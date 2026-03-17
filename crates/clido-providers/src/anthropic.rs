@@ -45,7 +45,7 @@ impl AnthropicProvider {
             if m.role == Role::System {
                 for b in &m.content {
                     if let ContentBlock::Text { text } = b {
-                        system.push_str("\n");
+                        system.push('\n');
                         system.push_str(text);
                     }
                 }
@@ -54,7 +54,7 @@ impl AnthropicProvider {
         let anthropic_messages: Vec<serde_json::Value> = messages
             .iter()
             .filter(|m| m.role != Role::System)
-            .map(|m| message_to_anthropic(m))
+            .map(message_to_anthropic)
             .collect::<Result<Vec<_>>>()?;
 
         let anthropic_tools: Vec<serde_json::Value> = tools
@@ -140,7 +140,7 @@ fn message_to_anthropic(m: &Message) -> Result<serde_json::Value> {
     let content: Vec<serde_json::Value> = m
         .content
         .iter()
-        .map(|b| content_block_to_anthropic(b))
+        .map(content_block_to_anthropic)
         .collect::<Result<Vec<_>>>()?;
 
     Ok(serde_json::json!({ "role": role, "content": content }))

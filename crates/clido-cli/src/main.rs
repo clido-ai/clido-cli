@@ -21,6 +21,19 @@ use thiserror::Error;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// ASCII banner shown when the agent starts (interactive text mode only).
+const BANNER: &str = r#"          ▄▄   ▄▄                ▄▄           
+        ▀███   ██              ▀███           
+          ██                     ██           
+ ▄██▀██   ██ ▀███    ██     ▄█▀▀███   ▄██▀██▄ 
+██▀  ██   ██   ██    ▀▀   ▄██    ██  ██▀   ▀██
+██        ██   ██         ███    ██  ██     ██
+██▄    ▄  ██   ██    ▄▄   ▀██    ██  ██▄   ▄██
+ █████▀ ▄████▄████▄  ▀█    ▀████▀███▄ ▀█████▀ 
+                      ▀                        
+                                             
+"#;
+
 /// Ask user on stderr/stdin for permission to run a state-changing tool (Default permission mode).
 struct StdinAskUser;
 
@@ -341,6 +354,11 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
         } else {
             None
         };
+
+    if cli.output_format == "text" && io::stdout().is_terminal() {
+        print!("{}", BANNER);
+        let _ = io::stdout().flush();
+    }
 
     let (session_id, mut writer) = match &resume_id {
         Some(id) => (id.clone(), SessionWriter::append(&workspace_root, id)?),

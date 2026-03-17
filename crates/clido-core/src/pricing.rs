@@ -37,8 +37,7 @@ pub struct PricingTable {
 const STALENESS_DAYS: u64 = 90;
 
 fn pricing_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "clido")
-        .map(|d| d.config_dir().join("pricing.toml"))
+    directories::ProjectDirs::from("", "", "clido").map(|d| d.config_dir().join("pricing.toml"))
 }
 
 /// Load pricing from config dir. If file is older than 90 days, log a warning.
@@ -53,9 +52,7 @@ pub fn load_pricing() -> (PricingTable, Option<std::path::PathBuf>) {
     }
     let table = match std::fs::read_to_string(&path) {
         Ok(s) => match toml::from_str::<PricingToml>(&s) {
-            Ok(t) => PricingTable {
-                models: t.model,
-            },
+            Ok(t) => PricingTable { models: t.model },
             Err(_) => PricingTable::default(),
         },
         Err(_) => PricingTable::default(),

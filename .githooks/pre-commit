@@ -1,0 +1,10 @@
+#!/bin/sh
+# Pre-commit hook: run checks that also run in CI.
+# Enable for this repo: git config core.hooksPath .githooks
+
+set -e
+
+echo "Running cargo fmt --check..."
+cargo fmt --all -- --check
+
+echo "Pre-commit checks passed."

@@ -51,9 +51,18 @@ impl Tool for EditTool {
             .or_else(|| input.get("path"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let old_string = input.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
-        let new_string = input.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
-        let replace_all = input.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
+        let old_string = input
+            .get("old_string")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let new_string = input
+            .get("new_string")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let replace_all = input
+            .get("replace_all")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         if path_str.is_empty() {
             return ToolOutput::err("Missing required field: file_path or path".to_string());

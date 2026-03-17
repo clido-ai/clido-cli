@@ -1,8 +1,12 @@
 //! Minimal agent loop: history, provider call, tool execution, repeat.
 
 use async_trait::async_trait;
-use clido_context::{assemble, estimate_tokens_str, DEFAULT_COMPACTION_THRESHOLD, DEFAULT_MAX_CONTEXT_TOKENS};
-use clido_core::{compute_cost_usd, AgentConfig, ContentBlock, Message, PermissionMode, Role, StopReason};
+use clido_context::{
+    assemble, estimate_tokens_str, DEFAULT_COMPACTION_THRESHOLD, DEFAULT_MAX_CONTEXT_TOKENS,
+};
+use clido_core::{
+    compute_cost_usd, AgentConfig, ContentBlock, Message, PermissionMode, Role, StopReason,
+};
 use clido_core::{ClidoError, PricingTable, Result};
 use clido_providers::ModelProvider;
 use clido_storage::{SessionLine, SessionWriter};
@@ -467,7 +471,9 @@ impl AgentLoop {
         name: &str,
         input: &serde_json::Value,
     ) -> ToolOutput {
-        let effective = self.permission_mode_override.unwrap_or(self.config.permission_mode);
+        let effective = self
+            .permission_mode_override
+            .unwrap_or(self.config.permission_mode);
 
         if name == "ExitPlanMode" {
             self.permission_mode_override = Some(PermissionMode::Default);

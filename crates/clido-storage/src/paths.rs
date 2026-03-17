@@ -13,7 +13,13 @@ pub fn data_dir() -> anyhow::Result<PathBuf> {
 fn sanitize_project_path(project_path: &Path) -> String {
     let s = project_path.display().to_string();
     s.chars()
-        .map(|c| if c == std::path::MAIN_SEPARATOR { '_' } else { c })
+        .map(|c| {
+            if c == std::path::MAIN_SEPARATOR {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect()
 }
 

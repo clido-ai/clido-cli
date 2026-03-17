@@ -3,17 +3,16 @@
 mod cli;
 
 use async_trait::async_trait;
+use clap::Parser;
 use clido_agent::{session_lines_to_messages, AgentLoop, AskUser};
 use clido_core::{
     agent_config_from_loaded, load_config, load_pricing, ClidoError, LoadedConfig, PermissionMode,
 };
 use clido_providers::AnthropicProvider;
 use clido_storage::{
-    list_sessions, session_dir_for_project, stale_paths, SessionLine, SessionReader,
-    SessionWriter,
+    list_sessions, session_dir_for_project, stale_paths, SessionLine, SessionReader, SessionWriter,
 };
 use clido_tools::default_registry;
-use clap::Parser;
 use std::env;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -120,7 +119,9 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
             return Ok(());
         }
         Some(cli::Subcommand::ListSessions) => {
-            eprintln!("Warning: 'clido list-sessions' is deprecated. Use 'clido sessions list' instead.");
+            eprintln!(
+                "Warning: 'clido list-sessions' is deprecated. Use 'clido sessions list' instead."
+            );
             return run_sessions_list().await;
         }
         Some(cli::Subcommand::ShowSession { id }) => {
@@ -173,24 +174,20 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
         }
         Some(id.clone())
     } else if cli.r#continue {
-        let cwd =
-            env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let cwd = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let sessions = list_sessions(&cwd)?;
         let id = sessions
             .first()
             .map(|s| s.session_id.clone())
             .ok_or_else(|| {
-                CliError::Usage(
-                    "No session to continue. Run 'clido <prompt>' first.".into(),
-                )
+                CliError::Usage("No session to continue. Run 'clido <prompt>' first.".into())
             })?;
         Some(id)
     } else {
         None
     };
 
-    let workspace_root =
-        env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let workspace_root = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     if cli.output_format == "stream-json" {
         return Err(CliError::Usage(
@@ -263,10 +260,7 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
         ))
     })?;
 
-    let model = cli
-        .model
-        .clone()
-        .unwrap_or_else(|| profile.model.clone());
+    let model = cli.model.clone().unwrap_or_else(|| profile.model.clone());
     let provider = Arc::new(AnthropicProvider::new(api_key, model.clone()));
 
     let mut registry = default_registry(workspace_root.clone());
@@ -309,9 +303,8 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
     };
 
     let system_prompt_base = if let Some(ref path) = cli.system_prompt_file {
-        std::fs::read_to_string(path).map_err(|e| {
-            CliError::Usage(format!("Failed to read system prompt file: {}", e))
-        })?
+        std::fs::read_to_string(path)
+            .map_err(|e| CliError::Usage(format!("Failed to read system prompt file: {}", e)))?
     } else if let Some(ref s) = cli.system_prompt {
         s.clone()
     } else {
@@ -342,13 +335,12 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
         }
     }
 
-    let ask_user: Option<Arc<dyn AskUser>> = if permission_mode == PermissionMode::Default
-        && io::stdin().is_terminal()
-    {
-        Some(Arc::new(StdinAskUser))
-    } else {
-        None
-    };
+    let ask_user: Option<Arc<dyn AskUser>> =
+        if permission_mode == PermissionMode::Default && io::stdin().is_terminal() {
+            Some(Arc::new(StdinAskUser))
+        } else {
+            None
+        };
 
     let (session_id, mut writer) = match &resume_id {
         Some(id) => (id.clone(), SessionWriter::append(&workspace_root, id)?),
@@ -373,12 +365,14 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
             if history.is_empty() {
                 let mut loop_ =
                     AgentLoop::new(provider, registry, config.clone(), ask_user.clone());
-                let r = loop_.run(
-                    &prompt,
-                    Some(&mut writer),
-                    Some(&pricing_table),
-                    Some(cancel.clone()),
-                ).await;
+                let r = loop_
+                    .run(
+                        &prompt,
+                        Some(&mut writer),
+                        Some(&pricing_table),
+                        Some(cancel.clone()),
+                    )
+                    .await;
                 (r, loop_.turn_count(), loop_.cumulative_cost_usd)
             } else {
                 let mut loop_ = AgentLoop::new_with_history(
@@ -388,22 +382,26 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
                     history,
                     ask_user.clone(),
                 );
-                let r = loop_.run_continue(
-                    Some(&mut writer),
-                    Some(&pricing_table),
-                    Some(cancel.clone()),
-                ).await;
+                let r = loop_
+                    .run_continue(
+                        Some(&mut writer),
+                        Some(&pricing_table),
+                        Some(cancel.clone()),
+                    )
+                    .await;
                 (r, loop_.turn_count(), loop_.cumulative_cost_usd)
             }
         }
         None => {
             let mut loop_ = AgentLoop::new(provider, registry, config, ask_user);
-            let r = loop_.run(
-                &prompt,
-                Some(&mut writer),
-                Some(&pricing_table),
-                Some(cancel),
-            ).await;
+            let r = loop_
+                .run(
+                    &prompt,
+                    Some(&mut writer),
+                    Some(&pricing_table),
+                    Some(cancel),
+                )
+                .await;
             (r, loop_.turn_count(), loop_.cumulative_cost_usd)
         }
     };
@@ -499,7 +497,10 @@ async fn run_doctor() -> Result<(), anyhow::Error> {
                 profile_name, api_key_env
             ));
         } else {
-            println!("✓ API key ({}) set for profile '{}'", api_key_env, profile_name);
+            println!(
+                "✓ API key ({}) set for profile '{}'",
+                api_key_env, profile_name
+            );
         }
     }
 
@@ -530,7 +531,9 @@ async fn run_doctor() -> Result<(), anyhow::Error> {
     if let Some(path) = &pricing_path {
         println!("✓ pricing.toml present: {}", path.display());
         if pricing_table.models.is_empty() {
-            warnings.push("pricing.toml is empty or invalid; using default cost estimates.".to_string());
+            warnings.push(
+                "pricing.toml is empty or invalid; using default cost estimates.".to_string(),
+            );
         }
         if let Ok(meta) = std::fs::metadata(path) {
             if let Ok(modified) = meta.modified() {
@@ -540,7 +543,9 @@ async fn run_doctor() -> Result<(), anyhow::Error> {
                 ) {
                     let age_secs = now.as_secs().saturating_sub(mod_dur.as_secs());
                     if age_secs > 90 * 86400 {
-                        warnings.push("pricing.toml is older than 90 days; consider updating.".to_string());
+                        warnings.push(
+                            "pricing.toml is older than 90 days; consider updating.".to_string(),
+                        );
                     }
                 }
             }
@@ -595,21 +600,14 @@ async fn run_sessions_list() -> anyhow::Result<()> {
     }
     for s in sessions {
         let (head, tail) = if s.session_id.len() > 12 {
-            (
-                &s.session_id[..8],
-                &s.session_id[s.session_id.len() - 4..],
-            )
+            (&s.session_id[..8], &s.session_id[s.session_id.len() - 4..])
         } else {
             (s.session_id.as_str(), "")
         };
         let short_id = format!("{}...{}", head, tail);
         println!(
             "{}  {}  turns: {}  cost: ${:.4}  {}",
-            short_id,
-            s.start_time,
-            s.num_turns,
-            s.total_cost_usd,
-            s.preview
+            short_id, s.start_time, s.num_turns, s.total_cost_usd, s.preview
         );
     }
     Ok(())

@@ -165,9 +165,11 @@ fn find_project_config(cwd: &Path) -> Option<PathBuf> {
 }
 
 fn load_toml(path: &Path) -> Result<ConfigFile> {
-    let s = std::fs::read_to_string(path)
-        .map_err(|e| ClidoError::Config(format!("Failed to read config {}: {}", path.display(), e)))?;
-    toml::from_str(&s).map_err(|e| ClidoError::Config(format!("Invalid config {}: {}", path.display(), e)))
+    let s = std::fs::read_to_string(path).map_err(|e| {
+        ClidoError::Config(format!("Failed to read config {}: {}", path.display(), e))
+    })?;
+    toml::from_str(&s)
+        .map_err(|e| ClidoError::Config(format!("Invalid config {}: {}", path.display(), e)))
 }
 
 /// Merge two config files; `later` overrides `base` (shallow for profile tables).
@@ -180,7 +182,10 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
     let agent = AgentSection {
         max_turns: later.agent.max_turns,
         max_budget_usd: later.agent.max_budget_usd.or(base.agent.max_budget_usd),
-        max_concurrent_tools: later.agent.max_concurrent_tools.or(base.agent.max_concurrent_tools),
+        max_concurrent_tools: later
+            .agent
+            .max_concurrent_tools
+            .or(base.agent.max_concurrent_tools),
     };
     let tools = ToolsSection {
         allowed: if later.tools.allowed.is_empty() {
@@ -196,7 +201,10 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
     };
     let context = ContextSection {
         compaction_threshold: later.context.compaction_threshold,
-        max_context_tokens: later.context.max_context_tokens.or(base.context.max_context_tokens),
+        max_context_tokens: later
+            .context
+            .max_context_tokens
+            .or(base.context.max_context_tokens),
     };
     ConfigFile {
         default_profile,
@@ -262,9 +270,7 @@ pub fn agent_config_from_loaded(
 ) -> Result<AgentConfig> {
     let profile = loaded.get_profile(profile_name)?;
     LoadedConfig::validate_provider(&profile.provider)?;
-    let model = cli_model
-        .clone()
-        .unwrap_or_else(|| profile.model.clone());
+    let model = cli_model.clone().unwrap_or_else(|| profile.model.clone());
     Ok(AgentConfig {
         max_turns: cli_max_turns.unwrap_or(loaded.agent.max_turns),
         max_budget_usd: cli_max_budget_usd.or(loaded.agent.max_budget_usd),

@@ -61,10 +61,7 @@ impl Tool for GlobTool {
         };
 
         if !base.is_dir() {
-            return ToolOutput::err(format!(
-                "Path is not a directory: {}",
-                base.display()
-            ));
+            return ToolOutput::err(format!("Path is not a directory: {}", base.display()));
         }
 
         let pattern = match Pattern::new(pattern) {

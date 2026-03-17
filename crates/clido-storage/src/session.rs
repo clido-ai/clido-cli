@@ -83,10 +83,7 @@ pub struct SessionWriter {
 
 impl SessionWriter {
     /// Create a new session file and write the meta line. Creates parent dirs.
-    pub fn create(
-        project_path: &Path,
-        session_id: &str,
-    ) -> anyhow::Result<Self> {
+    pub fn create(project_path: &Path, session_id: &str) -> anyhow::Result<Self> {
         let path = paths::session_file_path(project_path, session_id)?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -110,9 +107,7 @@ impl SessionWriter {
     /// Open an existing session file for appending (resume).
     pub fn append(project_path: &Path, session_id: &str) -> anyhow::Result<Self> {
         let path = paths::session_file_path(project_path, session_id)?;
-        let file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)?;
+        let file = std::fs::OpenOptions::new().append(true).open(&path)?;
         Ok(Self { file })
     }
 
@@ -198,14 +193,11 @@ pub fn stale_paths(records: &[StaleFileRecord]) -> Vec<String> {
             stale.push(r.path.clone());
             continue;
         };
-        let mtime_nanos = meta
-            .modified()
-            .ok()
-            .and_then(|t| {
-                t.duration_since(std::time::UNIX_EPOCH)
-                    .ok()
-                    .map(|d| d.as_nanos() as u64)
-            });
+        let mtime_nanos = meta.modified().ok().and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_nanos() as u64)
+        });
         let Ok(content) = std::fs::read_to_string(&r.path) else {
             stale.push(r.path.clone());
             continue;
@@ -239,8 +231,7 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
                         ..
                     }) = lines.first()
                     {
-                        let (num_turns, total_cost_usd, preview) =
-                            summarize_lines(&lines);
+                        let (num_turns, total_cost_usd, preview) = summarize_lines(&lines);
                         summaries.push(SessionSummary {
                             session_id: session_id.clone(),
                             project_path: proj.clone(),
@@ -312,17 +303,15 @@ mod tests {
 
     #[test]
     fn stale_file_records_from_tool_results() {
-        let lines = vec![
-            SessionLine::ToolResult {
-                tool_use_id: "x".into(),
-                content: "ok".into(),
-                is_error: false,
-                duration_ms: None,
-                path: Some("/tmp/a".into()),
-                content_hash: Some("abc".into()),
-                mtime_nanos: Some(123),
-            },
-        ];
+        let lines = vec![SessionLine::ToolResult {
+            tool_use_id: "x".into(),
+            content: "ok".into(),
+            is_error: false,
+            duration_ms: None,
+            path: Some("/tmp/a".into()),
+            content_hash: Some("abc".into()),
+            mtime_nanos: Some(123),
+        }];
         let records = SessionReader::stale_file_records(&lines);
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].path, "/tmp/a");

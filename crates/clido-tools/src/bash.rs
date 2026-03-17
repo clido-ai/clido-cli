@@ -58,10 +58,7 @@ impl Tool for BashTool {
             .arg(&command)
             .output();
 
-        let result = match tokio::time::timeout(
-            Duration::from_millis(timeout_ms),
-            output,
-        ).await {
+        let result = match tokio::time::timeout(Duration::from_millis(timeout_ms), output).await {
             Ok(Ok(out)) => out,
             Ok(Err(e)) => return ToolOutput::err(format!("Failed to execute: {}", e)),
             Err(_) => return ToolOutput::err("Command timed out".to_string()),

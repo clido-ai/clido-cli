@@ -49,10 +49,7 @@ impl Tool for WriteTool {
             .or_else(|| input.get("path"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let content = input
-            .get("content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
         if path_str.is_empty() {
             return ToolOutput::err("Missing required field: file_path or path".to_string());

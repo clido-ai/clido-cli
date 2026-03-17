@@ -49,7 +49,12 @@ impl Tool for GrepTool {
 
     async fn execute(&self, input: serde_json::Value) -> ToolOutput {
         let known_keys = [
-            "pattern", "path", "output_mode", "context", "i", "head_limit",
+            "pattern",
+            "path",
+            "output_mode",
+            "context",
+            "i",
+            "head_limit",
         ];
         if let Some(obj) = input.as_object() {
             for (k, _) in obj {
@@ -82,7 +87,10 @@ impl Tool for GrepTool {
             .and_then(|v| v.as_str())
             .unwrap_or("files_with_matches");
         let case_insensitive = input.get("i").and_then(|v| v.as_bool()).unwrap_or(false);
-        let head_limit = input.get("head_limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let head_limit = input
+            .get("head_limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
 
         let re = if case_insensitive {
             Regex::new(&format!("(?i){}", pattern))
@@ -123,12 +131,7 @@ impl Tool for GrepTool {
                     total_count += 1;
                     file_count += 1;
                     if output_mode == "content" {
-                        content_lines.push(format!(
-                            "{}:{}:{}",
-                            rel_path,
-                            line_no + 1,
-                            line.trim()
-                        ));
+                        content_lines.push(format!("{}:{}:{}", rel_path, line_no + 1, line.trim()));
                     }
                 }
             }

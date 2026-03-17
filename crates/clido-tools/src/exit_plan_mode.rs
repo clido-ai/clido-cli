@@ -1,6 +1,6 @@
 //! ExitPlanMode tool: no parameters; when executed, the agent loop switches from PlanOnly to Default.
 
-use super::{ToolOutput, Tool};
+use super::{Tool, ToolOutput};
 use async_trait::async_trait;
 
 /// Tool that signals the agent to switch from plan-only to default (interactive) permission mode.
@@ -30,6 +30,8 @@ impl Tool for ExitPlanModeTool {
     }
 
     async fn execute(&self, _input: serde_json::Value) -> ToolOutput {
-        ToolOutput::ok("Switched to agent mode. State-changing tools are now available.".to_string())
+        ToolOutput::ok(
+            "Switched to agent mode. State-changing tools are now available.".to_string(),
+        )
     }
 }

@@ -107,7 +107,8 @@ impl Tool for ReadTool {
             .map(|(i, line)| format!("{:>6}→{}", start + i + 1, line))
             .collect();
         let out = selected.join("\n");
-        if out.is_empty() && !content.is_empty() && (offset > total || (offset >= 1 && limit == 0)) {
+        if out.is_empty() && !content.is_empty() && (offset > total || (offset >= 1 && limit == 0))
+        {
             return ToolOutput::err(format!(
                 "File has {} lines; offset {} is out of range.",
                 total, offset

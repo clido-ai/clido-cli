@@ -31,7 +31,8 @@ fn estimate_tokens_block(b: &ContentBlock) -> u32 {
     match b {
         ContentBlock::Text { text } => estimate_tokens_str(text),
         ContentBlock::ToolUse { id, name, input } => {
-            4 + estimate_tokens_str(id) + estimate_tokens_str(name)
+            4 + estimate_tokens_str(id)
+                + estimate_tokens_str(name)
                 + estimate_tokens_str(&input.to_string())
         }
         ContentBlock::ToolResult {
@@ -78,15 +79,15 @@ pub fn assemble(
         start = i;
     }
 
-    if start == 0 && kept_tokens + system_prompt_tokens + placeholder_tokens > max_context_tokens
-    {
+    if start == 0 && kept_tokens + system_prompt_tokens + placeholder_tokens > max_context_tokens {
         return Err(ClidoError::ContextLimit {
             tokens: (system_prompt_tokens + kept_tokens + placeholder_tokens) as u64,
         });
     }
 
     let tail: Vec<Message> = messages[start..].to_vec();
-    let compacted_tokens = system_prompt_tokens + placeholder_tokens + estimate_tokens_messages(&tail);
+    let compacted_tokens =
+        system_prompt_tokens + placeholder_tokens + estimate_tokens_messages(&tail);
     if compacted_tokens > max_context_tokens {
         return Err(ClidoError::ContextLimit {
             tokens: compacted_tokens as u64,
@@ -139,7 +140,11 @@ mod tests {
         let mut messages = Vec::new();
         for i in 0..20 {
             messages.push(Message {
-                role: if i % 2 == 0 { Role::User } else { Role::Assistant },
+                role: if i % 2 == 0 {
+                    Role::User
+                } else {
+                    Role::Assistant
+                },
                 content: vec![ContentBlock::Text {
                     text: "x".repeat(2000),
                 }],

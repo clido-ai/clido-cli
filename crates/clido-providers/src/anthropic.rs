@@ -1,15 +1,15 @@
 //! Anthropic Messages API client.
 
 use async_trait::async_trait;
-use futures::Stream;
-use std::time::Duration;
-use tracing::warn;
 use clido_core::{
     AgentConfig, ContentBlock, Message, ModelResponse, Role, StopReason, ToolSchema, Usage,
 };
 use clido_core::{ClidoError, Result};
 use futures::stream;
+use futures::Stream;
 use std::pin::Pin;
+use std::time::Duration;
+use tracing::warn;
 
 use crate::provider::{ModelProvider, StreamEvent};
 
@@ -97,8 +97,8 @@ impl AnthropicProvider {
                 .map_err(|e| ClidoError::Provider(e.to_string()))?;
 
             if status.is_success() {
-                let json: serde_json::Value = serde_json::from_str(&text)
-                    .map_err(|e| ClidoError::Provider(e.to_string()))?;
+                let json: serde_json::Value =
+                    serde_json::from_str(&text).map_err(|e| ClidoError::Provider(e.to_string()))?;
                 return parse_anthropic_response(&json);
             }
 
@@ -173,10 +173,7 @@ fn content_block_to_anthropic(b: &ContentBlock) -> Result<serde_json::Value> {
 }
 
 fn parse_anthropic_response(json: &serde_json::Value) -> Result<ModelResponse> {
-    let id = json["id"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
+    let id = json["id"].as_str().unwrap_or("").to_string();
     let model = json["model"].as_str().unwrap_or("").to_string();
 
     let content: Vec<ContentBlock> = json["content"]
@@ -211,7 +208,9 @@ fn parse_anthropic_response(json: &serde_json::Value) -> Result<ModelResponse> {
 }
 
 fn parse_content_block(v: &serde_json::Value) -> Result<ContentBlock> {
-    let typ = v["type"].as_str().ok_or_else(|| ClidoError::Provider("missing type".into()))?;
+    let typ = v["type"]
+        .as_str()
+        .ok_or_else(|| ClidoError::Provider("missing type".into()))?;
     match typ {
         "text" => {
             let text = v["text"].as_str().unwrap_or("").to_string();
@@ -227,7 +226,10 @@ fn parse_content_block(v: &serde_json::Value) -> Result<ContentBlock> {
             let thinking = v["thinking"].as_str().unwrap_or("").to_string();
             Ok(ContentBlock::Thinking { thinking })
         }
-        _ => Err(ClidoError::Provider(format!("unknown content type: {}", typ))),
+        _ => Err(ClidoError::Provider(format!(
+            "unknown content type: {}",
+            typ
+        ))),
     }
 }
 

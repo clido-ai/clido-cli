@@ -21,7 +21,11 @@ fn clido_help_exits_zero() {
 fn clido_doctor_runs() {
     let out = clido_bin().arg("doctor").output().unwrap();
     let code = out.status.code().unwrap_or(-1);
-    assert!(code == 0 || code == 1 || code == 2, "unexpected exit code {}", code);
+    assert!(
+        code == 0 || code == 1 || code == 2,
+        "unexpected exit code {}",
+        code
+    );
 }
 
 #[test]
@@ -33,5 +37,9 @@ fn clido_init_exits_zero() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("config") || stdout.contains("Created"), "stdout: {}", stdout);
+    assert!(
+        stdout.contains("config") || stdout.contains("Created"),
+        "stdout: {}",
+        stdout
+    );
 }

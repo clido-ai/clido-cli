@@ -11,9 +11,17 @@ use clido_core::Result;
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     TextDelta(String),
-    ToolUseStart { id: String, name: String },
-    ToolUseDelta { id: String, partial_json: String },
-    ToolUseEnd { id: String },
+    ToolUseStart {
+        id: String,
+        name: String,
+    },
+    ToolUseDelta {
+        id: String,
+        partial_json: String,
+    },
+    ToolUseEnd {
+        id: String,
+    },
     MessageDelta {
         stop_reason: clido_core::StopReason,
         usage: Usage,

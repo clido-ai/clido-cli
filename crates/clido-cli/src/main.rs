@@ -6,7 +6,8 @@ use async_trait::async_trait;
 use clap::Parser;
 use clido_agent::{session_lines_to_messages, AgentLoop, AskUser};
 use clido_core::{
-    agent_config_from_loaded, load_config, load_pricing, ClidoError, LoadedConfig, PermissionMode,
+    agent_config_from_loaded, config_file_exists, load_config, load_pricing, ClidoError,
+    LoadedConfig, PermissionMode,
 };
 use clido_providers::AnthropicProvider;
 use clido_storage::{
@@ -67,6 +68,9 @@ impl AskUser for StdinAskUser {
 pub enum CliError {
     #[error("{0}")]
     Usage(String),
+    /// Config-related error; display with "Error [Config]: {}" per CLI spec.
+    #[error("{0}")]
+    Config(String),
     #[error("{0}")]
     Runtime(String),
     #[error("{0}")]
@@ -83,6 +87,7 @@ impl CliError {
     pub fn exit_code(&self) -> i32 {
         match self {
             CliError::Usage(_) => 2,
+            CliError::Config(_) => 2,
             CliError::Runtime(_) => 1,
             CliError::SoftLimit(_) => 3,
             CliError::Interrupted(_) => 130,
@@ -113,13 +118,17 @@ async fn main() {
     let exit = match run(cli).await {
         Ok(()) => 0,
         Err(e) => {
-            let code = if let Some(cli_err) = e.downcast_ref::<CliError>() {
-                cli_err.exit_code()
+            if let Some(cli_err) = e.downcast_ref::<CliError>() {
+                let code = cli_err.exit_code();
+                match cli_err {
+                    CliError::Config(msg) => eprintln!("Error [Config]: {}", msg),
+                    _ => eprintln!("Error: {}", e),
+                }
+                code
             } else {
+                eprintln!("Error: {}", e);
                 1
-            };
-            eprintln!("Error: {}", e);
-            code
+            }
         }
     };
     std::process::exit(exit);
@@ -154,6 +163,20 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
         None => {}
     }
 
+    let workspace_root = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    // First-run: no config file and we are about to run the agent (not init/doctor/version/sessions).
+    if !config_file_exists(&workspace_root) {
+        if is_stdin_tty() {
+            run_first_run_setup().await?;
+        } else {
+            return Err(CliError::Config(
+                "No configuration found. Run 'clido init' to set up Clido.".into(),
+            )
+            .into());
+        }
+    }
+
     // Run agent
     let mut prompt = cli.prompt_str();
     if prompt.is_empty() {
@@ -163,11 +186,12 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
             )
             .into());
         }
-        if !is_stdin_tty() {
-            let mut stdin = String::new();
-            io::stdin().read_to_string(&mut stdin)?;
-            prompt = stdin.trim().to_string();
+        if is_stdin_tty() {
+            return run_repl(cli).await;
         }
+        let mut stdin = String::new();
+        io::stdin().read_to_string(&mut stdin)?;
+        prompt = stdin.trim().to_string();
         if prompt.is_empty() {
             return Err(CliError::Usage(
                 "Usage: clido [-p] <prompt> or pipe prompt via stdin. Example: clido -p \"list files\""
@@ -199,8 +223,6 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
     } else {
         None
     };
-
-    let workspace_root = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     if cli.output_format == "stream-json" {
         return Err(CliError::Usage(
@@ -489,6 +511,249 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
             }
         }
     }
+}
+
+/// Interactive REPL: no prompt, TTY → loop with "clido> " prompt; exit on empty, "exit", "quit", or Ctrl-C.
+async fn run_repl(cli: cli::Cli) -> Result<(), anyhow::Error> {
+    let workspace_root = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    let loaded = load_config(&workspace_root).map_err(|e| CliError::Usage(e.to_string()))?;
+    let (pricing_table, _) = load_pricing();
+    let profile_name = cli
+        .profile
+        .as_deref()
+        .unwrap_or(loaded.default_profile.as_str());
+    let profile = loaded
+        .get_profile(profile_name)
+        .map_err(|e| CliError::Usage(e.to_string()))?;
+    LoadedConfig::validate_provider(&profile.provider)
+        .map_err(|e| CliError::Usage(e.to_string()))?;
+
+    let provider_name = cli.provider.as_deref().unwrap_or(profile.provider.as_str());
+    if provider_name != "anthropic" {
+        return Err(CliError::Usage(format!(
+            "Unknown or unsupported provider '{}'. In V1 only 'anthropic' is implemented.",
+            provider_name
+        ))
+        .into());
+    }
+
+    let api_key_env = profile
+        .api_key_env
+        .as_deref()
+        .unwrap_or("ANTHROPIC_API_KEY");
+    let api_key = env::var(api_key_env).map_err(|_| {
+        CliError::Usage(format!(
+            "API key not found for profile '{}'. Set {}. Run: clido doctor",
+            profile_name, api_key_env
+        ))
+    })?;
+
+    let model = cli.model.clone().unwrap_or_else(|| profile.model.clone());
+    let provider = Arc::new(AnthropicProvider::new(api_key, model.clone()));
+
+    let mut registry = default_registry(workspace_root.clone());
+    let allowed = cli
+        .allowed_tools
+        .clone()
+        .or_else(|| cli.tools.clone())
+        .or_else(|| {
+            if loaded.tools.allowed.is_empty() {
+                None
+            } else {
+                Some(loaded.tools.allowed.join(","))
+            }
+        })
+        .map(|s| s.split(',').map(|x| x.trim().to_string()).collect());
+    let disallowed = cli
+        .disallowed_tools
+        .clone()
+        .or_else(|| {
+            if loaded.tools.disallowed.is_empty() {
+                None
+            } else {
+                Some(loaded.tools.disallowed.join(","))
+            }
+        })
+        .map(|s| s.split(',').map(|x| x.trim().to_string()).collect());
+    registry = registry.with_filters(allowed, disallowed);
+    if registry.schemas().is_empty() {
+        return Err(CliError::Usage("No tools left after filters.".into()).into());
+    }
+
+    let permission_mode = match cli.permission_mode.as_deref() {
+        Some("plan") | Some("plan-only") => PermissionMode::PlanOnly,
+        Some("accept-all") => PermissionMode::AcceptAll,
+        _ => PermissionMode::Default,
+    };
+
+    let system_prompt_base = if let Some(ref path) = cli.system_prompt_file {
+        std::fs::read_to_string(path)
+            .map_err(|e| CliError::Usage(format!("Failed to read system prompt file: {}", e)))?
+    } else if let Some(ref s) = cli.system_prompt {
+        s.clone()
+    } else {
+        "You are a helpful coding assistant.".to_string()
+    };
+    let system_prompt = if let Some(ref append) = cli.append_system_prompt {
+        format!("{}\n{}", system_prompt_base, append)
+    } else {
+        system_prompt_base
+    };
+
+    let mut config = agent_config_from_loaded(
+        &loaded,
+        profile_name,
+        Some(cli.max_turns),
+        cli.max_budget_usd,
+        cli.model.clone(),
+        Some(system_prompt),
+        Some(permission_mode),
+    )
+    .map_err(|e| CliError::Usage(e.to_string()))?;
+
+    if config.max_context_tokens.is_none() {
+        if let Some(entry) = pricing_table.models.get(&config.model) {
+            if let Some(cw) = entry.context_window {
+                config.max_context_tokens = Some(cw);
+            }
+        }
+    }
+
+    let ask_user: Option<Arc<dyn AskUser>> =
+        if permission_mode == PermissionMode::Default && io::stdin().is_terminal() {
+            Some(Arc::new(StdinAskUser))
+        } else {
+            None
+        };
+
+    if cli.output_format == "text" && io::stdout().is_terminal() {
+        print!("{}", BANNER);
+        let _ = io::stdout().flush();
+    }
+
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let mut writer = SessionWriter::create(&workspace_root, &session_id)?;
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_handle = cancel.clone();
+    tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        cancel_handle.store(true, Ordering::Relaxed);
+    });
+
+    let mut loop_ = AgentLoop::new(provider, registry, config, ask_user);
+    let mut first_turn = true;
+    let mut total_turns: u32 = 0;
+    let mut total_cost_usd: f64 = 0.0;
+
+    loop {
+        eprint!("clido> ");
+        let _ = io::stderr().flush();
+        let mut line = String::new();
+        if io::stdin().read_line(&mut line).is_err() {
+            break;
+        }
+        let line = line.trim();
+        if line.is_empty() || line.eq_ignore_ascii_case("exit") || line.eq_ignore_ascii_case("quit")
+        {
+            break;
+        }
+
+        let result = if first_turn {
+            loop_
+                .run(
+                    line,
+                    Some(&mut writer),
+                    Some(&pricing_table),
+                    Some(cancel.clone()),
+                )
+                .await
+        } else {
+            loop_
+                .run_next_turn(
+                    line,
+                    Some(&mut writer),
+                    Some(&pricing_table),
+                    Some(cancel.clone()),
+                )
+                .await
+        };
+
+        total_turns += loop_.turn_count();
+        total_cost_usd += loop_.cumulative_cost_usd;
+
+        if let Err(ClidoError::Interrupted) = &result {
+            let _ = writer.flush();
+            eprintln!("Interrupted.");
+            return Err(CliError::Interrupted("Interrupted by user.".into()).into());
+        }
+
+        match result {
+            Ok(text) => {
+                if cli.output_format == "json" {
+                    let out = serde_json::json!({
+                        "schema_version": 1,
+                        "type": "repl_turn",
+                        "result": text,
+                        "session_id": session_id,
+                    });
+                    println!("{}", serde_json::to_string(&out).unwrap());
+                } else {
+                    println!("{}", text);
+                }
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if cli.output_format == "json" {
+                    let out = serde_json::json!({
+                        "schema_version": 1,
+                        "type": "repl_turn",
+                        "is_error": true,
+                        "result": msg,
+                    });
+                    println!("{}", serde_json::to_string(&out).unwrap());
+                } else {
+                    eprintln!("Error: {}", msg);
+                }
+            }
+        }
+
+        first_turn = false;
+    }
+
+    let _ = writer.write_line(&SessionLine::Result {
+        exit_status: "completed".to_string(),
+        total_cost_usd,
+        num_turns: total_turns,
+        duration_ms: 0,
+    });
+    let _ = writer.flush();
+    Ok(())
+}
+
+/// First-run interactive setup: no config file and TTY → create default config and inform user.
+async fn run_first_run_setup() -> Result<(), anyhow::Error> {
+    eprintln!("No configuration found. Running first-time setup.");
+    let dir = directories::ProjectDirs::from("", "", "clido")
+        .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
+    let config_dir = dir.config_dir();
+    std::fs::create_dir_all(config_dir)?;
+    let config_path = config_dir.join("config.toml");
+    let default_toml = r#"
+default_profile = "default"
+
+[profile.default]
+provider = "anthropic"
+model = "claude-3-5-sonnet-20241022"
+api_key_env = "ANTHROPIC_API_KEY"
+"#;
+    std::fs::write(&config_path, default_toml.trim_start())?;
+    eprintln!(
+        "Created {}. Set ANTHROPIC_API_KEY in your environment, then run 'clido doctor' to verify.",
+        config_path.display()
+    );
+    Ok(())
 }
 
 async fn run_doctor() -> Result<(), anyhow::Error> {

@@ -286,6 +286,37 @@ impl AgentLoop {
         }
     }
 
+    /// Push a new user message and run until EndTurn (for REPL next turn).
+    pub async fn run_next_turn(
+        &mut self,
+        user_input: &str,
+        mut session: Option<&mut SessionWriter>,
+        pricing: Option<&PricingTable>,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<String> {
+        let user_msg = Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: user_input.to_string(),
+            }],
+        };
+        self.history.push(user_msg.clone());
+
+        if let Some(ref mut w) = session {
+            let content: Vec<serde_json::Value> = user_msg
+                .content
+                .iter()
+                .filter_map(|b| serde_json::to_value(b).ok())
+                .collect();
+            let _ = w.write_line(&SessionLine::UserMessage {
+                role: "user".to_string(),
+                content,
+            });
+        }
+
+        self.run_completion_loop(session, pricing, cancel).await
+    }
+
     /// Run until stop_reason is EndTurn or max_turns reached.
     /// If `session` is Some, writes UserMessage, AssistantMessage, ToolCall, ToolResult each turn.
     /// If `pricing` is Some, uses it for cost and budget; updates self.cumulative_cost_usd.
@@ -316,6 +347,15 @@ impl AgentLoop {
             });
         }
 
+        self.run_completion_loop(session, pricing, cancel).await
+    }
+
+    async fn run_completion_loop(
+        &mut self,
+        mut session: Option<&mut SessionWriter>,
+        pricing: Option<&PricingTable>,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<String> {
         let schemas = self.tools.schemas();
         let mut turns = 0;
         self.cumulative_cost_usd = 0.0;

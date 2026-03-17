@@ -28,7 +28,7 @@ See [Local development and testing](devdocs/guides/local-development-testing.md)
 
 ## Status
 
-**V1 implementation:** Core agent loop, six tools, config with profiles, sessions with resume and stale-file detection, context compaction, permission modes and ExitPlanMode, `clido doctor` and `clido init`, and hardening (retries, SIGINT, tests) are implemented. See [V1 gap analysis](devdocs/plans/releases/v1-gap-analysis.md) for current status and remaining gaps (e.g. interactive REPL, streaming UX). Build and test: see **Build** above.
+**V1 implementation:** Core agent loop, six tools, config with profiles, sessions with resume and stale-file detection, context compaction, permission modes and ExitPlanMode, `clido doctor` and `clido init`, interactive REPL (`clido` with no args at a TTY), first-run setup when no config exists, and hardening (retries, SIGINT, tests) are implemented. Scope and exit criteria: [V1 plan](devdocs/plans/releases/v1.md). Build and test: see **Build** above.
 
 ## Documentation
 

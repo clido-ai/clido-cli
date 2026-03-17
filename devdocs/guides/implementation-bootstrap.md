@@ -4,7 +4,7 @@ This guide is the **starting point for building Clido**. It tells contributors w
 
 It is intentionally short. Read this first, then go to the referenced source documents for detail.
 
-**Current V1 status:** See [v1-gap-analysis.md](../plans/releases/v1-gap-analysis.md) for what is implemented vs. remaining gaps. The V1 completion plan has been implemented: resume/continue, config and pricing, context compaction, permissions and ExitPlanMode, doctor and init, tool fixes, shutdown and retries, tests, and docs.
+**Current V1 status:** The V1 completion plan has been implemented: resume/continue, config and pricing, context compaction, permissions and ExitPlanMode, doctor and init, tool fixes, shutdown and retries, tests, and docs. Scope and exit criteria: [v1.md](../plans/releases/v1.md).
 
 ---
 

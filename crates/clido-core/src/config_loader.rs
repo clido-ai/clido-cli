@@ -132,7 +132,8 @@ impl LoadedConfig {
     }
 }
 
-fn global_config_path() -> Option<PathBuf> {
+/// Path to the global config file (CLIDO_CONFIG or platform config dir). Used for first-run detection.
+pub fn global_config_path() -> Option<PathBuf> {
     if let Ok(path_str) = std::env::var("CLIDO_CONFIG") {
         let p = PathBuf::from(&path_str);
         return Some(if p.is_absolute() {
@@ -142,6 +143,14 @@ fn global_config_path() -> Option<PathBuf> {
         });
     }
     directories::ProjectDirs::from("", "", "clido").map(|d| d.config_dir().join("config.toml"))
+}
+
+/// True if any config file exists (global or project). Used to decide first-run vs normal run.
+pub fn config_file_exists(cwd: &Path) -> bool {
+    if global_config_path().map(|p| p.exists()).unwrap_or(false) {
+        return true;
+    }
+    find_project_config(cwd).is_some()
 }
 
 fn find_project_config(cwd: &Path) -> Option<PathBuf> {
@@ -301,5 +310,15 @@ mod tests {
     fn validate_provider_rejects_unknown() {
         assert!(LoadedConfig::validate_provider("unknown").is_err());
         assert!(LoadedConfig::validate_provider("anthropic").is_ok());
+    }
+
+    #[test]
+    fn config_file_exists_true_when_project_config_present() {
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = temp.path();
+        let clido_dir = cwd.join(".clido");
+        std::fs::create_dir_all(&clido_dir).unwrap();
+        std::fs::write(clido_dir.join("config.toml"), "default_profile = \"default\"\n[profile.default]\nprovider = \"anthropic\"\nmodel = \"x\"\n").unwrap();
+        assert!(config_file_exists(cwd));
     }
 }

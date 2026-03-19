@@ -228,7 +228,7 @@ Main agent run: **dual-mode**.
 
 ## 4. First-Run and Onboarding Experience
 
-**UX and copy:** All interactive prompts (provider choice, API key, base URL, and any script that runs this flow) follow [ux-requirements.md](ux-requirements.md). Every prompt must (a) state what to type and that the user confirms with Enter, (b) show defaults in brackets (e.g. `[1]`, `[Y/n]`), and (c) never leave the user with a blank cursor without a "waiting for input" explanation. Scripts that invoke `clido init` must print a one-line intro before the subprocess (see ux-requirements §3). The CLI is required to be both **functional and visually clear** ("hübsch"); see ux-requirements §7.
+**UX and copy:** All interactive prompts (provider choice, API key, base URL, and any script that runs this flow) follow [ux-requirements.md](ux-requirements.md). Every prompt must (a) state what to type and that the user confirms with Enter, (b) show defaults in brackets (e.g. `[1]`, `[Y/n]`), and (c) never leave the user with a blank cursor without a "waiting for input" explanation. Scripts that invoke `clido init` must print a one-line intro before the subprocess (see ux-requirements §3). The CLI is required to be both **functional and visually clear** ("hübsch"); see ux-requirements §7. For a step-by-step map of every UI touchpoint (setup, banner, doctor, sessions, workflow, errors), see [ui-implementation-plan.md](ui-implementation-plan.md).
 
 ### Auto-detection on first run
 

@@ -19,6 +19,7 @@ use clido_workflows::{
     load as load_workflow, run_workflow as run_workflow_exec, validate as validate_workflow,
     StepRunRequest, StepRunResult, WorkflowContext, WorkflowStepRunner,
 };
+use inquire::{Confirm, Select, Text};
 use std::env;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::path::Path;
@@ -28,27 +29,91 @@ use thiserror::Error;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Rich TTY setup banner (ux-requirements §2.2). Shown when stderr is a TTY.
-const SETUP_BANNER_RICH: &str = r#"┌─ Clido setup ────────────────────────────────────────────────┐
-│  Choose a provider and where to store your API key.          │
-│  Answer the questions below; type a number or letter,        │
-│  then press Enter. Defaults are in brackets.                  │
-└─────────────────────────────────────────────────────────────┘"#;
+/// Inner width of the setup box (so right border aligns).
+const SETUP_BOX_WIDTH: usize = 59;
+
+/// Build the rich setup box with exactly SETUP_BOX_WIDTH chars per line so borders align (ux-requirements §2.2).
+fn setup_banner_rich() -> String {
+    let pad = |s: &str| {
+        let n = s.chars().count();
+        format!("{}{}", s, " ".repeat(SETUP_BOX_WIDTH.saturating_sub(n)))
+    };
+    let wrap = |s: &str| -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur = String::new();
+        let mut cur_len = 0usize;
+        for word in s.split_whitespace() {
+            let wl = word.chars().count();
+            let sep = if cur.is_empty() { 0 } else { 1 };
+            if cur_len + sep + wl > SETUP_BOX_WIDTH {
+                out.push(cur);
+                cur = word.to_string();
+                cur_len = wl;
+            } else {
+                if !cur.is_empty() {
+                    cur.push(' ');
+                    cur_len += 1;
+                }
+                cur.push_str(word);
+                cur_len += wl;
+            }
+        }
+        if !cur.is_empty() {
+            out.push(cur);
+        }
+        out
+    };
+    let mut lines = vec![
+        "  Clido setup".to_string(),
+        "  Choose a provider and where to store your API key.".to_string(),
+    ];
+    lines.extend(wrap(
+        "  Answer the questions below; use arrow keys or type, then Enter.",
+    ));
+    lines.push("  Defaults are in brackets.".to_string());
+    let body = lines
+        .iter()
+        .map(|l| format!("║{}║", pad(l)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "╔{}╗\n{}\n╚{}╝",
+        "═".repeat(SETUP_BOX_WIDTH),
+        body,
+        "═".repeat(SETUP_BOX_WIDTH),
+    )
+}
 
 /// ASCII fallback when not a TTY or narrow (ux-requirements §2.2).
 const SETUP_BANNER_ASCII: &str = "  --- Clido setup ---\n  Answer each question: type your choice, then press Enter. Defaults in [brackets].";
 
-/// Use color only when TTY and NO_COLOR not set (CLI spec §5: NO_COLOR respected unconditionally).
-fn setup_use_color() -> bool {
-    io::stderr().is_terminal() && env::var("NO_COLOR").is_err()
+/// True if we should show the rich setup UI (box, welcome line). Use stdin OR stderr TTY so the banner shows whenever the user is at a terminal.
+fn setup_use_rich_ui() -> bool {
+    io::stdin().is_terminal() || io::stderr().is_terminal()
 }
 
-/// ANSI codes for setup flow (only when setup_use_color()). ux-requirements §7.3: color supports, does not replace, text.
+/// Use color for CLI output when any standard stream is a TTY and NO_COLOR is not set (CLI spec §5, ux-requirements §7.3).
+/// Used for agent banner, REPL prompt, doctor, errors, first-run, permission prompt, deprecation warnings.
+fn cli_use_color() -> bool {
+    (io::stdin().is_terminal() || io::stderr().is_terminal() || io::stdout().is_terminal())
+        && env::var("NO_COLOR").is_err()
+}
+
+/// Use color only in setup flow (alias for consistency with ux-requirements: stdin or stderr TTY).
+fn setup_use_color() -> bool {
+    (io::stdin().is_terminal() || io::stderr().is_terminal()) && env::var("NO_COLOR").is_err()
+}
+
+/// ANSI codes for CLI UI (only when cli_use_color() or setup_use_color()). ux-requirements §7.3: color supports, does not replace, text.
 mod ansi {
-    pub const CYAN: &str = "\x1b[36m"; // box / accent
-    pub const DIM: &str = "\x1b[2m"; // hints
-    pub const GREEN: &str = "\x1b[32m"; // success
     pub const RESET: &str = "\x1b[0m";
+    pub const BOLD: &str = "\x1b[1m";
+    pub const DIM: &str = "\x1b[2m"; // hints, prompt
+    pub const CYAN: &str = "\x1b[36m"; // box / accent / banner
+    pub const BRIGHT_CYAN: &str = "\x1b[96m"; // title
+    pub const GREEN: &str = "\x1b[32m"; // success
+    pub const YELLOW: &str = "\x1b[33m"; // warnings
+    pub const RED: &str = "\x1b[31m"; // errors
 }
 
 /// Build provider from profile; resolves API key from env and calls build_provider.
@@ -99,7 +164,11 @@ impl AskUser for StdinAskUser {
             serde_json::to_string(input).unwrap_or_else(|_| "?".into())
         );
         let result = tokio::task::spawn_blocking(move || {
-            eprint!("{}", prompt);
+            if cli_use_color() {
+                eprint!("{}{}{}", ansi::DIM, prompt, ansi::RESET);
+            } else {
+                eprint!("{}", prompt);
+            }
             let _ = io::stderr().flush();
             let mut line = String::new();
             if io::stdin().read_line(&mut line).is_ok() {
@@ -165,20 +234,43 @@ async fn main() {
 
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
-    tracing::info!("clido starting");
+    // Global startup banner: shown on every interactive text startup, regardless of subcommand.
+    if cli.output_format == "text" && io::stdout().is_terminal() {
+        if cli_use_color() {
+            print!("{}", ansi::CYAN);
+        }
+        print!("{}", BANNER);
+        if cli_use_color() {
+            print!("{}", ansi::RESET);
+        }
+        let _ = io::stdout().flush();
+    }
 
     let exit = match run(cli).await {
         Ok(()) => 0,
         Err(e) => {
             if let Some(cli_err) = e.downcast_ref::<CliError>() {
                 let code = cli_err.exit_code();
-                match cli_err {
-                    CliError::Config(msg) => eprintln!("Error [Config]: {}", msg),
-                    _ => eprintln!("Error: {}", e),
+                if cli_use_color() {
+                    match cli_err {
+                        CliError::Config(msg) => {
+                            eprintln!("{}Error [Config]: {}{}", ansi::RED, msg, ansi::RESET)
+                        }
+                        _ => eprintln!("{}Error: {}{}", ansi::RED, e, ansi::RESET),
+                    }
+                } else {
+                    match cli_err {
+                        CliError::Config(msg) => eprintln!("Error [Config]: {}", msg),
+                        _ => eprintln!("Error: {}", e),
+                    }
                 }
                 code
             } else {
-                eprintln!("Error: {}", e);
+                if cli_use_color() {
+                    eprintln!("{}Error: {}{}", ansi::RED, e, ansi::RESET);
+                } else {
+                    eprintln!("Error: {}", e);
+                }
                 1
             }
         }
@@ -193,13 +285,24 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
             return Ok(());
         }
         Some(cli::Subcommand::ListSessions) => {
-            eprintln!(
-                "Warning: 'clido list-sessions' is deprecated. Use 'clido sessions list' instead."
-            );
+            if cli_use_color() {
+                eprintln!(
+                    "{}Warning: 'clido list-sessions' is deprecated. Use 'clido sessions list' instead.{}",
+                    ansi::YELLOW, ansi::RESET
+                );
+            } else {
+                eprintln!(
+                    "Warning: 'clido list-sessions' is deprecated. Use 'clido sessions list' instead."
+                );
+            }
             return run_sessions_list().await;
         }
         Some(cli::Subcommand::ShowSession { id }) => {
-            eprintln!("Warning: 'clido show-session' is deprecated. Use 'clido sessions show <id>' instead.");
+            if cli_use_color() {
+                eprintln!("{}Warning: 'clido show-session' is deprecated. Use 'clido sessions show <id>' instead.{}", ansi::YELLOW, ansi::RESET);
+            } else {
+                eprintln!("Warning: 'clido show-session' is deprecated. Use 'clido sessions show <id>' instead.");
+            }
             return run_sessions_show(id).await;
         }
         Some(cli::Subcommand::Sessions { cmd }) => match cmd {
@@ -416,11 +519,6 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
             None
         };
 
-    if cli.output_format == "text" && io::stdout().is_terminal() {
-        print!("{}", BANNER);
-        let _ = io::stdout().flush();
-    }
-
     let (session_id, mut writer) = match &resume_id {
         Some(id) => (id.clone(), SessionWriter::append(&workspace_root, id)?),
         None => {
@@ -493,7 +591,11 @@ async fn run(cli: cli::Cli) -> Result<(), anyhow::Error> {
 
     if let Err(ClidoError::Interrupted) = &result {
         let _ = writer.flush();
-        eprintln!("Interrupted.");
+        if cli_use_color() {
+            eprintln!("{}Interrupted.{}", ansi::DIM, ansi::RESET);
+        } else {
+            eprintln!("Interrupted.");
+        }
         return Err(CliError::Interrupted("Interrupted by user.".into()).into());
     }
 
@@ -651,11 +753,6 @@ async fn run_repl(cli: cli::Cli) -> Result<(), anyhow::Error> {
             None
         };
 
-    if cli.output_format == "text" && io::stdout().is_terminal() {
-        print!("{}", BANNER);
-        let _ = io::stdout().flush();
-    }
-
     let session_id = uuid::Uuid::new_v4().to_string();
     let mut writer = SessionWriter::create(&workspace_root, &session_id)?;
 
@@ -672,7 +769,11 @@ async fn run_repl(cli: cli::Cli) -> Result<(), anyhow::Error> {
     let mut total_cost_usd: f64 = 0.0;
 
     loop {
-        eprint!("clido> ");
+        if cli_use_color() {
+            eprint!("{}clido> {}", ansi::DIM, ansi::RESET);
+        } else {
+            eprint!("clido> ");
+        }
         let _ = io::stderr().flush();
         let mut line = String::new();
         if io::stdin().read_line(&mut line).is_err() {
@@ -893,10 +994,21 @@ async fn run_workflow_run(
     };
     let audit_path = workflow_run_path(&def.name, &run_id).ok();
     let summary = run_workflow_exec(&def, &mut context, &runner, audit_path.as_deref()).await?;
-    println!(
-        "Workflow completed: {} steps, ${:.4} total, {} ms",
-        summary.step_count, summary.total_cost_usd, summary.total_duration_ms
-    );
+    if cli_use_color() {
+        println!(
+            "{}Workflow completed: {} steps, ${:.4} total, {} ms{}",
+            ansi::GREEN,
+            summary.step_count,
+            summary.total_cost_usd,
+            summary.total_duration_ms,
+            ansi::RESET
+        );
+    } else {
+        println!(
+            "Workflow completed: {} steps, ${:.4} total, {} ms",
+            summary.step_count, summary.total_cost_usd, summary.total_duration_ms
+        );
+    }
     Ok(())
 }
 
@@ -1017,14 +1129,31 @@ fn run_interactive_setup_blocking(
     let mut line = String::new();
 
     let use_color = setup_use_color();
-    if io::stderr().is_terminal() {
+    let rich = setup_use_rich_ui();
+
+    if rich {
+        // Production-grade setup UI: welcome line, spacing, bordered box, then prompts.
+        if use_color {
+            eprintln!(
+                "{}{}  Welcome to Clido.{} {}Let's set up your environment.{}",
+                ansi::BOLD,
+                ansi::BRIGHT_CYAN,
+                ansi::RESET,
+                ansi::DIM,
+                ansi::RESET
+            );
+        } else {
+            eprintln!("  Welcome to Clido. Let's set up your environment.");
+        }
+        eprintln!();
         if use_color {
             eprint!("{}", ansi::CYAN);
         }
-        eprintln!("{}", SETUP_BANNER_RICH);
+        eprintln!("{}", setup_banner_rich());
         if use_color {
             eprint!("{}", ansi::RESET);
         }
+        eprintln!();
         if let Some(s) = init_subline {
             if use_color {
                 eprintln!("{}{}{}", ansi::DIM, s, ansi::RESET);
@@ -1032,6 +1161,7 @@ fn run_interactive_setup_blocking(
                 eprintln!("{}", s);
             }
         }
+        let _ = io::stderr().flush();
     } else {
         eprintln!("{}", SETUP_BANNER_ASCII);
         if let Some(s) = init_subline {
@@ -1039,35 +1169,59 @@ fn run_interactive_setup_blocking(
         }
     }
 
-    eprintln!("  Provider:");
-    eprintln!("    1) Anthropic (cloud) — requires API key");
-    eprintln!("    2) Local (Ollama)    — no key; use http://localhost:11434");
-    if use_color {
-        eprintln!(
-            "{}  Type 1 or 2, then press Enter [default: 1]:{}",
-            ansi::DIM,
-            ansi::RESET
-        );
+    let choice: u8 = if rich {
+        // Arrow-key selection (inquire) for production-grade UX.
+        let options: Vec<&str> = vec![
+            "Anthropic (cloud) — requires API key",
+            "Local (Ollama) — no key; use http://localhost:11434",
+        ];
+        let selected: &str = Select::new("Provider:", options)
+            .with_starting_cursor(0)
+            .prompt()
+            .map_err(|e| anyhow::anyhow!("prompt: {}", e))?;
+        if selected.contains("Local") {
+            2
+        } else {
+            1
+        }
     } else {
+        eprintln!("  Provider:");
+        eprintln!("    1) Anthropic (cloud) — requires API key");
+        eprintln!("    2) Local (Ollama)    — no key; use http://localhost:11434");
         eprintln!("  Type 1 or 2, then press Enter [default: 1]:");
-    }
-    line.clear();
-    stdin
-        .read_line(&mut line)
-        .map_err(|e| anyhow::anyhow!("stdin: {}", e))?;
-    let choice: u8 = line.trim().parse().unwrap_or(1);
-
-    let toml = if choice == 2 {
-        eprintln!("  Ollama base URL (press Enter for http://localhost:11434):");
         line.clear();
         stdin
             .read_line(&mut line)
             .map_err(|e| anyhow::anyhow!("stdin: {}", e))?;
-        let base = line.trim();
-        let base_url = if base.is_empty() {
+        line.trim().parse().unwrap_or(1)
+    };
+
+    let toml = if choice == 2 {
+        let base_url = if rich {
+            Text::new("Ollama base URL")
+                .with_default("http://localhost:11434")
+                .prompt()
+                .map_err(|e| anyhow::anyhow!("prompt: {}", e))?
+                .trim()
+                .to_string()
+        } else {
+            eprintln!("  Ollama base URL (press Enter for http://localhost:11434):");
+            line.clear();
+            stdin
+                .read_line(&mut line)
+                .map_err(|e| anyhow::anyhow!("stdin: {}", e))?;
+            let base = line.trim();
+            if base.is_empty() {
+                "http://localhost:11434"
+            } else {
+                base
+            }
+            .to_string()
+        };
+        let base_url = if base_url.is_empty() {
             "http://localhost:11434"
         } else {
-            base
+            base_url.as_str()
         };
         format!(
             r#"default_profile = "default"
@@ -1080,14 +1234,21 @@ base_url = "{}"
             base_url
         )
     } else {
-        eprintln!("  Use existing ANTHROPIC_API_KEY from your environment? [Y/n]:");
-        line.clear();
-        stdin
-            .read_line(&mut line)
-            .map_err(|e| anyhow::anyhow!("stdin: {}", e))?;
-        let use_env = line.trim().is_empty()
-            || line.trim().eq_ignore_ascii_case("y")
-            || line.trim().eq_ignore_ascii_case("yes");
+        let use_env = if rich {
+            Confirm::new("Use existing ANTHROPIC_API_KEY from your environment?")
+                .with_default(true)
+                .prompt()
+                .map_err(|e| anyhow::anyhow!("prompt: {}", e))?
+        } else {
+            eprintln!("  Use existing ANTHROPIC_API_KEY from your environment? [Y/n]:");
+            line.clear();
+            stdin
+                .read_line(&mut line)
+                .map_err(|e| anyhow::anyhow!("stdin: {}", e))?;
+            line.trim().is_empty()
+                || line.trim().eq_ignore_ascii_case("y")
+                || line.trim().eq_ignore_ascii_case("yes")
+        };
         if !use_env {
             if use_color {
                 eprintln!(
@@ -1126,7 +1287,15 @@ api_key_env = "ANTHROPIC_API_KEY"
 
 /// First-run interactive setup: no config file and TTY → run interactive setup, write config, then continue.
 async fn run_first_run_setup() -> Result<(), anyhow::Error> {
-    eprintln!("No configuration found. Running first-time setup.");
+    if cli_use_color() {
+        eprintln!(
+            "{}No configuration found. Running first-time setup.{}",
+            ansi::DIM,
+            ansi::RESET
+        );
+    } else {
+        eprintln!("No configuration found. Running first-time setup.");
+    }
     let (config_path, toml) = tokio::task::spawn_blocking(|| run_interactive_setup_blocking(None))
         .await
         .map_err(|e| anyhow::anyhow!("setup: {}", e))??;
@@ -1166,6 +1335,7 @@ async fn run_doctor() -> Result<(), anyhow::Error> {
         .api_key_env
         .as_deref()
         .unwrap_or("ANTHROPIC_API_KEY");
+    let use_color = cli_use_color();
     if profile.provider != "local" {
         if env::var(api_key_env).is_err() {
             mandatory.push(format!(
@@ -1173,10 +1343,20 @@ async fn run_doctor() -> Result<(), anyhow::Error> {
                 profile_name, api_key_env
             ));
         } else {
-            println!(
-                "✓ API key ({}) set for profile '{}'",
-                api_key_env, profile_name
-            );
+            if use_color {
+                println!(
+                    "{}✓ API key ({}) set for profile '{}'{}",
+                    ansi::GREEN,
+                    api_key_env,
+                    profile_name,
+                    ansi::RESET
+                );
+            } else {
+                println!(
+                    "✓ API key ({}) set for profile '{}'",
+                    api_key_env, profile_name
+                );
+            }
         }
     }
 
@@ -1186,13 +1366,31 @@ async fn run_doctor() -> Result<(), anyhow::Error> {
                 if let Err(e) = std::fs::create_dir_all(&dir) {
                     mandatory.push(format!("Session dir not writable: {}", e));
                 } else {
-                    println!("✓ Session dir created and writable: {}", dir.display());
+                    if use_color {
+                        println!(
+                            "{}✓ Session dir created and writable: {}{}",
+                            ansi::GREEN,
+                            dir.display(),
+                            ansi::RESET
+                        );
+                    } else {
+                        println!("✓ Session dir created and writable: {}", dir.display());
+                    }
                 }
             } else {
                 let test_file = dir.join(".clido_doctor_write_test");
                 if std::fs::write(&test_file, b"").is_ok() {
                     let _ = std::fs::remove_file(&test_file);
-                    println!("✓ Session dir writable: {}", dir.display());
+                    if use_color {
+                        println!(
+                            "{}✓ Session dir writable: {}{}",
+                            ansi::GREEN,
+                            dir.display(),
+                            ansi::RESET
+                        );
+                    } else {
+                        println!("✓ Session dir writable: {}", dir.display());
+                    }
                 } else {
                     mandatory.push(format!("Session dir not writable: {}", dir.display()));
                 }
@@ -1205,7 +1403,16 @@ async fn run_doctor() -> Result<(), anyhow::Error> {
 
     let (pricing_table, pricing_path) = load_pricing();
     if let Some(path) = &pricing_path {
-        println!("✓ pricing.toml present: {}", path.display());
+        if use_color {
+            println!(
+                "{}✓ pricing.toml present: {}{}",
+                ansi::GREEN,
+                path.display(),
+                ansi::RESET
+            );
+        } else {
+            println!("✓ pricing.toml present: {}", path.display());
+        }
         if pricing_table.models.is_empty() {
             warnings.push(
                 "pricing.toml is empty or invalid; using default cost estimates.".to_string(),
@@ -1232,13 +1439,21 @@ async fn run_doctor() -> Result<(), anyhow::Error> {
 
     if !mandatory.is_empty() {
         for m in &mandatory {
-            eprintln!("✗ {}", m);
+            if use_color {
+                eprintln!("{}✗ {}{}", ansi::RED, m, ansi::RESET);
+            } else {
+                eprintln!("✗ {}", m);
+            }
         }
         return Err(CliError::DoctorMandatory(mandatory.join(" ")).into());
     }
     if !warnings.is_empty() {
         for w in &warnings {
-            eprintln!("⚠ {}", w);
+            if use_color {
+                eprintln!("{}⚠ {}{}", ansi::YELLOW, w, ansi::RESET);
+            } else {
+                eprintln!("⚠ {}", w);
+            }
         }
         return Err(CliError::DoctorWarnings(warnings.join(" ")).into());
     }

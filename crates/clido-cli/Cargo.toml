@@ -24,4 +24,5 @@ uuid = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 directories = { workspace = true }
+inquire = { workspace = true }
 

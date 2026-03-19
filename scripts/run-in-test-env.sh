@@ -28,8 +28,9 @@ run_verify() {
 run_init() {
   mkdir -p "$TEST_DIR"
   echo "=== Interactive init (config -> $CLIDO_CONFIG) ==="
-  echo "  Clido will ask 2 questions: provider (1 or 2), then API key (Y/n)."
-  echo "  Type your answer after each question and press Enter."
+  # ux-requirements §3.2: intro before clido init so user knows questions follow
+  echo "  Clido will ask 2 questions: provider, then API key."
+  echo "  Use arrow keys to select, or type and press Enter. (Config → $CLIDO_CONFIG)"
   cargo run -p clido-cli -q -- init
 }
 

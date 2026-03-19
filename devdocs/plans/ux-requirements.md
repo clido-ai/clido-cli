@@ -33,15 +33,26 @@
 
 Before any question, print a short header so the user knows what is happening.
 
-**Rich TTY (preferred when stdout is a TTY and width ≥ 60):**
+**Rich TTY (preferred when stdin or stderr is a TTY and width ≥ 60):**
+
+Before the box, print a welcome line (e.g. "Welcome to Clido." in bold/accent, "Let's set up your environment." in dim). Then a blank line, then the setup box. Production implementation uses a double-line box:
 
 ```
-┌─ Clido setup ────────────────────────────────────────────────┐
-│  Choose a provider and where to store your API key.          │
-│  Answer the questions below; type a number or letter,         │
-│  then press Enter. Defaults are in brackets.                  │
-└─────────────────────────────────────────────────────────────┘
+  Welcome to Clido. Let's set up your environment.
+
+╔═══════════════════════════════════════════════════════════════╗
+║  Clido setup                                                    ║
+║  Choose a provider and where to store your API key.             ║
+║  Answer the questions below; use arrow keys or type, then Enter.  ║
+║  Defaults are in brackets.                                       ║
+╚═══════════════════════════════════════════════════════════════╝
 ```
+
+**Box alignment:** Each line between the vertical bars must have exactly the same character width (e.g. 59) so the right border aligns. Implementation uses a fixed inner width and pads each line.
+
+**Rich TTY interaction:** When stdin/stderr is a TTY, provider choice and yes/no prompts use **arrow-key selection** (e.g. via inquire): user can move with ↑/↓ and confirm with Enter, or type and Enter. Non-TTY falls back to "Type 1 or 2, then press Enter" and read_line.
+
+Alternative (single-line box): `┌─ Clido setup ───…───┐` / `│ … │` / `└──…──┘` is also valid.
 
 **ASCII / non-TTY / narrow:**
 
@@ -61,7 +72,9 @@ So the user never sees a motionless cursor without context.
 
 ### 2.3 Provider choice — exact copy
 
-**Prompt (stderr):**
+**Rich TTY (arrow-key selection):** Show an interactive list: "Anthropic (cloud) — requires API key", "Local (Ollama) — no key; use http://localhost:11434". User selects with arrow keys and Enter, or types and Enter. Default: first option (Anthropic).
+
+**ASCII / non-TTY prompt (stderr):**
 
 ```
   Provider:
@@ -70,7 +83,7 @@ So the user never sees a motionless cursor without context.
   Type 1 or 2, then press Enter [default: 1]:
 ```
 
-- Implementation must include the phrase "Type 1 or 2, then press Enter" (or equivalent: "Enter 1 or 2 and press Enter") so it is obvious that the program is waiting for input and what to type.
+- Implementation must include the phrase "Type 1 or 2, then press Enter" (or equivalent) in non-TTY so it is obvious that the program is waiting for input.
 - Default: if the user presses Enter with no input, treat as `1`.
 
 ### 2.4 If provider = Anthropic — API key
@@ -193,23 +206,42 @@ Every empty state and every error category must have defined copy and an actiona
 
 ### 7.2 Box drawing (rich TTY)
 
-- Use light Unicode box-drawing for setup and permission: `┌`, `─`, `┐`, `│`, `└`, `┘`. Top line: `┌─ <title> ───…───┐` (fill to a reasonable width, e.g. 60).
+- Use light Unicode box-drawing for setup and permission: single-line `┌`, `─`, `┐`, `│`, `└`, `┘` (top line: `┌─ <title> ───…───┐`) or double-line `╔`, `═`, `╗`, `║`, `╚`, `╝` for a stronger header (e.g. setup banner). Fill to a reasonable width (e.g. 60–65 columns).
 - ASCII fallback: use a simple line of dashes and a title, e.g. `--- Clido setup ---`, no box.
 
 ### 7.3 Colors
 
-- Use color only to support, not to replace, text: e.g. green for success, red for error, dim for hints. When `NO_COLOR` is set or non-TTY, omit color; symbols and text carry full meaning (CLI spec §16).
-- **Setup flow (first-run / `clido init`):** When stderr is a TTY and `NO_COLOR` is not set: cyan for the banner box, dim for the "Type 1 or 2…" prompt line and for hints (e.g. export key), green for the "Created … Run 'clido doctor'" success line. This keeps the flow readable and visually clear without relying on color for meaning.
+- Use color only to support, not to replace, text: e.g. green for success, red for error, yellow/dim for warnings, cyan for accent. When `NO_COLOR` is set or when no TTY is available for the relevant stream, omit color; symbols and text carry full meaning (CLI spec §16).
+- **Setup flow (first-run / `clido init`):** When stdin or stderr is a TTY and `NO_COLOR` is not set: bold + bright cyan for "Welcome to Clido.", dim for "Let's set up your environment." and for hints; cyan for the banner box; dim for the "Type 1 or 2…" prompt line; green for the "Created … Run 'clido doctor'" success line.
+- **Agent banner:** When stdout is a TTY and `NO_COLOR` is not set: cyan for the ASCII art banner so the product name stands out.
+- **REPL prompt:** When stderr is a TTY and `NO_COLOR` is not set: dim or cyan for the "clido> " prompt.
+- **Doctor:** Green for ✓ (pass), red for ✗ (mandatory failure), yellow or dim for ⚠ (warnings).
+- **Errors:** Red for "Error [Config]:" and "Error:" on stderr when TTY and no `NO_COLOR`.
+- **First-run notice and "Interrupted.":** Dim (or red for Interrupted) when TTY and no `NO_COLOR`.
+- **Deprecation warnings:** Yellow or dim for "Warning: …" when TTY and no `NO_COLOR`.
 
 ### 7.4 Session footer and tool lifecycle
 
 - As in CLI spec §5: tool lifecycle (· → ↻ → ✓/✗), session footer `✓ Done  ·  5 turns  ·  $0.0041  ·  2.3s`. Keep alignment and spacing consistent so the output looks orderly, not ragged.
 
+### 7.5 Banners: setup vs agent
+
+- **Setup banner (init / first-run):** The welcome line + double-line box shown at the start of `clido init` or first-run setup. This is the "setup screen"; it is the first thing the user sees when running init (no "clido starting" log line before it). See §2.2 and [ui-implementation-plan.md](ui-implementation-plan.md) §2.1.
+- **Agent banner:** The ASCII-art "Clido" logo shown when starting a **run** (e.g. `clido "fix the test"`) or the REPL in text mode. Only visible when stdout is a TTY. See [ui-implementation-plan.md](ui-implementation-plan.md) §2.4.
+
+### 7.6 Other UI surfaces (agent, doctor, sessions, workflow, errors)
+
+- **Agent banner:** Shown when starting a run or REPL in text mode and stdout is a TTY; optional cyan when color is on. See [ui-implementation-plan.md](ui-implementation-plan.md) §2.4.
+- **Doctor:** ✓ / ✗ / ⚠ with optional green/red/yellow per §7.3. Copy and exit codes in CLI spec §4 and §6.
+- **Sessions list:** Empty state and list format in CLI spec §4; optional header when TTY. See ui-implementation-plan §2.7–2.8.
+- **Workflow:** Completion line and dry-run format; optional success color. See ui-implementation-plan §2.9–2.11.
+- **Errors:** "Error [Config]: …" and "Error: …" on stderr; optional red when TTY. See CLI spec §6 and ui-implementation-plan §2.12.
+
 ---
 
 ## 8. Checklist for Implementors and QA
 
-- [ ] Every interactive prompt in first-run/init uses the exact or template copy from §2 and includes a "Type … and press Enter" (or equivalent) instruction.
+- [ ] Every interactive prompt in first-run/init uses the exact or template copy from §2; in rich TTY, arrow-key selection is available; in non-TTY, a "Type … and press Enter" (or equivalent) instruction is shown.
 - [ ] Defaults are shown in brackets (e.g. `[1]`, `[Y/n]`).
 - [ ] Scripts that run `clido init` (or other interactive commands) print the intro from §3 before the subprocess.
 - [ ] Permission and project-instruction prompts use the copy from CLI spec §7 and security-model / §5 above.
@@ -221,6 +253,7 @@ Every empty state and every error category must have defined copy and an actiona
 
 ## 9. References
 
+- **UI implementation plan:** [ui-implementation-plan.md](ui-implementation-plan.md) — every touchpoint, user story, and implementation step; single source for what to implement where.
 - **CLI spec:** [cli-interface-specification.md](cli-interface-specification.md) — §4 First-Run, §5 Text Output, §6 Errors, §7 Permission, §8 REPL, §16 Accessibility.
 - **Security model:** [../guides/security-model.md](../guides/security-model.md) — project-instruction trust prompt.
 - **Development plan:** [development-plan.md](development-plan.md) — Phase 3.4.2 (project instructions), Phase 4.3 (permission prompt).

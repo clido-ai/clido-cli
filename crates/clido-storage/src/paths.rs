@@ -35,6 +35,25 @@ pub fn session_file_path(project_path: &Path, session_id: &str) -> anyhow::Resul
     Ok(session_dir_for_project(project_path)?.join(format!("{}.jsonl", session_id)))
 }
 
+/// Path for a workflow run audit file: `{data_dir}/workflows/{workflow_name}/{run_id}.json`.
+pub fn workflow_run_path(workflow_name: &str, run_id: &str) -> anyhow::Result<PathBuf> {
+    let base = data_dir()?;
+    let sanitized_name = workflow_name
+        .chars()
+        .map(|c| {
+            if c == std::path::MAIN_SEPARATOR {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect::<String>();
+    Ok(base
+        .join("workflows")
+        .join(sanitized_name)
+        .join(format!("{}.json", run_id)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

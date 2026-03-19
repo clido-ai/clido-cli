@@ -14,6 +14,7 @@ clido-core = { path = "../clido-core" }
 clido-providers = { path = "../clido-providers" }
 clido-storage = { path = "../clido-storage" }
 clido-tools = { path = "../clido-tools" }
+clido-workflows = { path = "../clido-workflows" }
 clap = { workspace = true, features = ["derive", "env"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }

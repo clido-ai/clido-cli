@@ -130,7 +130,7 @@ mod tests {
                 text: "hi".to_string(),
             }],
         };
-        let out = assemble(&[m.clone()], 0, 100_000, 0.75).unwrap();
+        let out = assemble(std::slice::from_ref(&m), 0, 100_000, 0.75).unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].content.len(), 1);
     }

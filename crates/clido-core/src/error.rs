@@ -23,6 +23,9 @@ pub enum ClidoError {
     #[error("planner error: {0}")]
     Planner(String),
 
+    #[error("workflow error: {0}")]
+    Workflow(String),
+
     #[error("config error: {0}")]
     Config(String),
 

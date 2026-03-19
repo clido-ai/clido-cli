@@ -77,6 +77,17 @@ impl Default for ContextSection {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct WorkflowsSection {
+    #[serde(default = "default_workflows_directory")]
+    pub directory: String,
+}
+
+fn default_workflows_directory() -> String {
+    ".clido/workflows".to_string()
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ConfigFile {
@@ -90,6 +101,8 @@ pub struct ConfigFile {
     pub tools: ToolsSection,
     #[serde(default)]
     pub context: ContextSection,
+    #[serde(default)]
+    pub workflows: WorkflowsSection,
 }
 
 fn default_default_profile() -> String {
@@ -104,6 +117,7 @@ pub struct LoadedConfig {
     pub agent: AgentSection,
     pub tools: ToolsSection,
     pub context: ContextSection,
+    pub workflows: WorkflowsSection,
 }
 
 impl LoadedConfig {
@@ -215,12 +229,20 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
             .max_context_tokens
             .or(base.context.max_context_tokens),
     };
+    let workflows = WorkflowsSection {
+        directory: if later.workflows.directory != default_workflows_directory() {
+            later.workflows.directory
+        } else {
+            base.workflows.directory
+        },
+    };
     ConfigFile {
         default_profile,
         profile,
         agent,
         tools,
         context,
+        workflows,
     }
 }
 
@@ -232,6 +254,7 @@ pub fn load_config(cwd: &Path) -> Result<LoadedConfig> {
         agent: AgentSection::default(),
         tools: ToolsSection::default(),
         context: ContextSection::default(),
+        workflows: WorkflowsSection::default(),
     };
 
     if let Some(path) = global_config_path() {
@@ -264,6 +287,7 @@ pub fn load_config(cwd: &Path) -> Result<LoadedConfig> {
         agent: merged.agent,
         tools: merged.tools,
         context: merged.context,
+        workflows: merged.workflows,
     })
 }
 

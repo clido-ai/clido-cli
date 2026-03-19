@@ -16,7 +16,6 @@ echo "Running cargo fmt --check..."
 cargo fmt --all -- --check
 
 echo "Running cargo clippy..."
-rm -rf target
 cargo clippy --workspace -- -D warnings
 
 echo "Pre-commit checks passed."

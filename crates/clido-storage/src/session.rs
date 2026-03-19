@@ -222,8 +222,7 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
             if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                 let load_result: Result<Vec<SessionLine>, anyhow::Error> =
                     SessionReader::load(project_path, stem);
-                if let Ok(ref lines) = load_result {
-                    let lines: &[SessionLine] = lines;
+                if let Ok(lines) = load_result {
                     if let Some(SessionLine::Meta {
                         session_id,
                         start_time,
@@ -231,7 +230,7 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
                         ..
                     }) = lines.first()
                     {
-                        let (num_turns, total_cost_usd, preview) = summarize_lines(lines);
+                        let (num_turns, total_cost_usd, preview) = summarize_lines(&lines);
                         summaries.push(SessionSummary {
                             session_id: session_id.clone(),
                             project_path: proj.clone(),

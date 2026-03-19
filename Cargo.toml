@@ -9,6 +9,7 @@ members = [
   "crates/clido-planner",
   "crates/clido-index",
   "crates/clido-agent",
+  "crates/clido-workflows",
   "crates/clido-cli",
 ]
 resolver = "2"

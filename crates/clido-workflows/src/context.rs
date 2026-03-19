@@ -1,0 +1,122 @@
+//! Workflow execution context: inputs, step outputs, results.
+
+use std::collections::HashMap;
+
+use crate::types::WorkflowDef;
+use clido_core::{ClidoError, Result};
+
+/// Runtime context for a workflow run: resolved inputs and step outputs.
+#[derive(Debug, Clone, Default)]
+pub struct WorkflowContext {
+    /// Resolved input values (key = input name).
+    pub inputs: HashMap<String, serde_json::Value>,
+    /// Step output text by "step_id.output_name".
+    pub step_outputs: HashMap<String, String>,
+    /// Per-step result (output_text, cost_usd, duration_ms, error).
+    pub step_results: Vec<StepResult>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StepResult {
+    pub step_id: String,
+    pub output_text: String,
+    pub cost_usd: f64,
+    pub duration_ms: u64,
+    pub error: Option<String>,
+}
+
+impl WorkflowContext {
+    /// Resolve inputs from def and overrides. Missing required → Error.
+    pub fn resolve_inputs(
+        def: &WorkflowDef,
+        overrides: &[(String, serde_json::Value)],
+    ) -> Result<HashMap<String, serde_json::Value>> {
+        let mut map: HashMap<String, serde_json::Value> = HashMap::new();
+        for (k, v) in overrides {
+            map.insert(k.clone(), v.clone());
+        }
+        for input in &def.inputs {
+            if map.contains_key(&input.name) {
+                continue;
+            }
+            if let Some(ref default) = input.default {
+                map.insert(input.name.clone(), default.clone());
+            } else if input.required {
+                return Err(ClidoError::Workflow(format!(
+                    "Missing required input: {}",
+                    input.name
+                )));
+            }
+        }
+        Ok(map)
+    }
+
+    /// Create context with given inputs and empty step_outputs/step_results.
+    pub fn new(inputs: HashMap<String, serde_json::Value>) -> Self {
+        Self {
+            inputs,
+            step_outputs: HashMap::new(),
+            step_results: Vec::new(),
+        }
+    }
+
+    /// Set output for a step (e.g. "explore.output" -> "...").
+    pub fn set_step_output(&mut self, step_id: &str, output_name: &str, value: String) {
+        self.step_outputs
+            .insert(format!("{}.{}", step_id, output_name), value);
+    }
+
+    /// Get step output for template (steps.step_id.output_name).
+    pub fn get_step_output(&self, step_id: &str, output_name: &str) -> Option<&str> {
+        self.step_outputs
+            .get(&format!("{}.{}", step_id, output_name))
+            .map(String::as_str)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{InputDef, WorkflowDef};
+
+    #[test]
+    fn resolve_inputs_required_missing() {
+        let def = WorkflowDef {
+            name: "x".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![InputDef {
+                name: "required_key".to_string(),
+                required: true,
+                default: None,
+            }],
+            steps: vec![],
+            output: None,
+            prerequisites: None,
+        };
+        let overrides: Vec<(String, serde_json::Value)> = vec![];
+        let err = WorkflowContext::resolve_inputs(&def, &overrides).unwrap_err();
+        assert!(err.to_string().contains("Missing required input"));
+        assert!(err.to_string().contains("required_key"));
+    }
+
+    #[test]
+    fn resolve_inputs_default_applied() {
+        let def = WorkflowDef {
+            name: "x".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![InputDef {
+                name: "opt".to_string(),
+                required: false,
+                default: Some(serde_json::Value::String("default_val".to_string())),
+            }],
+            steps: vec![],
+            output: None,
+            prerequisites: None,
+        };
+        let overrides: Vec<(String, serde_json::Value)> = vec![];
+        let map = WorkflowContext::resolve_inputs(&def, &overrides).unwrap();
+        assert_eq!(map.get("opt").and_then(|v| v.as_str()), Some("default_val"));
+    }
+}

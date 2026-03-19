@@ -114,6 +114,36 @@ pub enum Subcommand {
 
     /// Run health checks (API key, session dir, pricing).
     Doctor,
+
+    /// Workflow commands (run, validate, inspect, list).
+    Workflow {
+        #[command(subcommand)]
+        cmd: WorkflowCmd,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum WorkflowCmd {
+    /// Run a workflow from file or name.
+    Run {
+        /// Workflow file path or name (from workflows directory).
+        workflow: String,
+        /// Input overrides: key=value (repeatable).
+        #[arg(long, short = 'i')]
+        input: Vec<String>,
+        /// Validate and render prompts only; no API calls.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip cost confirmation.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Validate workflow YAML.
+    Validate { path: PathBuf },
+    /// Inspect workflow: list steps and dependencies.
+    Inspect { path: PathBuf },
+    /// List workflows from configured directories.
+    List,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -139,6 +169,7 @@ impl Cli {
             Some(Subcommand::Version) => false,
             Some(Subcommand::Init) => false,
             Some(Subcommand::Doctor) => false,
+            Some(Subcommand::Workflow { .. }) => false,
         }
     }
 }

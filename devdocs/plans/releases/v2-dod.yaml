@@ -296,3 +296,20 @@ items:
       command: "cargo test --workspace"
     status: GAP
     gap_reason: "V2 not yet released"
+
+  # --- UX (ux-requirements.md; applies to all releases) ---
+  - id: ux-first-run-init-copy
+    description: "First-run and clido init prompts use copy from ux-requirements §2 (Type 1 or 2, press Enter, defaults in brackets)"
+    source: "devdocs/plans/ux-requirements.md §2; CLI spec §4"
+    verification:
+      type: command
+      command: "cargo test -p clido-cli --test integration init_prompts_contain_ux_copy"
+    status: DONE
+
+  - id: ux-script-intro-before-init
+    description: "scripts/run-in-test-env.sh prints intro before clido init (ux-requirements §3.2)"
+    source: "devdocs/plans/ux-requirements.md §3.2"
+    verification:
+      type: command
+      command: "grep -q 'Clido will ask 2 questions' scripts/run-in-test-env.sh"
+    status: DONE

@@ -22,6 +22,7 @@ This folder contains the design, planning, schema, testing, and research documen
 
 ## Plans
 
+- **[plans/ux-requirements.md](./plans/ux-requirements.md)** — UX and copy standards: interactive prompts, script intros, visual design (functional and "hübsch"); first-run/init, permission, empty states; color use in setup flow.
 - **[plans/releases/README.md](./plans/releases/README.md)** — Release overview from V1 to V4.
 - **[plans/releases/v1.md](./plans/releases/v1.md)** — V1 scope and exit criteria.
 - **[plans/releases/v1-5.md](./plans/releases/v1-5.md)** — V1.5 operator-quality scope.

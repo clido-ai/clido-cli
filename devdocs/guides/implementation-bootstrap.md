@@ -14,10 +14,11 @@ When documents overlap, use this order:
 
 1. **User-facing behavior:** [`devdocs/plans/cli-interface-specification.md`](../plans/cli-interface-specification.md)
 2. **Release scope and what must ship now:** [`devdocs/plans/releases/v1.md`](../plans/releases/v1.md) and [`devdocs/plans/releases/README.md`](../plans/releases/README.md)
-3. **Architecture and milestone order:** [`devdocs/plans/development-plan.md`](../plans/development-plan.md)
-4. **Validation and coverage expectations:** [`devdocs/guides/testing-strategy-and-master-test-plan.md`](testing-strategy-and-master-test-plan.md)
-5. **Concrete schemas and references:** `devdocs/schemas/*.md`
-6. **Forward-looking ideas:** `devdocs/ideas/*.md` are non-binding unless promoted into the roadmap/spec
+3. **UX and copy (interactive flows, prompts, visual design):** [`devdocs/plans/ux-requirements.md`](../plans/ux-requirements.md)
+4. **Architecture and milestone order:** [`devdocs/plans/development-plan.md`](../plans/development-plan.md)
+5. **Validation and coverage expectations:** [`devdocs/guides/testing-strategy-and-master-test-plan.md`](testing-strategy-and-master-test-plan.md)
+6. **Concrete schemas and references:** `devdocs/schemas/*.md`
+7. **Forward-looking ideas:** `devdocs/ideas/*.md` are non-binding unless promoted into the roadmap/spec
 
 If you discover a conflict:
 

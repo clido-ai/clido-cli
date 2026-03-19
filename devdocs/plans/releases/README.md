@@ -29,10 +29,11 @@ Each release builds on the previous. Later releases are not planned in detail un
 
 Each release that is in scope for implementation has a companion DoD:
 
-- **Canonical:** `devdocs/plans/releases/<release>-dod.yaml`. Every item is verifiable (run a command, run `clido` with args, or run coverage). Every item has `source` for traceability to the release plan or development-plan.
+- **Canonical:** `devdocs/plans/releases/<release>-dod.yaml`. Every item is verifiable (run a command, run `clido` with args, or run coverage). Every item has `source` for traceability to the release plan, development-plan, or **CLI spec**.
+- **Derivation rule:** DoD items are **derived from** the CLI spec and the release plan. Every in-scope requirement in those documents must have at least one DoD item that verifies the *behavior* (not only "command exists"). Nothing in scope may ship without a corresponding DoD item (or an explicit GAP with reason). UX requirements ([ux-requirements.md](../ux-requirements.md)) are reflected in DoD items where they affect interactive flows (e.g. first-run/init copy, script intros).
 - **Human-readable:** `devdocs/plans/releases/<release>-dod.md`, generated from the YAML by `scripts/generate-dod-md.sh`.
 - **Verification:** Run `scripts/verify-dod.sh` from the repo root. It reads `CURRENT`, loads the corresponding `*-dod.yaml`, runs each verification, and exits 0 only if all pass. CI should run this for release validation. The script requires **yq v4+** (e.g. `brew install yq` on macOS).
-- **Adding DoD for a new release:** Copy the structure from `v1-dod.yaml`, replace with that release's exit criteria and in-scope items from its plan, expand each into verifiable bullets (command / cli / coverage), set all `status` to DONE or GAP with `gap_reason`. Then run `scripts/generate-dod-md.sh <release>` and set `CURRENT` to that release when switching focus.
+- **Adding DoD for a new release:** Copy the structure from `v1-dod.yaml`. For each in-scope section of the CLI spec and the release plan, add one or more verifiable items (command / cli / coverage) with `source` pointing to that section. Set all `status` to DONE or GAP with `gap_reason`. Then run `scripts/generate-dod-md.sh <release>` and set `CURRENT` to that release when switching focus.
 
 - **Detailed DoDs:** Each release has a *detailed* DoD: every exit criterion, in-scope phase, and CLI surface item is expanded into one or more verifiable items with traceability (`source`) to the release plan or development-plan. V1 has 35+ items; V1.5, V2, V3, and V4 each have 20–40+ items. The human-readable `*-dod.md` files are generated from the YAML (or kept in sync manually).
 

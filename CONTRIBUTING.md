@@ -32,7 +32,8 @@ cargo nextest run --workspace
 
 Use the [local development testing](devdocs/guides/local-development-testing.md) guide to run and test the agent without risking your own repositories.
 
-**Toolchain consistency:** Use a single Rust toolchain for build, test, and clippy. If you see `E0514: found crate X compiled by an incompatible version of rustc`, run `cargo clean` and then use rustup’s cargo (e.g. `rustup run stable cargo build` / `cargo test` / `cargo clippy`). The pre-commit hook sets `PATH` to prefer `~/.cargo/bin` so one toolchain is used.
+**Rust version:** This repo pins **Rust 1.94** in `rust-toolchain.toml`. Use **rustup only** (install from https://rustup.rs). Run `rustup update` so you have 1.94; then `cargo build` and `cargo clippy` in this repo use that version automatically. **Do not use Homebrew Rust** for this repo—it can mix with rustup and cause E0514. If you have both, never set `RUSTC` and put `~/.cargo/bin` first in `PATH`.
+
 
 **Pre-commit hook (recommended):** To run the same checks as CI before each commit (`cargo fmt --check` and `cargo clippy --workspace -- -D warnings`):
 
@@ -41,6 +42,10 @@ git config core.hooksPath .githooks
 ```
 
 The hook lives in `.githooks/pre-commit`. CI also runs tests; run `cargo test --workspace` (or `cargo nextest run --workspace`) before pushing.
+
+**If you cannot commit** because the hook fails:
+- **`cargo fmt --check` failed:** Run `cargo fmt --all`, then `git add -u` and try again.
+- **`cargo clippy` failed with E0514 (incompatible rustc):** The repo pins Rust 1.94 (`rust-toolchain.toml`). Run `rustup update` so you have 1.94, then `export PATH="${HOME}/.cargo/bin:${PATH}"` and `unset RUSTC`, then `cargo clean` and `cargo clippy --workspace -- -D warnings`. Then commit again.
 
 ## What V1 means operationally
 
@@ -74,6 +79,7 @@ See the [release plans](devdocs/plans/releases/README.md) for the full map of ph
 
 ## Key reference docs
 
+- **UX and copy:** [devdocs/plans/ux-requirements.md](devdocs/plans/ux-requirements.md) — interactive prompts (first-run, init, permission), script intros, visual design and color; CLI must be functional and visually clear.
 - **Config and pricing:** [devdocs/schemas/config.md](devdocs/schemas/config.md) — field-by-field reference for `config.toml`, `.clido/config.toml`, and `pricing.toml`.
 - **Security:** [devdocs/guides/security-model.md](devdocs/guides/security-model.md) — workspace boundaries, path policy, secret redaction, permission model, sandbox behavior.
 - **Session and output schemas:** [devdocs/schemas/output-and-session.md](devdocs/schemas/output-and-session.md) — session JSONL, `--output-format json` / `stream-json`, audit log, versioning.

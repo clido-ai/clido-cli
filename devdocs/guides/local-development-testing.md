@@ -10,6 +10,18 @@ clido reads and modifies files. During development, you will run incomplete or e
 
 The solution is isolation: use temporary fixture repositories, constrained run modes, and local model providers wherever possible.
 
+### Quick test (script)
+
+From the repo root, run verification and optional interactive init in an isolated dir (no change to `~/.config/clido`):
+
+```sh
+./scripts/run-in-test-env.sh        # verify + init
+./scripts/run-in-test-env.sh verify  # build, test, DoD only
+./scripts/run-in-test-env.sh init    # interactive init into $CLIDO_TEST_DIR (default /tmp/clido-test-env)
+```
+
+Override the test dir: `CLIDO_TEST_DIR=/path/to/dir ./scripts/run-in-test-env.sh init`.
+
 ---
 
 ## Setting up a development environment

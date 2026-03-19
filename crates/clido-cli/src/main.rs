@@ -28,6 +28,29 @@ use thiserror::Error;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Rich TTY setup banner (ux-requirements §2.2). Shown when stderr is a TTY.
+const SETUP_BANNER_RICH: &str = r#"┌─ Clido setup ────────────────────────────────────────────────┐
+│  Choose a provider and where to store your API key.          │
+│  Answer the questions below; type a number or letter,        │
+│  then press Enter. Defaults are in brackets.                  │
+└─────────────────────────────────────────────────────────────┘"#;
+
+/// ASCII fallback when not a TTY or narrow (ux-requirements §2.2).
+const SETUP_BANNER_ASCII: &str = "  --- Clido setup ---\n  Answer each question: type your choice, then press Enter. Defaults in [brackets].";
+
+/// Use color only when TTY and NO_COLOR not set (CLI spec §5: NO_COLOR respected unconditionally).
+fn setup_use_color() -> bool {
+    io::stderr().is_terminal() && env::var("NO_COLOR").is_err()
+}
+
+/// ANSI codes for setup flow (only when setup_use_color()). ux-requirements §7.3: color supports, does not replace, text.
+mod ansi {
+    pub const CYAN: &str = "\x1b[36m"; // box / accent
+    pub const DIM: &str = "\x1b[2m"; // hints
+    pub const GREEN: &str = "\x1b[32m"; // success
+    pub const RESET: &str = "\x1b[0m";
+}
+
 /// Build provider from profile; resolves API key from env and calls build_provider.
 fn make_provider(
     profile_name: &str,
@@ -976,27 +999,155 @@ async fn run_workflow_list() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// First-run interactive setup: no config file and TTY → create default config and inform user.
-async fn run_first_run_setup() -> Result<(), anyhow::Error> {
-    eprintln!("No configuration found. Running first-time setup.");
-    let dir = directories::ProjectDirs::from("", "", "clido")
-        .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
-    let config_dir = dir.config_dir();
-    std::fs::create_dir_all(config_dir)?;
-    let config_path = config_dir.join("config.toml");
-    let default_toml = r#"
-default_profile = "default"
+/// Interactive setup flow (CLI spec §4): ask provider, API key/env or base URL, write config.
+/// Returns (config_path, toml_content). Runs in blocking thread for stdin reads.
+/// When stderr is a TTY, prints rich banner (ux-requirements §2.2); otherwise ASCII.
+fn run_interactive_setup_blocking(
+    init_subline: Option<&str>,
+) -> Result<(std::path::PathBuf, String), anyhow::Error> {
+    let config_path = if let Ok(p) = env::var("CLIDO_CONFIG") {
+        std::path::PathBuf::from(p)
+    } else {
+        let dir = directories::ProjectDirs::from("", "", "clido")
+            .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
+        dir.config_dir().join("config.toml")
+    };
+
+    let mut stdin = io::stdin().lock();
+    let mut line = String::new();
+
+    let use_color = setup_use_color();
+    if io::stderr().is_terminal() {
+        if use_color {
+            eprint!("{}", ansi::CYAN);
+        }
+        eprintln!("{}", SETUP_BANNER_RICH);
+        if use_color {
+            eprint!("{}", ansi::RESET);
+        }
+        if let Some(s) = init_subline {
+            if use_color {
+                eprintln!("{}{}{}", ansi::DIM, s, ansi::RESET);
+            } else {
+                eprintln!("{}", s);
+            }
+        }
+    } else {
+        eprintln!("{}", SETUP_BANNER_ASCII);
+        if let Some(s) = init_subline {
+            eprintln!("{}", s);
+        }
+    }
+
+    eprintln!("  Provider:");
+    eprintln!("    1) Anthropic (cloud) — requires API key");
+    eprintln!("    2) Local (Ollama)    — no key; use http://localhost:11434");
+    if use_color {
+        eprintln!(
+            "{}  Type 1 or 2, then press Enter [default: 1]:{}",
+            ansi::DIM,
+            ansi::RESET
+        );
+    } else {
+        eprintln!("  Type 1 or 2, then press Enter [default: 1]:");
+    }
+    line.clear();
+    stdin
+        .read_line(&mut line)
+        .map_err(|e| anyhow::anyhow!("stdin: {}", e))?;
+    let choice: u8 = line.trim().parse().unwrap_or(1);
+
+    let toml = if choice == 2 {
+        eprintln!("  Ollama base URL (press Enter for http://localhost:11434):");
+        line.clear();
+        stdin
+            .read_line(&mut line)
+            .map_err(|e| anyhow::anyhow!("stdin: {}", e))?;
+        let base = line.trim();
+        let base_url = if base.is_empty() {
+            "http://localhost:11434"
+        } else {
+            base
+        };
+        format!(
+            r#"default_profile = "default"
+
+[profile.default]
+provider = "local"
+model = "codellama"
+base_url = "{}"
+"#,
+            base_url
+        )
+    } else {
+        eprintln!("  Use existing ANTHROPIC_API_KEY from your environment? [Y/n]:");
+        line.clear();
+        stdin
+            .read_line(&mut line)
+            .map_err(|e| anyhow::anyhow!("stdin: {}", e))?;
+        let use_env = line.trim().is_empty()
+            || line.trim().eq_ignore_ascii_case("y")
+            || line.trim().eq_ignore_ascii_case("yes");
+        if !use_env {
+            if use_color {
+                eprintln!(
+                    "{}  Set your key in the environment, then run Clido again:{}",
+                    ansi::DIM,
+                    ansi::RESET
+                );
+                eprintln!(
+                    "{}    export ANTHROPIC_API_KEY='your-key-here'{}",
+                    ansi::DIM,
+                    ansi::RESET
+                );
+                eprintln!(
+                    "{}  Or add it to your shell profile. Then run: clido doctor{}",
+                    ansi::DIM,
+                    ansi::RESET
+                );
+            } else {
+                eprintln!("  Set your key in the environment, then run Clido again:");
+                eprintln!("    export ANTHROPIC_API_KEY='your-key-here'");
+                eprintln!("  Or add it to your shell profile. Then run: clido doctor");
+            }
+        }
+        r#"default_profile = "default"
 
 [profile.default]
 provider = "anthropic"
 model = "claude-3-5-sonnet-20241022"
 api_key_env = "ANTHROPIC_API_KEY"
-"#;
-    std::fs::write(&config_path, default_toml.trim_start())?;
-    eprintln!(
-        "Created {}. Set ANTHROPIC_API_KEY in your environment, then run 'clido doctor' to verify.",
-        config_path.display()
-    );
+"#
+        .to_string()
+    };
+
+    Ok((config_path, toml))
+}
+
+/// First-run interactive setup: no config file and TTY → run interactive setup, write config, then continue.
+async fn run_first_run_setup() -> Result<(), anyhow::Error> {
+    eprintln!("No configuration found. Running first-time setup.");
+    let (config_path, toml) = tokio::task::spawn_blocking(|| run_interactive_setup_blocking(None))
+        .await
+        .map_err(|e| anyhow::anyhow!("setup: {}", e))??;
+    let parent = config_path
+        .parent()
+        .ok_or_else(|| CliError::Usage("Invalid config path.".into()))?;
+    std::fs::create_dir_all(parent)?;
+    std::fs::write(&config_path, toml.trim_start())?;
+    if setup_use_color() {
+        eprintln!(
+            "{}  Created {}. Run 'clido doctor' to verify.{}",
+            ansi::GREEN,
+            config_path.display(),
+            ansi::RESET
+        );
+    } else {
+        eprintln!(
+            "  Created {}. Run 'clido doctor' to verify.",
+            config_path.display()
+        );
+    }
     Ok(())
 }
 
@@ -1095,24 +1246,31 @@ async fn run_doctor() -> Result<(), anyhow::Error> {
 }
 
 async fn run_init() -> Result<(), anyhow::Error> {
-    let dir = directories::ProjectDirs::from("", "", "clido")
-        .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
-    let config_dir = dir.config_dir();
-    std::fs::create_dir_all(config_dir)?;
-    let config_path = config_dir.join("config.toml");
-    let default_toml = r#"
-default_profile = "default"
-
-[profile.default]
-provider = "anthropic"
-model = "claude-3-5-sonnet-20241022"
-api_key_env = "ANTHROPIC_API_KEY"
-"#;
-    std::fs::write(&config_path, default_toml.trim_start())?;
-    println!(
-        "Created {}. Set ANTHROPIC_API_KEY and run clido doctor.",
-        config_path.display()
-    );
+    let (config_path, toml) = tokio::task::spawn_blocking(|| {
+        run_interactive_setup_blocking(Some(
+            "  Re-run 'clido init' anytime to change provider or reset config.",
+        ))
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("init: {}", e))??;
+    let parent = config_path
+        .parent()
+        .ok_or_else(|| CliError::Usage("Invalid config path.".into()))?;
+    std::fs::create_dir_all(parent)?;
+    std::fs::write(&config_path, toml.trim_start())?;
+    if setup_use_color() {
+        println!(
+            "{}  Created {}. Run 'clido doctor' to verify.{}",
+            ansi::GREEN,
+            config_path.display(),
+            ansi::RESET
+        );
+    } else {
+        println!(
+            "  Created {}. Run 'clido doctor' to verify.",
+            config_path.display()
+        );
+    }
     Ok(())
 }
 

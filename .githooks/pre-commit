@@ -1,16 +1,21 @@
 #!/bin/sh
 # Pre-commit hook: run the same checks as CI (fmt + clippy).
 # Enable for this repo: git config core.hooksPath .githooks
-# Uses only rustup's cargo (PATH) and one toolchain to avoid E0514.
+# Uses only rustup's cargo and one toolchain to avoid E0514 (incompatible rustc).
 
 set -e
 
-# Prefer rustup's cargo so one toolchain is used (avoids E0514 with Homebrew rust).
+# Use rustup and the toolchain from rust-toolchain.toml (pinned 1.94). Avoids E0514 when Homebrew rust is present.
 export PATH="${HOME}/.cargo/bin:${PATH}"
+unset RUSTC
+unset RUSTFLAGS
+unset CARGO_BUILD_RUSTC
 if ! command -v rustup >/dev/null 2>&1; then
-    echo "Pre-commit: rustup not found. Install from https://rustup.rs and use it as your only Rust."
+    echo "Pre-commit: rustup not found. Install from https://rustup.rs; this repo pins Rust 1.94 in rust-toolchain.toml."
     exit 1
 fi
+# Ensure the pinned toolchain is installed (e.g. 1.94 from rust-toolchain.toml).
+rustup show active-toolchain >/dev/null 2>&1 || rustup update
 
 echo "Running cargo fmt --check..."
 cargo fmt --all -- --check

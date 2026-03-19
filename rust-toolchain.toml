@@ -1,2 +1,4 @@
+# Pin one Rust version for the whole repo so we never mix toolchains (e.g. rustup vs Homebrew).
+# Install/update: rustup update
 [toolchain]
-channel = "stable"
+channel = "1.94"

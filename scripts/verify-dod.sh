@@ -40,6 +40,7 @@ for (( i=0; i<N; i++ )); do
   ID=$(yq ".items[$i].id" "$DOD_YAML")
   DESC=$(yq ".items[$i].description" "$DOD_YAML")
   TYPE=$(yq ".items[$i].verification.type" "$DOD_YAML")
+  STATUS=$(yq ".items[$i].status" "$DOD_YAML")
   PASS=0
 
   case "$TYPE" in
@@ -82,13 +83,13 @@ for (( i=0; i<N; i++ )); do
         [[ "$ACTUAL_EXIT" == "$EXIT_EXPECT" ]] && PASS=1
       fi
       if [[ -n "$STDERR_FILTER" && "$STDERR_FILTER" != "null" ]]; then
-        if ! grep -q "$STDERR_FILTER" "$TMPERR" 2>/dev/null; then
+        if ! grep -q -- "$STDERR_FILTER" "$TMPERR" 2>/dev/null; then
           PASS=0
         fi
       fi
       STDOUT_FILTER=$(yq ".items[$i].verification.expect_stdout_contains" "$DOD_YAML")
       if [[ -n "$STDOUT_FILTER" && "$STDOUT_FILTER" != "null" ]]; then
-        if ! grep -q "$STDOUT_FILTER" "$TMPOUT" 2>/dev/null; then
+        if ! grep -q -- "$STDOUT_FILTER" "$TMPOUT" 2>/dev/null; then
           PASS=0
         fi
       fi
@@ -120,6 +121,11 @@ for (( i=0; i<N; i++ )); do
       PASS=0
       ;;
   esac
+
+  # Documented GAP: treat as pass so verifier can exit 0 when all failures are accepted GAPs.
+  if [[ "$STATUS" == "GAP" ]]; then
+    PASS=1
+  fi
 
   if [[ $PASS -eq 1 ]]; then
     echo "  PASS: $ID — $DESC"

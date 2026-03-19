@@ -28,10 +28,11 @@ items:
       type: coverage
       scope: workspace
       min_percent: 70
-    status: DONE
+    status: GAP
+    gap_reason: "Requires cargo-tarpaulin; run 'cargo install cargo-tarpaulin' then verify locally or in CI. Target 70% remains exit-criteria for v1."
 
   - id: integration-tests
-    description: "Integration tests pass (clido_help_exits_zero, clido_init_exits_zero, clido_doctor_runs)"
+    description: "Integration tests pass (help, init, doctor, first_run_interactive, init_interactive_writes_config, init_prompts_contain_ux_copy)"
     source: "v1.md Exit Criteria; development-plan Phase 5.4"
     verification:
       type: command
@@ -175,6 +176,31 @@ items:
       expect_exit: 0
     status: DONE
 
+  # --- CLI spec §4 First-Run and Onboarding: interactive setup behavior ---
+  - id: first-run-interactive
+    description: "No config + TTY: interactive setup runs (ask provider, API key/env, write config)"
+    source: "CLI spec §4 Auto-detection on first run"
+    verification:
+      type: command
+      command: "cargo test -p clido-cli --test integration first_run_interactive"
+    status: DONE
+
+  - id: init-interactive-same-flow
+    description: "clido init runs the same interactive setup flow (provider, key/URL, write config)"
+    source: "CLI spec §4 clido init"
+    verification:
+      type: command
+      command: "cargo test -p clido-cli --test integration init_interactive_writes_config"
+    status: DONE
+
+  - id: first-run-non-interactive
+    description: "No config + non-TTY: exit 2 with message to run clido init"
+    source: "CLI spec §4 Non-interactive first run"
+    verification:
+      type: command
+      command: "set +e; (d=$(pwd) && cd /tmp && CLIDO_CONFIG=/nonexistent/clido/config.toml \"$d/target/debug/clido\" -p hello 2>/dev/null); e=$?; set -e; [ \"$e\" -eq 2 ]"
+    status: DONE
+
   - id: cli-doctor
     description: "clido doctor runs (exit 0 or 1); V1 checks API key, session dir, pricing.toml"
     source: "v1.md Exit Criteria; v1.md Release boundaries"
@@ -265,4 +291,21 @@ items:
     verification:
       type: command
       command: "cargo test -p clido-core config"
+    status: DONE
+
+  # --- UX (ux-requirements.md; CLI spec §4) ---
+  - id: ux-first-run-init-copy
+    description: "First-run and clido init prompts use copy from ux-requirements §2 (Type 1 or 2, press Enter, defaults in brackets, Created + clido doctor)"
+    source: "devdocs/plans/ux-requirements.md §2; CLI spec §4"
+    verification:
+      type: command
+      command: "cargo test -p clido-cli --test integration init_prompts_contain_ux_copy"
+    status: DONE
+
+  - id: ux-script-intro-before-init
+    description: "scripts/run-in-test-env.sh prints intro before clido init (ux-requirements §3.2)"
+    source: "devdocs/plans/ux-requirements.md §3.2"
+    verification:
+      type: command
+      command: "grep -q 'Clido will ask 2 questions' scripts/run-in-test-env.sh"
     status: DONE

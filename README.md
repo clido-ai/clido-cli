@@ -37,6 +37,7 @@ See [Local development and testing](devdocs/guides/local-development-testing.md)
 | [Implementation bootstrap](devdocs/guides/implementation-bootstrap.md) | Where to start, canonical doc order, locked pre-build decisions |
 | [Development plan](devdocs/plans/development-plan.md) | Architecture, Rust workspace, phased roadmap |
 | [CLI interface spec](devdocs/plans/cli-interface-specification.md) | Canonical command surface and behavior |
+| [UX requirements](devdocs/plans/ux-requirements.md) | Interactive copy, script intros, visual design (functional and clear) |
 | [Releases](devdocs/plans/releases/README.md) | V1 → V4 scope and exit criteria |
 | [Config reference](devdocs/schemas/config.md) | `config.toml`, `.clido/config.toml`, and `pricing.toml` schema |
 | [Testing strategy](devdocs/guides/testing-strategy-and-master-test-plan.md) | Full validation strategy and test taxonomy |

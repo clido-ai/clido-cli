@@ -38,3 +38,5 @@ toml = "0.8"
 sha2 = "0.10"
 hex = "0.4"
 inquire = "0.9"
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }

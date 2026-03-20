@@ -64,7 +64,7 @@ Alternative (single-line box): `┌─ Clido setup ───…───┐` / `
 **When launched from a script (e.g. run-in-test-env.sh):** The script must print *before* calling `clido init`:
 
 ```
-  Next: Clido will ask 2 questions in this terminal (provider, then API key).
+  Next: Clido will ask 3 questions in this terminal (provider, model, then API key or base URL).
   Type your answer after each question and press Enter.
 ```
 
@@ -72,21 +72,40 @@ So the user never sees a motionless cursor without context.
 
 ### 2.3 Provider choice — exact copy
 
-**Rich TTY (arrow-key selection):** Show an interactive list: "Anthropic (cloud) — requires API key", "Local (Ollama) — no key; use http://localhost:11434". User selects with arrow keys and Enter, or types and Enter. Default: first option (Anthropic).
+**Rich TTY (arrow-key selection):** Show an interactive list: "Anthropic (cloud) — requires API key", "OpenRouter (cloud) — requires API key", "Local (Ollama) — no key; use http://localhost:11434". User selects with arrow keys and Enter, or types and Enter. Default: first option (Anthropic).
 
 **ASCII / non-TTY prompt (stderr):**
 
 ```
   Provider:
-    1) Anthropic (cloud) — requires API key
-    2) Local (Ollama)    — no key; use http://localhost:11434
-  Type 1 or 2, then press Enter [default: 1]:
+    1) Anthropic (cloud)  — requires API key
+    2) OpenRouter (cloud) — requires API key
+    3) Local (Ollama)     — no key; use http://localhost:11434
+  Type 1, 2, or 3, then press Enter [default: 1]:
 ```
 
-- Implementation must include the phrase "Type 1 or 2, then press Enter" (or equivalent) in non-TTY so it is obvious that the program is waiting for input.
+- Implementation must include the phrase "Type 1, 2, or 3, then press Enter" (or equivalent) in non-TTY so it is obvious that the program is waiting for input.
 - Default: if the user presses Enter with no input, treat as `1`.
 
-### 2.4 If provider = Anthropic — API key
+### 2.4 Model selection
+
+After provider, the user selects a model.
+
+**Rich TTY:** Show an interactive list of common models for the chosen provider, plus a "Custom..." option that opens a free-text prompt.
+
+- Anthropic defaults: `claude-sonnet-4-5`, `claude-opus-4-5`, `claude-haiku-4-5-20251001`, `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`
+- OpenRouter defaults: `anthropic/claude-3-5-sonnet`, `anthropic/claude-haiku-3-5`, `openai/gpt-4o`, `openai/gpt-4o-mini`, `google/gemini-2.0-flash`
+- Local: free-text `Text` prompt with default `llama3.2`
+
+**ASCII / non-TTY prompt (stderr):**
+
+```
+  Model (press Enter for <default>):
+```
+
+- Empty input → use the default for that provider.
+
+### 2.5 If provider = Anthropic — API key
 
 **Prompt (stderr):**
 
@@ -103,7 +122,17 @@ So the user never sees a motionless cursor without context.
   Or add it to your shell profile. Then run: clido doctor
 ```
 
-### 2.5 If provider = Local — base URL
+### 2.5a If provider = OpenRouter — API key
+
+**Prompt (stderr):**
+
+```
+  Use existing OPENROUTER_API_KEY from your environment? [Y/n]:
+```
+
+Same logic as §2.5. Hint uses `OPENROUTER_API_KEY`. Generated config includes `api_key_env = "OPENROUTER_API_KEY"`.
+
+### 2.6 If provider = Local — base URL
 
 **Prompt (stderr):**
 
@@ -114,7 +143,7 @@ So the user never sees a motionless cursor without context.
 - Empty input → use `http://localhost:11434`.
 - Otherwise use the trimmed line (no URL validation required in prompt; config load may validate later).
 
-### 2.6 After config is written
+### 2.7 After config is written
 
 **Message (stdout for `clido init`, stderr for first-run):**
 
@@ -124,7 +153,7 @@ So the user never sees a motionless cursor without context.
 
 - `<path>` is the actual config file path (e.g. `~/.config/clido/config.toml` or the value of `CLIDO_CONFIG`).
 
-### 2.7 Titles for first-run vs init
+### 2.8 Titles for first-run vs init
 
 - **First-run (no config, TTY):** Header title: `Clido setup` (or "First-time setup — Clido"); subline can say "Answer the questions below…" as in §2.2.
 - **Explicit `clido init`:** Header title: `Clido setup`; subline can add "Re-run `clido init` anytime to change provider or reset config."
@@ -142,7 +171,7 @@ Any script or wrapper that invokes a Clido command that may read from stdin (e.g
 Print to stderr or stdout (before calling `clido init`):
 
 ```
-  Clido will ask 2 questions: provider (1 or 2), then API key (Y/n).
+  Clido will ask 3 questions: provider (1, 2, or 3), model, then API key (Y/n) or base URL.
   Type your answer after each question and press Enter.
 ```
 

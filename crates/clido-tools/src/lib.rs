@@ -19,20 +19,30 @@ pub use edit::EditTool;
 pub use exit_plan_mode::ExitPlanModeTool;
 pub use glob_tool::GlobTool;
 pub use grep_tool::GrepTool;
+pub use path_guard::PathGuard;
 pub use read::ReadTool;
 pub use registry::ToolRegistry;
 pub use write::WriteTool;
 
 /// Build default V1 tool registry with workspace root (e.g. env::current_dir()).
 pub fn default_registry(workspace_root: PathBuf) -> ToolRegistry {
+    default_registry_with_blocked(workspace_root, Vec::new())
+}
+
+/// Build registry with blocked paths excluded from all file tools and Bash.
+pub fn default_registry_with_blocked(
+    workspace_root: PathBuf,
+    blocked: Vec<PathBuf>,
+) -> ToolRegistry {
+    let guard = PathGuard::new(workspace_root).with_blocked(blocked.clone());
     let mut r = ToolRegistry::new();
     r.register(ExitPlanModeTool);
-    r.register(BashTool);
-    r.register(ReadTool::new(workspace_root.clone()));
-    r.register(WriteTool::new(workspace_root.clone()));
-    r.register(EditTool::new(workspace_root.clone()));
-    r.register(GlobTool::new(workspace_root.clone()));
-    r.register(GrepTool::new(workspace_root));
+    r.register(BashTool::new_with_blocked(blocked));
+    r.register(ReadTool::new_with_guard(guard.clone()));
+    r.register(WriteTool::new_with_guard(guard.clone()));
+    r.register(EditTool::new_with_guard(guard.clone()));
+    r.register(GlobTool::new_with_guard(guard.clone()));
+    r.register(GrepTool::new_with_guard(guard));
     r
 }
 

@@ -22,6 +22,13 @@ pub trait AskUser: Send + Sync {
     async fn ask(&self, tool_name: &str, input: &serde_json::Value) -> bool;
 }
 
+/// Callback for observing tool calls in real time (used by the TUI to show progress).
+#[async_trait]
+pub trait EventEmitter: Send + Sync {
+    async fn on_tool_start(&self, name: &str, input: &serde_json::Value);
+    async fn on_tool_done(&self, name: &str, is_error: bool);
+}
+
 /// Reconstruct conversation history from session JSONL lines (for resume).
 pub fn session_lines_to_messages(lines: &[SessionLine]) -> Vec<Message> {
     let mut messages = Vec::new();
@@ -87,6 +94,7 @@ pub struct AgentLoop {
     config: AgentConfig,
     history: Vec<Message>,
     ask_user: Option<Arc<dyn AskUser>>,
+    emit: Option<Arc<dyn EventEmitter>>,
     /// When set, overrides config.permission_mode for the rest of the session (e.g. after ExitPlanMode).
     permission_mode_override: Option<PermissionMode>,
     /// Last turn count after run() (for session recording).
@@ -108,6 +116,7 @@ impl AgentLoop {
             config,
             history: Vec::new(),
             ask_user,
+            emit: None,
             permission_mode_override: None,
             last_turn_count: 0,
             cumulative_cost_usd: 0.0,
@@ -128,10 +137,17 @@ impl AgentLoop {
             config,
             history,
             ask_user,
+            emit: None,
             permission_mode_override: None,
             last_turn_count: 0,
             cumulative_cost_usd: 0.0,
         }
+    }
+
+    /// Attach an event emitter for tool call observability (used by TUI).
+    pub fn with_emitter(mut self, emit: Arc<dyn EventEmitter>) -> Self {
+        self.emit = Some(emit);
+        self
     }
 
     /// Turn count from last run (for session result line).
@@ -243,7 +259,13 @@ impl AgentLoop {
                                     input: input.clone(),
                                 });
                             }
+                            if let Some(ref e) = self.emit {
+                                e.on_tool_start(name, input).await;
+                            }
                             let output = self.execute_tool_maybe_gated(name, input).await;
+                            if let Some(ref e) = self.emit {
+                                e.on_tool_done(name, output.is_error).await;
+                            }
                             if let Some(ref mut w) = session {
                                 let _ = w.write_line(&SessionLine::ToolResult {
                                     tool_use_id: id.clone(),
@@ -463,7 +485,13 @@ impl AgentLoop {
                                     input: input.clone(),
                                 });
                             }
+                            if let Some(ref e) = self.emit {
+                                e.on_tool_start(name, input).await;
+                            }
                             let output = self.execute_tool_maybe_gated(name, input).await;
+                            if let Some(ref e) = self.emit {
+                                e.on_tool_done(name, output.is_error).await;
+                            }
                             if let Some(ref mut w) = session {
                                 let _ = w.write_line(&SessionLine::ToolResult {
                                     tool_use_id: id.clone(),

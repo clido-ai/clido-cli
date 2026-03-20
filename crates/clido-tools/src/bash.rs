@@ -1,22 +1,23 @@
 //! Bash tool: execute shell commands.
 
 use async_trait::async_trait;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::{Tool, ToolOutput};
 
 /// Execute shell commands via sh -c.
-pub struct BashTool;
-
-impl Default for BashTool {
-    fn default() -> Self {
-        Self
-    }
+#[derive(Default)]
+pub struct BashTool {
+    blocked: Vec<PathBuf>,
 }
 
 impl BashTool {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+    pub fn new_with_blocked(blocked: Vec<PathBuf>) -> Self {
+        Self { blocked }
     }
 }
 
@@ -54,6 +55,16 @@ impl Tool for BashTool {
             Some(c) => c.to_string(),
             None => return ToolOutput::err("Missing required field: command".to_string()),
         };
+
+        // Refuse commands that reference any blocked path.
+        for blocked in &self.blocked {
+            let blocked_str = blocked.to_string_lossy();
+            if command.contains(blocked_str.as_ref()) {
+                return ToolOutput::err(
+                    "Access denied: command references a protected file.".to_string(),
+                );
+            }
+        }
         let timeout_ms = input
             .get("timeout")
             .and_then(|v| v.as_u64())

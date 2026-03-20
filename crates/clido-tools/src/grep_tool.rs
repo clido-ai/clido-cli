@@ -5,16 +5,21 @@ use ignore::WalkBuilder;
 use regex::Regex;
 use std::path::PathBuf;
 
-use crate::path_guard;
+use crate::path_guard::PathGuard;
 use crate::{Tool, ToolOutput};
 
 pub struct GrepTool {
-    pub workspace_root: PathBuf,
+    guard: PathGuard,
 }
 
 impl GrepTool {
     pub fn new(workspace_root: PathBuf) -> Self {
-        Self { workspace_root }
+        Self {
+            guard: PathGuard::new(workspace_root),
+        }
+    }
+    pub fn new_with_guard(guard: PathGuard) -> Self {
+        Self { guard }
     }
 }
 
@@ -74,9 +79,9 @@ impl Tool for GrepTool {
 
         let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
         let base = if path_str == "." || path_str.is_empty() {
-            self.workspace_root.clone()
+            self.guard.workspace_root().to_path_buf()
         } else {
-            match path_guard::resolve_and_check(path_str, &self.workspace_root) {
+            match self.guard.resolve_and_check(path_str) {
                 Ok(p) => p,
                 Err(e) => return ToolOutput::err(e),
             }
@@ -117,12 +122,15 @@ impl Tool for GrepTool {
             if !path.is_file() {
                 continue;
             }
+            if self.guard.is_blocked(path) {
+                continue;
+            }
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
             let rel_path = path
-                .strip_prefix(&self.workspace_root)
+                .strip_prefix(self.guard.workspace_root())
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|_| path.display().to_string());
             let mut file_count = 0u64;
@@ -137,7 +145,7 @@ impl Tool for GrepTool {
             }
             if output_mode == "files_with_matches" && file_count > 0 {
                 let rel = path
-                    .strip_prefix(&self.workspace_root)
+                    .strip_prefix(self.guard.workspace_root())
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| path.display().to_string());
                 file_matches.push(rel);

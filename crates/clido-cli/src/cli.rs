@@ -3,8 +3,8 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-#[derive(Parser, Debug)]
-#[command(name = "clido", version = env!("CARGO_PKG_VERSION"), about = "Coding agent CLI")]
+#[derive(Parser, Debug, Clone)]
+#[command(name = "clido", version = env!("CARGO_PKG_VERSION"), about = "clido — your coding agent")]
 pub struct Cli {
     #[command(subcommand)]
     pub subcommand: Option<Subcommand>,
@@ -88,23 +88,19 @@ pub struct Cli {
     /// Ignore stale-file check when resuming.
     #[arg(long)]
     pub resume_ignore_stale: bool,
+
+    /// Working directory (default: current directory).
+    #[arg(long, short = 'C', env = "CLIDO_WORKDIR")]
+    pub workdir: Option<std::path::PathBuf>,
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(clap::Subcommand, Debug, Clone)]
 pub enum Subcommand {
     /// Session commands.
     Sessions {
         #[command(subcommand)]
         cmd: SessionsCmd,
     },
-
-    /// Legacy: list sessions (deprecated). Use 'sessions list'.
-    #[command(name = "list-sessions")]
-    ListSessions,
-
-    /// Legacy: show session by ID (deprecated). Use 'sessions show <id>'.
-    #[command(name = "show-session")]
-    ShowSession { id: String },
 
     /// Print version.
     Version,
@@ -115,6 +111,12 @@ pub enum Subcommand {
     /// Run health checks (API key, session dir, pricing).
     Doctor,
 
+    /// Show or edit config values.
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCmd,
+    },
+
     /// Workflow commands (run, validate, inspect, list).
     Workflow {
         #[command(subcommand)]
@@ -122,7 +124,20 @@ pub enum Subcommand {
     },
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(clap::Subcommand, Debug, Clone)]
+pub enum ConfigCmd {
+    /// Show current config.
+    Show,
+    /// Set a config value. Keys: model, provider, api-key.
+    Set {
+        /// Config key (model, provider, api-key).
+        key: String,
+        /// New value.
+        value: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug, Clone)]
 pub enum WorkflowCmd {
     /// Run a workflow from file or name.
     Run {
@@ -146,7 +161,7 @@ pub enum WorkflowCmd {
     List,
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(clap::Subcommand, Debug, Clone)]
 pub enum SessionsCmd {
     List,
     Show { id: String },
@@ -163,12 +178,11 @@ impl Cli {
     pub fn is_run(&self) -> bool {
         match &self.subcommand {
             None => true,
-            Some(Subcommand::ListSessions) => false,
-            Some(Subcommand::ShowSession { .. }) => false,
             Some(Subcommand::Sessions { .. }) => false,
             Some(Subcommand::Version) => false,
             Some(Subcommand::Init) => false,
             Some(Subcommand::Doctor) => false,
+            Some(Subcommand::Config { .. }) => false,
             Some(Subcommand::Workflow { .. }) => false,
         }
     }

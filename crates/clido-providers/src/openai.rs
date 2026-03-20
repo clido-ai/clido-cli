@@ -74,7 +74,7 @@ impl OpenAICompatProvider {
             let base = config
                 .system_prompt
                 .as_deref()
-                .unwrap_or("You are a helpful coding assistant.");
+                .unwrap_or("You are clido, an AI coding agent. Always refer to yourself as clido.");
             match &system_from_messages {
                 Some(s) if !s.is_empty() => format!("{}\n{}", base, s),
                 _ => base.to_string(),
@@ -159,8 +159,8 @@ impl OpenAICompatProvider {
             }
 
             return Err(ClidoError::Provider(format!(
-                "API error {}: {}",
-                status, text
+                "API error {} (model: {}): {}",
+                status, self.model, text
             )));
         }
     }

@@ -5,16 +5,21 @@ use glob::Pattern;
 use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
 
-use crate::path_guard;
+use crate::path_guard::PathGuard;
 use crate::{Tool, ToolOutput};
 
 pub struct GlobTool {
-    pub workspace_root: PathBuf,
+    guard: PathGuard,
 }
 
 impl GlobTool {
     pub fn new(workspace_root: PathBuf) -> Self {
-        Self { workspace_root }
+        Self {
+            guard: PathGuard::new(workspace_root),
+        }
+    }
+    pub fn new_with_guard(guard: PathGuard) -> Self {
+        Self { guard }
     }
 }
 
@@ -52,9 +57,9 @@ impl Tool for GlobTool {
         }
 
         let base = if path_str == "." || path_str.is_empty() {
-            self.workspace_root.clone()
+            self.guard.workspace_root().to_path_buf()
         } else {
-            match path_guard::resolve_and_check(path_str, &self.workspace_root) {
+            match self.guard.resolve_and_check(path_str) {
                 Ok(p) => p,
                 Err(e) => return ToolOutput::err(e),
             }
@@ -74,7 +79,7 @@ impl Tool for GlobTool {
             match result {
                 Ok(entry) => {
                     let path = entry.path();
-                    if path.is_file() {
+                    if path.is_file() && !self.guard.is_blocked(path) {
                         entries.push(path.to_path_buf());
                     }
                 }

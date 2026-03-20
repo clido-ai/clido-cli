@@ -4,16 +4,21 @@ use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
-use crate::path_guard;
+use crate::path_guard::PathGuard;
 use crate::{Tool, ToolOutput};
 
 pub struct EditTool {
-    pub workspace_root: PathBuf,
+    guard: PathGuard,
 }
 
 impl EditTool {
     pub fn new(workspace_root: PathBuf) -> Self {
-        Self { workspace_root }
+        Self {
+            guard: PathGuard::new(workspace_root),
+        }
+    }
+    pub fn new_with_guard(guard: PathGuard) -> Self {
+        Self { guard }
     }
 }
 
@@ -71,7 +76,7 @@ impl Tool for EditTool {
             return ToolOutput::err("Missing required field: old_string".to_string());
         }
 
-        let path = match path_guard::resolve_and_check(path_str, &self.workspace_root) {
+        let path = match self.guard.resolve_and_check(path_str) {
             Ok(p) => p,
             Err(e) => return ToolOutput::err(e),
         };

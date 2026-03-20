@@ -8,10 +8,13 @@ use crate::config::{AgentConfig, PermissionMode};
 use crate::{ClidoError, Result};
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub struct ProfileEntry {
     pub provider: String,
     pub model: String,
+    /// API key stored directly in config (takes priority over api_key_env).
+    #[serde(default)]
+    pub api_key: Option<String>,
+    /// Name of the environment variable that holds the API key.
     #[serde(default)]
     pub api_key_env: Option<String>,
     #[serde(default)]
@@ -133,7 +136,7 @@ impl LoadedConfig {
 
     /// Validate provider name.
     pub fn validate_provider(provider: &str) -> Result<()> {
-        let valid = ["anthropic", "openai", "openrouter", "alibaba", "local"];
+        let valid = ["anthropic", "openrouter", "local"];
         if valid.contains(&provider) {
             Ok(())
         } else {
@@ -275,6 +278,7 @@ pub fn load_config(cwd: &Path) -> Result<LoadedConfig> {
             ProfileEntry {
                 provider: "anthropic".to_string(),
                 model: "claude-3-5-sonnet-20241022".to_string(),
+                api_key: None,
                 api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
                 base_url: None,
             },

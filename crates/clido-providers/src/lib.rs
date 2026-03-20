@@ -18,15 +18,24 @@ pub fn build_provider(
     provider_name: &str,
     api_key: String,
     model: String,
-    _base_url: Option<&str>,
+    base_url: Option<&str>,
 ) -> Result<Arc<dyn ModelProvider>> {
     match provider_name {
         "anthropic" => Ok(Arc::new(AnthropicProvider::new(api_key, model))),
         "openrouter" => Ok(Arc::new(OpenAICompatProvider::new_openrouter(
             api_key, model,
         ))),
+        "local" => {
+            let url = base_url.unwrap_or("http://localhost:11434").to_string();
+            Ok(Arc::new(OpenAICompatProvider::new(
+                api_key,
+                model,
+                url,
+                Vec::new(),
+            )))
+        }
         p => Err(ClidoError::Config(format!(
-            "Provider '{}' is not yet supported. Available: anthropic, openrouter.",
+            "Provider '{}' is not yet supported. Available: anthropic, openrouter, local.",
             p
         ))),
     }

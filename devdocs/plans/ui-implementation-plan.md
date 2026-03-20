@@ -66,7 +66,7 @@
 
 | Step | What | Detail |
 |------|------|--------|
-| 1 | Intro before `clido init` | Exact copy per ux-requirements §3.2: "Clido will ask 2 questions: provider (1 or 2), then API key (Y/n)." + "Type your answer after each question and press Enter." Optional second line: config path. |
+| 1 | Intro before `clido init` | Exact copy per ux-requirements §3.2: "Clido will ask 3 questions: provider, model, then API key (Y/n) or base URL for local." + "Use arrow keys to select, or type and press Enter." Optional second line: config path. |
 
 ### 3.3 `devdocs/plans/ux-requirements.md`
 
@@ -88,7 +88,7 @@
 - **Sessions:** "When I run `clido sessions list` with no sessions, I see 'No sessions yet. Run clido <prompt> to start one.' When I have sessions, I see id, time, turns, cost, preview in a readable list."
 - **Workflow:** "When I run a workflow, I see a clear completion line (e.g. 'Workflow completed: N steps, $X, Y ms'). Dry-run shows step prompts between --- markers."
 - **Errors:** "When something goes wrong, I see 'Error [Config]: …' or 'Error: …' on stderr in red when color is on, with an actionable hint where applicable."
-- **Script:** "When I run ./scripts/run-in-test-env.sh init, I see two lines explaining that Clido will ask 2 questions and to type answers, then the setup UI."
+- **Script:** "When I run ./scripts/run-in-test-env.sh init, I see two lines explaining that Clido will ask 3 questions (provider, model, API key) and to use arrow keys or type, then the setup UI."
 
 ---
 

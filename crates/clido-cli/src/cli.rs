@@ -37,9 +37,9 @@ pub struct Cli {
     #[arg(long, env = "CLIDO_PROVIDER")]
     pub provider: Option<String>,
 
-    /// Max agent turns.
-    #[arg(long, env = "CLIDO_MAX_TURNS", default_value = "10")]
-    pub max_turns: u32,
+    /// Max agent turns per prompt. Defaults to the config value (200 if unset).
+    #[arg(long, env = "CLIDO_MAX_TURNS")]
+    pub max_turns: Option<u32>,
 
     /// Max budget in USD.
     #[arg(long, env = "CLIDO_MAX_BUDGET_USD")]

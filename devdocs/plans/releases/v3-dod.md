@@ -6,82 +6,82 @@ Verify with: `scripts/verify-dod.sh`
 
 ## Items
 
-- [x] **build** — Workspace builds for all targets  `[GAP: V3 not yet released]`
+- [x] **build** — Workspace builds for all targets
   - *Source:* v3.md builds on V2
 
-- [x] **tests** — All workspace tests pass  `[GAP: V3 not yet released]`
+- [x] **tests** — All workspace tests pass
   - *Source:* v3.md builds on V2
 
-- [x] **coverage-workspace** — Workspace line coverage >= 78% (V3 floor)  `[GAP: V3 not yet released]`
+- [x] **coverage-workspace** — Workspace line coverage >= 78% (V3 floor)
   - *Source:* development-plan Phase 5.4.2
 
-- [x] **subagents-isolated** — Subagents can run isolated reasoning tasks without destabilizing or corrupting the parent session  `[GAP: V3 not yet released]`
+- [x] **subagents-isolated** — Subagents can run isolated reasoning tasks without destabilizing or corrupting the parent session
   - *Source:* v3.md Exit Criteria; Phase 4.7
 
-- [x] **subagent-session-isolation** — SubAgentManager and session isolation; parent session correctness validated  `[GAP: V3 not yet released]`
+- [x] **subagent-session-isolation** — SubAgentManager and session isolation; parent session correctness validated
   - *Source:* v3.md Suggested Internal Milestones
 
-- [x] **workflows-load-yaml** — Workflows can be loaded from YAML and executed  `[GAP: V3 not yet released]`
+- [x] **workflows-load-yaml** — Workflows can be loaded from YAML and executed
   - *Source:* v3.md Exit Criteria; Phase 4.9
 
-- [x] **workflow-preflight** — Pre-flight validates step-tools, profiles, API keys, and optional prerequisites  `[GAP: V3 not yet released]`
+- [x] **workflow-preflight** — Pre-flight validates step-tools, profiles, API keys, and optional prerequisites
   - *Source:* v3.md Exit Criteria; Phase 4.9
 
-- [x] **workflow-check-command** — workflow check can be run before the first execution  `[GAP: V3 not yet released]`
+- [x] **workflow-check-command** — workflow check can be run before the first execution
   - *Source:* v3.md Exit Criteria
 
-- [x] **cli-workflow-run** — clido workflow run exists  `[GAP: V3 not yet released]`
+- [x] **cli-workflow-run** — clido workflow run exists
   - *Source:* v3.md CLI Surface
 
-- [x] **cli-workflow-validate-inspect-list** — clido workflow validate, workflow inspect, workflow list exist  `[GAP: V3 not yet released]`
+- [x] **cli-workflow-validate-inspect-list** — clido workflow validate, workflow inspect, workflow list exist
   - *Source:* v3.md CLI Surface
 
-- [x] **memory-retrieval-relevant** — Memory retrieval produces relevant results more often than noise; hybrid search (FTS5 + vector) validated; semantic retrieval finds paraphrased memories; irrelevant memories do NOT surface  `[GAP: V3 not yet released]`
+- [x] **memory-retrieval-relevant** — Memory retrieval produces relevant results more often than noise; hybrid search (FTS5 + vector) validated; semantic retrieval finds paraphrased memories; irrelevant memories do NOT surface
   - *Source:* v3.md Exit Criteria; Phase 5.5
 
-- [x] **memory-embedding-engine** — EmbeddingEngine (fastembed-rs, local ONNX) implemented; embedding quality validated  `[GAP: V3 not yet released]`
+- [x] **memory-embedding-engine** — EmbeddingEngine (fastembed-rs, local ONNX) implemented; embedding quality validated
   - *Source:* v3.md Suggested Internal Milestones
 
-- [x] **memory-long-term-store** — Long-term memory store: SQLite + FTS5 + sqlite-vec hybrid; keyword, semantic, hybrid retrieval validated  `[GAP: V3 not yet released]`
+- [x] **memory-long-term-store** — Long-term memory store: SQLite + FTS5 + sqlite-vec hybrid; keyword, semantic, hybrid retrieval validated
   - *Source:* v3.md Suggested Internal Milestones
 
-- [x] **memory-injection-agent-loop** — Relevance-based memory injection wired into agent loop; injected memories match task context  `[GAP: V3 not yet released]`
+- [x] **memory-injection-agent-loop** — Relevance-based memory injection wired into agent loop; injected memories match task context
   - *Source:* v3.md Suggested Internal Milestones
 
-- [x] **clido-memory-list** — clido memory list exists  `[GAP: V3 not yet released]`
+- [x] **clido-memory-list** — clido memory list exists
   - *Source:* v3.md CLI Surface
 
-- [x] **clido-memory-prune-reset** — clido memory prune, memory reset exist  `[GAP: V3 not yet released]`
+- [x] **clido-memory-prune-reset** — clido memory prune, memory reset exist
   - *Source:* v3.md CLI Surface
 
-- [x] **coverage-clido-memory** — clido-memory crate line coverage >= 70%  `[GAP: V3 not yet released]`
+- [x] **coverage-clido-memory** — clido-memory crate line coverage >= 70%
   - *Source:* development-plan Phase 5.4.2
 
-- [x] **mcp-configured-started** — MCP servers can be configured, started, and safely used as registered tools  `[GAP: V3 not yet released]`
+- [x] **mcp-configured-started** — MCP servers can be configured, started, and safely used as registered tools
   - *Source:* v3.md Exit Criteria; Phase 8.3
 
-- [x] **mcp-client-lifecycle** — MCP client and server lifecycle management; validated against at least two real MCP servers  `[GAP: V3 not yet released]`
+- [x] **mcp-client-lifecycle** — MCP client and server lifecycle management; validated against at least two real MCP servers
   - *Source:* v3.md Suggested Internal Milestones
 
-- [x] **repo-indexing-improves-search** — Repository indexing measurably improves search or navigation on medium-to-large repos compared to Grep and Glob alone  `[GAP: V3 not yet released]`
+- [x] **repo-indexing-improves-search** — Repository indexing measurably improves search or navigation on medium-to-large repos compared to Grep and Glob alone
   - *Source:* v3.md Exit Criteria; Phase 8.7
 
-- [x] **file-symbol-index** — File and symbol index built; search quality validated against fixture repositories  `[GAP: V3 not yet released]`
+- [x] **file-symbol-index** — File and symbol index built; search quality validated against fixture repositories
   - *Source:* v3.md Suggested Internal Milestones
 
-- [x] **coverage-clido-index** — clido-index crate line coverage >= 70%  `[GAP: V3 not yet released]`
+- [x] **coverage-clido-index** — clido-index crate line coverage >= 70%
   - *Source:* development-plan Phase 5.4.2; testing-strategy
 
-- [x] **tool-semantic-search** — SemanticSearch tool available to the model (query, optional target_directory, num_results); uses embedding engine and repo indexing  `[GAP: V3 not yet released]`
+- [x] **tool-semantic-search** — SemanticSearch tool available to the model (query, optional target_directory, num_results); uses embedding engine and repo indexing
   - *Source:* v3.md CLI Surface
 
-- [x] **cli-fetch-models** — clido fetch-models exists  `[GAP: V3 not yet released]`
+- [x] **cli-fetch-models** — clido fetch-models exists
   - *Source:* v3.md CLI Surface
 
-- [x] **v3-measurement-suite** — Full V3 measurement suite; each feature meets its success threshold  `[GAP: V3 not yet released]`
+- [x] **v3-measurement-suite** — Full V3 measurement suite; each feature meets its success threshold
   - *Source:* v3.md Suggested Internal Milestones; V3 Design Rule
 
-- [x] **workflow-preflight-dynamic-params** — Pre-flight and dynamic parameters for workflows (Phase 4.9.x)  `[GAP: V3 not yet released]`
+- [x] **workflow-preflight-dynamic-params** — Pre-flight and dynamic parameters for workflows (Phase 4.9.x)
   - *Source:* v3.md Included Scope; releases README
 
 - [x] **ux-first-run-init-copy** — First-run and clido init prompts use copy from ux-requirements §2 (Type 1 or 2, press Enter, defaults in brackets)

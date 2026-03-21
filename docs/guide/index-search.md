@@ -28,12 +28,21 @@ clido index build --dir /path/to/project
 Index only specific file types (comma-separated extensions):
 
 ```bash
-clido index build --ext rs,py,js,ts
+clido index build --ext sol,rs,py,js,ts
 ```
 
-Default extensions: `rs,py,js,ts,go`.
+Default extensions include **Web3 and smart-contract languages first**, then general-purpose languages:
+
+| Category | Extensions |
+|----------|-----------|
+| Smart contracts | `sol` (Solidity), `move` (Move/Aptos/Sui), `vy` (Vyper), `fe` (Fe), `yul` (Yul/Yul+), `rell` (Rell/Chromia), `cairo` (Cairo/StarkNet) |
+| General purpose | `rs`, `py`, `js`, `ts`, `go`, `java`, `c`, `cpp`, `h`, `md` |
 
 Building the index is idempotent — re-running it updates changed files and removes deleted ones.
+
+::: tip Auto-build
+The `SemanticSearch` tool **builds and refreshes the index automatically** before every search. You never need to run `clido index build` manually — the agent handles it. The index is refreshed if it is older than 1 hour.
+:::
 
 ::: tip Incremental updates
 `clido index build` performs an incremental update: only files that have changed since the last build are re-indexed. For large codebases this is much faster than a full rebuild.
@@ -78,13 +87,30 @@ The agent uses these results to navigate to the right files rather than reading 
 
 ## Supported languages
 
+### Smart contracts and Web3
+
+| Language | Extensions | Notes |
+|----------|-----------|-------|
+| Solidity | `.sol` | Ethereum, EVM-compatible chains |
+| Move | `.move` | Aptos, Sui |
+| Vyper | `.vy` | Ethereum (Python-like) |
+| Fe | `.fe` | Ethereum (Rust-like) |
+| Yul / Yul+ | `.yul` | EVM assembly IR |
+| Rell | `.rell` | Chromia blockchain |
+| Cairo | `.cairo` | StarkNet |
+
+### General-purpose languages
+
 | Language | Extensions | Symbol types |
 |----------|-----------|-------------|
 | Rust | `.rs` | Functions, structs, enums, traits, type aliases, constants, modules |
 | Python | `.py` | Functions, classes, methods |
-| JavaScript | `.js`, `.jsx` | Functions, classes, arrow functions |
-| TypeScript | `.ts`, `.tsx` | Functions, classes, interfaces, type aliases |
+| JavaScript | `.js` | Functions, classes, arrow functions |
+| TypeScript | `.ts` | Functions, classes, interfaces, type aliases |
 | Go | `.go` | Functions, types, methods, interfaces |
+| Java | `.java` | Classes, interfaces, methods |
+| C / C++ | `.c`, `.cpp`, `.h` | Functions, structs, typedefs |
+| Markdown | `.md` | Headings (as navigation symbols) |
 
 Additional languages can be added — see [Adding Tools](/developer/adding-tools) for extension points.
 
@@ -97,18 +123,25 @@ The index is stored at `.clido/index.db` relative to the directory passed to `--
 .clido/index.db
 ```
 
-## Enabling the index for the agent
+## How the index is kept fresh
 
-The index is used automatically when `.clido/index.db` exists in the working directory. You can also explicitly enable the index via the config:
+The `SemanticSearch` tool automatically:
 
-```toml
-[agent]
-# (no explicit index flag needed — presence of the DB enables it)
+1. **Builds** the index on first use if it does not exist yet
+2. **Refreshes** it if the existing index is older than 1 hour
+
+This means you can clone a repo and immediately ask the agent semantic questions — no setup step needed. The auto-build note is shown in the tool output:
+
+```
+(Building repo index: 312 files, 2,104 symbols — this is a one-time cost)
+[SemanticSearch] query: "transfer ownership"
+→ contracts/Token.sol:88  function transferOwnership
+→ contracts/Ownable.sol:14  event OwnershipTransferred
 ```
 
-Or via the CLI:
+The manual `clido index build` command is still available for CI pipelines or when you want to pre-warm the index before a session:
 
 ```bash
-# Build the index and immediately use it
-clido index build && clido "find all functions that handle authentication"
+# Pre-warm for a large monorepo before starting a session
+clido index build && clido "refactor the ERC-20 token to use EIP-2612 permits"
 ```

@@ -28,8 +28,13 @@ pub struct AgentSection {
     pub max_turns: u32,
     #[serde(default = "default_max_budget")]
     pub max_budget_usd: Option<f64>,
-    #[serde(default)]
+    /// Also accepted as `max-parallel-tools` (CLI name). Config key is `max-concurrent-tools`.
+    #[serde(default, alias = "max-parallel-tools")]
     pub max_concurrent_tools: Option<u32>,
+    /// Suppress spinner, tool lifecycle output, and cost footer.
+    /// Can be set persistently here; `--quiet` / `-q` CLI flag also sets this.
+    #[serde(default)]
+    pub quiet: bool,
 }
 
 impl Default for AgentSection {
@@ -38,12 +43,13 @@ impl Default for AgentSection {
             max_turns: default_max_turns(),
             max_budget_usd: default_max_budget(),
             max_concurrent_tools: None,
+            quiet: false,
         }
     }
 }
 
 fn default_max_turns() -> u32 {
-    50
+    200
 }
 fn default_max_budget() -> Option<f64> {
     Some(5.0)
@@ -216,6 +222,7 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
             .agent
             .max_concurrent_tools
             .or(base.agent.max_concurrent_tools),
+        quiet: later.agent.quiet || base.agent.quiet,
     };
     let tools = ToolsSection {
         allowed: if later.tools.allowed.is_empty() {
@@ -322,6 +329,8 @@ pub fn agent_config_from_loaded(
     let profile = loaded.get_profile(profile_name)?;
     LoadedConfig::validate_provider(&profile.provider)?;
     let model = cli_model.clone().unwrap_or_else(|| profile.model.clone());
+    // Config key is `max-concurrent-tools`; CLI flag is `--max-parallel-tools`.
+    // Both refer to the same bounded-concurrency cap. CLI wins when provided.
     let max_parallel_tools = cli_max_parallel_tools
         .or(loaded.agent.max_concurrent_tools)
         .unwrap_or(4);
@@ -335,7 +344,7 @@ pub fn agent_config_from_loaded(
         use_index: false,
         max_context_tokens: loaded.context.max_context_tokens,
         compaction_threshold: Some(loaded.context.compaction_threshold),
-        quiet: cli_quiet,
+        quiet: cli_quiet || loaded.agent.quiet,
         max_parallel_tools,
     })
 }

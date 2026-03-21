@@ -47,7 +47,7 @@ fn default_max_parallel_tools() -> u32 {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            max_turns: 50,
+            max_turns: 200,
             max_budget_usd: Some(5.0),
             model: String::new(),
             system_prompt: None,

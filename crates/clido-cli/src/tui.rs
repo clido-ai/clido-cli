@@ -1871,6 +1871,11 @@ async fn agent_task(
         .with_planner(planner_mode);
 
     let mut first_turn = true;
+    // Auto-continue counter: when the turn limit is hit mid-task, clido automatically
+    // injects "please continue" so the agent never stops mid-work. We cap this at
+    // MAX_AUTO_CONTINUES to avoid infinite loops on genuinely stuck agents.
+    const MAX_AUTO_CONTINUES: u32 = 5;
+    let mut auto_continue_count: u32 = 0;
 
     loop {
         let action = tokio::select! {
@@ -1964,10 +1969,65 @@ async fn agent_task(
 
                 match result {
                     Ok(text) => {
+                        auto_continue_count = 0; // reset on clean completion
                         let _ = event_tx.send(AgentEvent::Response(text));
                     }
                     Err(ClidoError::Interrupted) => {
+                        auto_continue_count = 0;
                         let _ = event_tx.send(AgentEvent::Interrupted);
+                    }
+                    Err(ClidoError::MaxTurnsExceeded) => {
+                        auto_continue_count += 1;
+                        if auto_continue_count <= MAX_AUTO_CONTINUES {
+                            // Silently inject a continue prompt — the agent picks up from
+                            // exactly where it left off since history is intact.
+                            let _ = event_tx.send(AgentEvent::Thinking(
+                                "↻ Continuing (turn limit reached)…".to_string(),
+                            ));
+                            // Call run_next_turn directly with a continue message.
+                            let continue_result = agent
+                                .run_next_turn(
+                                    "Please continue where you left off.",
+                                    Some(&mut writer),
+                                    Some(&setup.pricing_table),
+                                    Some(cancel.clone()),
+                                )
+                                .await;
+                            let _ = event_tx.send(AgentEvent::TokenUsage {
+                                input_tokens: agent.cumulative_input_tokens,
+                                output_tokens: agent.cumulative_output_tokens,
+                                cost_usd: agent.cumulative_cost_usd,
+                            });
+                            match continue_result {
+                                Ok(text) => {
+                                    auto_continue_count = 0;
+                                    let _ = event_tx.send(AgentEvent::Response(text));
+                                }
+                                Err(ClidoError::Interrupted) => {
+                                    auto_continue_count = 0;
+                                    let _ = event_tx.send(AgentEvent::Interrupted);
+                                }
+                                Err(e) => {
+                                    let _ = event_tx.send(AgentEvent::Err(e.to_string()));
+                                }
+                            }
+                        } else {
+                            // Hard cap hit: surface a friendly, actionable message.
+                            let _ = event_tx.send(AgentEvent::Err(format!(
+                                "Reached the turn limit {} times without finishing.\n\
+                                 History is intact — type \"continue\" to keep going,\n\
+                                 or start a new task.",
+                                MAX_AUTO_CONTINUES
+                            )));
+                            auto_continue_count = 0; // reset so next message works
+                        }
+                    }
+                    Err(ClidoError::BudgetExceeded) => {
+                        // Budget limit is a real stop — always show it.
+                        let _ = event_tx.send(AgentEvent::Err(
+                            "Budget limit reached. Increase --max-budget-usd or check your config."
+                                .to_string(),
+                        ));
                     }
                     Err(e) => {
                         let _ = event_tx.send(AgentEvent::Err(e.to_string()));

@@ -55,7 +55,7 @@ impl AgentSetup {
         let mut config = agent_config_from_loaded(
             &loaded,
             profile_name,
-            Some(cli.max_turns),
+            cli.max_turns,
             cli.max_budget_usd,
             cli.model.clone(),
             Some(system_prompt),

@@ -32,8 +32,13 @@ impl OpenAICompatProvider {
         base_url: String,
         extra_headers: Vec<(String, String)>,
     ) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .unwrap_or_default();
         Self {
-            client: reqwest::Client::new(),
+            client,
             api_key,
             model,
             base_url,
@@ -108,8 +113,13 @@ impl OpenAICompatProvider {
             body["tool_choice"] = serde_json::json!("auto");
         }
 
-        const MAX_ATTEMPTS: u32 = 3;
-        let mut attempt = 0u32;
+        const MAX_RATE_LIMIT_ATTEMPTS: u32 = 6;
+        const MAX_SERVER_ERROR_ATTEMPTS: u32 = 5;
+        const MAX_NETWORK_ATTEMPTS: u32 = 4;
+
+        let mut rate_limit_attempts = 0u32;
+        let mut server_error_attempts = 0u32;
+        let mut network_attempts = 0u32;
         let url = self.request_url();
         loop {
             let mut req = self
@@ -120,17 +130,78 @@ impl OpenAICompatProvider {
             for (k, v) in &self.extra_headers {
                 req = req.header(k.as_str(), v.as_str());
             }
-            let res = req
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| ClidoError::Provider(e.to_string()))?;
+            let res = match req.json(&body).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    network_attempts += 1;
+                    if network_attempts < MAX_NETWORK_ATTEMPTS {
+                        let delay = network_backoff_secs(network_attempts);
+                        warn!(
+                            "Network error (attempt {}/{}), retrying in {}s: {}",
+                            network_attempts, MAX_NETWORK_ATTEMPTS, delay, e
+                        );
+                        tokio::time::sleep(Duration::from_secs(delay)).await;
+                        continue;
+                    }
+                    return Err(ClidoError::Provider(format!(
+                        "Connection failed after {} attempts: {}",
+                        MAX_NETWORK_ATTEMPTS,
+                        if e.is_timeout() {
+                            "request timed out".to_string()
+                        } else if e.is_connect() {
+                            "could not connect — check your internet connection".to_string()
+                        } else {
+                            e.to_string()
+                        }
+                    )));
+                }
+            };
 
             let status = res.status();
-            let text = res
-                .text()
-                .await
-                .map_err(|e| ClidoError::Provider(e.to_string()))?;
+
+            if status.as_u16() == 429 {
+                let retry_after = res.headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                    .map(|s| Duration::from_secs(s.min(300)));
+                let _body = res.text().await.unwrap_or_default();
+                rate_limit_attempts += 1;
+                if rate_limit_attempts < MAX_RATE_LIMIT_ATTEMPTS {
+                    let delay = retry_after.unwrap_or_else(|| {
+                        Duration::from_secs(rate_limit_backoff_secs(rate_limit_attempts))
+                    });
+                    tracing::info!(
+                        "Rate limited (attempt {}/{}), waiting {:.0}s…",
+                        rate_limit_attempts, MAX_RATE_LIMIT_ATTEMPTS, delay.as_secs_f64()
+                    );
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                return Err(ClidoError::Provider(format!(
+                    "Rate limit exceeded after {} attempts. Please wait and try again.",
+                    MAX_RATE_LIMIT_ATTEMPTS
+                )));
+            }
+
+            let text = res.text().await.map_err(|e| ClidoError::Provider(e.to_string()))?;
+
+            if status.is_server_error() {
+                server_error_attempts += 1;
+                if server_error_attempts < MAX_SERVER_ERROR_ATTEMPTS {
+                    let delay = server_error_backoff_secs(server_error_attempts);
+                    warn!(
+                        "Server error {} (attempt {}/{}), retrying in {}s",
+                        status, server_error_attempts, MAX_SERVER_ERROR_ATTEMPTS, delay
+                    );
+                    tokio::time::sleep(Duration::from_secs(delay)).await;
+                    continue;
+                }
+                return Err(ClidoError::Provider(format!(
+                    "API server error ({}) after {} attempts. Please try again later.",
+                    status.as_u16(), MAX_SERVER_ERROR_ATTEMPTS
+                )));
+            }
 
             if status.is_success() {
                 let json: serde_json::Value =
@@ -138,32 +209,31 @@ impl OpenAICompatProvider {
                 return parse_openai_response(&json);
             }
 
-            let retriable = status.as_u16() == 429 || status.is_server_error();
-            if retriable && attempt < MAX_ATTEMPTS - 1 {
-                attempt += 1;
-                let delay_ms = match attempt {
-                    1 => 1000,
-                    2 => 2000,
-                    _ => 4000,
-                };
-                warn!(
-                    "Provider {} (attempt {}/{}), retrying in {}ms: {}",
-                    status,
-                    attempt,
-                    MAX_ATTEMPTS,
-                    delay_ms,
-                    text.chars().take(200).collect::<String>()
-                );
-                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                continue;
-            }
-
-            return Err(ClidoError::Provider(format!(
-                "API error {} (model: {}): {}",
-                status, self.model, text
-            )));
+            // Non-retriable client error.
+            let msg = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                if let Some(m) = json["error"]["message"].as_str() {
+                    format!("API error ({}): {}", status.as_u16(), m)
+                } else {
+                    format!("API error ({}): {}", status.as_u16(), &text[..text.len().min(300)])
+                }
+            } else {
+                format!("API error {} (model: {}): {}", status, self.model, &text[..text.len().min(300)])
+            };
+            return Err(ClidoError::Provider(msg));
         }
     }
+}
+
+fn rate_limit_backoff_secs(attempt: u32) -> u64 {
+    (15u64 * (1u64 << (attempt - 1).min(3))).min(120)
+}
+
+fn server_error_backoff_secs(attempt: u32) -> u64 {
+    (1u64 << (attempt - 1).min(4)).min(16)
+}
+
+fn network_backoff_secs(attempt: u32) -> u64 {
+    (1u64 << (attempt - 1).min(2)).min(4)
 }
 
 /// Convert Clido messages to OpenAI chat format. Returns (system_content, messages).

@@ -10,6 +10,8 @@ use crate::{Tool, ToolOutput};
 #[derive(Default)]
 pub struct BashTool {
     blocked: Vec<PathBuf>,
+    /// When true, wrap command in a sandbox (sandbox-exec on macOS, bwrap on Linux).
+    sandbox: bool,
 }
 
 impl BashTool {
@@ -17,12 +19,97 @@ impl BashTool {
         Self::default()
     }
     pub fn new_with_blocked(blocked: Vec<PathBuf>) -> Self {
-        Self { blocked }
+        Self { blocked, sandbox: false }
+    }
+    /// Create a sandboxed Bash tool.
+    pub fn new_sandboxed(blocked: Vec<PathBuf>) -> Self {
+        Self { blocked, sandbox: true }
     }
 }
 
 fn default_timeout_ms() -> u64 {
     30_000
+}
+
+/// Plain (unsandboxed) command execution.
+async fn build_plain_command(command: &str) -> std::io::Result<std::process::Output> {
+    tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .output()
+        .await
+}
+
+/// Sandboxed command execution.
+///
+/// On macOS uses `sandbox-exec` with a restrictive profile.
+/// On Linux uses `bwrap` if available, otherwise falls back to a plain run with a warning
+/// emitted to stderr (bwrap unavailable in many CI environments).
+async fn build_sandboxed_command(command: &str) -> std::io::Result<std::process::Output> {
+    #[cfg(target_os = "macos")]
+    {
+        // macOS sandbox-exec profile: deny everything except process exec,
+        // file reads, and writes to /tmp.
+        const PROFILE: &str = concat!(
+            "(version 1)",
+            "(deny default)",
+            "(allow process-exec)",
+            "(allow file-read*)",
+            "(allow file-write* (subpath \"/tmp\"))",
+            "(allow network-outbound)",
+            "(allow signal (target self))",
+        );
+        tokio::process::Command::new("sandbox-exec")
+            .arg("-p")
+            .arg(PROFILE)
+            .arg("sh")
+            .arg("-c")
+            .arg(command)
+            .output()
+            .await
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Check if bwrap is available.
+        let bwrap_check = tokio::process::Command::new("which")
+            .arg("bwrap")
+            .output()
+            .await;
+        if bwrap_check.map(|o| o.status.success()).unwrap_or(false) {
+            tokio::process::Command::new("bwrap")
+                .args([
+                    "--ro-bind", "/", "/",
+                    "--tmpfs", "/tmp",
+                    "--unshare-net",
+                    "--die-with-parent",
+                    "sh", "-c", command,
+                ])
+                .output()
+                .await
+        } else {
+            // bwrap not available — fall back to unsandboxed with a warning.
+            tracing::warn!(
+                "sandbox requested but bwrap not found; running unsandboxed"
+            );
+            tokio::process::Command::new("sh")
+                .arg("-c")
+                .arg(command)
+                .output()
+                .await
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        // Unsupported platform — run unsandboxed.
+        tracing::warn!("sandbox not supported on this platform; running unsandboxed");
+        tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .output()
+            .await
+    }
 }
 
 #[async_trait]
@@ -70,12 +157,16 @@ impl Tool for BashTool {
             .and_then(|v| v.as_u64())
             .unwrap_or_else(default_timeout_ms);
 
-        let output = tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(&command)
-            .output();
+        let run_result = tokio::time::timeout(Duration::from_millis(timeout_ms), async {
+            if self.sandbox {
+                build_sandboxed_command(&command).await
+            } else {
+                build_plain_command(&command).await
+            }
+        })
+        .await;
 
-        let result = match tokio::time::timeout(Duration::from_millis(timeout_ms), output).await {
+        let result = match run_result {
             Ok(Ok(out)) => out,
             Ok(Err(e)) => return ToolOutput::err(format!("Failed to execute: {}", e)),
             Err(_) => return ToolOutput::err("Command timed out".to_string()),

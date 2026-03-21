@@ -3,4 +3,15 @@ name = "clido-index"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+doctest = false
+
 [dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { workspace = true }
+anyhow = { workspace = true }
+walkdir = "2"
+regex = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

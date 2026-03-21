@@ -232,6 +232,10 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
                     }) = first
                     {
                         let (num_turns, total_cost_usd, preview) = summarize_lines(&lines);
+                        // Skip sessions with no user messages (launched but nothing sent).
+                        if num_turns == 0 {
+                            continue;
+                        }
                         summaries.push(SessionSummary {
                             session_id: session_id.clone(),
                             project_path: proj.clone(),
@@ -250,20 +254,26 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
 }
 
 fn summarize_lines(lines: &[SessionLine]) -> (u32, f64, String) {
-    let mut num_turns = 0u32;
-    let mut total_cost_usd = 0.0;
+    let mut result_turns: Option<u32> = None;
+    let mut result_cost: Option<f64> = None;
+    let mut user_turn_count = 0u32;
     let mut preview = String::new();
+    let mut preview_set = false;
     for line in lines {
         match line {
             SessionLine::UserMessage { content, .. } => {
-                let first_text = content
-                    .first()
-                    .and_then(|c: &serde_json::Value| c.get("text"));
-                if let Some(s) = first_text.and_then(|v: &serde_json::Value| v.as_str()) {
-                    let s: &str = s;
-                    preview = s.chars().take(50).collect::<String>();
-                    if s.len() > 50 {
-                        preview.push('…');
+                user_turn_count += 1;
+                if !preview_set {
+                    let first_text = content
+                        .first()
+                        .and_then(|c: &serde_json::Value| c.get("text"));
+                    if let Some(s) = first_text.and_then(|v: &serde_json::Value| v.as_str()) {
+                        let trimmed = s.trim();
+                        preview = trimmed.chars().take(80).collect::<String>();
+                        if trimmed.chars().count() > 80 {
+                            preview.push('…');
+                        }
+                        preview_set = true;
                     }
                 }
             }
@@ -272,12 +282,14 @@ fn summarize_lines(lines: &[SessionLine]) -> (u32, f64, String) {
                 total_cost_usd: c,
                 ..
             } => {
-                num_turns = *n;
-                total_cost_usd = *c;
+                result_turns = Some(*n);
+                result_cost = Some(*c);
             }
             _ => {}
         }
     }
+    let num_turns = result_turns.unwrap_or(user_turn_count);
+    let total_cost_usd = result_cost.unwrap_or(0.0);
     (num_turns, total_cost_usd, preview)
 }
 

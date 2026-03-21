@@ -73,6 +73,15 @@ pub enum ProviderType {
     Local,
 }
 
+/// Hooks configuration: shell commands run before/after each tool call.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HooksConfig {
+    /// Shell command to run before each tool use. Env: CLIDO_TOOL_NAME, CLIDO_TOOL_INPUT.
+    pub pre_tool_use: Option<String>,
+    /// Shell command to run after each tool use. Env: CLIDO_TOOL_NAME, CLIDO_TOOL_INPUT, CLIDO_TOOL_OUTPUT, CLIDO_TOOL_IS_ERROR, CLIDO_TOOL_DURATION_MS.
+    pub post_tool_use: Option<String>,
+}
+
 /// Provider-level configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {

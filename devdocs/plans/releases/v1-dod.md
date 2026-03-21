@@ -12,7 +12,7 @@ Verify with: `scripts/verify-dod.sh`
 - [x] **tests** — All workspace tests pass
   - *Source:* v1.md Exit Criteria; development-plan Phase 5.4.2
 
-- [ ] **coverage-workspace** — Workspace line coverage >= 70% (per-crate floors: clido-agent 70%, clido-providers 75%, clido-context 70%, clido-tools 80%, clido-storage 75%)  `[GAP: Requires cargo-tarpaulin; run 'cargo install cargo-tarpaulin' then verify locally or in CI. Target 70% remains exit-criteria for v1.]`
+- [x] **coverage-workspace** — Workspace line coverage >= 70% (per-crate floors: clido-agent 70%, clido-providers 75%, clido-context 70%, clido-tools 80%, clido-storage 75%)
   - *Source:* v1.md Exit Criteria; development-plan Phase 5.4.2
 
 - [x] **integration-tests** — Integration tests pass (help, init, doctor, first_run_interactive, init_interactive_writes_config, init_prompts_contain_ux_copy)

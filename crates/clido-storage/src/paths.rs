@@ -9,6 +9,11 @@ pub fn data_dir() -> anyhow::Result<PathBuf> {
     Ok(dir.data_dir().to_path_buf())
 }
 
+/// Sanitize a project path for use as an audit/data directory name.
+pub fn sanitize_for_audit(project_path: &Path) -> String {
+    sanitize_project_path(project_path)
+}
+
 /// Sanitize path for use as a directory name (e.g. replace / with _).
 fn sanitize_project_path(project_path: &Path) -> String {
     let s = project_path.display().to_string();

@@ -1,4 +1,5 @@
 # Rust
+.tmp/
 target/
 
 # Cursor IDE (plans, skills — repo-specific)

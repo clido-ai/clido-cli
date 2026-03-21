@@ -3,12 +3,15 @@
 mod bash;
 mod edit;
 mod exit_plan_mode;
+pub mod file_tracker;
 mod glob_tool;
 mod grep_tool;
+pub mod mcp;
 mod path_guard;
 mod read;
 mod registry;
 pub mod secrets;
+mod semantic_search;
 mod write;
 
 use std::path::PathBuf;
@@ -18,11 +21,14 @@ use async_trait::async_trait;
 pub use bash::BashTool;
 pub use edit::EditTool;
 pub use exit_plan_mode::ExitPlanModeTool;
+pub use file_tracker::FileTracker;
 pub use glob_tool::GlobTool;
 pub use grep_tool::GrepTool;
+pub use mcp::{load_mcp_config, McpClient, McpConfig, McpServerConfig, McpToolDef, McpTool};
 pub use path_guard::PathGuard;
 pub use read::ReadTool;
 pub use registry::ToolRegistry;
+pub use semantic_search::SemanticSearchTool;
 pub use write::WriteTool;
 
 /// Build default V1 tool registry with workspace root (e.g. env::current_dir()).
@@ -35,15 +41,31 @@ pub fn default_registry_with_blocked(
     workspace_root: PathBuf,
     blocked: Vec<PathBuf>,
 ) -> ToolRegistry {
-    let guard = PathGuard::new(workspace_root).with_blocked(blocked.clone());
+    default_registry_with_options(workspace_root, blocked, false)
+}
+
+/// Build registry with optional Bash sandboxing.
+pub fn default_registry_with_options(
+    workspace_root: PathBuf,
+    blocked: Vec<PathBuf>,
+    sandbox: bool,
+) -> ToolRegistry {
+    let guard = PathGuard::new(workspace_root.clone()).with_blocked(blocked.clone());
+    let tracker = FileTracker::new();
+    let read_cache = clido_context::read_cache::ReadCache::new();
     let mut r = ToolRegistry::new();
     r.register(ExitPlanModeTool);
-    r.register(BashTool::new_with_blocked(blocked));
-    r.register(ReadTool::new_with_guard(guard.clone()));
-    r.register(WriteTool::new_with_guard(guard.clone()));
-    r.register(EditTool::new_with_guard(guard.clone()));
+    if sandbox {
+        r.register(BashTool::new_sandboxed(blocked));
+    } else {
+        r.register(BashTool::new_with_blocked(blocked));
+    }
+    r.register(ReadTool::new_with_cache(guard.clone(), tracker.clone(), read_cache));
+    r.register(WriteTool::new_with_tracker(guard.clone(), tracker.clone()));
+    r.register(EditTool::new_with_tracker(guard.clone(), tracker.clone()));
     r.register(GlobTool::new_with_guard(guard.clone()));
     r.register(GrepTool::new_with_guard(guard));
+    r.register(SemanticSearchTool::new(workspace_root));
     r
 }
 
@@ -58,6 +80,8 @@ pub struct ToolOutput {
     pub content_hash: Option<String>,
     /// For Write/Edit: mtime in nanos (for session stale-file detection).
     pub mtime_nanos: Option<u64>,
+    /// For Edit: unified diff of the change (for TUI display).
+    pub diff: Option<String>,
 }
 
 impl ToolOutput {
@@ -68,6 +92,7 @@ impl ToolOutput {
             path: None,
             content_hash: None,
             mtime_nanos: None,
+            diff: None,
         }
     }
     pub fn err(content: String) -> Self {
@@ -77,6 +102,7 @@ impl ToolOutput {
             path: None,
             content_hash: None,
             mtime_nanos: None,
+            diff: None,
         }
     }
     pub fn ok_with_meta(
@@ -91,6 +117,7 @@ impl ToolOutput {
             path: Some(path),
             content_hash: Some(content_hash),
             mtime_nanos: Some(mtime_nanos),
+            diff: None,
         }
     }
 }

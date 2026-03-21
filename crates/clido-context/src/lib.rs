@@ -1,5 +1,7 @@
 //! Context assembly and token budget: truncate or compact history to fit model context.
 
+pub mod read_cache;
+
 use clido_core::{ClidoError, ContentBlock, Message, Result};
 
 /// Default max context tokens when not set in config or pricing.

@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::config::{AgentConfig, PermissionMode};
+use crate::config::{AgentConfig, HooksConfig, PermissionMode};
 use crate::{ClidoError, Result};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -106,6 +106,8 @@ pub struct ConfigFile {
     pub context: ContextSection,
     #[serde(default)]
     pub workflows: WorkflowsSection,
+    #[serde(default)]
+    pub hooks: HooksConfig,
 }
 
 fn default_default_profile() -> String {
@@ -121,6 +123,7 @@ pub struct LoadedConfig {
     pub tools: ToolsSection,
     pub context: ContextSection,
     pub workflows: WorkflowsSection,
+    pub hooks: HooksConfig,
 }
 
 impl LoadedConfig {
@@ -240,6 +243,10 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
             base.workflows.directory
         },
     };
+    let hooks = HooksConfig {
+        pre_tool_use: later.hooks.pre_tool_use.or(base.hooks.pre_tool_use),
+        post_tool_use: later.hooks.post_tool_use.or(base.hooks.post_tool_use),
+    };
     ConfigFile {
         default_profile,
         profile,
@@ -247,6 +254,7 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
         tools,
         context,
         workflows,
+        hooks,
     }
 }
 
@@ -259,6 +267,7 @@ pub fn load_config(cwd: &Path) -> Result<LoadedConfig> {
         tools: ToolsSection::default(),
         context: ContextSection::default(),
         workflows: WorkflowsSection::default(),
+        hooks: HooksConfig::default(),
     };
 
     if let Some(path) = global_config_path() {
@@ -293,6 +302,7 @@ pub fn load_config(cwd: &Path) -> Result<LoadedConfig> {
         tools: merged.tools,
         context: merged.context,
         workflows: merged.workflows,
+        hooks: merged.hooks,
     })
 }
 

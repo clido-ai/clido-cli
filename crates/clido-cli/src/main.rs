@@ -1,10 +1,13 @@
 //! Clido CLI entry point.
 
 mod agent_setup;
+mod audit_cmd;
 mod cli;
 mod config;
 mod doctor;
 mod errors;
+mod index_cmd;
+mod memory_cmd;
 mod models;
 mod pricing_cmd;
 mod provider;
@@ -12,6 +15,7 @@ mod repl;
 mod run;
 mod sessions;
 mod setup;
+mod stats;
 mod tui;
 mod ui;
 mod workflow;
@@ -19,7 +23,7 @@ mod workflow;
 use clap::{CommandFactory, Parser};
 use clido_core::config_file_exists;
 use std::env;
-use std::io::{self, IsTerminal};
+use std::io::{self, IsTerminal, Write};
 
 use errors::CliError;
 use ui::{ansi, cli_use_color};
@@ -134,6 +138,71 @@ async fn dispatch(cli: cli::Cli) -> Result<(), anyhow::Error> {
         Some(cli::Subcommand::UpdatePricing) => {
             pricing_cmd::run_update_pricing();
             return Ok(());
+        }
+        Some(cli::Subcommand::Completions { shell }) => {
+            use clap_complete::{generate, shells};
+            let mut cmd = cli::Cli::command();
+            let shell_enum = shell.to_lowercase();
+            match shell_enum.as_str() {
+                "bash" => generate(shells::Bash, &mut cmd, "clido", &mut io::stdout()),
+                "zsh" => generate(shells::Zsh, &mut cmd, "clido", &mut io::stdout()),
+                "fish" => generate(shells::Fish, &mut cmd, "clido", &mut io::stdout()),
+                "powershell" | "ps" => {
+                    generate(shells::PowerShell, &mut cmd, "clido", &mut io::stdout())
+                }
+                "elvish" => generate(shells::Elvish, &mut cmd, "clido", &mut io::stdout()),
+                _ => {
+                    eprintln!(
+                        "Unknown shell: {}. Use: bash, zsh, fish, powershell, elvish",
+                        shell
+                    );
+                    std::process::exit(2);
+                }
+            }
+            return Ok(());
+        }
+        Some(cli::Subcommand::Man) => {
+            let cmd = cli::Cli::command();
+            let man = clap_mangen::Man::new(cmd);
+            let mut buf = Vec::new();
+            man.render(&mut buf)?;
+            io::stdout().write_all(&buf)?;
+            return Ok(());
+        }
+        Some(cli::Subcommand::Stats { session, json }) => {
+            return stats::run_stats(session.as_deref(), *json);
+        }
+        Some(cli::Subcommand::Audit {
+            tail,
+            session,
+            tool,
+            since,
+            json,
+        }) => {
+            return audit_cmd::run_audit(*tail, session.as_deref(), tool.as_deref(), since.as_deref(), *json);
+        }
+        Some(cli::Subcommand::Memory { cmd }) => {
+            return memory_cmd::run_memory(cmd);
+        }
+        Some(cli::Subcommand::FetchModels { provider, json }) => {
+            models::run_list_models(provider.as_deref(), *json);
+            return Ok(());
+        }
+        Some(cli::Subcommand::Index { cmd }) => {
+            return index_cmd::run_index(cmd).await;
+        }
+        Some(cli::Subcommand::Run { prompt }) => {
+            let prompt_str = prompt.join(" ").trim().to_string();
+            if prompt_str.is_empty() {
+                return Err(CliError::Usage(
+                    "run requires a prompt. Usage: clido run <prompt>".into(),
+                )
+                .into());
+            }
+            let mut run_cli = cli.clone();
+            run_cli.subcommand = None;
+            run_cli.prompt = prompt.clone();
+            return run::run_agent(run_cli).await;
         }
         None => {}
     }

@@ -2,7 +2,8 @@
 
 use clido_agent::{session_lines_to_messages, AgentLoop};
 use clido_core::ClidoError;
-use clido_storage::{list_sessions, stale_paths, SessionLine, SessionReader, SessionWriter};
+use clido_planner;
+use clido_storage::{list_sessions, stale_paths, AuditLog, SessionLine, SessionReader, SessionWriter};
 use std::env;
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,7 +15,14 @@ use crate::errors::CliError;
 use crate::ui::{ansi, cli_use_color};
 
 pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
-    let workspace_root = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    if cli.sandbox && !cli.quiet {
+        eprintln!("Bash sandbox enabled (sandbox-exec on macOS, bwrap on Linux).");
+    }
+
+    let workspace_root = cli
+        .workdir
+        .clone()
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
     let resume_id = resolve_resume_id(&cli, &workspace_root)?;
     let resume_lines = load_resume_lines(&cli, &resume_id, &workspace_root)?;
 
@@ -28,6 +36,17 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
         }
     };
 
+    // Set up audit log.
+    let audit = AuditLog::open(&workspace_root)
+        .ok()
+        .map(|a| Arc::new(std::sync::Mutex::new(a)));
+
+    // Hooks from config.
+    let loaded = clido_core::load_config(&workspace_root).ok();
+    let hooks = loaded.as_ref().map(|l| l.hooks.clone()).filter(|h| {
+        h.pre_tool_use.is_some() || h.post_tool_use.is_some()
+    });
+
     let cancel = make_cancel_token();
     let start = std::time::Instant::now();
 
@@ -37,6 +56,12 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
             if history.is_empty() {
                 let mut loop_ =
                     AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user);
+                if let Some(ref a) = audit {
+                    loop_ = loop_.with_audit_log(a.clone());
+                }
+                if let Some(h) = hooks.clone() {
+                    loop_ = loop_.with_hooks(h);
+                }
                 let r = loop_
                     .run(
                         &cli.prompt_str(),
@@ -54,6 +79,12 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
                     history,
                     setup.ask_user,
                 );
+                if let Some(ref a) = audit {
+                    loop_ = loop_.with_audit_log(a.clone());
+                }
+                if let Some(h) = hooks.clone() {
+                    loop_ = loop_.with_hooks(h);
+                }
                 let r = loop_
                     .run_continue(Some(&mut writer), Some(&setup.pricing_table), Some(cancel))
                     .await;
@@ -62,10 +93,45 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
         }
         None => {
             let mut loop_ =
-                AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user);
+                AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
+                    .with_planner(cli.planner);
+            if let Some(ref a) = audit {
+                loop_ = loop_.with_audit_log(a.clone());
+            }
+            if let Some(h) = hooks {
+                loop_ = loop_.with_hooks(h);
+            }
+            // If --planner is set, make a real LLM planning call before the agent loop.
+            // The plan is printed to stdout as an informational prefix; if planning fails
+            // (network error, malformed JSON, invalid graph) we silently proceed without a plan.
+            if cli.planner {
+                let planning_prompt = format!(
+                    "You are a task planner. Decompose the following task into a JSON task graph.\n\
+                     Format: {{\"goal\":\"<goal>\",\"tasks\":[{{\"id\":\"t1\",\"description\":\"<description>\",\"depends_on\":[]}},...]}}\n\
+                     Tasks that can run in parallel should have no shared dependencies.\n\
+                     Keep it to 2-5 tasks maximum. Respond with ONLY the JSON, no explanation.\n\n\
+                     Task: {}",
+                    cli.prompt_str()
+                );
+                if let Ok(plan_text) = loop_.complete_simple(&planning_prompt).await {
+                    if let Ok(graph) = clido_planner::parse_plan(&plan_text) {
+                        if !cli.quiet {
+                            println!("Plan:");
+                            for t in &graph.tasks {
+                                if t.depends_on.is_empty() {
+                                    println!("  {}: {}", t.id, t.description);
+                                } else {
+                                    println!("  {}: {}  (depends: {})", t.id, t.description, t.depends_on.join(", "));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let prompt = cli.prompt_str();
             let r = loop_
                 .run(
-                    &cli.prompt_str(),
+                    &prompt,
                     Some(&mut writer),
                     Some(&setup.pricing_table),
                     Some(cancel),

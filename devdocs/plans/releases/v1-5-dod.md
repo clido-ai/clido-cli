@@ -6,64 +6,64 @@ Verify with: `scripts/verify-dod.sh`
 
 ## Items
 
-- [ ] **build** — Workspace builds for all targets  `[GAP: V1.5 not yet released]`
+- [x] **build** — Workspace builds for all targets
   - *Source:* v1-5.md builds on V1
 
-- [ ] **tests** — All workspace tests pass  `[GAP: V1.5 not yet released]`
+- [x] **tests** — All workspace tests pass
   - *Source:* v1-5.md builds on V1
 
-- [ ] **coverage-workspace** — Workspace line coverage >= 75% (V1.5 floor)  `[GAP: V1.5 not yet released]`
+- [x] **coverage-workspace** — Workspace line coverage >= 75% (V1.5 floor)
   - *Source:* development-plan Phase 5.4.2; testing-strategy
 
-- [ ] **cost-tracking-session-footer** — Clido reports cumulative token cost at the end of every session  `[GAP: V1.5 not yet released]`
+- [x] **cost-tracking-session-footer** — Clido reports cumulative token cost at the end of every session
   - *Source:* v1-5.md Exit Criteria; Phase 4.4
 
-- [ ] **cost-tracking-displayed** — Cost displayed in session footer  `[GAP: V1.5 not yet released]`
+- [x] **cost-tracking-displayed** — Cost displayed in session footer
   - *Source:* v1-5.md UX outcomes
 
-- [ ] **concurrent-tool-execution** — Batches of read-only tool calls execute concurrently under a configurable semaphore cap  `[GAP: V1.5 not yet released]`
+- [x] **concurrent-tool-execution** — Batches of read-only tool calls execute concurrently under a configurable semaphore cap
   - *Source:* v1-5.md Exit Criteria; Phase 4.6
 
-- [ ] **bounded-concurrency-config** — Bounded concurrency is configurable (config or flag)  `[GAP: V1.5 not yet released]`
+- [x] **bounded-concurrency-config** — Bounded concurrency is configurable (config or flag)
   - *Source:* v1-5.md Included Scope Phase 4.6
 
-- [ ] **context-dedup-repeated-reads** — Repeated reads of unchanged files do not add duplicate content to context  `[GAP: V1.5 not yet released]`
+- [x] **context-dedup-repeated-reads** — Repeated reads of unchanged files do not add duplicate content to context
   - *Source:* v1-5.md Exit Criteria; Phase 6.2
 
-- [ ] **secret-detection-warning** — Secret-like patterns in Write or Edit content produce a clear warning before the write proceeds  `[GAP: V1.5 not yet released]`
+- [x] **secret-detection-warning** — Secret-like patterns in Write or Edit content produce a clear warning before the write proceeds
   - *Source:* v1-5.md Exit Criteria; Phase 7.2
 
-- [ ] **output-format-json** — --output-format json produces a stable, well-defined JSON result on completion  `[GAP: V1.5 not yet released]`
+- [x] **output-format-json** — --output-format json produces a stable, well-defined JSON result on completion
   - *Source:* v1-5.md Exit Criteria; Phase 8.2
 
-- [ ] **output-format-json-schema** — JSON output has stable schema and exit_status  `[GAP: V1.5 not yet released]`
+- [x] **output-format-json-schema** — JSON output has stable schema and exit_status
   - *Source:* v1-5.md UX outcomes
 
-- [ ] **output-format-stream-json** — --output-format stream-json produces valid newline-delimited JSON for every event  `[GAP: V1.5 not yet released]`
+- [x] **output-format-stream-json** — --output-format stream-json produces valid newline-delimited JSON for every event
   - *Source:* v1-5.md Exit Criteria; Phase 8.2
 
-- [ ] **doctor-expanded** — clido doctor expands past V1 basic checks and detects the most common local setup problems clearly  `[GAP: V1.5 not yet released]`
+- [x] **doctor-expanded** — clido doctor expands past V1 basic checks and detects the most common local setup problems clearly
   - *Source:* v1-5.md Exit Criteria; Phase 8.4
 
-- [ ] **doctor-exit-codes** — Doctor exit codes 0 (all pass), 1 (mandatory fail), 2 (warnings only)  `[GAP: V1.5 not yet released]`
+- [x] **doctor-exit-codes** — Doctor exit codes 0 (all pass), 1 (mandatory fail), 2 (warnings only)
   - *Source:* v1-5.md UX outcomes
 
-- [ ] **cli-quiet** — clido --quiet / -q suppresses spinner, tool lifecycle, cost footer  `[GAP: V1.5 not yet released]`
+- [x] **cli-quiet** — clido --quiet / -q suppresses spinner, tool lifecycle, cost footer
   - *Source:* v1-5.md CLI Surface
 
-- [ ] **cli-mcp-config** — clido --mcp-config <file> is accepted (path to MCP config)  `[GAP: V1.5 not yet released]`
+- [x] **cli-mcp-config** — clido --mcp-config <file> is accepted (path to MCP config)
   - *Source:* v1-5.md CLI Surface
 
-- [ ] **cli-sessions-fork** — clido sessions fork <id> exists  `[GAP: V1.5 not yet released]`
+- [x] **cli-sessions-fork** — clido sessions fork <id> exists
   - *Source:* v1-5.md CLI Surface
 
-- [ ] **cli-list-models** — clido list-models exists; list-models --provider <name> and --json  `[GAP: V1.5 not yet released]`
+- [x] **cli-list-models** — clido list-models exists; list-models --provider <name> and --json
   - *Source:* v1-5.md CLI Surface
 
-- [ ] **cli-update-pricing** — clido update-pricing exists  `[GAP: V1.5 not yet released]`
+- [x] **cli-update-pricing** — clido update-pricing exists
   - *Source:* v1-5.md CLI Surface
 
-- [ ] **integration-tests-v15** — Integration tests cover JSON output and cost footer  `[GAP: V1.5 not yet released]`
+- [x] **integration-tests-v15** — Integration tests cover JSON output and cost footer
   - *Source:* v1-5.md Suggested Internal Milestones
 
 - [x] **ux-first-run-init-copy** — First-run and clido init prompts use copy from ux-requirements §2 (Type 1 or 2, press Enter, defaults in brackets)

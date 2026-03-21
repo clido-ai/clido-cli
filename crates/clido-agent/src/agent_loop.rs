@@ -5,15 +5,17 @@ use clido_context::{
     assemble, estimate_tokens_str, DEFAULT_COMPACTION_THRESHOLD, DEFAULT_MAX_CONTEXT_TOKENS,
 };
 use clido_core::{
-    compute_cost_usd, AgentConfig, ContentBlock, Message, PermissionMode, Role, StopReason,
+    compute_cost_usd, AgentConfig, ContentBlock, HooksConfig, Message, PermissionMode, Role,
+    StopReason,
 };
 use clido_core::{ClidoError, PricingTable, Result};
+use clido_memory::MemoryStore;
 use clido_providers::ModelProvider;
-use clido_storage::{SessionLine, SessionWriter};
+use clido_storage::{AuditEntry, AuditLog, SessionLine, SessionWriter};
 use clido_tools::{ToolOutput, ToolRegistry};
 use futures::future::join_all;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 use tracing::debug;
 
@@ -28,7 +30,11 @@ pub trait AskUser: Send + Sync {
 #[async_trait]
 pub trait EventEmitter: Send + Sync {
     async fn on_tool_start(&self, name: &str, input: &serde_json::Value);
-    async fn on_tool_done(&self, name: &str, is_error: bool);
+    /// Called after a tool completes. `diff` is set for Edit operations.
+    async fn on_tool_done(&self, name: &str, is_error: bool, diff: Option<String>);
+    /// Called for any text the model emits while it's still calling tools (thinking aloud).
+    /// Default impl is a no-op so existing code compiles without changes.
+    async fn on_assistant_text(&self, _text: &str) {}
 }
 
 /// Reconstruct conversation history from session JSONL lines (for resume).
@@ -103,6 +109,19 @@ pub struct AgentLoop {
     last_turn_count: u32,
     /// Cumulative cost in USD from last run (when pricing provided).
     pub cumulative_cost_usd: f64,
+    /// Cumulative input tokens from last run.
+    pub cumulative_input_tokens: u64,
+    /// Cumulative output tokens from last run.
+    pub cumulative_output_tokens: u64,
+    /// Optional audit log for recording tool calls.
+    audit_log: Option<Arc<std::sync::Mutex<AuditLog>>>,
+    /// Optional hooks config for pre/post tool use.
+    hooks: Option<HooksConfig>,
+    /// Optional long-term memory store for context injection.
+    memory: Option<Arc<Mutex<MemoryStore>>>,
+    /// When true, the agent will emit a planning step on the first turn (--planner flag).
+    /// The plan is purely informational: the reactive loop still drives execution.
+    pub planner_mode: bool,
 }
 
 impl AgentLoop {
@@ -122,7 +141,19 @@ impl AgentLoop {
             permission_mode_override: None,
             last_turn_count: 0,
             cumulative_cost_usd: 0.0,
+            cumulative_input_tokens: 0,
+            cumulative_output_tokens: 0,
+            audit_log: None,
+            hooks: None,
+            memory: None,
+            planner_mode: false,
         }
+    }
+
+    /// Enable or disable planner mode (--planner CLI flag).
+    pub fn with_planner(mut self, enabled: bool) -> Self {
+        self.planner_mode = enabled;
+        self
     }
 
     /// Create an agent loop with pre-filled history (for resume).
@@ -143,6 +174,12 @@ impl AgentLoop {
             permission_mode_override: None,
             last_turn_count: 0,
             cumulative_cost_usd: 0.0,
+            cumulative_input_tokens: 0,
+            cumulative_output_tokens: 0,
+            audit_log: None,
+            hooks: None,
+            memory: None,
+            planner_mode: false,
         }
     }
 
@@ -152,9 +189,86 @@ impl AgentLoop {
         self
     }
 
+    /// Attach an audit log.
+    pub fn with_audit_log(mut self, log: Arc<std::sync::Mutex<AuditLog>>) -> Self {
+        self.audit_log = Some(log);
+        self
+    }
+
+    /// Attach hooks config.
+    pub fn with_hooks(mut self, hooks: HooksConfig) -> Self {
+        self.hooks = Some(hooks);
+        self
+    }
+
+    /// Attach a long-term memory store. Before each turn, relevant memories for the
+    /// current prompt are retrieved and injected into the system prompt.
+    pub fn with_memory(mut self, store: Arc<Mutex<MemoryStore>>) -> Self {
+        self.memory = Some(store);
+        self
+    }
+
+    /// Retrieve relevant memories for the given prompt and prepend them to
+    /// the system prompt override for one turn.
+    fn inject_memories(&self, prompt: &str) -> Option<String> {
+        let store = self.memory.as_ref()?;
+        let lock = store.lock().ok()?;
+        let results = lock.search_keyword(prompt, 5).ok()?;
+        if results.is_empty() {
+            return None;
+        }
+        let memory_text: String = results
+            .iter()
+            .map(|e| format!("- {}", e.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let base = self
+            .config
+            .system_prompt
+            .as_deref()
+            .unwrap_or("You are a helpful coding assistant.");
+        Some(format!(
+            "{}\n\n[Relevant memories]\n{}",
+            base, memory_text
+        ))
+    }
+
     /// Turn count from last run (for session result line).
     pub fn turn_count(&self) -> u32 {
         self.last_turn_count
+    }
+
+    /// Replace the current conversation history (for session resume).
+    pub fn replace_history(&mut self, history: Vec<clido_core::Message>) {
+        self.history = history;
+        self.last_turn_count = 0;
+        self.cumulative_cost_usd = 0.0;
+        self.cumulative_input_tokens = 0;
+        self.cumulative_output_tokens = 0;
+    }
+
+    /// Make a single LLM completion call with no tools — used for planning.
+    /// Returns the first text block from the response, or an error.
+    pub async fn complete_simple(&self, prompt: &str) -> clido_core::Result<String> {
+        let messages = vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: prompt.to_string(),
+            }],
+        }];
+        let response = self.provider.complete(&messages, &[], &self.config).await?;
+        let text = response
+            .content
+            .iter()
+            .find_map(|b| {
+                if let ContentBlock::Text { text } = b {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+        Ok(text)
     }
 
     /// Continue from existing history (resume). Does not push a new user message; runs the loop until EndTurn or max_turns.
@@ -167,6 +281,8 @@ impl AgentLoop {
         let schemas = self.tools.schemas();
         let mut turns = 0;
         self.cumulative_cost_usd = 0.0;
+        self.cumulative_input_tokens = 0;
+        self.cumulative_output_tokens = 0;
         const DEFAULT_INPUT_USD_PER_1M: f64 = 3.0;
         const DEFAULT_OUTPUT_USD_PER_1M: f64 = 15.0;
 
@@ -213,6 +329,8 @@ impl AgentLoop {
                         / 1_000_000.0
                 });
             self.cumulative_cost_usd += turn_cost;
+            self.cumulative_input_tokens += response.usage.input_tokens;
+            self.cumulative_output_tokens += response.usage.output_tokens;
 
             if let Some(limit) = self.config.max_budget_usd {
                 if self.cumulative_cost_usd > limit {
@@ -280,42 +398,90 @@ impl AgentLoop {
                             .unwrap_or(false)
                     });
 
-                    let outputs: Vec<ToolOutput> = if all_read_only && tool_uses.len() > 1 {
+                    let outputs: Vec<(ToolOutput, u64)> = if all_read_only && tool_uses.len() > 1 {
                         if let Some(ref e) = self.emit {
                             for (_, name, input) in &tool_uses {
                                 e.on_tool_start(name, input).await;
                             }
                         }
-                        let results = self.execute_tool_batch(&tool_uses).await;
-                        if let Some(ref e) = self.emit {
-                            for ((_, name, _), output) in tool_uses.iter().zip(results.iter()) {
-                                e.on_tool_done(name, output.is_error).await;
+                        for (_, name, input) in &tool_uses {
+                            if let Some(ref hooks) = self.hooks {
+                                if let Some(cmd) = &hooks.pre_tool_use {
+                                    run_hook(cmd, &[
+                                        ("CLIDO_TOOL_NAME", name.as_str()),
+                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
+                                    ]);
+                                }
                             }
                         }
-                        results
+                        let t0 = std::time::Instant::now();
+                        let results = self.execute_tool_batch(&tool_uses).await;
+                        let batch_ms = t0.elapsed().as_millis() as u64;
+                        if let Some(ref e) = self.emit {
+                            for ((_, name, _), output) in tool_uses.iter().zip(results.iter()) {
+                                e.on_tool_done(name, output.is_error, output.diff.clone()).await;
+                            }
+                        }
+                        for ((_, name, input), output) in tool_uses.iter().zip(results.iter()) {
+                            self.write_audit(name, input, output, batch_ms);
+                            if let Some(ref hooks) = self.hooks {
+                                if let Some(cmd) = &hooks.post_tool_use {
+                                    run_hook(cmd, &[
+                                        ("CLIDO_TOOL_NAME", name.as_str()),
+                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
+                                        ("CLIDO_TOOL_OUTPUT", &output.content.chars().take(500).collect::<String>()),
+                                        ("CLIDO_TOOL_IS_ERROR", if output.is_error { "true" } else { "false" }),
+                                        ("CLIDO_TOOL_DURATION_MS", &batch_ms.to_string()),
+                                    ]);
+                                }
+                            }
+                        }
+                        results.into_iter().map(|o| (o, batch_ms)).collect()
                     } else {
                         let mut outputs = Vec::new();
                         for (_, name, input) in &tool_uses {
                             if let Some(ref e) = self.emit {
                                 e.on_tool_start(name, input).await;
                             }
-                            let output = self.execute_tool_maybe_gated(name, input).await;
-                            if let Some(ref e) = self.emit {
-                                e.on_tool_done(name, output.is_error).await;
+                            if let Some(ref hooks) = self.hooks {
+                                if let Some(cmd) = &hooks.pre_tool_use {
+                                    run_hook(cmd, &[
+                                        ("CLIDO_TOOL_NAME", name.as_str()),
+                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
+                                    ]);
+                                }
                             }
-                            outputs.push(output);
+                            let t0 = std::time::Instant::now();
+                            let output = self.execute_tool_maybe_gated(name, input).await;
+                            let duration_ms = t0.elapsed().as_millis() as u64;
+                            if let Some(ref e) = self.emit {
+                                e.on_tool_done(name, output.is_error, output.diff.clone()).await;
+                            }
+                            self.write_audit(name, input, &output, duration_ms);
+                            if let Some(ref hooks) = self.hooks {
+                                if let Some(cmd) = &hooks.post_tool_use {
+                                    run_hook(cmd, &[
+                                        ("CLIDO_TOOL_NAME", name.as_str()),
+                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
+                                        ("CLIDO_TOOL_OUTPUT", &output.content.chars().take(500).collect::<String>()),
+                                        ("CLIDO_TOOL_IS_ERROR", if output.is_error { "true" } else { "false" }),
+                                        ("CLIDO_TOOL_DURATION_MS", &duration_ms.to_string()),
+                                    ]);
+                                }
+                            }
+                            outputs.push((output, duration_ms));
                         }
                         outputs
                     };
 
                     let mut tool_results = Vec::new();
-                    for ((id, _, _), output) in tool_uses.iter().zip(outputs.iter()) {
+                    for ((id, _, _), (output, duration_ms)) in tool_uses.iter().zip(outputs.iter()) {
                         if let Some(ref mut w) = session {
                             let _ = w.write_line(&SessionLine::ToolResult {
                                 tool_use_id: id.clone(),
                                 content: output.content.clone(),
                                 is_error: output.is_error,
-                                duration_ms: None,
+                                duration_ms: Some(*duration_ms),
                                 path: output.path.clone(),
                                 content_hash: output.content_hash.clone(),
                                 mtime_nanos: output.mtime_nanos,
@@ -392,6 +558,11 @@ impl AgentLoop {
         pricing: Option<&PricingTable>,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
+        // Inject relevant memories into system prompt before running.
+        if let Some(injected) = self.inject_memories(user_input) {
+            self.config.system_prompt = Some(injected);
+        }
+
         let user_msg = Message {
             role: Role::User,
             content: vec![ContentBlock::Text {
@@ -424,6 +595,8 @@ impl AgentLoop {
         let schemas = self.tools.schemas();
         let mut turns = 0;
         self.cumulative_cost_usd = 0.0;
+        self.cumulative_input_tokens = 0;
+        self.cumulative_output_tokens = 0;
         const DEFAULT_INPUT_USD_PER_1M: f64 = 3.0;
         const DEFAULT_OUTPUT_USD_PER_1M: f64 = 15.0;
 
@@ -470,6 +643,8 @@ impl AgentLoop {
                         / 1_000_000.0
                 });
             self.cumulative_cost_usd += turn_cost;
+            self.cumulative_input_tokens += response.usage.input_tokens;
+            self.cumulative_output_tokens += response.usage.output_tokens;
 
             if let Some(limit) = self.config.max_budget_usd {
                 if self.cumulative_cost_usd > limit {
@@ -517,7 +692,25 @@ impl AgentLoop {
                     return Ok(text.trim().to_string());
                 }
                 StopReason::ToolUse => {
-                    // Execute each tool use and push results as user message
+                    // Emit any text blocks the model produced before/alongside tool calls.
+                    let thinking: String = response
+                        .content
+                        .iter()
+                        .filter_map(|b| {
+                            if let ContentBlock::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    if !thinking.trim().is_empty() {
+                        if let Some(ref e) = self.emit {
+                            e.on_assistant_text(&thinking).await;
+                        }
+                    }
+
                     let tool_uses: Vec<(String, String, serde_json::Value)> = response
                         .content
                         .iter()
@@ -547,42 +740,90 @@ impl AgentLoop {
                             .unwrap_or(false)
                     });
 
-                    let outputs: Vec<ToolOutput> = if all_read_only && tool_uses.len() > 1 {
+                    let outputs: Vec<(ToolOutput, u64)> = if all_read_only && tool_uses.len() > 1 {
                         if let Some(ref e) = self.emit {
                             for (_, name, input) in &tool_uses {
                                 e.on_tool_start(name, input).await;
                             }
                         }
-                        let results = self.execute_tool_batch(&tool_uses).await;
-                        if let Some(ref e) = self.emit {
-                            for ((_, name, _), output) in tool_uses.iter().zip(results.iter()) {
-                                e.on_tool_done(name, output.is_error).await;
+                        for (_, name, input) in &tool_uses {
+                            if let Some(ref hooks) = self.hooks {
+                                if let Some(cmd) = &hooks.pre_tool_use {
+                                    run_hook(cmd, &[
+                                        ("CLIDO_TOOL_NAME", name.as_str()),
+                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
+                                    ]);
+                                }
                             }
                         }
-                        results
+                        let t0 = std::time::Instant::now();
+                        let results = self.execute_tool_batch(&tool_uses).await;
+                        let batch_ms = t0.elapsed().as_millis() as u64;
+                        if let Some(ref e) = self.emit {
+                            for ((_, name, _), output) in tool_uses.iter().zip(results.iter()) {
+                                e.on_tool_done(name, output.is_error, output.diff.clone()).await;
+                            }
+                        }
+                        for ((_, name, input), output) in tool_uses.iter().zip(results.iter()) {
+                            self.write_audit(name, input, output, batch_ms);
+                            if let Some(ref hooks) = self.hooks {
+                                if let Some(cmd) = &hooks.post_tool_use {
+                                    run_hook(cmd, &[
+                                        ("CLIDO_TOOL_NAME", name.as_str()),
+                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
+                                        ("CLIDO_TOOL_OUTPUT", &output.content.chars().take(500).collect::<String>()),
+                                        ("CLIDO_TOOL_IS_ERROR", if output.is_error { "true" } else { "false" }),
+                                        ("CLIDO_TOOL_DURATION_MS", &batch_ms.to_string()),
+                                    ]);
+                                }
+                            }
+                        }
+                        results.into_iter().map(|o| (o, batch_ms)).collect()
                     } else {
                         let mut outputs = Vec::new();
                         for (_, name, input) in &tool_uses {
                             if let Some(ref e) = self.emit {
                                 e.on_tool_start(name, input).await;
                             }
-                            let output = self.execute_tool_maybe_gated(name, input).await;
-                            if let Some(ref e) = self.emit {
-                                e.on_tool_done(name, output.is_error).await;
+                            if let Some(ref hooks) = self.hooks {
+                                if let Some(cmd) = &hooks.pre_tool_use {
+                                    run_hook(cmd, &[
+                                        ("CLIDO_TOOL_NAME", name.as_str()),
+                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
+                                    ]);
+                                }
                             }
-                            outputs.push(output);
+                            let t0 = std::time::Instant::now();
+                            let output = self.execute_tool_maybe_gated(name, input).await;
+                            let duration_ms = t0.elapsed().as_millis() as u64;
+                            if let Some(ref e) = self.emit {
+                                e.on_tool_done(name, output.is_error, output.diff.clone()).await;
+                            }
+                            self.write_audit(name, input, &output, duration_ms);
+                            if let Some(ref hooks) = self.hooks {
+                                if let Some(cmd) = &hooks.post_tool_use {
+                                    run_hook(cmd, &[
+                                        ("CLIDO_TOOL_NAME", name.as_str()),
+                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
+                                        ("CLIDO_TOOL_OUTPUT", &output.content.chars().take(500).collect::<String>()),
+                                        ("CLIDO_TOOL_IS_ERROR", if output.is_error { "true" } else { "false" }),
+                                        ("CLIDO_TOOL_DURATION_MS", &duration_ms.to_string()),
+                                    ]);
+                                }
+                            }
+                            outputs.push((output, duration_ms));
                         }
                         outputs
                     };
 
                     let mut tool_results = Vec::new();
-                    for ((id, _, _), output) in tool_uses.iter().zip(outputs.iter()) {
+                    for ((id, _, _), (output, duration_ms)) in tool_uses.iter().zip(outputs.iter()) {
                         if let Some(ref mut w) = session {
                             let _ = w.write_line(&SessionLine::ToolResult {
                                 tool_use_id: id.clone(),
                                 content: output.content.clone(),
                                 is_error: output.is_error,
-                                duration_ms: None,
+                                duration_ms: Some(*duration_ms),
                                 path: output.path.clone(),
                                 content_hash: output.content_hash.clone(),
                                 mtime_nanos: output.mtime_nanos,
@@ -662,6 +903,25 @@ impl AgentLoop {
         }
     }
 
+    /// Write an audit entry for a completed tool call.
+    fn write_audit(&self, tool_name: &str, tool_input: &serde_json::Value, output: &ToolOutput, duration_ms: u64) {
+        if let Some(ref audit) = self.audit_log {
+            let entry = AuditEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                session_id: String::new(),
+                tool_name: tool_name.to_string(),
+                input_summary: serde_json::to_string(tool_input)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(200)
+                    .collect(),
+                is_error: output.is_error,
+                duration_ms,
+            };
+            let _ = audit.lock().unwrap().append(&entry);
+        }
+    }
+
     /// Execute a batch of tool calls, using parallel execution if all are read-only.
     /// Returns results in the same order as the input tool_uses slice.
     async fn execute_tool_batch(
@@ -706,4 +966,14 @@ impl AgentLoop {
             results
         }
     }
+}
+
+/// Fire-and-forget hook execution (blocking, errors silently ignored).
+fn run_hook(cmd: &str, env_vars: &[(&str, &str)]) {
+    let mut command = std::process::Command::new("sh");
+    command.arg("-c").arg(cmd);
+    for (k, v) in env_vars {
+        command.env(k, v);
+    }
+    let _ = command.spawn();
 }

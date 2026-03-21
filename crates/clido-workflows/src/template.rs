@@ -32,11 +32,19 @@ pub fn build_tera_context(ctx: &WorkflowContext) -> Result<Context> {
     Ok(tera_ctx)
 }
 
+/// Normalize `${{ ... }}` (GitHub Actions style) to `{{ ... }}` (Tera style).
+/// This allows workflow YAML to use either notation interchangeably.
+pub fn normalize_template(template_str: &str) -> String {
+    template_str.replace("${{", "{{")
+}
+
 /// Render a template string with the given context. Missing variable → Workflow error.
+/// Supports both `{{ inputs.name }}` (Tera) and `${{ inputs.name }}` (GitHub Actions) syntax.
 pub fn render(template_str: &str, ctx: &WorkflowContext) -> Result<String> {
+    let normalized = normalize_template(template_str);
     let tera_ctx = build_tera_context(ctx)?;
     let mut tera = Tera::default();
-    tera.add_raw_template("inline", template_str)
+    tera.add_raw_template("inline", &normalized)
         .map_err(|e| ClidoError::Workflow(format!("Template parse error: {}", e)))?;
     tera.render("inline", &tera_ctx)
         .map_err(|e| ClidoError::Workflow(format!("Template render error: {}", e)))
@@ -66,6 +74,19 @@ mod tests {
         ctx.set_step_output("a", "output", "step a result".to_string());
         let out = render("Previous: {{ steps.a.output }}", &ctx).unwrap();
         assert_eq!(out, "Previous: step a result");
+    }
+
+    #[test]
+    fn render_github_actions_style_inputs() {
+        let mut inputs = HashMap::new();
+        inputs.insert(
+            "repo".to_string(),
+            serde_json::Value::String("my-repo".to_string()),
+        );
+        let ctx = WorkflowContext::new(inputs);
+        // ${{ inputs.repo }} should work the same as {{ inputs.repo }}
+        let out = render("Review ${{ inputs.repo }}", &ctx).unwrap();
+        assert_eq!(out, "Review my-repo");
     }
 
     #[test]

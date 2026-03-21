@@ -6,7 +6,7 @@ pub mod error;
 pub mod pricing;
 pub mod types;
 
-pub use config::{AgentConfig, PermissionMode, ProviderConfig, ProviderType};
+pub use config::{AgentConfig, HooksConfig, PermissionMode, ProviderConfig, ProviderType};
 pub use config_loader::{
     agent_config_from_loaded, config_file_exists, load_config, LoadedConfig, ProfileEntry,
 };

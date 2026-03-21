@@ -9,7 +9,7 @@ use futures::stream;
 use futures::Stream;
 use std::pin::Pin;
 use std::time::Duration;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::provider::{ModelProvider, StreamEvent};
 
@@ -22,14 +22,16 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     pub fn new(api_key: String, model: String) -> Self {
-        Self {
-            client: reqwest::Client::new(),
-            api_key,
-            model,
-        }
+        let client = reqwest::Client::builder()
+            // Total request timeout (connect + send + body read).
+            .timeout(Duration::from_secs(120))
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .unwrap_or_default();
+        Self { client, api_key, model }
     }
 
-    /// Build request body and POST to API.
+    /// Build request body and POST to API, with robust retry/backoff.
     async fn complete_impl(
         &self,
         messages: &[Message],
@@ -68,65 +70,169 @@ impl AnthropicProvider {
             })
             .collect();
 
+        let system_blocks = serde_json::json!([{
+            "type": "text",
+            "text": system,
+            "cache_control": {"type": "ephemeral"}
+        }]);
+
         let body = serde_json::json!({
             "model": self.model,
             "max_tokens": 8192,
-            "system": system,
+            "system": system_blocks,
             "messages": anthropic_messages,
             "tools": anthropic_tools
         });
 
-        const MAX_ATTEMPTS: u32 = 3;
-        let mut attempt = 0u32;
+        // Max attempts for each failure category.
+        const MAX_RATE_LIMIT_ATTEMPTS: u32 = 6;
+        const MAX_SERVER_ERROR_ATTEMPTS: u32 = 5;
+        const MAX_NETWORK_ATTEMPTS: u32 = 4;
+
+        let mut rate_limit_attempts = 0u32;
+        let mut server_error_attempts = 0u32;
+        let mut network_attempts = 0u32;
+
         loop {
             let res = self
                 .client
                 .post("https://api.anthropic.com/v1/messages")
                 .header("x-api-key", &self.api_key)
                 .header("anthropic-version", "2023-06-01")
+                .header("anthropic-beta", "prompt-caching-2024-07-31")
                 .header("content-type", "application/json")
                 .json(&body)
                 .send()
-                .await
-                .map_err(|e| ClidoError::Provider(e.to_string()))?;
+                .await;
+
+            let res = match res {
+                Ok(r) => r,
+                Err(e) => {
+                    // Network / connection / timeout error — retry a few times.
+                    network_attempts += 1;
+                    if network_attempts < MAX_NETWORK_ATTEMPTS {
+                        let delay_secs = network_backoff_secs(network_attempts);
+                        warn!(
+                            "Network error (attempt {}/{}), retrying in {}s: {}",
+                            network_attempts, MAX_NETWORK_ATTEMPTS, delay_secs, e
+                        );
+                        tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+                        continue;
+                    }
+                    return Err(ClidoError::Provider(format!(
+                        "Connection failed after {} attempts: {}",
+                        MAX_NETWORK_ATTEMPTS,
+                        friendly_network_error(&e)
+                    )));
+                }
+            };
 
             let status = res.status();
+
+            if status.as_u16() == 429 {
+                // Rate limited — respect Retry-After or use exponential backoff.
+                let retry_after = parse_retry_after(res.headers());
+                let _text = res.text().await.unwrap_or_default();
+                rate_limit_attempts += 1;
+                if rate_limit_attempts < MAX_RATE_LIMIT_ATTEMPTS {
+                    let delay = retry_after.unwrap_or_else(|| {
+                        Duration::from_secs(rate_limit_backoff_secs(rate_limit_attempts))
+                    });
+                    info!(
+                        "Rate limited (attempt {}/{}), waiting {:.0}s…",
+                        rate_limit_attempts,
+                        MAX_RATE_LIMIT_ATTEMPTS,
+                        delay.as_secs_f64()
+                    );
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                return Err(ClidoError::Provider(format!(
+                    "Rate limit exceeded after {} attempts. Please wait and try again.",
+                    MAX_RATE_LIMIT_ATTEMPTS
+                )));
+            }
+
             let text = res
                 .text()
                 .await
                 .map_err(|e| ClidoError::Provider(e.to_string()))?;
 
+            if status.is_server_error() {
+                server_error_attempts += 1;
+                if server_error_attempts < MAX_SERVER_ERROR_ATTEMPTS {
+                    let delay_secs = server_error_backoff_secs(server_error_attempts);
+                    warn!(
+                        "Server error {} (attempt {}/{}), retrying in {}s",
+                        status, server_error_attempts, MAX_SERVER_ERROR_ATTEMPTS, delay_secs
+                    );
+                    tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+                    continue;
+                }
+                return Err(ClidoError::Provider(format!(
+                    "API server error ({}) after {} attempts. Please try again later.",
+                    status.as_u16(),
+                    MAX_SERVER_ERROR_ATTEMPTS
+                )));
+            }
+
             if status.is_success() {
-                let json: serde_json::Value =
-                    serde_json::from_str(&text).map_err(|e| ClidoError::Provider(e.to_string()))?;
+                let json: serde_json::Value = serde_json::from_str(&text)
+                    .map_err(|e| ClidoError::Provider(e.to_string()))?;
                 return parse_anthropic_response(&json);
             }
 
-            let retriable = status.as_u16() == 429 || status.is_server_error();
-            if retriable && attempt < MAX_ATTEMPTS - 1 {
-                attempt += 1;
-                let delay_ms = match attempt {
-                    1 => 1000,
-                    2 => 2000,
-                    _ => 4000,
-                };
-                warn!(
-                    "Provider {} (attempt {}/{}), retrying in {}ms: {}",
-                    status,
-                    attempt,
-                    MAX_ATTEMPTS,
-                    delay_ms,
-                    text.chars().take(200).collect::<String>()
-                );
-                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                continue;
-            }
-
-            return Err(ClidoError::Provider(format!(
-                "API error {}: {}",
-                status, text
-            )));
+            // Other client errors (400, 401, 403, etc.) — don't retry.
+            return Err(ClidoError::Provider(extract_api_error(status, &text)));
         }
+    }
+}
+
+/// Parse `Retry-After` header value (integer seconds only; HTTP-date not supported).
+fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    headers
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        // Cap at 5 minutes to avoid waiting forever on a bad header value.
+        .map(|secs| Duration::from_secs(secs.min(300)))
+}
+
+/// Backoff for rate limits: 15s, 30s, 60s, 90s, 120s, …
+fn rate_limit_backoff_secs(attempt: u32) -> u64 {
+    let base: u64 = 15 * (1u64 << (attempt - 1).min(3));
+    base.min(120)
+}
+
+/// Backoff for server errors: 1s, 2s, 4s, 8s, 16s.
+fn server_error_backoff_secs(attempt: u32) -> u64 {
+    (1u64 << (attempt - 1).min(4)).min(16)
+}
+
+/// Backoff for network errors: 1s, 2s, 4s.
+fn network_backoff_secs(attempt: u32) -> u64 {
+    (1u64 << (attempt - 1).min(2)).min(4)
+}
+
+/// Try to extract a clean message from an Anthropic error JSON body.
+fn extract_api_error(status: reqwest::StatusCode, text: &str) -> String {
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
+        if let Some(msg) = json["error"]["message"].as_str() {
+            return format!("API error ({}): {}", status.as_u16(), msg);
+        }
+    }
+    let preview = &text[..text.len().min(300)];
+    format!("API error ({}): {}", status.as_u16(), preview)
+}
+
+/// Produce a human-readable message for a reqwest network error.
+fn friendly_network_error(e: &reqwest::Error) -> String {
+    if e.is_timeout() {
+        "request timed out".to_string()
+    } else if e.is_connect() {
+        "could not connect to api.anthropic.com — check your internet connection".to_string()
+    } else {
+        e.to_string()
     }
 }
 

@@ -4,22 +4,28 @@ use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
+use crate::file_tracker::FileTracker;
 use crate::path_guard::PathGuard;
 use crate::secrets::scan_for_secrets;
 use crate::{Tool, ToolOutput};
 
 pub struct WriteTool {
     guard: PathGuard,
+    tracker: Option<FileTracker>,
 }
 
 impl WriteTool {
     pub fn new(workspace_root: PathBuf) -> Self {
         Self {
             guard: PathGuard::new(workspace_root),
+            tracker: None,
         }
     }
     pub fn new_with_guard(guard: PathGuard) -> Self {
-        Self { guard }
+        Self { guard, tracker: None }
+    }
+    pub fn new_with_tracker(guard: PathGuard, tracker: FileTracker) -> Self {
+        Self { guard, tracker: Some(tracker) }
     }
 }
 
@@ -37,11 +43,10 @@ impl Tool for WriteTool {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "file_path": { "type": "string" },
-                "path": { "type": "string" },
-                "content": { "type": "string" }
+                "file_path": { "type": "string", "description": "Path to the file to write (relative to cwd)" },
+                "content": { "type": "string", "description": "Full content to write to the file" }
             },
-            "required": ["content"]
+            "required": ["file_path", "content"]
         })
     }
 
@@ -75,6 +80,13 @@ impl Tool for WriteTool {
             Err(e) => return ToolOutput::err(e),
         };
 
+        // Check for external modification only for files that were previously read.
+        if let Some(ref tracker) = self.tracker {
+            if let Some(err) = tracker.check_not_stale(&path) {
+                return ToolOutput::err(err);
+            }
+        }
+
         if let Some(parent) = path.parent() {
             if let Err(e) = tokio::fs::create_dir_all(parent).await {
                 return ToolOutput::err(e.to_string());
@@ -91,6 +103,10 @@ impl Tool for WriteTool {
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_nanos() as u64)
                     .unwrap_or(0);
+                // Update tracker so the next write to this file (same session) doesn't false-alarm.
+                if let Some(ref tracker) = self.tracker {
+                    tracker.update(&path, mtime_nanos);
+                }
                 ToolOutput::ok_with_meta(
                     "File written successfully.".to_string(),
                     path.display().to_string(),

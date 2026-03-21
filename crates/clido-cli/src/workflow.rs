@@ -9,9 +9,9 @@ use clido_core::{
 use clido_storage::{workflow_run_path, SessionWriter};
 use clido_tools::default_registry;
 use clido_workflows::{
-    load as load_workflow, render, run_workflow as run_workflow_exec,
-    validate as validate_workflow, StepRunRequest, StepRunResult, WorkflowContext,
-    WorkflowStepRunner,
+    load as load_workflow, preflight as preflight_workflow, render,
+    run_workflow as run_workflow_exec, validate as validate_workflow, PreflightStatus,
+    StepRunRequest, StepRunResult, WorkflowContext, WorkflowStepRunner,
 };
 use std::env;
 use std::io::Write;
@@ -33,6 +33,7 @@ pub async fn run_workflow(cmd: &WorkflowCmd) -> Result<(), anyhow::Error> {
         WorkflowCmd::Validate { path } => run_workflow_validate(path).await,
         WorkflowCmd::Inspect { path } => run_workflow_inspect(path).await,
         WorkflowCmd::List => run_workflow_list().await,
+        WorkflowCmd::Check { path, json } => run_workflow_check(path, *json).await,
     }
 }
 
@@ -247,6 +248,58 @@ async fn run_workflow_list() -> Result<(), anyhow::Error> {
     for path in found {
         if let Ok(def) = load_workflow(&path) {
             println!("  {}  {}", def.name, path.display());
+        }
+    }
+    Ok(())
+}
+
+async fn run_workflow_check(path: &Path, json: bool) -> Result<(), anyhow::Error> {
+    let workspace_root = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let def = load_workflow(path).map_err(|e| CliError::Usage(e.to_string()))?;
+    // Gather available profiles and tools from config
+    let (available_profiles, available_tools) = match load_config(&workspace_root) {
+        Ok(loaded) => {
+            let profiles: Vec<String> = loaded.profiles.keys().cloned().collect();
+            let tools: Vec<String> = {
+                let reg = clido_tools::default_registry(workspace_root.clone());
+                reg.schemas().into_iter().map(|s| s.name).collect()
+            };
+            (profiles, tools)
+        }
+        Err(_) => (vec![], vec![]),
+    };
+    let profile_refs: Vec<&str> = available_profiles.iter().map(String::as_str).collect();
+    let tool_refs: Vec<&str> = available_tools.iter().map(String::as_str).collect();
+    let result = preflight_workflow(&def, &profile_refs, &tool_refs);
+
+    if json {
+        let items: Vec<serde_json::Value> = result
+            .checks
+            .iter()
+            .map(|c| {
+                let (status, msg) = match &c.status {
+                    PreflightStatus::Pass => ("pass", String::new()),
+                    PreflightStatus::Warn(m) => ("warn", m.clone()),
+                    PreflightStatus::Fail(m) => ("fail", m.clone()),
+                };
+                serde_json::json!({ "name": c.name, "status": status, "message": msg })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+    } else {
+        for check in &result.checks {
+            let (icon, msg) = match &check.status {
+                PreflightStatus::Pass => ("PASS", String::new()),
+                PreflightStatus::Warn(m) => ("WARN", format!(" — {}", m)),
+                PreflightStatus::Fail(m) => ("FAIL", format!(" — {}", m)),
+            };
+            println!("[{}] {}{}", icon, check.name, msg);
+        }
+        if result.is_ok() {
+            println!("Preflight OK");
+        } else {
+            println!("Preflight FAILED");
+            return Err(CliError::Usage("Preflight failed".into()).into());
         }
     }
     Ok(())

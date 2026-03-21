@@ -7,10 +7,32 @@ edition = "2021"
 name = "clido"
 path = "src/main.rs"
 
+[[bench]]
+name = "startup"
+harness = false
+
+[dev-dependencies]
+criterion = { workspace = true }
+tempfile = "3"
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+clido-workflows = { path = "../clido-workflows" }
+clido-memory = { path = "../clido-memory" }
+clido-index = { path = "../clido-index" }
+clido-agent = { path = "../clido-agent" }
+clido-tools = { path = "../clido-tools" }
+clido-core = { path = "../clido-core" }
+clido-providers = { path = "../clido-providers" }
+futures = { workspace = true }
+tokio = { workspace = true }
+
 [dependencies]
 async-trait = { workspace = true }
 clido-agent = { path = "../clido-agent" }
 clido-core = { path = "../clido-core" }
+clido-index = { path = "../clido-index" }
+clido-memory = { path = "../clido-memory" }
+clido-planner = { path = "../clido-planner" }
 clido-providers = { path = "../clido-providers" }
 clido-storage = { path = "../clido-storage" }
 clido-tools = { path = "../clido-tools" }
@@ -29,4 +51,6 @@ ratatui = { workspace = true }
 crossterm = { workspace = true }
 futures = { workspace = true }
 libc = { workspace = true }
+clap_complete = { workspace = true }
+clap_mangen = { workspace = true }
 

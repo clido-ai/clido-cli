@@ -2,24 +2,31 @@
 
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
+use similar::{ChangeTag, TextDiff};
 use std::path::PathBuf;
 
+use crate::file_tracker::FileTracker;
 use crate::path_guard::PathGuard;
 use crate::secrets::scan_for_secrets;
 use crate::{Tool, ToolOutput};
 
 pub struct EditTool {
     guard: PathGuard,
+    tracker: Option<FileTracker>,
 }
 
 impl EditTool {
     pub fn new(workspace_root: PathBuf) -> Self {
         Self {
             guard: PathGuard::new(workspace_root),
+            tracker: None,
         }
     }
     pub fn new_with_guard(guard: PathGuard) -> Self {
-        Self { guard }
+        Self { guard, tracker: None }
+    }
+    pub fn new_with_tracker(guard: PathGuard, tracker: FileTracker) -> Self {
+        Self { guard, tracker: Some(tracker) }
     }
 }
 
@@ -37,13 +44,12 @@ impl Tool for EditTool {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "file_path": { "type": "string" },
-                "path": { "type": "string" },
-                "old_string": { "type": "string" },
-                "new_string": { "type": "string" },
-                "replace_all": { "type": "boolean", "default": false }
+                "file_path": { "type": "string", "description": "Path to the file to edit (relative to cwd)" },
+                "old_string": { "type": "string", "description": "Exact string to replace" },
+                "new_string": { "type": "string", "description": "Replacement string" },
+                "replace_all": { "type": "boolean", "default": false, "description": "Replace all occurrences instead of just the first" }
             },
-            "required": ["old_string"]
+            "required": ["file_path", "old_string", "new_string"]
         })
     }
 
@@ -82,6 +88,13 @@ impl Tool for EditTool {
             Err(e) => return ToolOutput::err(e),
         };
 
+        // Check for external modification before reading+writing.
+        if let Some(ref tracker) = self.tracker {
+            if let Some(err) = tracker.check_not_stale(&path) {
+                return ToolOutput::err(err);
+            }
+        }
+
         let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
             Err(e) => return ToolOutput::err(e.to_string()),
@@ -96,6 +109,7 @@ impl Tool for EditTool {
             );
         }
 
+        let old_content = content.clone();
         let new_content = if replace_all {
             content.replace(old_string, new_string)
         } else {
@@ -123,13 +137,58 @@ impl Tool for EditTool {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0);
-        ToolOutput::ok_with_meta(
+        // Update tracker so subsequent edits to the same file in one session don't false-alarm.
+        if let Some(ref tracker) = self.tracker {
+            tracker.update(&path, mtime_nanos);
+        }
+        let diff = build_unified_diff(path_str, &old_content, &new_content);
+        let mut out = ToolOutput::ok_with_meta(
             format!("The file {} has been updated successfully.", path.display()),
             path.display().to_string(),
             hash,
             mtime_nanos,
-        )
+        );
+        out.diff = Some(diff);
+        out
     }
+}
+
+/// Produce a compact unified diff string (±5 context lines).
+fn build_unified_diff(path: &str, old: &str, new: &str) -> String {
+    let diff = TextDiff::from_lines(old, new);
+    let mut out = String::new();
+    for group in diff.grouped_ops(3) {
+        // Header: --- a/path  +++ b/path
+        if out.is_empty() {
+            out.push_str(&format!("--- a/{}\n+++ b/{}\n", path, path));
+        }
+        let first = group.first().unwrap();
+        let last = group.last().unwrap();
+        let old_start = first.old_range().start + 1;
+        let old_len: usize = group.iter().map(|op| op.old_range().len()).sum();
+        let new_start = first.new_range().start + 1;
+        let new_len: usize = group.iter().map(|op| op.new_range().len()).sum();
+        out.push_str(&format!(
+            "@@ -{},{} +{},{} @@\n",
+            old_start, old_len, new_start, new_len
+        ));
+        let _ = last; // suppress unused warning
+        for op in &group {
+            for change in diff.iter_changes(op) {
+                let prefix = match change.tag() {
+                    ChangeTag::Delete => "-",
+                    ChangeTag::Insert => "+",
+                    ChangeTag::Equal => " ",
+                };
+                out.push_str(prefix);
+                out.push_str(change.value());
+                if !change.value().ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]

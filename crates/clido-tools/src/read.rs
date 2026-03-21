@@ -3,21 +3,36 @@
 use async_trait::async_trait;
 use std::path::PathBuf;
 
+use crate::file_tracker::FileTracker;
 use crate::path_guard::PathGuard;
 use crate::{Tool, ToolOutput};
 
 pub struct ReadTool {
     guard: PathGuard,
+    tracker: Option<FileTracker>,
+    read_cache: Option<clido_context::read_cache::ReadCache>,
 }
 
 impl ReadTool {
     pub fn new(workspace_root: PathBuf) -> Self {
         Self {
             guard: PathGuard::new(workspace_root),
+            tracker: None,
+            read_cache: None,
         }
     }
     pub fn new_with_guard(guard: PathGuard) -> Self {
-        Self { guard }
+        Self { guard, tracker: None, read_cache: None }
+    }
+    pub fn new_with_tracker(guard: PathGuard, tracker: FileTracker) -> Self {
+        Self { guard, tracker: Some(tracker), read_cache: None }
+    }
+    pub fn new_with_cache(
+        guard: PathGuard,
+        tracker: FileTracker,
+        read_cache: clido_context::read_cache::ReadCache,
+    ) -> Self {
+        Self { guard, tracker: Some(tracker), read_cache: Some(read_cache) }
     }
 }
 
@@ -84,10 +99,56 @@ impl Tool for ReadTool {
             ));
         }
 
+        // Compute a lightweight hash of mtime+size for cache keying.
+        let cache_hash = {
+            use std::time::UNIX_EPOCH;
+            let mtime_ns = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            format!("{}-{}", mtime_ns, meta.len())
+        };
+
+        // Check the in-memory read cache before hitting disk.
+        if let Some(ref cache) = self.read_cache {
+            if let Some(cached) = cache.get(&path, &cache_hash) {
+                let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                if offset == 0 && limit == 0 {
+                    // Full-file read: return cached directly.
+                    if let Some(ref tracker) = self.tracker {
+                        let mtime = meta
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_nanos() as u64)
+                            .unwrap_or(0);
+                        tracker.record(&path, mtime);
+                    }
+                    // Re-format with line numbers.
+                    let lines: Vec<&str> = cached.lines().collect();
+                    let out: String = lines
+                        .iter()
+                        .enumerate()
+                        .map(|(i, line)| format!("{:>6}\u{2192}{}", i + 1, line))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    return ToolOutput::ok(out);
+                }
+            }
+        }
+
         let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
             Err(e) => return ToolOutput::err(e.to_string()),
         };
+
+        // Populate cache for full-file reads.
+        if let Some(ref cache) = self.read_cache {
+            cache.insert(path.clone(), cache_hash, content.clone());
+        }
 
         let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -118,6 +179,18 @@ impl Tool for ReadTool {
                 "File has {} lines; offset {} is out of range.",
                 total, offset
             ));
+        }
+
+        // Record mtime so Edit/Write can detect external modifications later.
+        if let Some(ref tracker) = self.tracker {
+            let mtime = tokio::fs::metadata(&path)
+                .await
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            tracker.record(&path, mtime);
         }
 
         ToolOutput::ok(out)

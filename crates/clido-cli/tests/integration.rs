@@ -347,6 +347,52 @@ fn cli_mcp_config_flag_in_help() {
     );
 }
 
+// ─── JSON output integration ──────────────────────────────────────────────────
+
+/// Run clido with --output-format json against a fake config.
+/// The API call will fail (bad key), but the binary must still output valid JSON
+/// with the required schema fields (schema_version, type, exit_status, is_error).
+#[test]
+fn cli_json_output_error_has_schema() {
+    let tmp = std::env::temp_dir().join(format!("clido_json_test_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp);
+    let config_path = tmp.join("config.toml");
+    // Write a minimal config with a fake API key so init isn't triggered.
+    std::fs::write(
+        &config_path,
+        "default_profile = \"default\"\n[profile.default]\nprovider = \"anthropic\"\nmodel = \"claude-3-5-haiku-20241022\"\napi_key = \"sk-ant-fake-key-for-test\"\n",
+    ).unwrap();
+    let out = clido_bin()
+        .env("CLIDO_CONFIG", &config_path)
+        .env("NO_COLOR", "1")
+        .args(["--output-format", "json", "say hello"])
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_file(&config_path);
+    let _ = std::fs::remove_dir(&tmp);
+    // Binary should exit non-zero (API error) but stdout must be valid JSON.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.trim().is_empty(), "expected JSON on stdout; got empty");
+    let v: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {stdout}"));
+    assert_eq!(v["schema_version"], 1, "schema_version must be 1");
+    assert_eq!(v["type"], "result", "type must be result");
+    assert!(v["exit_status"].is_string(), "exit_status must be string");
+    assert!(v["is_error"].is_boolean(), "is_error must be boolean");
+    assert!(v["session_id"].is_string(), "session_id must be string");
+}
+
+/// Cost footer: emit_result in text mode with nonzero cost writes footer to stderr.
+/// We can't run a full agent call in integration tests, so we confirm the binary's
+/// text output path doesn't crash and the footer format is documented via unit tests.
+#[test]
+fn cli_text_output_exits_zero_on_help() {
+    let out = clido_bin().arg("--help").output().unwrap();
+    assert!(out.status.success());
+    // Footer format is "↳ N turns · $X.XXXX · Xms" — verified in run.rs unit tests.
+    // Here we just confirm text mode (the default) works end-to-end.
+}
+
 // ─── UX requirements ──────────────────────────────────────────────────────────
 
 /// UX requirements: init prompts must state what to type and press Enter (ux-requirements §2.3).

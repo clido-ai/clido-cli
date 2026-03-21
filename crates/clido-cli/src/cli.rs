@@ -73,7 +73,7 @@ pub struct Cli {
     #[arg(long)]
     pub tools: Option<String>,
 
-    /// Output format: text, json, stream-json.
+    /// Output format: text (default), json, or stream-json.
     #[arg(long, env = "CLIDO_OUTPUT_FORMAT", default_value = "text")]
     pub output_format: String,
 
@@ -89,7 +89,7 @@ pub struct Cli {
     #[arg(short = 'q', long)]
     pub quiet: bool,
 
-    /// MCP config file path (Model Context Protocol).
+    /// Path to MCP server config (JSON/YAML) for Model Context Protocol tool servers.
     #[arg(long)]
     pub mcp_config: Option<std::path::PathBuf>,
 
@@ -104,11 +104,24 @@ pub struct Cli {
     /// Working directory (default: current directory).
     #[arg(long, short = 'C', env = "CLIDO_WORKDIR")]
     pub workdir: Option<std::path::PathBuf>,
+
+    /// Input format: text (default) or stream-json (for SDK/subprocess use).
+    #[arg(long, env = "CLIDO_INPUT_FORMAT", default_value = "text")]
+    pub input_format: String,
+
+    /// Enable Bash sandboxing (sandbox-exec on macOS, bwrap on Linux).
+    #[arg(long)]
+    pub sandbox: bool,
+
+    /// Enable task decomposition planner (experimental): decomposes the prompt into a DAG
+    /// of subtasks before executing. Falls back to the reactive loop on plan failure.
+    #[arg(long)]
+    pub planner: bool,
 }
 
 #[derive(clap::Subcommand, Debug, Clone)]
 pub enum Subcommand {
-    /// Session commands.
+    /// Manage sessions (list, show, fork, resume).
     Sessions {
         #[command(subcommand)]
         cmd: SessionsCmd,
@@ -120,7 +133,7 @@ pub enum Subcommand {
     /// Explicit setup / config wizard.
     Init,
 
-    /// Run health checks (API key, session dir, pricing).
+    /// Check environment, API key, config, and tool health.
     Doctor,
 
     /// Show or edit config values.
@@ -129,13 +142,13 @@ pub enum Subcommand {
         cmd: ConfigCmd,
     },
 
-    /// Workflow commands (run, validate, inspect, list).
+    /// Run declarative YAML workflows (run, validate, inspect, list).
     Workflow {
         #[command(subcommand)]
         cmd: WorkflowCmd,
     },
 
-    /// List available models (per provider or all).
+    /// List available models by provider.
     ListModels {
         /// Provider filter (anthropic, openrouter, local).
         #[arg(long)]
@@ -145,8 +158,90 @@ pub enum Subcommand {
         json: bool,
     },
 
-    /// Update pricing data (bundled; shows current file path and age).
+    /// Update model pricing data from remote (shows current file path and age).
     UpdatePricing,
+
+    /// Run an agent with a prompt (scriptable alias for positional prompt).
+    Run {
+        /// Prompt to send to the agent.
+        #[arg(trailing_var_arg = true)]
+        prompt: Vec<String>,
+    },
+
+    /// Show session statistics (cost, turns, timing).
+    Stats {
+        /// Filter to a specific session ID.
+        #[arg(long)]
+        session: Option<String>,
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// View the tool call audit log.
+    Audit {
+        /// Tail mode (last N entries).
+        #[arg(long)]
+        tail: Option<usize>,
+        /// Filter by session ID.
+        #[arg(long)]
+        session: Option<String>,
+        /// Filter by tool name.
+        #[arg(long)]
+        tool: Option<String>,
+        /// Filter by start time (ISO 8601, e.g. 2026-01-01).
+        #[arg(long)]
+        since: Option<String>,
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Generate shell completion scripts.
+    Completions {
+        /// Shell: bash, zsh, fish, powershell, elvish.
+        shell: String,
+    },
+
+    /// Generate man page (output to stdout, pipe to man or save to file).
+    Man,
+
+    /// Long-term memory management (list, prune, reset).
+    Memory {
+        #[command(subcommand)]
+        cmd: MemoryCmd,
+    },
+
+    /// Fetch model list from a provider's API.
+    FetchModels {
+        #[arg(long)]
+        provider: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Repository index management (build, stats, clear) — enables SemanticSearch tool.
+    Index {
+        #[command(subcommand)]
+        cmd: IndexCmd,
+    },
+}
+
+#[derive(clap::Subcommand, Debug, Clone)]
+pub enum IndexCmd {
+    /// Build the repository index (file + symbol index).
+    Build {
+        /// Directory to index (default: current directory).
+        #[arg(long, short = 'd')]
+        dir: Option<PathBuf>,
+        /// File extensions to index, comma-separated (default: rs,py,js,ts,go).
+        #[arg(long, default_value = "rs,py,js,ts,go")]
+        ext: String,
+    },
+    /// Show index statistics.
+    Stats,
+    /// Clear the index.
+    Clear,
 }
 
 #[derive(clap::Subcommand, Debug, Clone)]
@@ -184,6 +279,35 @@ pub enum WorkflowCmd {
     Inspect { path: PathBuf },
     /// List workflows from configured directories.
     List,
+    /// Run preflight checks on a workflow (profiles, tools, inputs).
+    Check {
+        path: PathBuf,
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(clap::Subcommand, Debug, Clone)]
+pub enum MemoryCmd {
+    /// List memories (most recent first).
+    List {
+        /// Maximum entries to show (default: 20).
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
+    /// Prune old memories, keeping the most recent N.
+    Prune {
+        /// Number of recent memories to keep (default: 100).
+        #[arg(long)]
+        keep: Option<usize>,
+    },
+    /// Reset (delete all) memories.
+    Reset {
+        /// Skip confirmation prompt.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(clap::Subcommand, Debug, Clone)]
@@ -217,6 +341,14 @@ impl Cli {
             Some(Subcommand::Workflow { .. }) => false,
             Some(Subcommand::ListModels { .. }) => false,
             Some(Subcommand::UpdatePricing) => false,
+            Some(Subcommand::Run { .. }) => false,
+            Some(Subcommand::Stats { .. }) => false,
+            Some(Subcommand::Audit { .. }) => false,
+            Some(Subcommand::Completions { .. }) => false,
+            Some(Subcommand::Man) => false,
+            Some(Subcommand::Memory { .. }) => false,
+            Some(Subcommand::FetchModels { .. }) => false,
+            Some(Subcommand::Index { .. }) => false,
         }
     }
 }

@@ -6,7 +6,7 @@ use clido_core::{
     agent_config_from_loaded, load_config, load_pricing, AgentConfig, LoadedConfig, PermissionMode,
     PricingTable,
 };
-use clido_tools::{default_registry_with_blocked, ToolRegistry};
+use clido_tools::{default_registry_with_options, McpTool, ToolRegistry};
 use std::io::{self, IsTerminal};
 use std::path::Path;
 use std::sync::Arc;
@@ -45,7 +45,8 @@ impl AgentSetup {
         )
         .map_err(CliError::Usage)?;
 
-        let registry = build_registry(cli, &loaded, workspace_root)?;
+        let mut registry = build_registry(cli, &loaded, workspace_root)?;
+        registry = load_mcp_tools(cli, registry);
 
         let permission_mode = parse_permission_mode(cli.permission_mode.as_deref());
 
@@ -97,6 +98,51 @@ pub fn global_config_path() -> Option<std::path::PathBuf> {
     directories::ProjectDirs::from("", "", "clido").map(|d| d.config_dir().join("config.toml"))
 }
 
+/// If --mcp-config is provided, spawn MCP servers and register their tools.
+/// Errors are printed to stderr but never fatal — the agent runs with whatever
+/// tools were successfully registered.
+fn load_mcp_tools(cli: &Cli, mut registry: ToolRegistry) -> ToolRegistry {
+    let Some(ref mcp_path) = cli.mcp_config else {
+        return registry;
+    };
+    use clido_tools::load_mcp_config;
+    use clido_tools::McpClient;
+    let mcp_cfg = match load_mcp_config(mcp_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("MCP config load failed: {}", e);
+            return registry;
+        }
+    };
+    for server_config in mcp_cfg.servers {
+        let server_name = server_config.name.clone();
+        match McpClient::spawn(server_config) {
+            Err(e) => eprintln!("MCP spawn failed for '{}': {}", server_name, e),
+            Ok(client) => {
+                if let Err(e) = client.initialize() {
+                    eprintln!("MCP initialize failed for '{}': {}", server_name, e);
+                    continue;
+                }
+                match client.list_tools() {
+                    Err(e) => eprintln!("MCP list_tools failed for '{}': {}", server_name, e),
+                    Ok(tools) => {
+                        let client_arc = Arc::new(client);
+                        for tool_def in tools {
+                            let tool_name = tool_def.name.clone();
+                            let mcp_tool = McpTool::new(tool_def, client_arc.clone());
+                            registry.register(mcp_tool);
+                            if !cli.quiet {
+                                eprintln!("MCP tool registered: {}/{}", server_name, tool_name);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    registry
+}
+
 fn build_registry(
     cli: &Cli,
     loaded: &clido_core::LoadedConfig,
@@ -127,7 +173,8 @@ fn build_registry(
         .map(|s| s.split(',').map(|x| x.trim().to_string()).collect());
     // Block the config file from all tool access so its contents never leave the local system.
     let blocked = global_config_path().into_iter().collect::<Vec<_>>();
-    let registry = default_registry_with_blocked(workspace_root.to_path_buf(), blocked)
+    let sandbox = cli.sandbox;
+    let registry = default_registry_with_options(workspace_root.to_path_buf(), blocked, sandbox)
         .with_filters(allowed, disallowed);
     if registry.schemas().is_empty() {
         return Err(CliError::Usage(

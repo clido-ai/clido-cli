@@ -21,6 +21,8 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 | `/plan save` | Save the current plan to `.clido/plans/` | `/plan save` | Saved plans can be resumed with `clido plan run` |
 | `/plan list` | List all saved plans | `/plan list` | Shows id, task count, done count, and goal |
 | `/memory <query>` | Search long-term memory | `/memory error handling` | The agent also uses memory automatically |
+| `/ship [msg]` | Stage all changes, commit, and push | `/ship fix login bug` | Auto-generates message if none given; repair cycle on hook/push failures |
+| `/save [msg]` | Stage all changes and commit locally (no push) | `/save wip checkpoint` | Auto-generates message if none given; repair cycle on hook failures |
 | `/check` | Run diagnostics on the current project | `/check` | Invokes the DiagnosticsTool |
 | `/image <path>` | Attach an image to the next message | `/image screenshot.png` | Supports PNG, JPEG, GIF, WebP |
 | `/index` | Show repo index stats | `/index` | Build with `clido index build` |

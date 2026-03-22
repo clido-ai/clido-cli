@@ -55,6 +55,8 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/plan edit", "open plan editor for the current plan"),
     ("/plan save", "save current plan to .clido/plans/"),
     ("/plan list", "list all saved plans"),
+    ("/ship", "stage → commit (auto message) → push. Usage: /ship [message]"),
+    ("/save", "stage → commit (auto message), no push. Usage: /save [message]"),
     ("/check", "run diagnostics on current project"),
     ("/image", "attach an image to the next message. Usage: /image <path>"),
     ("/index", "show repo index stats"),
@@ -1439,6 +1441,8 @@ fn execute_slash(app: &mut App, cmd: &str) {
             app.push(ChatLine::Info("  /plan edit         open plan editor for active plan".into()));
             app.push(ChatLine::Info("  /plan save         save current plan to .clido/plans/".into()));
             app.push(ChatLine::Info("  /plan list         list all saved plans".into()));
+            app.push(ChatLine::Info("  /ship [msg]        stage → commit → push (auto message or custom)".into()));
+            app.push(ChatLine::Info("  /save [msg]        stage → commit locally, no push".into()));
             app.push(ChatLine::Info("  /check             run diagnostics on current project".into()));
             app.push(ChatLine::Info("  /index             show repo index stats".into()));
             app.push(ChatLine::Info("  /rules             show active project rules files (CLIDO.md)".into()));
@@ -1607,6 +1611,66 @@ fn execute_slash(app: &mut App, cmd: &str) {
                     app.pending_error = Some(format!("list plans: {}", e));
                 }
             }
+        }
+        _ if cmd.starts_with("/ship") => {
+            let custom_msg = cmd.trim_start_matches("/ship").trim();
+            let msg_instruction = if custom_msg.is_empty() {
+                "Generate a commit message from the staged diff: imperative mood, ≤72 chars subject, \
+                 body only if the change is complex. Append trailer: \
+                 `Co-Authored-By: Claude <noreply@clido.dev>`".to_string()
+            } else {
+                format!("Use this commit message verbatim: {custom_msg}")
+            };
+            app.send_now(format!(
+                "Git ship: stage all changes and push.\n\
+                \n\
+                Steps:\n\
+                1. Verify this is a git repo (`git rev-parse --git-dir`). Stop if not.\n\
+                2. Run `git status` — if nothing to commit, report and stop.\n\
+                3. Run `git diff HEAD` and `git status -s` to understand changes.\n\
+                4. Warn and skip any sensitive files (*.env, *secret*, *credential*, *password*) \
+                   before staging.\n\
+                5. `git add -A` (excluding sensitive files).\n\
+                6. {msg_instruction}\n\
+                7. `git commit -m \"<message>\"` — if it fails (hook, lint, tests):\n\
+                   - Read the error, fix the root cause (format/lint/test as needed).\n\
+                   - Re-stage affected files and retry the commit.\n\
+                   - Repeat up to 3 attempts total. Never use --no-verify.\n\
+                   - If still failing after 3 attempts, explain what is blocking and stop.\n\
+                8. `git push` — if rejected:\n\
+                   - Diverged history: `git pull --rebase origin <branch>` then push again.\n\
+                   - No upstream: `git push -u origin <branch>`.\n\
+                   - Never force-push to main or master.\n\
+                9. Report the commit hash and pushed branch."
+            ));
+        }
+        _ if cmd.starts_with("/save") => {
+            let custom_msg = cmd.trim_start_matches("/save").trim();
+            let msg_instruction = if custom_msg.is_empty() {
+                "Generate a commit message from the staged diff: imperative mood, ≤72 chars subject, \
+                 body only if the change is complex. Append trailer: \
+                 `Co-Authored-By: Claude <noreply@clido.dev>`".to_string()
+            } else {
+                format!("Use this commit message verbatim: {custom_msg}")
+            };
+            app.send_now(format!(
+                "Git save: stage all changes and commit locally (no push).\n\
+                \n\
+                Steps:\n\
+                1. Verify this is a git repo (`git rev-parse --git-dir`). Stop if not.\n\
+                2. Run `git status` — if nothing to commit, report and stop.\n\
+                3. Run `git diff HEAD` and `git status -s` to understand changes.\n\
+                4. Warn and skip any sensitive files (*.env, *secret*, *credential*, *password*) \
+                   before staging.\n\
+                5. `git add -A` (excluding sensitive files).\n\
+                6. {msg_instruction}\n\
+                7. `git commit -m \"<message>\"` — if it fails (hook, lint, tests):\n\
+                   - Read the error, fix the root cause (format/lint/test as needed).\n\
+                   - Re-stage affected files and retry the commit.\n\
+                   - Repeat up to 3 attempts total. Never use --no-verify.\n\
+                   - If still failing after 3 attempts, explain what is blocking and stop.\n\
+                8. Report the commit hash and message."
+            ));
         }
         "/check" => {
             // Send a message to the agent asking it to run diagnostics on the current project.

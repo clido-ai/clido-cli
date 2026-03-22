@@ -39,32 +39,80 @@ use clido_planner::{Complexity, Plan, PlanEditor, TaskStatus};
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/// Slash commands grouped by section: (section_label, [(cmd, description)])
+const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
+    ("Session", &[
+        ("/clear", "clear the conversation"),
+        ("/sessions", "list & resume recent sessions"),
+        ("/session", "show current session ID"),
+        ("/help", "show key bindings and all slash commands"),
+        ("/quit", "exit clido"),
+    ]),
+    ("Model", &[
+        ("/model", "show or switch model. Usage: /model [model-name]"),
+        ("/fast", "switch to fast (cheap) model for this session"),
+        ("/smart", "switch to smart (powerful) model for this session"),
+    ]),
+    ("Context", &[
+        ("/cost", "show session cost so far"),
+        ("/tokens", "show token usage so far"),
+        ("/compact", "compact context window now (summarise history)"),
+        ("/memory", "search long-term memory. Usage: /memory <query>"),
+    ]),
+    ("Git", &[
+        ("/branch", "create + switch to a new branch. Usage: /branch <name>"),
+        ("/sync", "pull --rebase from upstream, resolve conflicts if needed"),
+        ("/pr", "create a pull request. Usage: /pr [title]"),
+        ("/ship", "stage → commit → push. Usage: /ship [message]"),
+        ("/save", "stage → commit locally, no push. Usage: /save [message]"),
+        ("/undo", "undo last committed change (git reset HEAD~1)"),
+        ("/rollback", "restore to a checkpoint. Usage: /rollback [id]"),
+    ]),
+    ("Plan", &[
+        ("/plan", "show current task plan (requires --plan flag)"),
+        ("/plan edit", "open plan editor for the current plan"),
+        ("/plan save", "save current plan to .clido/plans/"),
+        ("/plan list", "list all saved plans"),
+    ]),
+    ("Project", &[
+        ("/workdir", "show working directory"),
+        ("/check", "run diagnostics on current project"),
+        ("/index", "show repo index stats"),
+        ("/rules", "show active project rules files (CLIDO.md)"),
+        ("/image", "attach an image to the next message. Usage: /image <path>"),
+    ]),
+];
+
+/// Flat list derived from sections — used for autocomplete and command matching.
 const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/clear", "clear the conversation"),
+    ("/sessions", "list & resume recent sessions"),
+    ("/session", "show current session ID"),
     ("/help", "show key bindings and all slash commands"),
+    ("/quit", "exit clido"),
     ("/model", "show or switch model. Usage: /model [model-name]"),
     ("/fast", "switch to fast (cheap) model for this session"),
     ("/smart", "switch to smart (powerful) model for this session"),
-    ("/sessions", "list recent sessions for this project"),
-    ("/session", "show current session ID"),
-    ("/workdir", "show working directory"),
     ("/cost", "show session cost so far"),
     ("/tokens", "show token usage so far"),
-    ("/memory", "search long-term memory (usage: /memory <query>)"),
-    ("/plan", "show current task plan (requires --planner/--plan)"),
-    ("/plan edit", "open plan editor for the current plan"),
-    ("/plan save", "save current plan to .clido/plans/"),
-    ("/plan list", "list all saved plans"),
+    ("/compact", "compact context window now (summarise history)"),
+    ("/memory", "search long-term memory. Usage: /memory <query>"),
     ("/branch", "create + switch to a new branch. Usage: /branch <name>"),
     ("/sync", "pull --rebase from upstream, resolve conflicts if needed"),
     ("/pr", "create a pull request. Usage: /pr [title]"),
-    ("/ship", "stage → commit (auto message) → push. Usage: /ship [message]"),
-    ("/save", "stage → commit (auto message), no push. Usage: /save [message]"),
+    ("/ship", "stage → commit → push. Usage: /ship [message]"),
+    ("/save", "stage → commit locally, no push. Usage: /save [message]"),
+    ("/undo", "undo last committed change (git reset HEAD~1)"),
+    ("/rollback", "restore to a checkpoint. Usage: /rollback [id]"),
+    ("/plan", "show current task plan (requires --plan flag)"),
+    ("/plan edit", "open plan editor for the current plan"),
+    ("/plan save", "save current plan to .clido/plans/"),
+    ("/plan list", "list all saved plans"),
+    ("/workdir", "show working directory"),
     ("/check", "run diagnostics on current project"),
-    ("/image", "attach an image to the next message. Usage: /image <path>"),
     ("/index", "show repo index stats"),
     ("/rules", "show active project rules files (CLIDO.md)"),
-    ("/quit", "exit clido"),
+    ("/image", "attach an image to the next message. Usage: /image <path>"),
 ];
 
 // ── Permission grant options ───────────────────────────────────────────────────
@@ -106,7 +154,9 @@ enum AgentEvent {
     /// Emitted when a session is resumed; carries display messages.
     ResumedSession { messages: Vec<(String, String)> },
     /// Token usage update after agent turn completion.
-    TokenUsage { input_tokens: u64, output_tokens: u64, cost_usd: f64 },
+    TokenUsage { input_tokens: u64, output_tokens: u64, cost_usd: f64, context_max_tokens: u64 },
+    /// Emitted once by the `/compact` command after history is compacted.
+    Compacted { before: usize, after: usize },
     /// Emitted when the planner produces a valid task graph (--planner mode).
     /// Each string is a human-readable description of one planned task.
     PlanCreated { tasks: Vec<String> },
@@ -369,6 +419,10 @@ struct App {
     session_input_tokens: u64,
     session_output_tokens: u64,
     session_cost_usd: f64,
+    /// Max context window in tokens for the current model (0 = unknown).
+    context_max_tokens: u64,
+    /// Channel to trigger immediate context compaction in agent_task.
+    compact_now_tx: mpsc::UnboundedSender<()>,
     /// Last plan produced by the planner (--planner mode), stored for /plan command.
     last_plan: Option<Vec<String>>,
     /// Rules overlay: Some = popup visible, None = hidden.
@@ -401,6 +455,7 @@ impl App {
         prompt_tx: mpsc::UnboundedSender<String>,
         resume_tx: mpsc::UnboundedSender<String>,
         model_switch_tx: mpsc::UnboundedSender<String>,
+        compact_now_tx: mpsc::UnboundedSender<()>,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         provider: String,
         model: String,
@@ -441,6 +496,8 @@ impl App {
             session_input_tokens: 0,
             session_output_tokens: 0,
             session_cost_usd: 0.0,
+            context_max_tokens: 0,
+            compact_now_tx,
             last_plan: None,
             rules_overlay: None,
             notify_enabled,
@@ -641,14 +698,20 @@ fn render(frame: &mut Frame, app: &mut App) {
         ),
     ];
     if app.session_cost_usd > 0.0 {
-        let total_tok = app.session_input_tokens + app.session_output_tokens;
-        let tok_str = if total_tok >= 1000 {
-            format!("{:.1}k tok", total_tok as f64 / 1000.0)
+        let in_tok = app.session_input_tokens;
+        let tok_str = if in_tok >= 1000 {
+            format!("{:.1}k tok", in_tok as f64 / 1000.0)
         } else {
-            format!("{} tok", total_tok)
+            format!("{} tok", in_tok)
+        };
+        let ctx_str = if app.context_max_tokens > 0 {
+            let pct = (in_tok as f64 / app.context_max_tokens as f64 * 100.0).min(100.0);
+            format!("  {:.0}% ctx", pct)
+        } else {
+            String::new()
         };
         header_spans.push(Span::styled(
-            format!("   ${:.4}  {}", app.session_cost_usd, tok_str),
+            format!("   ${:.4}  {}{}", app.session_cost_usd, tok_str, ctx_str),
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
@@ -1427,32 +1490,14 @@ fn execute_slash(app: &mut App, cmd: &str) {
             app.push(ChatLine::Info("  Ctrl+U             clear input".into()));
             app.push(ChatLine::Info("  Mouse scroll       scroll conversation".into()));
             app.push(ChatLine::Info("".into()));
-            app.push(ChatLine::Info("  Slash Commands".into()));
-            app.push(ChatLine::Info("  /clear             clear conversation".into()));
-            app.push(ChatLine::Info("  /help              show this help".into()));
-            app.push(ChatLine::Info("  /model [name]      show provider & model, or switch to named model".into()));
-            app.push(ChatLine::Info("  /fast              switch to fast (cheap) model".into()));
-            app.push(ChatLine::Info("  /smart             switch to smart (powerful) model".into()));
+            for (section, cmds) in SLASH_COMMAND_SECTIONS {
+                app.push(ChatLine::Info(format!("  {}", section)));
+                for (cmd, desc) in *cmds {
+                    app.push(ChatLine::Info(format!("  {:<18} {}", cmd, desc)));
+                }
+                app.push(ChatLine::Info("".into()));
+            }
             app.push(ChatLine::Info("  @model-name <msg>  one-turn model override (e.g. @claude-opus-4-6 refactor this)".into()));
-            app.push(ChatLine::Info("  /session           show current session ID".into()));
-            app.push(ChatLine::Info("  /sessions          list & resume recent sessions".into()));
-            app.push(ChatLine::Info("  /workdir           show working directory".into()));
-            app.push(ChatLine::Info("  /cost              show session cost so far".into()));
-            app.push(ChatLine::Info("  /tokens            show token usage".into()));
-            app.push(ChatLine::Info("  /memory <query>    search long-term memory".into()));
-            app.push(ChatLine::Info("  /plan              show current task plan (--plan flag)".into()));
-            app.push(ChatLine::Info("  /plan edit         open plan editor for active plan".into()));
-            app.push(ChatLine::Info("  /plan save         save current plan to .clido/plans/".into()));
-            app.push(ChatLine::Info("  /plan list         list all saved plans".into()));
-            app.push(ChatLine::Info("  /branch <name>     create + switch to new branch, push upstream".into()));
-            app.push(ChatLine::Info("  /sync              pull --rebase from upstream, resolve conflicts".into()));
-            app.push(ChatLine::Info("  /pr [title]        create pull request (auto title+body or custom)".into()));
-            app.push(ChatLine::Info("  /ship [msg]        stage → commit → push (auto message or custom)".into()));
-            app.push(ChatLine::Info("  /save [msg]        stage → commit locally, no push".into()));
-            app.push(ChatLine::Info("  /check             run diagnostics on current project".into()));
-            app.push(ChatLine::Info("  /index             show repo index stats".into()));
-            app.push(ChatLine::Info("  /rules             show active project rules files (CLIDO.md)".into()));
-            app.push(ChatLine::Info("  /quit              exit".into()));
             app.push(ChatLine::Info("".into()));
             app.push(ChatLine::Info("  Agent Controls".into()));
             app.push(ChatLine::Info("  Ctrl+C             quit".into()));
@@ -1561,6 +1606,59 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 "  tokens: {} input  {} output",
                 app.session_input_tokens, app.session_output_tokens
             )));
+        }
+        "/compact" => {
+            if app.busy {
+                app.push(ChatLine::Info("  compact: agent is busy, try again when idle".into()));
+            } else {
+                app.push(ChatLine::Info("  compacting context window…".into()));
+                let _ = app.compact_now_tx.send(());
+            }
+        }
+        "/undo" => {
+            app.send_now(
+                "Undo the last committed change.\n\
+                \n\
+                Steps:\n\
+                1. Run `git log --oneline -5` to show the 5 most recent commits.\n\
+                2. Run `git status` to check for any uncommitted changes.\n\
+                3. If there is a recent commit to undo, run `git reset HEAD~1` to \
+                   undo the last commit and leave the changes staged.\n\
+                4. Show what files are now staged and a brief summary of what was undone.\n\
+                5. If there are only uncommitted changes (nothing committed yet), \
+                   ask the user which files to restore before acting."
+                    .to_string(),
+            );
+        }
+        _ if cmd.starts_with("/rollback") => {
+            let id = cmd.trim_start_matches("/rollback").trim();
+            if id.is_empty() {
+                app.send_now(
+                    "Show available checkpoints for this session.\n\
+                    \n\
+                    Steps:\n\
+                    1. List checkpoints in `.clido/checkpoints/` if the directory exists.\n\
+                    2. Also run `git log --oneline -10` to show recent git history.\n\
+                    3. Report both lists so the user can choose what to roll back to.\n\
+                    4. Ask the user which checkpoint or commit hash to restore, \
+                       then wait for their input."
+                        .to_string(),
+                );
+            } else {
+                let id = id.to_string();
+                app.send_now(format!(
+                    "Roll back to checkpoint or commit `{id}`.\n\
+                    \n\
+                    Steps:\n\
+                    1. Check if `{id}` looks like a git commit hash (7-40 hex chars) or a \
+                       checkpoint ID (starts with `ck_`).\n\
+                    2. For a git commit hash: run `git reset --hard {id}` after confirming \
+                       with the user that any uncommitted changes will be lost.\n\
+                    3. For a checkpoint ID: restore from `.clido/checkpoints/{id}/manifest.json` \
+                       by reading the manifest and restoring each listed file from its blob.\n\
+                    4. Show a summary of what was restored."
+                ));
+            }
         }
         "/plan" => {
             let plan_snapshot = app.last_plan.clone();
@@ -2692,6 +2790,7 @@ enum AgentAction {
     Run(String),
     Resume(String),
     SwitchModel(String),
+    CompactNow,
 }
 
 async fn agent_task(
@@ -2700,6 +2799,7 @@ async fn agent_task(
     mut prompt_rx: mpsc::UnboundedReceiver<String>,
     mut resume_rx: mpsc::UnboundedReceiver<String>,
     mut model_switch_rx: mpsc::UnboundedReceiver<String>,
+    mut compact_now_rx: mpsc::UnboundedReceiver<()>,
     event_tx: mpsc::UnboundedSender<AgentEvent>,
     perm_tx: mpsc::UnboundedSender<PermRequest>,
     cancel: std::sync::Arc<AtomicBool>,
@@ -2731,6 +2831,7 @@ async fn agent_task(
     });
 
     let planner_mode = cli.planner;
+    let context_max_tokens = setup.config.max_context_tokens.unwrap_or(200_000) as u64;
     let mut agent = AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
         .with_emitter(emitter)
         .with_planner(planner_mode);
@@ -2762,12 +2863,28 @@ async fn agent_task(
                     None => break,
                 }
             }
+            compact = compact_now_rx.recv() => {
+                match compact {
+                    Some(()) => AgentAction::CompactNow,
+                    None => break,
+                }
+            }
         };
 
         match action {
             AgentAction::SwitchModel(model_name) => {
                 agent.set_model(model_name.clone());
                 let _ = event_tx.send(AgentEvent::ModelSwitched { to_model: model_name });
+            }
+            AgentAction::CompactNow => {
+                match agent.compact_history_now().await {
+                    Ok((before, after)) => {
+                        let _ = event_tx.send(AgentEvent::Compacted { before, after });
+                    }
+                    Err(e) => {
+                        let _ = event_tx.send(AgentEvent::Err(format!("compact: {}", e)));
+                    }
+                }
             }
             AgentAction::Run(prompt) => {
                 cancel.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -2860,6 +2977,7 @@ async fn agent_task(
                     input_tokens: agent.cumulative_input_tokens,
                     output_tokens: agent.cumulative_output_tokens,
                     cost_usd: agent.cumulative_cost_usd,
+                    context_max_tokens,
                 });
 
                 match result {
@@ -2892,6 +3010,7 @@ async fn agent_task(
                                 input_tokens: agent.cumulative_input_tokens,
                                 output_tokens: agent.cumulative_output_tokens,
                                 cost_usd: agent.cumulative_cost_usd,
+                                context_max_tokens,
                             });
                             match continue_result {
                                 Ok(text) => {
@@ -3044,6 +3163,7 @@ pub async fn run_tui(cli: Cli) -> Result<(), anyhow::Error> {
     let (prompt_tx, prompt_rx) = mpsc::unbounded_channel::<String>();
     let (resume_tx, resume_rx) = mpsc::unbounded_channel::<String>();
     let (model_switch_tx, model_switch_rx) = mpsc::unbounded_channel::<String>();
+    let (compact_now_tx, compact_now_rx) = mpsc::unbounded_channel::<()>();
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<AgentEvent>();
     let (perm_tx, mut perm_rx) = mpsc::unbounded_channel::<PermRequest>();
 
@@ -3057,6 +3177,7 @@ pub async fn run_tui(cli: Cli) -> Result<(), anyhow::Error> {
         prompt_rx,
         resume_rx,
         model_switch_rx,
+        compact_now_rx,
         event_tx,
         perm_tx,
         cancel.clone(),
@@ -3093,7 +3214,7 @@ pub async fn run_tui(cli: Cli) -> Result<(), anyhow::Error> {
     let mut terminal = Terminal::new(backend)?;
 
     let plan_dry_run = cli.plan_dry_run;
-    let mut app = App::new(prompt_tx, resume_tx, model_switch_tx, cancel, provider, model, workspace_root.clone(), notify_enabled, image_state, plan_dry_run);
+    let mut app = App::new(prompt_tx, resume_tx, model_switch_tx, compact_now_tx, cancel, provider, model, workspace_root.clone(), notify_enabled, image_state, plan_dry_run);
     let result = event_loop(&mut app, &mut terminal, &mut event_rx, &mut perm_rx).await;
 
     let _ = disable_raw_mode();
@@ -3222,10 +3343,17 @@ async fn event_loop(
                         }
                         app.busy = false;
                     }
-                    Some(AgentEvent::TokenUsage { input_tokens, output_tokens, cost_usd }) => {
+                    Some(AgentEvent::TokenUsage { input_tokens, output_tokens, cost_usd, context_max_tokens }) => {
                         app.session_input_tokens = input_tokens;
                         app.session_output_tokens = output_tokens;
                         app.session_cost_usd = cost_usd;
+                        app.context_max_tokens = context_max_tokens;
+                    }
+                    Some(AgentEvent::Compacted { before, after }) => {
+                        app.push(ChatLine::Info(format!(
+                            "  context compacted: {} → {} messages",
+                            before, after
+                        )));
                     }
                     Some(AgentEvent::PlanCreated { tasks }) => {
                         // Display the plan in the chat as an info block.

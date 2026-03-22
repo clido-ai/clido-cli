@@ -9,6 +9,7 @@ clido supports multiple LLM providers. Each provider is configured as a profile 
 | Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | Default; supports prompt caching |
 | OpenAI-compatible | `openai` | `OPENAI_API_KEY` | Any OpenAI-API endpoint |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | Multi-model aggregator |
+| Alibaba Cloud | `alibabacloud` | `DASHSCOPE_API_KEY` | DashScope / Qwen models |
 | Local (Ollama) | `local` | — | No API key required |
 
 ## Anthropic (Claude)
@@ -97,6 +98,19 @@ ollama pull llama3.2      # download the model
 ::: warning Local model limitations
 Local models generally have smaller context windows and weaker instruction-following than cloud models. Complex multi-step coding tasks may require a larger model (e.g. `llama3.1:70b`) for reliable tool use.
 :::
+
+## Alibaba Cloud (DashScope / Qwen)
+
+Connects to the DashScope OpenAI-compatible endpoint. Set `DASHSCOPE_API_KEY` or store the key in your profile.
+
+```toml
+[profile.alibaba]
+provider    = "alibabacloud"
+model       = "qwen-max"
+api_key_env = "DASHSCOPE_API_KEY"
+```
+
+You can override the endpoint with `base_url` if needed (defaults to `https://dashscope.aliyuncs.com/compatible-mode/v1`).
 
 ## Listing available models
 

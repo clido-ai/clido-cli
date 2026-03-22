@@ -4,33 +4,63 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 
 ## Command list
 
+### Session
+
 | Command | Description | Example | Notes |
 |---------|-------------|---------|-------|
-| `/help` | Display all key bindings and slash commands | `/help` | Output appears in the chat pane |
 | `/clear` | Clear the chat display | `/clear` | The session JSONL file is not modified; history is preserved |
-| `/session` | Show the current session ID | `/session` | |
 | `/sessions` | Open the session picker | `/sessions` | Use arrow keys to select, Enter to resume |
-| `/workdir` | Show the current working directory | `/workdir` | |
-| `/cost` | Print accumulated cost for this session | `/cost` | Mirrors the status strip numbers |
-| `/tokens` | Print input and output token usage | `/tokens` | |
+| `/session` | Show the current session ID | `/session` | |
+| `/help` | Display all key bindings and slash commands | `/help` | Output appears in the chat pane |
+| `/quit` | Exit clido | `/quit` | Equivalent to pressing `Ctrl+C` when idle |
+
+### Model
+
+| Command | Description | Example | Notes |
+|---------|-------------|---------|-------|
 | `/model [name]` | Show or switch the active model | `/model claude-opus-4-6` | Switches immediately; reverts after session ends |
 | `/fast` | Switch to the fast (cheap) model | `/fast` | `claude-haiku-4-5-20251001` |
 | `/smart` | Switch to the smart (powerful) model | `/smart` | `claude-opus-4-6` |
-| `/plan` | Show the current task plan | `/plan` | Active when `--plan` or `--planner` flag is set |
-| `/plan edit` | Re-open the plan editor overlay | `/plan edit` | Edit tasks, complexity, notes before executing |
-| `/plan save` | Save the current plan to `.clido/plans/` | `/plan save` | Saved plans can be resumed with `clido plan run` |
-| `/plan list` | List all saved plans | `/plan list` | Shows id, task count, done count, and goal |
+
+### Context
+
+| Command | Description | Example | Notes |
+|---------|-------------|---------|-------|
+| `/cost` | Print accumulated cost for this session | `/cost` | Mirrors the status strip numbers |
+| `/tokens` | Print input and output token usage | `/tokens` | |
+| `/compact` | Compact the context window immediately | `/compact` | Summarises history via LLM; shows before/after message count |
 | `/memory <query>` | Search long-term memory | `/memory error handling` | The agent also uses memory automatically |
+
+### Git
+
+| Command | Description | Example | Notes |
+|---------|-------------|---------|-------|
 | `/branch <name>` | Create a new branch and switch to it | `/branch feature/auth` | Stashes uncommitted changes, creates branch, pushes with upstream |
 | `/sync` | Pull and rebase from upstream | `/sync` | Stashes if needed, fetches, rebases, resolves simple conflicts |
 | `/pr [title]` | Create a pull request | `/pr add login rate limiting` | Auto-generates title and body from diff; requires `gh` or prints for manual creation |
 | `/ship [msg]` | Stage all changes, commit, and push | `/ship fix login bug` | Auto-generates message if none given; repair cycle on hook/push failures |
 | `/save [msg]` | Stage all changes and commit locally (no push) | `/save wip checkpoint` | Auto-generates message if none given; repair cycle on hook failures |
+| `/undo` | Undo the last committed change | `/undo` | Runs `git reset HEAD~1`; shows what was undone |
+| `/rollback [id]` | Restore to a checkpoint or commit | `/rollback ck_abc123` | Accepts checkpoint ID (`ck_…`) or git commit hash |
+
+### Plan
+
+| Command | Description | Example | Notes |
+|---------|-------------|---------|-------|
+| `/plan` | Show the current task plan | `/plan` | Active when `--plan` or `--planner` flag is set |
+| `/plan edit` | Re-open the plan editor overlay | `/plan edit` | Edit tasks, complexity, notes before executing |
+| `/plan save` | Save the current plan to `.clido/plans/` | `/plan save` | Saved plans can be resumed with `clido plan run` |
+| `/plan list` | List all saved plans | `/plan list` | Shows id, task count, done count, and goal |
+
+### Project
+
+| Command | Description | Example | Notes |
+|---------|-------------|---------|-------|
+| `/workdir` | Show the current working directory | `/workdir` | |
 | `/check` | Run diagnostics on the current project | `/check` | Invokes the DiagnosticsTool |
-| `/image <path>` | Attach an image to the next message | `/image screenshot.png` | Supports PNG, JPEG, GIF, WebP |
 | `/index` | Show repo index stats | `/index` | Build with `clido index build` |
 | `/rules` | Show active CLIDO.md rules files | `/rules` | Overlay listing all discovered rules |
-| `/quit` | Exit clido | `/quit` | Equivalent to pressing `Ctrl+C` when idle |
+| `/image <path>` | Attach an image to the next message | `/image screenshot.png` | Supports PNG, JPEG, GIF, WebP |
 
 ## Using slash commands
 

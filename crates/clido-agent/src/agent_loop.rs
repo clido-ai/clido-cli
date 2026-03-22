@@ -285,6 +285,35 @@ impl AgentLoop {
         self.cumulative_output_tokens = 0;
     }
 
+    /// Immediately compact the conversation history, regardless of the compaction threshold.
+    /// Returns `(before, after)` message counts. Useful for the `/compact` TUI command.
+    pub async fn compact_history_now(&mut self) -> Result<(usize, usize)> {
+        let before = self.history.len();
+        let sys_tokens = self
+            .config
+            .system_prompt
+            .as_ref()
+            .map(|s| estimate_tokens_str(s))
+            .unwrap_or(0) as u32;
+        let max_ctx = self
+            .config
+            .max_context_tokens
+            .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
+        // Pass threshold=0 to force compaction unconditionally.
+        let compacted = compact_with_summary(
+            &self.history,
+            sys_tokens,
+            max_ctx,
+            0.0,
+            self.provider.as_ref(),
+            &self.config,
+        )
+        .await?;
+        let after = compacted.len();
+        self.history = compacted;
+        Ok((before, after))
+    }
+
     /// Make a single LLM completion call with no tools — used for planning.
     /// Returns the first text block from the response, or an error.
     pub async fn complete_simple(&self, prompt: &str) -> clido_core::Result<String> {

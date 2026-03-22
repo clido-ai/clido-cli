@@ -34,8 +34,19 @@ pub fn build_provider(
                 Vec::new(),
             )))
         }
+        "alibabacloud" => {
+            let url = base_url
+                .unwrap_or("https://dashscope.aliyuncs.com/compatible-mode/v1")
+                .to_string();
+            Ok(Arc::new(OpenAICompatProvider::new(
+                api_key,
+                model,
+                url,
+                Vec::new(),
+            )))
+        }
         p => Err(ClidoError::Config(format!(
-            "Provider '{}' is not yet supported. Available: anthropic, openrouter, local.",
+            "Provider '{}' is not yet supported. Available: anthropic, openrouter, local, alibabacloud.",
             p
         ))),
     }

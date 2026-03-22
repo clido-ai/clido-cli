@@ -285,7 +285,7 @@ pub fn parse_pytest_output(output: &str) -> TestResult {
         let trimmed = line.trim();
         if trimmed.starts_with("FAILED ") {
             // `FAILED path::test_name - reason`
-            let rest = &trimmed["FAILED ".len()..];
+            let rest = trimmed.strip_prefix("FAILED ").unwrap_or(trimmed);
             let name = rest.split(" - ").next().unwrap_or(rest).trim().to_string();
             failing_names.push(name);
         }
@@ -381,10 +381,7 @@ pub fn parse_npm_output(output: &str) -> TestResult {
     // If we couldn't parse, check for common failure indicators.
     if passed == 0 && failed == 0 {
         let lower = output.to_lowercase();
-        if lower.contains("1 failed")
-            || lower.contains("error")
-            || lower.contains("failing")
-        {
+        if lower.contains("1 failed") || lower.contains("error") || lower.contains("failing") {
             failed = 1;
         } else {
             passed = 1;
@@ -418,8 +415,8 @@ pub fn parse_npm_output(output: &str) -> TestResult {
 /// Lines of interest:
 /// - `--- PASS: TestFoo (0.00s)`
 /// - `--- FAIL: TestBar (0.01s)`
-/// - `ok  	pkg/path	0.234s`
-/// - `FAIL	pkg/path	0.234s`
+/// - `ok      pkg/path    0.234s`
+/// - `FAIL    pkg/path    0.234s`
 pub fn parse_go_output(output: &str) -> TestResult {
     let mut passed = 0u32;
     let mut failed = 0u32;

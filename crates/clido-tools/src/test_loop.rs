@@ -89,10 +89,8 @@ impl Tool for TestLoopTool {
 
         // Run tests synchronously (blocking) — acceptable because this is a
         // long-running operation and the caller expects to wait.
-        let result = tokio::task::spawn_blocking(move || {
-            run_tests(&workdir, command.as_deref())
-        })
-        .await;
+        let result =
+            tokio::task::spawn_blocking(move || run_tests(&workdir, command.as_deref())).await;
 
         let result = match result {
             Ok(Ok(r)) => r,

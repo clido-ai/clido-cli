@@ -89,11 +89,7 @@ mod tests {
 
     #[async_trait]
     impl TaskRunner for MockRunner {
-        async fn run_task(
-            &self,
-            task: &TaskNode,
-            context: &HashMap<String, String>,
-        ) -> TaskResult {
+        async fn run_task(&self, task: &TaskNode, context: &HashMap<String, String>) -> TaskResult {
             let ctx_summary: String = context
                 .iter()
                 .map(|(k, v)| format!("{}={}", k, v))
@@ -178,7 +174,11 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.task_results.len(), 3);
         // c must come after a and b
-        let ids: Vec<&str> = result.task_results.iter().map(|r| r.task_id.as_str()).collect();
+        let ids: Vec<&str> = result
+            .task_results
+            .iter()
+            .map(|r| r.task_id.as_str())
+            .collect();
         let c_pos = ids.iter().position(|&x| x == "c").unwrap();
         let a_pos = ids.iter().position(|&x| x == "a").unwrap();
         let b_pos = ids.iter().position(|&x| x == "b").unwrap();
@@ -191,10 +191,7 @@ mod tests {
         // A cyclic graph: PlanExecutor should return used_fallback = true.
         let graph = TaskGraph {
             goal: "cycle".to_string(),
-            tasks: vec![
-                make_node("x", vec!["y"]),
-                make_node("y", vec!["x"]),
-            ],
+            tasks: vec![make_node("x", vec!["y"]), make_node("y", vec!["x"])],
         };
         let runner = MockRunner;
         let result = PlanExecutor::execute(&graph, &runner).await;

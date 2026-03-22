@@ -25,7 +25,11 @@ impl PlanEditor {
     }
 
     /// Rename a task's description.
-    pub fn rename_task(&mut self, task_id: &str, new_description: &str) -> Result<(), PlanEditError> {
+    pub fn rename_task(
+        &mut self,
+        task_id: &str,
+        new_description: &str,
+    ) -> Result<(), PlanEditError> {
         let task = self
             .plan
             .tasks
@@ -51,7 +55,11 @@ impl PlanEditor {
     }
 
     /// Update a task's complexity.
-    pub fn set_complexity(&mut self, task_id: &str, complexity: Complexity) -> Result<(), PlanEditError> {
+    pub fn set_complexity(
+        &mut self,
+        task_id: &str,
+        complexity: Complexity,
+    ) -> Result<(), PlanEditError> {
         let task = self
             .plan
             .tasks
@@ -271,7 +279,11 @@ mod tests {
     fn test_add_task() {
         let mut editor = PlanEditor::new(make_test_plan());
         editor
-            .add_task("t3".to_string(), "third task".to_string(), vec!["t2".to_string()])
+            .add_task(
+                "t3".to_string(),
+                "third task".to_string(),
+                vec!["t2".to_string()],
+            )
             .unwrap();
         assert_eq!(editor.plan.tasks.len(), 3);
         assert_eq!(editor.plan.tasks[2].id, "t3");

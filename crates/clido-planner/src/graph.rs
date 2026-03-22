@@ -1,7 +1,7 @@
 //! TaskGraph: DAG of tasks with dependency validation.
 
-use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 pub type TaskId = String;
 
@@ -112,7 +112,10 @@ impl TaskGraph {
         for task in &self.tasks {
             for dep in &task.depends_on {
                 *in_degree.entry(task.id.as_str()).or_insert(0) += 1;
-                graph.entry(dep.as_str()).or_default().push(task.id.as_str());
+                graph
+                    .entry(dep.as_str())
+                    .or_default()
+                    .push(task.id.as_str());
             }
         }
 
@@ -161,7 +164,10 @@ impl TaskGraph {
         for task in &self.tasks {
             for dep in &task.depends_on {
                 *in_degree.entry(task.id.as_str()).or_insert(0) += 1;
-                graph.entry(dep.as_str()).or_default().push(task.id.as_str());
+                graph
+                    .entry(dep.as_str())
+                    .or_default()
+                    .push(task.id.as_str());
             }
         }
 
@@ -253,10 +259,7 @@ mod tests {
     fn validate_cycle_detected() {
         let g = TaskGraph {
             goal: "test".to_string(),
-            tasks: vec![
-                make_node("a", vec!["b"]),
-                make_node("b", vec!["a"]),
-            ],
+            tasks: vec![make_node("a", vec!["b"]), make_node("b", vec!["a"])],
         };
         assert!(matches!(g.validate(), Err(GraphError::Cycle)));
     }

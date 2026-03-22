@@ -9,11 +9,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use clido_agent::{
-    AgentLoop, AskUser, EventEmitter,
-    PermGrant as AgentPermGrant, PermRequest as AgentPermRequest,
+    AgentLoop, AskUser, EventEmitter, PermGrant as AgentPermGrant, PermRequest as AgentPermRequest,
 };
 use clido_core::ClidoError;
-use clido_planner;
 use clido_storage::SessionWriter;
 use crossterm::{
     event::{Event, EventStream, KeyCode, KeyModifiers, MouseEventKind},
@@ -41,49 +39,91 @@ const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧
 
 /// Slash commands grouped by section: (section_label, [(cmd, description)])
 const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
-    ("Session", &[
-        ("/clear", "clear the conversation"),
-        ("/sessions", "list & resume recent sessions"),
-        ("/session", "show current session ID"),
-        ("/help", "show key bindings and all slash commands"),
-        ("/quit", "exit clido"),
-    ]),
-    ("Model", &[
-        ("/models", "open interactive model picker (search, filter, favorites)"),
-        ("/model", "show or switch model. Usage: /model [model-name]"),
-        ("/fast", "switch to fast (cheap) model for this session"),
-        ("/smart", "switch to smart (powerful) model for this session"),
-        ("/role", "switch to model assigned to a role. Usage: /role <name>"),
-        ("/fav", "toggle favorite on current model"),
-    ]),
-    ("Context", &[
-        ("/cost", "show session cost so far"),
-        ("/tokens", "show token usage so far"),
-        ("/compact", "compact context window now (summarise history)"),
-        ("/memory", "search long-term memory. Usage: /memory <query>"),
-    ]),
-    ("Git", &[
-        ("/branch", "create + switch to a new branch. Usage: /branch <name>"),
-        ("/sync", "pull --rebase from upstream, resolve conflicts if needed"),
-        ("/pr", "create a pull request. Usage: /pr [title]"),
-        ("/ship", "stage → commit → push. Usage: /ship [message]"),
-        ("/save", "stage → commit locally, no push. Usage: /save [message]"),
-        ("/undo", "undo last committed change (git reset HEAD~1)"),
-        ("/rollback", "restore to a checkpoint. Usage: /rollback [id]"),
-    ]),
-    ("Plan", &[
-        ("/plan", "show current task plan (requires --plan flag)"),
-        ("/plan edit", "open plan editor for the current plan"),
-        ("/plan save", "save current plan to .clido/plans/"),
-        ("/plan list", "list all saved plans"),
-    ]),
-    ("Project", &[
-        ("/workdir", "show working directory"),
-        ("/check", "run diagnostics on current project"),
-        ("/index", "show repo index stats"),
-        ("/rules", "show active project rules files (CLIDO.md)"),
-        ("/image", "attach an image to the next message. Usage: /image <path>"),
-    ]),
+    (
+        "Session",
+        &[
+            ("/clear", "clear the conversation"),
+            ("/sessions", "list & resume recent sessions"),
+            ("/session", "show current session ID"),
+            ("/help", "show key bindings and all slash commands"),
+            ("/quit", "exit clido"),
+        ],
+    ),
+    (
+        "Model",
+        &[
+            (
+                "/models",
+                "open interactive model picker (search, filter, favorites)",
+            ),
+            ("/model", "show or switch model. Usage: /model [model-name]"),
+            ("/fast", "switch to fast (cheap) model for this session"),
+            (
+                "/smart",
+                "switch to smart (powerful) model for this session",
+            ),
+            (
+                "/role",
+                "switch to model assigned to a role. Usage: /role <name>",
+            ),
+            ("/fav", "toggle favorite on current model"),
+        ],
+    ),
+    (
+        "Context",
+        &[
+            ("/cost", "show session cost so far"),
+            ("/tokens", "show token usage so far"),
+            ("/compact", "compact context window now (summarise history)"),
+            ("/memory", "search long-term memory. Usage: /memory <query>"),
+        ],
+    ),
+    (
+        "Git",
+        &[
+            (
+                "/branch",
+                "create + switch to a new branch. Usage: /branch <name>",
+            ),
+            (
+                "/sync",
+                "pull --rebase from upstream, resolve conflicts if needed",
+            ),
+            ("/pr", "create a pull request. Usage: /pr [title]"),
+            ("/ship", "stage → commit → push. Usage: /ship [message]"),
+            (
+                "/save",
+                "stage → commit locally, no push. Usage: /save [message]",
+            ),
+            ("/undo", "undo last committed change (git reset HEAD~1)"),
+            (
+                "/rollback",
+                "restore to a checkpoint. Usage: /rollback [id]",
+            ),
+        ],
+    ),
+    (
+        "Plan",
+        &[
+            ("/plan", "show current task plan (requires --plan flag)"),
+            ("/plan edit", "open plan editor for the current plan"),
+            ("/plan save", "save current plan to .clido/plans/"),
+            ("/plan list", "list all saved plans"),
+        ],
+    ),
+    (
+        "Project",
+        &[
+            ("/workdir", "show working directory"),
+            ("/check", "run diagnostics on current project"),
+            ("/index", "show repo index stats"),
+            ("/rules", "show active project rules files (CLIDO.md)"),
+            (
+                "/image",
+                "attach an image to the next message. Usage: /image <path>",
+            ),
+        ],
+    ),
 ];
 
 /// Flat list derived from sections — used for autocomplete and command matching.
@@ -93,23 +133,44 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/session", "show current session ID"),
     ("/help", "show key bindings and all slash commands"),
     ("/quit", "exit clido"),
-    ("/models", "open interactive model picker (search, filter, favorites)"),
+    (
+        "/models",
+        "open interactive model picker (search, filter, favorites)",
+    ),
     ("/model", "show or switch model. Usage: /model [model-name]"),
     ("/fast", "switch to fast (cheap) model for this session"),
-    ("/smart", "switch to smart (powerful) model for this session"),
-    ("/role", "switch to model assigned to a role. Usage: /role <name>"),
+    (
+        "/smart",
+        "switch to smart (powerful) model for this session",
+    ),
+    (
+        "/role",
+        "switch to model assigned to a role. Usage: /role <name>",
+    ),
     ("/fav", "toggle favorite on current model"),
     ("/cost", "show session cost so far"),
     ("/tokens", "show token usage so far"),
     ("/compact", "compact context window now (summarise history)"),
     ("/memory", "search long-term memory. Usage: /memory <query>"),
-    ("/branch", "create + switch to a new branch. Usage: /branch <name>"),
-    ("/sync", "pull --rebase from upstream, resolve conflicts if needed"),
+    (
+        "/branch",
+        "create + switch to a new branch. Usage: /branch <name>",
+    ),
+    (
+        "/sync",
+        "pull --rebase from upstream, resolve conflicts if needed",
+    ),
     ("/pr", "create a pull request. Usage: /pr [title]"),
     ("/ship", "stage → commit → push. Usage: /ship [message]"),
-    ("/save", "stage → commit locally, no push. Usage: /save [message]"),
+    (
+        "/save",
+        "stage → commit locally, no push. Usage: /save [message]",
+    ),
     ("/undo", "undo last committed change (git reset HEAD~1)"),
-    ("/rollback", "restore to a checkpoint. Usage: /rollback [id]"),
+    (
+        "/rollback",
+        "restore to a checkpoint. Usage: /rollback [id]",
+    ),
     ("/plan", "show current task plan (requires --plan flag)"),
     ("/plan edit", "open plan editor for the current plan"),
     ("/plan save", "save current plan to .clido/plans/"),
@@ -118,7 +179,10 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/check", "run diagnostics on current project"),
     ("/index", "show repo index stats"),
     ("/rules", "show active project rules files (CLIDO.md)"),
-    ("/image", "attach an image to the next message. Usage: /image <path>"),
+    (
+        "/image",
+        "attach an image to the next message. Usage: /image <path>",
+    ),
 ];
 
 // ── Permission grant options ───────────────────────────────────────────────────
@@ -148,8 +212,15 @@ struct PermsState {
 // ── Agent → TUI events ────────────────────────────────────────────────────────
 
 enum AgentEvent {
-    ToolStart { name: String, detail: String },
-    ToolDone { name: String, is_error: bool, diff: Option<String> },
+    ToolStart {
+        name: String,
+        detail: String,
+    },
+    ToolDone {
+        name: String,
+        is_error: bool,
+        diff: Option<String>,
+    },
     /// Intermediate text the model emits while it's still calling tools.
     Thinking(String),
     Response(String),
@@ -158,24 +229,45 @@ enum AgentEvent {
     /// Emitted once when the agent session is created.
     SessionStarted(String),
     /// Emitted when a session is resumed; carries display messages.
-    ResumedSession { messages: Vec<(String, String)> },
+    ResumedSession {
+        messages: Vec<(String, String)>,
+    },
     /// Token usage update after agent turn completion.
-    TokenUsage { input_tokens: u64, output_tokens: u64, cost_usd: f64, context_max_tokens: u64 },
+    TokenUsage {
+        input_tokens: u64,
+        output_tokens: u64,
+        cost_usd: f64,
+        context_max_tokens: u64,
+    },
     /// Emitted once by the `/compact` command after history is compacted.
-    Compacted { before: usize, after: usize },
+    Compacted {
+        before: usize,
+        after: usize,
+    },
     /// Emitted when the planner produces a valid task graph (--planner mode).
     /// Each string is a human-readable description of one planned task.
-    PlanCreated { tasks: Vec<String> },
+    PlanCreated {
+        tasks: Vec<String>,
+    },
     /// Emitted when the session model is switched (via /model, /fast, /smart).
-    ModelSwitched { to_model: String },
+    ModelSwitched {
+        to_model: String,
+    },
     /// Plan generated and ready for user review (--plan mode).
-    PlanReady { plan: Plan },
+    PlanReady {
+        plan: Plan,
+    },
     /// A plan task started executing.
     #[allow(dead_code)]
-    PlanTaskStarted { task_id: String },
+    PlanTaskStarted {
+        task_id: String,
+    },
     /// A plan task completed.
     #[allow(dead_code)]
-    PlanTaskDone { task_id: String, success: bool },
+    PlanTaskDone {
+        task_id: String,
+        success: bool,
+    },
 }
 
 // ── Plan editor state ─────────────────────────────────────────────────────────
@@ -257,7 +349,10 @@ impl ModelPickerState {
             .filter(|m| {
                 m.id.to_lowercase().contains(&f)
                     || m.provider.to_lowercase().contains(&f)
-                    || m.role.as_deref().map(|r| r.to_lowercase().contains(&f)).unwrap_or(false)
+                    || m.role
+                        .as_deref()
+                        .map(|r| r.to_lowercase().contains(&f))
+                        .unwrap_or(false)
             })
             .collect()
     }
@@ -522,6 +617,7 @@ struct App {
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         prompt_tx: mpsc::UnboundedSender<String>,
         resume_tx: mpsc::UnboundedSender<String>,
@@ -914,7 +1010,10 @@ fn render(frame: &mut Frame, app: &mut App) {
         let title_line = if app.pending_perm.is_some() {
             Line::from(vec![
                 Span::styled("⏸", Style::default().fg(Color::LightMagenta)),
-                Span::styled(" waiting for permission… ", Style::default().fg(Color::LightMagenta)),
+                Span::styled(
+                    " waiting for permission… ",
+                    Style::default().fg(Color::LightMagenta),
+                ),
             ])
         } else if app.queued.is_some() {
             Line::from(vec![
@@ -960,11 +1059,7 @@ fn render(frame: &mut Frame, app: &mut App) {
             frame.set_cursor_position((input_area.x + 2 + cursor_col, input_area.y + 1));
         }
     } else {
-        let idle_title = if app.input.is_empty() {
-            " Ask anything  (Enter=send  ↑↓=history  /help=commands) ".to_string()
-        } else {
-            " Ask anything  (Enter=send  ↑↓=history  /help=commands) ".to_string()
-        };
+        let idle_title = " Ask anything  (Enter=send  ↑↓=history  /help=commands) ".to_string();
         let block = Block::default()
             .title(idle_title)
             .borders(Borders::ALL)
@@ -993,7 +1088,9 @@ fn render(frame: &mut Frame, app: &mut App) {
     if app.session_cost_usd > 0.0 {
         hint_spans.push(Span::styled(
             format!("  ${:.4}", app.session_cost_usd),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ));
     }
     // Scroll position indicator when not following.
@@ -1001,7 +1098,9 @@ fn render(frame: &mut Frame, app: &mut App) {
         let pct = (app.scroll as u32 * 100 / app.max_scroll as u32).min(100);
         hint_spans.push(Span::styled(
             format!("  [{}%]", pct),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ));
     }
     let hint = Paragraph::new(Line::from(hint_spans));
@@ -1011,7 +1110,9 @@ fn render(frame: &mut Frame, app: &mut App) {
     if !app.following && app.max_scroll > app.scroll {
         let unread_hint = Span::styled(
             "  ↓ new  (PgDn) ",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         );
         let hint_line = Line::from(vec![unread_hint]);
         let hint_para = Paragraph::new(hint_line);
@@ -1066,7 +1167,8 @@ fn render(frame: &mut Frame, app: &mut App) {
         const VISIBLE: usize = 12;
         let n_rows = picker.sessions.len().min(VISIBLE) as u16;
         // border(2) + header(1) + blank(1) + rows = n_rows + 4
-        let popup_h = (n_rows + 4).min(input_area.y.saturating_sub(hint_area.y) + hint_area.y + input_area.y);
+        let popup_h =
+            (n_rows + 4).min(input_area.y.saturating_sub(hint_area.y) + hint_area.y + input_area.y);
         let popup_h = popup_h.min(area.height.saturating_sub(4));
         let popup_h = (n_rows + 4).min(popup_h.max(6));
         let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
@@ -1077,14 +1179,22 @@ fn render(frame: &mut Frame, app: &mut App) {
 
         let mut content: Vec<Line<'static>> = vec![
             Line::from(vec![Span::styled(
-                format!("  {:<8}  {:<3}  {:<6}  {:<11}  {}", "id", "msg", "cost", "date", "preview"),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                format!(
+                    "  {:<8}  {:<3}  {:<6}  {:<11}  {}",
+                    "id", "msg", "cost", "date", "preview"
+                ),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             )]),
             Line::raw(""),
         ];
 
         let end = (picker.scroll_offset + VISIBLE).min(picker.sessions.len());
-        for (di, s) in picker.sessions[picker.scroll_offset..end].iter().enumerate() {
+        for (di, s) in picker.sessions[picker.scroll_offset..end]
+            .iter()
+            .enumerate()
+        {
             let selected = picker.scroll_offset + di == picker.selected;
             let bg = if selected { Color::Blue } else { Color::Reset };
             let fg = if selected { Color::White } else { Color::Gray };
@@ -1107,7 +1217,10 @@ fn render(frame: &mut Frame, app: &mut App) {
 
         // Add scroll indicators if there are more sessions above or below visible range.
         let above = picker.scroll_offset;
-        let below = picker.sessions.len().saturating_sub(picker.scroll_offset + VISIBLE);
+        let below = picker
+            .sessions
+            .len()
+            .saturating_sub(picker.scroll_offset + VISIBLE);
         if above > 0 || below > 0 {
             let mut scroll_parts = Vec::new();
             if above > 0 {
@@ -1118,16 +1231,20 @@ fn render(frame: &mut Frame, app: &mut App) {
             }
             content.push(Line::from(vec![Span::styled(
                 format!("  {}", scroll_parts.join("  ")),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             )]));
         }
 
         let total = picker.sessions.len();
-        let picker_title = format!(" Sessions — {} total  (↑↓  Enter=resume  Esc=close) ", total);
+        let picker_title = format!(
+            " Sessions — {} total  (↑↓  Enter=resume  Esc=close) ",
+            total
+        );
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content)
-                .block(modal_block(&picker_title, Color::Cyan)),
+            Paragraph::new(content).block(modal_block(&picker_title, Color::Cyan)),
             popup_rect,
         );
     }
@@ -1146,8 +1263,13 @@ fn render(frame: &mut Frame, app: &mut App) {
                 Style::default().fg(Color::White),
             )]),
             Line::from(vec![Span::styled(
-                format!("  {:<2} {:<32}  {:<12}  {:>8}  {:>8}  {:>6}  {}", "  ", "model", "provider", "in/mtok", "out/mtok", "ctx", "role"),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                format!(
+                    "  {:<2} {:<32}  {:<12}  {:>8}  {:>8}  {:>6}  {}",
+                    "  ", "model", "provider", "in/mtok", "out/mtok", "ctx", "role"
+                ),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             )]),
             Line::raw(""),
         ];
@@ -1158,35 +1280,47 @@ fn render(frame: &mut Frame, app: &mut App) {
             let bg = if selected { Color::Blue } else { Color::Reset };
             let fg = if selected { Color::White } else { Color::Gray };
             let fav = if m.is_favorite { "★" } else { "  " };
-            let ctx = m.context_k.map(|k| format!("{:>4}k", k)).unwrap_or_else(|| "    ?".into());
+            let ctx = m
+                .context_k
+                .map(|k| format!("{:>4}k", k))
+                .unwrap_or_else(|| "    ?".into());
             let role = m.role.as_deref().unwrap_or("");
             let id_display: String = m.id.chars().take(32).collect();
             let prov_display: String = m.provider.chars().take(12).collect();
             content.push(Line::from(vec![Span::styled(
                 format!(
                     "  {} {:<32}  {:<12}  {:>8.2}  {:>8.2}  {}  {}",
-                    fav, id_display, prov_display,
-                    m.input_mtok, m.output_mtok,
-                    ctx, role
+                    fav, id_display, prov_display, m.input_mtok, m.output_mtok, ctx, role
                 ),
                 Style::default().fg(fg).bg(bg),
             )]));
         }
 
         let above = picker.scroll_offset;
-        let below = filtered.len().saturating_sub(picker.scroll_offset + VISIBLE);
+        let below = filtered
+            .len()
+            .saturating_sub(picker.scroll_offset + VISIBLE);
         if above > 0 || below > 0 {
             let mut parts = Vec::new();
-            if above > 0 { parts.push(format!("↑↑ {} more", above)); }
-            if below > 0 { parts.push(format!("↓↓ {} more", below)); }
+            if above > 0 {
+                parts.push(format!("↑↑ {} more", above));
+            }
+            if below > 0 {
+                parts.push(format!("↓↓ {} more", below));
+            }
             content.push(Line::from(vec![Span::styled(
                 format!("  {}", parts.join("  ")),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             )]));
         }
 
         let total = filtered.len();
-        let title = format!(" Models — {} found  (↑↓  Enter=use  f=fav  Esc=close  type to filter) ", total);
+        let title = format!(
+            " Models — {} found  (↑↓  Enter=use  f=fav  Esc=close  type to filter) ",
+            total
+        );
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block(&title, Color::Magenta)),
@@ -1201,8 +1335,12 @@ fn render(frame: &mut Frame, app: &mut App) {
         let inner_w = popup_rect.width.saturating_sub(4) as usize;
         let preview = truncate_chars(&perm.preview, inner_w);
 
-        const OPTIONS: &[&str] =
-            &["Allow once", "Allow always — this session", "Allow all in workdir — this session", "Deny"];
+        const OPTIONS: &[&str] = &[
+            "Allow once",
+            "Allow always — this session",
+            "Allow all in workdir — this session",
+            "Deny",
+        ];
 
         let mut content = vec![
             Line::from(vec![Span::styled(
@@ -1217,8 +1355,10 @@ fn render(frame: &mut Frame, app: &mut App) {
 
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content)
-                .block(modal_block(&format!(" Allow {}? ", perm.tool_name), Color::Yellow)),
+            Paragraph::new(content).block(modal_block(
+                &format!(" Allow {}? ", perm.tool_name),
+                Color::Yellow,
+            )),
             popup_rect,
         );
     }
@@ -1243,7 +1383,9 @@ fn render(frame: &mut Frame, app: &mut App) {
         content.push(Line::raw(""));
         content.push(Line::from(vec![Span::styled(
             "  [ OK ]  (Enter / Esc / Space)",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )]));
 
         frame.render_widget(Clear, popup_rect);
@@ -1265,7 +1407,9 @@ fn render(frame: &mut Frame, app: &mut App) {
             for (path, preview) in rules {
                 content.push(Line::from(vec![Span::styled(
                     format!("  {}", path),
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 )]));
                 if !preview.is_empty() {
                     content.push(Line::from(vec![Span::styled(
@@ -1278,7 +1422,9 @@ fn render(frame: &mut Frame, app: &mut App) {
         content.push(Line::raw(""));
         content.push(Line::from(vec![Span::styled(
             "  [ Close ]  (Enter / Esc)".to_string(),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )]));
 
         let popup_h = ((content.len() as u16) + 2).min(area.height.saturating_sub(4));
@@ -1305,10 +1451,18 @@ fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
 
     let plan = &editor.plan;
     let task_count = plan.tasks.len();
-    let done_count = plan.tasks.iter().filter(|t| t.status == TaskStatus::Done).count();
+    let done_count = plan
+        .tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Done)
+        .count();
     let complexity_summary = if plan.tasks.iter().any(|t| t.complexity == Complexity::High) {
         "high"
-    } else if plan.tasks.iter().any(|t| t.complexity == Complexity::Medium) {
+    } else if plan
+        .tasks
+        .iter()
+        .any(|t| t.complexity == Complexity::Medium)
+    {
         "medium"
     } else {
         "low"
@@ -1324,17 +1478,18 @@ fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        .border_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     // Split inner: task list | help bar at bottom
-    let [task_area, hint_area] = ratatui::layout::Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(2),
-    ])
-    .areas(inner);
+    let [task_area, hint_area] =
+        ratatui::layout::Layout::vertical([Constraint::Min(0), Constraint::Length(2)]).areas(inner);
 
     // ── Task list ──
     let mut task_lines: Vec<Line<'static>> = Vec::new();
@@ -1343,22 +1498,30 @@ fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         // Inline edit form for the selected task
         task_lines.push(Line::from(vec![Span::styled(
             "  Edit task",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )]));
         task_lines.push(Line::raw(""));
 
         let desc_style = if form.focused_field == TaskEditField::Description {
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
         let notes_style = if form.focused_field == TaskEditField::Notes {
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
         let comp_style = if form.focused_field == TaskEditField::Complexity {
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
@@ -1374,13 +1537,17 @@ fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
 
         let (low_style, med_style, high_style) = match form.complexity {
             Complexity::Low => (
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
                 Style::default().fg(Color::DarkGray),
                 Style::default().fg(Color::DarkGray),
             ),
             Complexity::Medium => (
                 Style::default().fg(Color::DarkGray),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
                 Style::default().fg(Color::DarkGray),
             ),
             Complexity::High => (
@@ -1398,7 +1565,9 @@ fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         task_lines.push(Line::raw(""));
         task_lines.push(Line::from(vec![Span::styled(
             "  Tab=next field  Enter=save  Esc=cancel",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         )]));
     } else {
         // Task list with selection highlight
@@ -1425,8 +1594,12 @@ fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
             };
 
             let complexity_badge = match task.complexity {
-                Complexity::Low => Span::styled(" [low] ", Style::default().fg(Color::DarkGray).bg(bg)),
-                Complexity::Medium => Span::styled(" [med] ", Style::default().fg(Color::Yellow).bg(bg)),
+                Complexity::Low => {
+                    Span::styled(" [low] ", Style::default().fg(Color::DarkGray).bg(bg))
+                }
+                Complexity::Medium => {
+                    Span::styled(" [med] ", Style::default().fg(Color::Yellow).bg(bg))
+                }
                 Complexity::High => Span::styled(" [high]", Style::default().fg(Color::Red).bg(bg)),
             };
 
@@ -1459,7 +1632,9 @@ fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         task_lines.push(Line::raw(""));
         task_lines.push(Line::from(vec![Span::styled(
             progress,
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         )]));
     }
 
@@ -1469,7 +1644,11 @@ fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     // ── Hint bar ──
-    let dry_run_note = if app.plan_dry_run { "  [dry-run: x will not execute]" } else { "" };
+    let dry_run_note = if app.plan_dry_run {
+        "  [dry-run: x will not execute]"
+    } else {
+        ""
+    };
     let hint = if app.plan_task_editing.is_some() {
         String::new()
     } else {
@@ -1481,7 +1660,9 @@ fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
             hint,
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         )])),
         hint_area,
     );
@@ -1494,7 +1675,12 @@ fn popup_above_input(input_area: Rect, h: u16, w: u16) -> Rect {
     let w = w.min(input_area.width);
     let x = input_area.x + (input_area.width.saturating_sub(w)) / 2;
     let y = input_area.y.saturating_sub(h);
-    Rect { x, y, width: w, height: h }
+    Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    }
 }
 
 /// Styled popup block — same structure for every modal.
@@ -1510,8 +1696,18 @@ fn modal_block(title: &str, border_color: Color) -> Block<'static> {
 fn modal_row(label: &str, selected: bool) -> Line<'static> {
     if selected {
         Line::from(vec![
-            Span::styled(" ▶ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::styled(label.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " ▶ ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                label.to_string(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ])
     } else {
         Line::from(vec![
@@ -1531,7 +1727,13 @@ fn modal_row_two_col(
 ) -> Line<'static> {
     let bg = if selected { Color::Blue } else { Color::Reset };
     Line::from(vec![
-        Span::styled(left, Style::default().fg(left_color).bg(bg).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            left,
+            Style::default()
+                .fg(left_color)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(right, Style::default().fg(right_color).bg(bg)),
     ])
 }
@@ -1541,7 +1743,12 @@ fn truncate_chars(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         s.to_string()
     } else {
-        format!("{}…", s.chars().take(max_chars.saturating_sub(1)).collect::<String>())
+        format!(
+            "{}…",
+            s.chars()
+                .take(max_chars.saturating_sub(1))
+                .collect::<String>()
+        )
     }
 }
 
@@ -1624,11 +1831,19 @@ fn execute_slash(app: &mut App, cmd: &str) {
             app.push(ChatLine::Info("".into()));
             app.push(ChatLine::Info("  Navigation".into()));
             app.push(ChatLine::Info("  Enter              send message".into()));
-            app.push(ChatLine::Info("  Ctrl+Enter         interrupt & send".into()));
-            app.push(ChatLine::Info("  ↑↓ / PgUp/PgDn    scroll conversation".into()));
-            app.push(ChatLine::Info("  ↑↓ (with input)   history navigation".into()));
+            app.push(ChatLine::Info(
+                "  Ctrl+Enter         interrupt & send".into(),
+            ));
+            app.push(ChatLine::Info(
+                "  ↑↓ / PgUp/PgDn    scroll conversation".into(),
+            ));
+            app.push(ChatLine::Info(
+                "  ↑↓ (with input)   history navigation".into(),
+            ));
             app.push(ChatLine::Info("  Ctrl+U             clear input".into()));
-            app.push(ChatLine::Info("  Mouse scroll       scroll conversation".into()));
+            app.push(ChatLine::Info(
+                "  Mouse scroll       scroll conversation".into(),
+            ));
             app.push(ChatLine::Info("".into()));
             for (section, cmds) in SLASH_COMMAND_SECTIONS {
                 app.push(ChatLine::Info(format!("  {}", section)));
@@ -1641,34 +1856,52 @@ fn execute_slash(app: &mut App, cmd: &str) {
             app.push(ChatLine::Info("".into()));
             app.push(ChatLine::Info("  Agent Controls".into()));
             app.push(ChatLine::Info("  Ctrl+C             quit".into()));
-            app.push(ChatLine::Info("  Ctrl+Enter         interrupt current run & send".into()));
-            app.push(ChatLine::Info("  Queue              type while agent runs, sends on finish".into()));
+            app.push(ChatLine::Info(
+                "  Ctrl+Enter         interrupt current run & send".into(),
+            ));
+            app.push(ChatLine::Info(
+                "  Queue              type while agent runs, sends on finish".into(),
+            ));
             app.push(ChatLine::Info("".into()));
         }
         "/fast" => {
-            let new_model = app.config_roles.get("fast")
+            let new_model = app
+                .config_roles
+                .get("fast")
                 .cloned()
                 .unwrap_or_else(|| "claude-haiku-4-5-20251001".to_string());
             app.model = new_model.clone();
             let _ = app.model_switch_tx.send(new_model.clone());
             app.model_prefs.push_recent(&new_model);
             app.model_prefs.save();
-            app.push(ChatLine::Info(format!("  model switched to {} (fast)", new_model)));
+            app.push(ChatLine::Info(format!(
+                "  model switched to {} (fast)",
+                new_model
+            )));
         }
         "/smart" => {
-            let new_model = app.config_roles.get("reasoning")
+            let new_model = app
+                .config_roles
+                .get("reasoning")
                 .cloned()
                 .unwrap_or_else(|| "claude-opus-4-6".to_string());
             app.model = new_model.clone();
             let _ = app.model_switch_tx.send(new_model.clone());
             app.model_prefs.push_recent(&new_model);
             app.model_prefs.save();
-            app.push(ChatLine::Info(format!("  model switched to {} (smart)", new_model)));
+            app.push(ChatLine::Info(format!(
+                "  model switched to {} (smart)",
+                new_model
+            )));
         }
         _ if cmd.starts_with("/model") && !cmd.starts_with("/models") => {
             let arg = cmd.trim_start_matches("/model").trim();
             if arg.is_empty() {
-                let fav = if app.model_prefs.is_favorite(&app.model) { " ★" } else { "" };
+                let fav = if app.model_prefs.is_favorite(&app.model) {
+                    " ★"
+                } else {
+                    ""
+                };
                 app.push(ChatLine::Info(format!(
                     "  provider: {}   model: {}{}",
                     app.provider, app.model, fav
@@ -1704,7 +1937,8 @@ fn execute_slash(app: &mut App, cmd: &str) {
             let role = cmd.trim_start_matches("/role").trim();
             if role.is_empty() {
                 // Show all configured roles — clone first to avoid borrow conflict.
-                let mut roles: Vec<(String, String)> = app.config_roles
+                let mut roles: Vec<(String, String)> = app
+                    .config_roles
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
@@ -1725,7 +1959,9 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 }
             } else {
                 // Resolve: prefs override config.
-                let model_id = app.model_prefs.resolve_role(role)
+                let model_id = app
+                    .model_prefs
+                    .resolve_role(role)
                     .map(|s| s.to_string())
                     .or_else(|| app.config_roles.get(role).cloned());
                 match model_id {
@@ -1761,21 +1997,25 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 "  {} {} {}",
                 icon,
                 model_id,
-                if is_fav { "added to favorites" } else { "removed from favorites" }
+                if is_fav {
+                    "added to favorites"
+                } else {
+                    "removed from favorites"
+                }
             )));
         }
-        "/session" => {
-            match &app.current_session_id {
-                Some(id) => app.push(ChatLine::Info(format!("  session: {}", id))),
-                None => app.push(ChatLine::Info("  no active session yet".into())),
-            }
-        }
+        "/session" => match &app.current_session_id {
+            Some(id) => app.push(ChatLine::Info(format!("  session: {}", id))),
+            None => app.push(ChatLine::Info("  no active session yet".into())),
+        },
         "/sessions" => {
             use clido_storage::list_sessions;
             match list_sessions(&app.workspace_root) {
                 Err(e) => app.push(ChatLine::Info(format!("  error listing sessions: {}", e))),
                 Ok(sessions) if sessions.is_empty() => {
-                    app.push(ChatLine::Info("  no sessions found for this project".into()));
+                    app.push(ChatLine::Info(
+                        "  no sessions found for this project".into(),
+                    ));
                 }
                 Ok(sessions) => {
                     let selected = sessions
@@ -1830,7 +2070,9 @@ fn execute_slash(app: &mut App, cmd: &str) {
         }
         "/compact" => {
             if app.busy {
-                app.push(ChatLine::Info("  compact: agent is busy, try again when idle".into()));
+                app.push(ChatLine::Info(
+                    "  compact: agent is busy, try again when idle".into(),
+                ));
             } else {
                 app.push(ChatLine::Info("  compacting context window…".into()));
                 let _ = app.compact_now_tx.send(());
@@ -1888,7 +2130,11 @@ fn execute_slash(app: &mut App, cmd: &str) {
                     app.push(ChatLine::Info("  plan  ┌─ Current plan:".into()));
                     let count = tasks.len();
                     for (i, task) in tasks.iter().enumerate() {
-                        let prefix = if i + 1 == count { "        └─" } else { "        ├─" };
+                        let prefix = if i + 1 == count {
+                            "        └─"
+                        } else {
+                            "        ├─"
+                        };
                         app.push(ChatLine::Info(format!("{} {}", prefix, task)));
                     }
                 }
@@ -1910,38 +2156,42 @@ fn execute_slash(app: &mut App, cmd: &str) {
         "/plan save" => {
             if let Some(ref editor) = app.plan_editor {
                 match clido_planner::save_plan(&app.workspace_root, &editor.plan) {
-                    Ok(path) => app.push(ChatLine::Info(format!("  plan saved: {}", path.display()))),
+                    Ok(path) => {
+                        app.push(ChatLine::Info(format!("  plan saved: {}", path.display())))
+                    }
                     Err(e) => app.pending_error = Some(format!("save plan: {}", e)),
                 }
             } else {
                 app.push(ChatLine::Info("  no active plan to save".into()));
             }
         }
-        "/plan list" => {
-            match clido_planner::list_plans(&app.workspace_root) {
-                Ok(summaries) if summaries.is_empty() => {
-                    app.push(ChatLine::Info("  no saved plans found".into()));
-                }
-                Ok(summaries) => {
-                    app.push(ChatLine::Info("  saved plans:".into()));
-                    for s in &summaries {
-                        app.push(ChatLine::Info(format!(
-                            "    {}  ({} tasks, {} done)  {}",
-                            s.id, s.task_count, s.done,
-                            truncate_chars(&s.goal, 50)
-                        )));
-                    }
-                }
-                Err(e) => {
-                    app.pending_error = Some(format!("list plans: {}", e));
+        "/plan list" => match clido_planner::list_plans(&app.workspace_root) {
+            Ok(summaries) if summaries.is_empty() => {
+                app.push(ChatLine::Info("  no saved plans found".into()));
+            }
+            Ok(summaries) => {
+                app.push(ChatLine::Info("  saved plans:".into()));
+                for s in &summaries {
+                    app.push(ChatLine::Info(format!(
+                        "    {}  ({} tasks, {} done)  {}",
+                        s.id,
+                        s.task_count,
+                        s.done,
+                        truncate_chars(&s.goal, 50)
+                    )));
                 }
             }
-        }
+            Err(e) => {
+                app.pending_error = Some(format!("list plans: {}", e));
+            }
+        },
         _ if cmd.starts_with("/branch") => {
             let name = cmd.trim_start_matches("/branch").trim().to_string();
             if name.is_empty() {
                 app.push(ChatLine::Info("  usage: /branch <name>".into()));
-                app.push(ChatLine::Info("  creates a new branch and switches to it".into()));
+                app.push(ChatLine::Info(
+                    "  creates a new branch and switches to it".into(),
+                ));
             } else {
                 app.send_now(format!(
                     "Create and switch to a new git branch named `{name}`.\n\
@@ -1974,13 +2224,14 @@ fn execute_slash(app: &mut App, cmd: &str) {
                    If conflicts are non-trivial, stop and explain what needs manual resolution.\n\
                 6. If a stash was created, pop it: `git stash pop`.\n\
                 7. Report how many commits were rebased and the current HEAD."
-                .to_string(),
+                    .to_string(),
             );
         }
         _ if cmd.starts_with("/pr") => {
             let title_arg = cmd.trim_start_matches("/pr").trim().to_string();
             let title_instruction = if title_arg.is_empty() {
-                "Generate a PR title (≤70 chars, imperative mood) and body from the branch diff.".to_string()
+                "Generate a PR title (≤70 chars, imperative mood) and body from the branch diff."
+                    .to_string()
             } else {
                 format!("Use this as the PR title: {title_arg}")
             };
@@ -2126,14 +2377,12 @@ fn build_lines(app: &App) -> Vec<Line<'static>> {
     for msg in &app.messages {
         match msg {
             ChatLine::User(text) => {
-                out.push(Line::from(vec![
-                    Span::styled(
-                        "you",
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                ]));
+                out.push(Line::from(vec![Span::styled(
+                    "you",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                )]));
                 out.extend(render_markdown(text));
                 out.push(Line::raw(""));
             }
@@ -2153,12 +2402,19 @@ fn build_lines(app: &App) -> Vec<Line<'static>> {
                         Span::raw("      "),
                         Span::styled(
                             part.to_string(),
-                            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::DIM),
                         ),
                     ]));
                 }
             }
-            ChatLine::ToolCall { name, detail, done, is_error } => {
+            ChatLine::ToolCall {
+                name,
+                detail,
+                done,
+                is_error,
+            } => {
                 let color = tool_color(name, *done, *is_error);
                 let style = Style::default().fg(color);
                 let icon = if *is_error {
@@ -2168,7 +2424,9 @@ fn build_lines(app: &App) -> Vec<Line<'static>> {
                 } else {
                     "↻"
                 };
-                let dim = Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM);
+                let dim = Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM);
                 if detail.is_empty() {
                     out.push(Line::from(vec![Span::styled(
                         format!("  {} {}", icon, name.clone()),
@@ -2197,7 +2455,9 @@ fn build_lines(app: &App) -> Vec<Line<'static>> {
                     } else if line.starts_with("---") || line.starts_with("+++") {
                         out.push(Line::from(vec![Span::styled(
                             format!("  {}", line),
-                            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::DIM),
                         )]));
                     } else if line.starts_with('+') {
                         let lineno = new_lineno;
@@ -2205,11 +2465,15 @@ fn build_lines(app: &App) -> Vec<Line<'static>> {
                         out.push(Line::from(vec![
                             Span::styled(
                                 format!("  {:>4} ", lineno),
-                                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                                Style::default()
+                                    .fg(Color::DarkGray)
+                                    .add_modifier(Modifier::DIM),
                             ),
                             Span::styled(
                                 line.to_string(),
-                                Style::default().fg(Color::Green).add_modifier(Modifier::DIM),
+                                Style::default()
+                                    .fg(Color::Green)
+                                    .add_modifier(Modifier::DIM),
                             ),
                         ]));
                     } else if line.starts_with('-') {
@@ -2218,7 +2482,9 @@ fn build_lines(app: &App) -> Vec<Line<'static>> {
                         out.push(Line::from(vec![
                             Span::styled(
                                 format!("  {:>4} ", lineno),
-                                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                                Style::default()
+                                    .fg(Color::DarkGray)
+                                    .add_modifier(Modifier::DIM),
                             ),
                             Span::styled(
                                 line.to_string(),
@@ -2233,11 +2499,15 @@ fn build_lines(app: &App) -> Vec<Line<'static>> {
                         out.push(Line::from(vec![
                             Span::styled(
                                 format!("  {:>4} ", lineno),
-                                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                                Style::default()
+                                    .fg(Color::DarkGray)
+                                    .add_modifier(Modifier::DIM),
                             ),
                             Span::styled(
                                 line.to_string(),
-                                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                                Style::default()
+                                    .fg(Color::DarkGray)
+                                    .add_modifier(Modifier::DIM),
                             ),
                         ]));
                     }
@@ -2265,8 +2535,18 @@ fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
     let mut parts = inner.split_whitespace();
     let old_part = parts.next()?;
     let new_part = parts.next()?;
-    let old_start: u32 = old_part.trim_start_matches('-').split(',').next()?.parse().ok()?;
-    let new_start: u32 = new_part.trim_start_matches('+').split(',').next()?.parse().ok()?;
+    let old_start: u32 = old_part
+        .trim_start_matches('-')
+        .split(',')
+        .next()?
+        .parse()
+        .ok()?;
+    let new_start: u32 = new_part
+        .trim_start_matches('+')
+        .split(',')
+        .next()?
+        .parse()
+        .ok()?;
     Some((old_start, new_start))
 }
 
@@ -2324,7 +2604,9 @@ fn render_markdown(text: &str) -> Vec<Line<'static>> {
                         current_line_spans.push(Span::raw(" ".repeat(indent)));
                         current_line_spans.push(Span::styled(
                             bullet.to_string(),
-                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
                         ));
                         in_list_item = true;
                     }
@@ -2332,74 +2614,76 @@ fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     Tag::Heading(..) => {
                         current_line_spans.push(Span::styled(
                             String::new(),
-                            Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
+                            Style::default()
+                                .add_modifier(Modifier::BOLD)
+                                .fg(Color::Cyan),
                         ));
                     }
                     Tag::Link(..) => {
                         current_line_spans.push(Span::styled(
                             String::new(),
-                            Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED),
+                            Style::default()
+                                .fg(Color::Blue)
+                                .add_modifier(Modifier::UNDERLINED),
                         ));
                     }
                     // Note: Inline code is Event::Code, not a tag pair
                     _ => {}
                 }
             }
-            Event::End(tag) => {
-                match tag {
-                    Tag::Emphasis | Tag::Strong | Tag::Link(..) => {
-                        if !current_line_spans.is_empty() {
-                            current_line_spans.pop();
-                        }
+            Event::End(tag) => match tag {
+                Tag::Emphasis | Tag::Strong | Tag::Link(..) => {
+                    if !current_line_spans.is_empty() {
+                        current_line_spans.pop();
                     }
-                    Tag::CodeBlock(_) => {
-                        in_code_block = false;
-                        if !current_line_spans.is_empty() {
-                            out.push(Line::from(current_line_spans));
-                            current_line_spans = Vec::new();
-                        }
-                    }
-                    Tag::List(_) => {
-                        list_stack.pop();
-                    }
-                    Tag::Item => {
-                        if !current_line_spans.is_empty() {
-                            out.push(Line::from(current_line_spans));
-                            current_line_spans = Vec::new();
-                        }
-                        in_list_item = false;
-                    }
-                    Tag::Paragraph => {
-                        if !current_line_spans.is_empty() {
-                            out.push(Line::from(current_line_spans));
-                            current_line_spans = Vec::new();
-                        }
-                        out.push(Line::raw(""));
-                    }
-                    Tag::Heading(..) => {
-                        if !current_line_spans.is_empty() {
-                            out.push(Line::from(current_line_spans));
-                            current_line_spans = Vec::new();
-                        }
-                        out.push(Line::raw(""));
-                    }
-                    _ => {}
                 }
-            }
+                Tag::CodeBlock(_) => {
+                    in_code_block = false;
+                    if !current_line_spans.is_empty() {
+                        out.push(Line::from(current_line_spans));
+                        current_line_spans = Vec::new();
+                    }
+                }
+                Tag::List(_) => {
+                    list_stack.pop();
+                }
+                Tag::Item => {
+                    if !current_line_spans.is_empty() {
+                        out.push(Line::from(current_line_spans));
+                        current_line_spans = Vec::new();
+                    }
+                    in_list_item = false;
+                }
+                Tag::Paragraph => {
+                    if !current_line_spans.is_empty() {
+                        out.push(Line::from(current_line_spans));
+                        current_line_spans = Vec::new();
+                    }
+                    out.push(Line::raw(""));
+                }
+                Tag::Heading(..) => {
+                    if !current_line_spans.is_empty() {
+                        out.push(Line::from(current_line_spans));
+                        current_line_spans = Vec::new();
+                    }
+                    out.push(Line::raw(""));
+                }
+                _ => {}
+            },
             Event::Text(text) => {
                 if in_code_block {
                     let lines = text.split('\n');
                     for (i, line) in lines.enumerate() {
-                        if i > 0 {
-                            if !current_line_spans.is_empty() {
-                                out.push(Line::from(current_line_spans));
-                                current_line_spans = Vec::new();
-                            }
+                        if i > 0 && !current_line_spans.is_empty() {
+                            out.push(Line::from(current_line_spans));
+                            current_line_spans = Vec::new();
                         }
                         if !line.is_empty() {
                             current_line_spans.push(Span::styled(
                                 line.to_string(),
-                                Style::default().fg(Color::White).add_modifier(Modifier::DIM),
+                                Style::default()
+                                    .fg(Color::White)
+                                    .add_modifier(Modifier::DIM),
                             ));
                             out.push(Line::from(current_line_spans));
                             current_line_spans = Vec::new();
@@ -2411,7 +2695,10 @@ fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     if in_list_item {
                         // Strip leading "- ", "* ", "+ ", or "1. " etc.
                         let trimmed = content.trim_start();
-                        if trimmed.starts_with('-') || trimmed.starts_with('*') || trimmed.starts_with('+') {
+                        if trimmed.starts_with('-')
+                            || trimmed.starts_with('*')
+                            || trimmed.starts_with('+')
+                        {
                             // Find first non-marker char after optional whitespace and numbers/dots
                             let mut chars = trimmed.chars();
                             // Skip the bullet char
@@ -2434,7 +2721,9 @@ fn render_markdown(text: &str) -> Vec<Line<'static>> {
             Event::Code(text) => {
                 let span = Span::styled(
                     text.to_string(),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::DIM),
                 );
                 if current_line_spans.is_empty() {
                     current_line_spans.push(span);
@@ -2535,8 +2824,12 @@ fn handle_plan_editor_key(app: &mut App, event: crossterm::event::KeyEvent) {
             Backspace => {
                 if let Some(ref mut form) = app.plan_task_editing {
                     match form.focused_field {
-                        TaskEditField::Description => { form.description.pop(); }
-                        TaskEditField::Notes => { form.notes.pop(); }
+                        TaskEditField::Description => {
+                            form.description.pop();
+                        }
+                        TaskEditField::Notes => {
+                            form.notes.pop();
+                        }
                         TaskEditField::Complexity => {}
                     }
                 }
@@ -2569,7 +2862,11 @@ fn handle_plan_editor_key(app: &mut App, event: crossterm::event::KeyEvent) {
     }
 
     // Task list navigation.
-    let task_count = app.plan_editor.as_ref().map(|e| e.plan.tasks.len()).unwrap_or(0);
+    let task_count = app
+        .plan_editor
+        .as_ref()
+        .map(|e| e.plan.tasks.len())
+        .unwrap_or(0);
 
     match event.code {
         Up => {
@@ -2600,10 +2897,11 @@ fn handle_plan_editor_key(app: &mut App, event: crossterm::event::KeyEvent) {
             if let Some(ref mut editor) = app.plan_editor {
                 if let Some(task) = editor.plan.tasks.get(app.plan_selected_task) {
                     let id = task.id.clone();
-                    if editor.delete_task(&id).is_ok() {
-                        if app.plan_selected_task >= editor.plan.tasks.len() && app.plan_selected_task > 0 {
-                            app.plan_selected_task -= 1;
-                        }
+                    if editor.delete_task(&id).is_ok()
+                        && app.plan_selected_task >= editor.plan.tasks.len()
+                        && app.plan_selected_task > 0
+                    {
+                        app.plan_selected_task -= 1;
                     }
                 }
             }
@@ -2614,12 +2912,8 @@ fn handle_plan_editor_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 let new_id = format!("t{}", editor.plan.tasks.len() + 1);
                 let _ = editor.add_task(new_id.clone(), "New task".to_string(), vec![]);
                 app.plan_selected_task = editor.plan.tasks.len() - 1;
-                app.plan_task_editing = Some(TaskEditState::new(
-                    &new_id,
-                    "New task",
-                    "",
-                    Complexity::Low,
-                ));
+                app.plan_task_editing =
+                    Some(TaskEditState::new(&new_id, "New task", "", Complexity::Low));
             }
         }
         Char(' ') => {
@@ -2644,10 +2938,7 @@ fn handle_plan_editor_key(app: &mut App, event: crossterm::event::KeyEvent) {
             if let Some(ref editor) = app.plan_editor {
                 match clido_planner::save_plan(&app.workspace_root, &editor.plan) {
                     Ok(path) => {
-                        app.push(ChatLine::Info(format!(
-                            "  plan saved: {}",
-                            path.display()
-                        )));
+                        app.push(ChatLine::Info(format!("  plan saved: {}", path.display())));
                     }
                     Err(e) => {
                         app.pending_error = Some(format!("save plan: {}", e));
@@ -2792,7 +3083,8 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         app.model_prefs.save();
                         // Rebuild known_models with updated favorites.
                         let (pricing, _) = clido_core::load_pricing();
-                        app.known_models = build_model_list(&pricing, &app.config_roles, &app.model_prefs);
+                        app.known_models =
+                            build_model_list(&pricing, &app.config_roles, &app.model_prefs);
                         picker.models = app.known_models.clone();
                         picker.clamp();
                     }
@@ -3092,6 +3384,7 @@ enum AgentAction {
     CompactNow,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn agent_task(
     cli: Cli,
     workspace_root: std::path::PathBuf,
@@ -3173,7 +3466,9 @@ async fn agent_task(
         match action {
             AgentAction::SwitchModel(model_name) => {
                 agent.set_model(model_name.clone());
-                let _ = event_tx.send(AgentEvent::ModelSwitched { to_model: model_name });
+                let _ = event_tx.send(AgentEvent::ModelSwitched {
+                    to_model: model_name,
+                });
             }
             AgentAction::CompactNow => {
                 match agent.compact_history_now().await {
@@ -3242,7 +3537,9 @@ async fn agent_task(
                                 // 'x' key sends a combined prompt via send_now.
                                 continue;
                             } else {
-                                let _ = event_tx.send(AgentEvent::PlanCreated { tasks: task_descriptions });
+                                let _ = event_tx.send(AgentEvent::PlanCreated {
+                                    tasks: task_descriptions,
+                                });
                             }
                         }
                         // If parse fails, silently proceed (fallback to reactive)
@@ -3253,27 +3550,52 @@ async fn agent_task(
                 let pending_img = image_state.lock().ok().and_then(|mut g| g.take());
                 let extra_blocks: Vec<clido_core::ContentBlock> =
                     if let Some((media_type, base64_data)) = pending_img {
-                        vec![clido_core::ContentBlock::Image { media_type, base64_data }]
+                        vec![clido_core::ContentBlock::Image {
+                            media_type,
+                            base64_data,
+                        }]
                     } else {
                         vec![]
                     };
                 let result = if extra_blocks.is_empty() {
                     if first_turn {
                         agent
-                            .run(&prompt, Some(&mut writer), Some(&setup.pricing_table), Some(cancel.clone()))
+                            .run(
+                                &prompt,
+                                Some(&mut writer),
+                                Some(&setup.pricing_table),
+                                Some(cancel.clone()),
+                            )
                             .await
                     } else {
                         agent
-                            .run_next_turn(&prompt, Some(&mut writer), Some(&setup.pricing_table), Some(cancel.clone()))
+                            .run_next_turn(
+                                &prompt,
+                                Some(&mut writer),
+                                Some(&setup.pricing_table),
+                                Some(cancel.clone()),
+                            )
                             .await
                     }
                 } else if first_turn {
                     agent
-                        .run_with_extra_blocks(&prompt, extra_blocks, Some(&mut writer), Some(&setup.pricing_table), Some(cancel.clone()))
+                        .run_with_extra_blocks(
+                            &prompt,
+                            extra_blocks,
+                            Some(&mut writer),
+                            Some(&setup.pricing_table),
+                            Some(cancel.clone()),
+                        )
                         .await
                 } else {
                     agent
-                        .run_next_turn_with_extra_blocks(&prompt, extra_blocks, Some(&mut writer), Some(&setup.pricing_table), Some(cancel.clone()))
+                        .run_next_turn_with_extra_blocks(
+                            &prompt,
+                            extra_blocks,
+                            Some(&mut writer),
+                            Some(&setup.pricing_table),
+                            Some(cancel.clone()),
+                        )
                         .await
                 };
                 first_turn = false;
@@ -3375,8 +3697,8 @@ async fn agent_task(
                                 writer = new_writer;
                             }
                             Err(e) => {
-                                let _ = event_tx
-                                    .send(AgentEvent::Err(format!("resume writer: {}", e)));
+                                let _ =
+                                    event_tx.send(AgentEvent::Err(format!("resume writer: {}", e)));
                             }
                         }
                         // Collect display messages for the TUI (user + assistant).
@@ -3397,8 +3719,12 @@ async fn agent_task(
                                     let text: String = content
                                         .iter()
                                         .filter_map(|c| {
-                                            if c.get("type").and_then(|v| v.as_str()) == Some("text") {
-                                                c.get("text").and_then(|v| v.as_str()).map(|s| s.to_string())
+                                            if c.get("type").and_then(|v| v.as_str())
+                                                == Some("text")
+                                            {
+                                                c.get("text")
+                                                    .and_then(|v| v.as_str())
+                                                    .map(|s| s.to_string())
                                             } else {
                                                 None
                                             }
@@ -3457,10 +3783,14 @@ fn build_model_list(
     // Invert roles map: model_id → role name (use first role found if multiple).
     let mut model_to_role: HashMap<String, String> = HashMap::new();
     for (role, model_id) in roles {
-        model_to_role.entry(model_id.clone()).or_insert_with(|| role.clone());
+        model_to_role
+            .entry(model_id.clone())
+            .or_insert_with(|| role.clone());
     }
     for (role, model_id) in &prefs.roles {
-        model_to_role.entry(model_id.clone()).or_insert_with(|| role.clone());
+        model_to_role
+            .entry(model_id.clone())
+            .or_insert_with(|| role.clone());
     }
 
     // Build all entries from the pricing table.
@@ -3580,7 +3910,11 @@ pub async fn run_tui(cli: Cli) -> Result<(), anyhow::Error> {
 
     enable_raw_mode()?;
     let mut out = stdout();
-    execute!(out, EnterAlternateScreen, crossterm::event::EnableMouseCapture)?;
+    execute!(
+        out,
+        EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )?;
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
 
@@ -3598,14 +3932,29 @@ pub async fn run_tui(cli: Cli) -> Result<(), anyhow::Error> {
     };
 
     let mut app = App::new(
-        prompt_tx, resume_tx, model_switch_tx, compact_now_tx, cancel,
-        provider, model, workspace_root.clone(), notify_enabled, image_state, plan_dry_run,
-        known_models, model_prefs, config_roles,
+        prompt_tx,
+        resume_tx,
+        model_switch_tx,
+        compact_now_tx,
+        cancel,
+        provider,
+        model,
+        workspace_root.clone(),
+        notify_enabled,
+        image_state,
+        plan_dry_run,
+        known_models,
+        model_prefs,
+        config_roles,
     );
     let result = event_loop(&mut app, &mut terminal, &mut event_rx, &mut perm_rx).await;
 
     let _ = disable_raw_mode();
-    let _ = execute!(terminal.backend_mut(), crossterm::event::DisableMouseCapture, LeaveAlternateScreen);
+    let _ = execute!(
+        terminal.backend_mut(),
+        crossterm::event::DisableMouseCapture,
+        LeaveAlternateScreen
+    );
     result
 }
 
@@ -3805,7 +4154,10 @@ mod tests {
         let result = parse_per_turn_model("@claude-opus-4-6 explain the auth flow");
         assert_eq!(
             result,
-            Some(("claude-opus-4-6".to_string(), "explain the auth flow".to_string()))
+            Some((
+                "claude-opus-4-6".to_string(),
+                "explain the auth flow".to_string()
+            ))
         );
     }
 

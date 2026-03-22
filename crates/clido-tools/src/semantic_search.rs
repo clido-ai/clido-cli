@@ -18,12 +18,12 @@ const INDEX_MAX_AGE_SECS: u64 = 3600;
 /// Web3/smart-contract languages are listed first so they get priority in results.
 const DEFAULT_EXTENSIONS: &[&str] = &[
     // Web3 / smart contracts
-    "sol",  // Solidity (Ethereum, EVM)
-    "move", // Move (Aptos, Sui)
-    "vy",   // Vyper
-    "fe",   // Fe (Ethereum)
-    "yul",  // Yul / Yul+ (EVM assembly IR)
-    "rell", // Rell (Chromia)
+    "sol",   // Solidity (Ethereum, EVM)
+    "move",  // Move (Aptos, Sui)
+    "vy",    // Vyper
+    "fe",    // Fe (Ethereum)
+    "yul",   // Yul / Yul+ (EVM assembly IR)
+    "rell",  // Rell (Chromia)
     "cairo", // Cairo (StarkNet)
     // General-purpose
     "rs", "py", "js", "ts", "go", "java", "c", "cpp", "h", "md",
@@ -47,7 +47,9 @@ impl SemanticSearchTool {
     fn index_age_secs(index_path: &std::path::Path) -> Option<u64> {
         let meta = std::fs::metadata(index_path).ok()?;
         let modified = meta.modified().ok()?;
-        let age = SystemTime::now().duration_since(modified).unwrap_or(Duration::ZERO);
+        let age = SystemTime::now()
+            .duration_since(modified)
+            .unwrap_or(Duration::ZERO);
         Some(age.as_secs())
     }
 
@@ -57,8 +59,8 @@ impl SemanticSearchTool {
         let age = Self::index_age_secs(&db_path);
 
         let needs_build = match age {
-            None => true,                          // doesn't exist yet
-            Some(s) => s > INDEX_MAX_AGE_SECS,     // stale
+            None => true,                      // doesn't exist yet
+            Some(s) => s > INDEX_MAX_AGE_SECS, // stale
         };
 
         if !needs_build {
@@ -70,14 +72,21 @@ impl SemanticSearchTool {
             let _ = std::fs::create_dir_all(parent);
         }
 
-        let label = if age.is_none() { "Building" } else { "Refreshing" };
+        let label = if age.is_none() {
+            "Building"
+        } else {
+            "Refreshing"
+        };
 
         match clido_index::RepoIndex::open(&db_path) {
             Err(e) => format!("(Index unavailable: {})\n", e),
             Ok(mut idx) => match idx.build(&self.workspace_root, DEFAULT_EXTENSIONS) {
                 Ok(n) => {
                     let (_, sym_count) = idx.stats().unwrap_or((0, 0));
-                    format!("({} repo index: {} files, {} symbols)\n", label, n, sym_count)
+                    format!(
+                        "({} repo index: {} files, {} symbols)\n",
+                        label, n, sym_count
+                    )
                 }
                 Err(e) => format!("(Index build failed: {})\n", e),
             },
@@ -162,16 +171,13 @@ impl Tool for SemanticSearchTool {
                     }
                     // Files
                     if let Ok(files) = idx.search_files(&query) {
-                        let files: Vec<_> = match input
-                            .get("target_directory")
-                            .and_then(|v| v.as_str())
-                        {
-                            Some(dir) => files
-                                .into_iter()
-                                .filter(|f| f.path.contains(dir))
-                                .collect(),
-                            None => files,
-                        };
+                        let files: Vec<_> =
+                            match input.get("target_directory").and_then(|v| v.as_str()) {
+                                Some(dir) => {
+                                    files.into_iter().filter(|f| f.path.contains(dir)).collect()
+                                }
+                                None => files,
+                            };
                         if !files.is_empty() {
                             let mut part = format!("## Files matching '{}'\n", query);
                             for f in files.iter().take(num_results) {

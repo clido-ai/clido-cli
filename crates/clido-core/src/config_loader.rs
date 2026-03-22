@@ -156,10 +156,18 @@ impl RolesSection {
     /// Return all roles as a flat map of name → model ID.
     pub fn as_map(&self) -> HashMap<String, String> {
         let mut map = self.extra.clone();
-        if let Some(m) = &self.fast { map.insert("fast".into(), m.clone()); }
-        if let Some(m) = &self.reasoning { map.insert("reasoning".into(), m.clone()); }
-        if let Some(m) = &self.critic { map.insert("critic".into(), m.clone()); }
-        if let Some(m) = &self.planner { map.insert("planner".into(), m.clone()); }
+        if let Some(m) = &self.fast {
+            map.insert("fast".into(), m.clone());
+        }
+        if let Some(m) = &self.reasoning {
+            map.insert("reasoning".into(), m.clone());
+        }
+        if let Some(m) = &self.critic {
+            map.insert("critic".into(), m.clone());
+        }
+        if let Some(m) = &self.planner {
+            map.insert("planner".into(), m.clone());
+        }
         map
     }
 }

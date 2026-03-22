@@ -25,7 +25,10 @@ pub fn notify_done(session_id: &str, elapsed_secs: u64, cost_usd: f64) {
     #[cfg(feature = "desktop-notify")]
     {
         let summary = "clido done";
-        let body = format!("Session {} · {}s · ${:.4}", session_id, elapsed_secs, cost_usd);
+        let body = format!(
+            "Session {} · {}s · ${:.4}",
+            session_id, elapsed_secs, cost_usd
+        );
         use notify_rust::Notification;
         let _ = Notification::new().summary(summary).body(&body).show();
         let _ = session_id; // suppress unused warning when log line below is removed

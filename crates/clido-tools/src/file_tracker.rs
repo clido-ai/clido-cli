@@ -23,7 +23,10 @@ impl FileTracker {
     /// Record the mtime of a file after a successful Read.
     pub fn record(&self, path: &Path, mtime_nanos: u64) {
         if mtime_nanos > 0 {
-            self.inner.lock().unwrap().insert(path.to_path_buf(), mtime_nanos);
+            self.inner
+                .lock()
+                .unwrap()
+                .insert(path.to_path_buf(), mtime_nanos);
         }
     }
 
@@ -56,7 +59,10 @@ impl FileTracker {
     /// Update the tracker after a successful write so the next check passes.
     pub fn update(&self, path: &Path, mtime_nanos: u64) {
         if mtime_nanos > 0 {
-            self.inner.lock().unwrap().insert(path.to_path_buf(), mtime_nanos);
+            self.inner
+                .lock()
+                .unwrap()
+                .insert(path.to_path_buf(), mtime_nanos);
         }
     }
 }

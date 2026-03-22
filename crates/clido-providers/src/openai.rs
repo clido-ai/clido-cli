@@ -160,7 +160,8 @@ impl OpenAICompatProvider {
             let status = res.status();
 
             if status.as_u16() == 429 {
-                let retry_after = res.headers()
+                let retry_after = res
+                    .headers()
                     .get("retry-after")
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| s.trim().parse::<u64>().ok())
@@ -173,7 +174,9 @@ impl OpenAICompatProvider {
                     });
                     tracing::info!(
                         "Rate limited (attempt {}/{}), waiting {:.0}s…",
-                        rate_limit_attempts, MAX_RATE_LIMIT_ATTEMPTS, delay.as_secs_f64()
+                        rate_limit_attempts,
+                        MAX_RATE_LIMIT_ATTEMPTS,
+                        delay.as_secs_f64()
                     );
                     tokio::time::sleep(delay).await;
                     continue;
@@ -184,7 +187,10 @@ impl OpenAICompatProvider {
                 )));
             }
 
-            let text = res.text().await.map_err(|e| ClidoError::Provider(e.to_string()))?;
+            let text = res
+                .text()
+                .await
+                .map_err(|e| ClidoError::Provider(e.to_string()))?;
 
             if status.is_server_error() {
                 server_error_attempts += 1;
@@ -199,7 +205,8 @@ impl OpenAICompatProvider {
                 }
                 return Err(ClidoError::Provider(format!(
                     "API server error ({}) after {} attempts. Please try again later.",
-                    status.as_u16(), MAX_SERVER_ERROR_ATTEMPTS
+                    status.as_u16(),
+                    MAX_SERVER_ERROR_ATTEMPTS
                 )));
             }
 
@@ -214,10 +221,19 @@ impl OpenAICompatProvider {
                 if let Some(m) = json["error"]["message"].as_str() {
                     format!("API error ({}): {}", status.as_u16(), m)
                 } else {
-                    format!("API error ({}): {}", status.as_u16(), &text[..text.len().min(300)])
+                    format!(
+                        "API error ({}): {}",
+                        status.as_u16(),
+                        &text[..text.len().min(300)]
+                    )
                 }
             } else {
-                format!("API error {} (model: {}): {}", status, self.model, &text[..text.len().min(300)])
+                format!(
+                    "API error {} (model: {}): {}",
+                    status,
+                    self.model,
+                    &text[..text.len().min(300)]
+                )
             };
             return Err(ClidoError::Provider(msg));
         }

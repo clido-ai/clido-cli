@@ -14,8 +14,8 @@ use clido_memory::MemoryStore;
 use clido_providers::ModelProvider;
 use clido_storage::{AuditEntry, AuditLog, SessionLine, SessionWriter};
 use clido_tools::{ToolOutput, ToolRegistry};
-use similar::TextDiff;
 use futures::future::join_all;
+use similar::TextDiff;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
@@ -265,10 +265,7 @@ impl AgentLoop {
             .system_prompt
             .as_deref()
             .unwrap_or("You are a helpful coding assistant.");
-        Some(format!(
-            "{}\n\n[Relevant memories]\n{}",
-            base, memory_text
-        ))
+        Some(format!("{}\n\n[Relevant memories]\n{}", base, memory_text))
     }
 
     /// Turn count from last run (for session result line).
@@ -294,7 +291,7 @@ impl AgentLoop {
             .system_prompt
             .as_ref()
             .map(|s| estimate_tokens_str(s))
-            .unwrap_or(0) as u32;
+            .unwrap_or(0);
         let max_ctx = self
             .config
             .max_context_tokens
@@ -381,7 +378,15 @@ impl AgentLoop {
                 .config
                 .compaction_threshold
                 .unwrap_or(DEFAULT_COMPACTION_THRESHOLD);
-            let to_send = compact_with_summary(&self.history, system_tokens, max_ctx, threshold, self.provider.as_ref(), &self.config).await?;
+            let to_send = compact_with_summary(
+                &self.history,
+                system_tokens,
+                max_ctx,
+                threshold,
+                self.provider.as_ref(),
+                &self.config,
+            )
+            .await?;
 
             let response = self
                 .provider
@@ -474,10 +479,16 @@ impl AgentLoop {
                         for (_, name, input) in &tool_uses {
                             if let Some(ref hooks) = self.hooks {
                                 if let Some(cmd) = &hooks.pre_tool_use {
-                                    run_hook(cmd, &[
-                                        ("CLIDO_TOOL_NAME", name.as_str()),
-                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
-                                    ]);
+                                    run_hook(
+                                        cmd,
+                                        &[
+                                            ("CLIDO_TOOL_NAME", name.as_str()),
+                                            (
+                                                "CLIDO_TOOL_INPUT",
+                                                &serde_json::to_string(input).unwrap_or_default(),
+                                            ),
+                                        ],
+                                    );
                                 }
                             }
                         }
@@ -486,20 +497,37 @@ impl AgentLoop {
                         let batch_ms = t0.elapsed().as_millis() as u64;
                         if let Some(ref e) = self.emit {
                             for ((_, name, _), output) in tool_uses.iter().zip(results.iter()) {
-                                e.on_tool_done(name, output.is_error, output.diff.clone()).await;
+                                e.on_tool_done(name, output.is_error, output.diff.clone())
+                                    .await;
                             }
                         }
                         for ((_, name, input), output) in tool_uses.iter().zip(results.iter()) {
                             self.write_audit(name, input, output, batch_ms);
                             if let Some(ref hooks) = self.hooks {
                                 if let Some(cmd) = &hooks.post_tool_use {
-                                    run_hook(cmd, &[
-                                        ("CLIDO_TOOL_NAME", name.as_str()),
-                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
-                                        ("CLIDO_TOOL_OUTPUT", &output.content.chars().take(500).collect::<String>()),
-                                        ("CLIDO_TOOL_IS_ERROR", if output.is_error { "true" } else { "false" }),
-                                        ("CLIDO_TOOL_DURATION_MS", &batch_ms.to_string()),
-                                    ]);
+                                    run_hook(
+                                        cmd,
+                                        &[
+                                            ("CLIDO_TOOL_NAME", name.as_str()),
+                                            (
+                                                "CLIDO_TOOL_INPUT",
+                                                &serde_json::to_string(input).unwrap_or_default(),
+                                            ),
+                                            (
+                                                "CLIDO_TOOL_OUTPUT",
+                                                &output
+                                                    .content
+                                                    .chars()
+                                                    .take(500)
+                                                    .collect::<String>(),
+                                            ),
+                                            (
+                                                "CLIDO_TOOL_IS_ERROR",
+                                                if output.is_error { "true" } else { "false" },
+                                            ),
+                                            ("CLIDO_TOOL_DURATION_MS", &batch_ms.to_string()),
+                                        ],
+                                    );
                                 }
                             }
                         }
@@ -512,28 +540,51 @@ impl AgentLoop {
                             }
                             if let Some(ref hooks) = self.hooks {
                                 if let Some(cmd) = &hooks.pre_tool_use {
-                                    run_hook(cmd, &[
-                                        ("CLIDO_TOOL_NAME", name.as_str()),
-                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
-                                    ]);
+                                    run_hook(
+                                        cmd,
+                                        &[
+                                            ("CLIDO_TOOL_NAME", name.as_str()),
+                                            (
+                                                "CLIDO_TOOL_INPUT",
+                                                &serde_json::to_string(input).unwrap_or_default(),
+                                            ),
+                                        ],
+                                    );
                                 }
                             }
                             let t0 = std::time::Instant::now();
                             let output = self.execute_tool_maybe_gated(name, input).await;
                             let duration_ms = t0.elapsed().as_millis() as u64;
                             if let Some(ref e) = self.emit {
-                                e.on_tool_done(name, output.is_error, output.diff.clone()).await;
+                                e.on_tool_done(name, output.is_error, output.diff.clone())
+                                    .await;
                             }
                             self.write_audit(name, input, &output, duration_ms);
                             if let Some(ref hooks) = self.hooks {
                                 if let Some(cmd) = &hooks.post_tool_use {
-                                    run_hook(cmd, &[
-                                        ("CLIDO_TOOL_NAME", name.as_str()),
-                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
-                                        ("CLIDO_TOOL_OUTPUT", &output.content.chars().take(500).collect::<String>()),
-                                        ("CLIDO_TOOL_IS_ERROR", if output.is_error { "true" } else { "false" }),
-                                        ("CLIDO_TOOL_DURATION_MS", &duration_ms.to_string()),
-                                    ]);
+                                    run_hook(
+                                        cmd,
+                                        &[
+                                            ("CLIDO_TOOL_NAME", name.as_str()),
+                                            (
+                                                "CLIDO_TOOL_INPUT",
+                                                &serde_json::to_string(input).unwrap_or_default(),
+                                            ),
+                                            (
+                                                "CLIDO_TOOL_OUTPUT",
+                                                &output
+                                                    .content
+                                                    .chars()
+                                                    .take(500)
+                                                    .collect::<String>(),
+                                            ),
+                                            (
+                                                "CLIDO_TOOL_IS_ERROR",
+                                                if output.is_error { "true" } else { "false" },
+                                            ),
+                                            ("CLIDO_TOOL_DURATION_MS", &duration_ms.to_string()),
+                                        ],
+                                    );
                                 }
                             }
                             outputs.push((output, duration_ms));
@@ -542,7 +593,8 @@ impl AgentLoop {
                     };
 
                     let mut tool_results = Vec::new();
-                    for ((id, _, _), (output, duration_ms)) in tool_uses.iter().zip(outputs.iter()) {
+                    for ((id, _, _), (output, duration_ms)) in tool_uses.iter().zip(outputs.iter())
+                    {
                         if let Some(ref mut w) = session {
                             let _ = w.write_line(&SessionLine::ToolResult {
                                 tool_use_id: id.clone(),
@@ -767,7 +819,15 @@ impl AgentLoop {
                 .config
                 .compaction_threshold
                 .unwrap_or(DEFAULT_COMPACTION_THRESHOLD);
-            let to_send = compact_with_summary(&self.history, system_tokens, max_ctx, threshold, self.provider.as_ref(), &self.config).await?;
+            let to_send = compact_with_summary(
+                &self.history,
+                system_tokens,
+                max_ctx,
+                threshold,
+                self.provider.as_ref(),
+                &self.config,
+            )
+            .await?;
 
             let response = self
                 .provider
@@ -888,10 +948,16 @@ impl AgentLoop {
                         for (_, name, input) in &tool_uses {
                             if let Some(ref hooks) = self.hooks {
                                 if let Some(cmd) = &hooks.pre_tool_use {
-                                    run_hook(cmd, &[
-                                        ("CLIDO_TOOL_NAME", name.as_str()),
-                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
-                                    ]);
+                                    run_hook(
+                                        cmd,
+                                        &[
+                                            ("CLIDO_TOOL_NAME", name.as_str()),
+                                            (
+                                                "CLIDO_TOOL_INPUT",
+                                                &serde_json::to_string(input).unwrap_or_default(),
+                                            ),
+                                        ],
+                                    );
                                 }
                             }
                         }
@@ -900,20 +966,37 @@ impl AgentLoop {
                         let batch_ms = t0.elapsed().as_millis() as u64;
                         if let Some(ref e) = self.emit {
                             for ((_, name, _), output) in tool_uses.iter().zip(results.iter()) {
-                                e.on_tool_done(name, output.is_error, output.diff.clone()).await;
+                                e.on_tool_done(name, output.is_error, output.diff.clone())
+                                    .await;
                             }
                         }
                         for ((_, name, input), output) in tool_uses.iter().zip(results.iter()) {
                             self.write_audit(name, input, output, batch_ms);
                             if let Some(ref hooks) = self.hooks {
                                 if let Some(cmd) = &hooks.post_tool_use {
-                                    run_hook(cmd, &[
-                                        ("CLIDO_TOOL_NAME", name.as_str()),
-                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
-                                        ("CLIDO_TOOL_OUTPUT", &output.content.chars().take(500).collect::<String>()),
-                                        ("CLIDO_TOOL_IS_ERROR", if output.is_error { "true" } else { "false" }),
-                                        ("CLIDO_TOOL_DURATION_MS", &batch_ms.to_string()),
-                                    ]);
+                                    run_hook(
+                                        cmd,
+                                        &[
+                                            ("CLIDO_TOOL_NAME", name.as_str()),
+                                            (
+                                                "CLIDO_TOOL_INPUT",
+                                                &serde_json::to_string(input).unwrap_or_default(),
+                                            ),
+                                            (
+                                                "CLIDO_TOOL_OUTPUT",
+                                                &output
+                                                    .content
+                                                    .chars()
+                                                    .take(500)
+                                                    .collect::<String>(),
+                                            ),
+                                            (
+                                                "CLIDO_TOOL_IS_ERROR",
+                                                if output.is_error { "true" } else { "false" },
+                                            ),
+                                            ("CLIDO_TOOL_DURATION_MS", &batch_ms.to_string()),
+                                        ],
+                                    );
                                 }
                             }
                         }
@@ -926,28 +1009,51 @@ impl AgentLoop {
                             }
                             if let Some(ref hooks) = self.hooks {
                                 if let Some(cmd) = &hooks.pre_tool_use {
-                                    run_hook(cmd, &[
-                                        ("CLIDO_TOOL_NAME", name.as_str()),
-                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
-                                    ]);
+                                    run_hook(
+                                        cmd,
+                                        &[
+                                            ("CLIDO_TOOL_NAME", name.as_str()),
+                                            (
+                                                "CLIDO_TOOL_INPUT",
+                                                &serde_json::to_string(input).unwrap_or_default(),
+                                            ),
+                                        ],
+                                    );
                                 }
                             }
                             let t0 = std::time::Instant::now();
                             let output = self.execute_tool_maybe_gated(name, input).await;
                             let duration_ms = t0.elapsed().as_millis() as u64;
                             if let Some(ref e) = self.emit {
-                                e.on_tool_done(name, output.is_error, output.diff.clone()).await;
+                                e.on_tool_done(name, output.is_error, output.diff.clone())
+                                    .await;
                             }
                             self.write_audit(name, input, &output, duration_ms);
                             if let Some(ref hooks) = self.hooks {
                                 if let Some(cmd) = &hooks.post_tool_use {
-                                    run_hook(cmd, &[
-                                        ("CLIDO_TOOL_NAME", name.as_str()),
-                                        ("CLIDO_TOOL_INPUT", &serde_json::to_string(input).unwrap_or_default()),
-                                        ("CLIDO_TOOL_OUTPUT", &output.content.chars().take(500).collect::<String>()),
-                                        ("CLIDO_TOOL_IS_ERROR", if output.is_error { "true" } else { "false" }),
-                                        ("CLIDO_TOOL_DURATION_MS", &duration_ms.to_string()),
-                                    ]);
+                                    run_hook(
+                                        cmd,
+                                        &[
+                                            ("CLIDO_TOOL_NAME", name.as_str()),
+                                            (
+                                                "CLIDO_TOOL_INPUT",
+                                                &serde_json::to_string(input).unwrap_or_default(),
+                                            ),
+                                            (
+                                                "CLIDO_TOOL_OUTPUT",
+                                                &output
+                                                    .content
+                                                    .chars()
+                                                    .take(500)
+                                                    .collect::<String>(),
+                                            ),
+                                            (
+                                                "CLIDO_TOOL_IS_ERROR",
+                                                if output.is_error { "true" } else { "false" },
+                                            ),
+                                            ("CLIDO_TOOL_DURATION_MS", &duration_ms.to_string()),
+                                        ],
+                                    );
                                 }
                             }
                             outputs.push((output, duration_ms));
@@ -956,7 +1062,8 @@ impl AgentLoop {
                     };
 
                     let mut tool_results = Vec::new();
-                    for ((id, _, _), (output, duration_ms)) in tool_uses.iter().zip(outputs.iter()) {
+                    for ((id, _, _), (output, duration_ms)) in tool_uses.iter().zip(outputs.iter())
+                    {
                         if let Some(ref mut w) = session {
                             let _ = w.write_line(&SessionLine::ToolResult {
                                 tool_use_id: id.clone(),
@@ -1061,14 +1168,11 @@ impl AgentLoop {
                             PermGrant::Allow => {}
                             PermGrant::AllowAll => {}
                             PermGrant::Deny => {
-                                return ToolOutput::ok(
-                                    "Write rejected by user.".to_string(),
-                                );
+                                return ToolOutput::ok("Write rejected by user.".to_string());
                             }
                             PermGrant::EditInEditor => {
                                 // Open editor, then re-route to write the edited content
-                                if let (Some(content), Some(path)) = (proposed_content, file_path)
-                                {
+                                if let (Some(content), Some(path)) = (proposed_content, file_path) {
                                     match open_in_editor_blocking(&content, &path).await {
                                         Ok(edited) => {
                                             // Write the edited content directly
@@ -1108,7 +1212,13 @@ impl AgentLoop {
     }
 
     /// Write an audit entry for a completed tool call.
-    fn write_audit(&self, tool_name: &str, tool_input: &serde_json::Value, output: &ToolOutput, duration_ms: u64) {
+    fn write_audit(
+        &self,
+        tool_name: &str,
+        tool_input: &serde_json::Value,
+        output: &ToolOutput,
+        duration_ms: u64,
+    ) {
         if let Some(ref audit) = self.audit_log {
             let entry = AuditEntry {
                 timestamp: chrono::Utc::now().to_rfc3339(),
@@ -1181,7 +1291,7 @@ async fn compute_diff_for_tool(
 ) -> (Option<String>, Option<String>, Option<std::path::PathBuf>) {
     let (path_key, content_key) = match tool_name {
         "Write" | "write" => ("file_path", "content"),
-        "Edit"  | "edit"  => ("file_path", "new_string"),
+        "Edit" | "edit" => ("file_path", "new_string"),
         _ => return (None, None, None),
     };
 
@@ -1208,10 +1318,7 @@ async fn compute_diff_for_tool(
 
 /// Open proposed content in `$EDITOR` (fallback `$VISUAL`, then `vi`),
 /// wait for the editor to exit, and return the saved content.
-async fn open_in_editor_blocking(
-    proposed: &str,
-    file_path: &std::path::Path,
-) -> Result<String> {
+async fn open_in_editor_blocking(proposed: &str, file_path: &std::path::Path) -> Result<String> {
     let editor = std::env::var("EDITOR")
         .or_else(|_| std::env::var("VISUAL"))
         .unwrap_or_else(|_| "vi".to_string());
@@ -1237,7 +1344,9 @@ async fn open_in_editor_blocking(
         let status = std::process::Command::new(&editor_clone)
             .arg(tmp.path())
             .status()
-            .map_err(|e| ClidoError::Other(anyhow::anyhow!("spawn editor '{}': {}", editor_clone, e)))?;
+            .map_err(|e| {
+                ClidoError::Other(anyhow::anyhow!("spawn editor '{}': {}", editor_clone, e))
+            })?;
 
         if !status.success() {
             return Err(ClidoError::Other(anyhow::anyhow!(
@@ -1296,7 +1405,12 @@ async fn compact_with_summary(
 
     // Nothing to compact (entire history fits in tail) — let assemble() handle it.
     if start == 0 {
-        return assemble(msgs, system_prompt_tokens, max_context_tokens, compaction_threshold);
+        return assemble(
+            msgs,
+            system_prompt_tokens,
+            max_context_tokens,
+            compaction_threshold,
+        );
     }
 
     let to_compact = &msgs[..start];
@@ -1365,7 +1479,11 @@ async fn summarize_messages(
                 ContentBlock::ToolResult {
                     content, is_error, ..
                 } => {
-                    let label = if *is_error { "Tool error" } else { "Tool result" };
+                    let label = if *is_error {
+                        "Tool error"
+                    } else {
+                        "Tool result"
+                    };
                     let body = if content.len() > MAX_TOOL_RESULT_CHARS {
                         format!("{}… (truncated)", &content[..MAX_TOOL_RESULT_CHARS])
                     } else {

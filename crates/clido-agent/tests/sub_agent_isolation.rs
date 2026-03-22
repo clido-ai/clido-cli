@@ -128,14 +128,22 @@ async fn two_sub_agents_run_sequentially_without_cross_pollution() {
     let p1: Arc<dyn ModelProvider> = Arc::new(MockProvider {
         response_text: "agent_one".to_string(),
     });
-    let mut a1 = SubAgent::new(p1, default_registry_with_blocked(tmp.clone(), vec![]), test_config());
+    let mut a1 = SubAgent::new(
+        p1,
+        default_registry_with_blocked(tmp.clone(), vec![]),
+        test_config(),
+    );
     let r1 = a1.run("task one").await.unwrap();
 
     // Second agent started after first completes — no shared state
     let p2: Arc<dyn ModelProvider> = Arc::new(MockProvider {
         response_text: "agent_two".to_string(),
     });
-    let mut a2 = SubAgent::new(p2, default_registry_with_blocked(tmp.clone(), vec![]), test_config());
+    let mut a2 = SubAgent::new(
+        p2,
+        default_registry_with_blocked(tmp.clone(), vec![]),
+        test_config(),
+    );
     let r2 = a2.run("task two").await.unwrap();
 
     assert_eq!(r1, "agent_one");

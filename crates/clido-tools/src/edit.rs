@@ -24,10 +24,16 @@ impl EditTool {
         }
     }
     pub fn new_with_guard(guard: PathGuard) -> Self {
-        Self { guard, tracker: None }
+        Self {
+            guard,
+            tracker: None,
+        }
     }
     pub fn new_with_tracker(guard: PathGuard, tracker: FileTracker) -> Self {
-        Self { guard, tracker: Some(tracker) }
+        Self {
+            guard,
+            tracker: Some(tracker),
+        }
     }
 }
 
@@ -157,9 +163,12 @@ impl<'a> Matcher<'a> {
         let norm_abs = search_start + norm_pos;
 
         // Map normalized byte position back to original content byte position
-        if let Some((orig_start, orig_end)) =
-            map_normalized_pos_to_original(self.content, &norm_full, norm_abs, norm_abs + norm_old.len())
-        {
+        if let Some((orig_start, orig_end)) = map_normalized_pos_to_original(
+            self.content,
+            &norm_full,
+            norm_abs,
+            norm_abs + norm_old.len(),
+        ) {
             if replace_all && count >= 2 {
                 return Some(MatchResult::Found {
                     byte_start: usize::MAX,
@@ -225,7 +234,7 @@ impl<'a> Matcher<'a> {
             // Apply anchor weighting: windows far from anchor get slight penalty
             let effective_score = if let Some(anchor) = anchor_center {
                 let center = start + score_window / 2;
-                let dist = if center > anchor { center - anchor } else { anchor - center };
+                let dist = center.abs_diff(anchor);
                 let penalty = (dist as f32 * 0.005).min(0.1);
                 score - penalty
             } else {
@@ -365,7 +374,10 @@ fn map_normalized_pos_to_original(
 
     let norm_before = &normalized[..norm_start];
     let start_line_idx = norm_before.matches('\n').count();
-    let start_col = norm_before.rfind('\n').map(|p| norm_before.len() - p - 1).unwrap_or(norm_before.len());
+    let start_col = norm_before
+        .rfind('\n')
+        .map(|p| norm_before.len() - p - 1)
+        .unwrap_or(norm_before.len());
 
     let norm_match = &normalized[norm_start..norm_end];
     let end_line_idx = start_line_idx + norm_match.matches('\n').count();
@@ -425,7 +437,11 @@ fn map_normalized_pos_to_original(
 // ---------------------------------------------------------------------------
 
 /// Convert 1-indexed start/end line numbers to byte offsets in `s`.
-fn line_range_to_bytes(s: &str, start_line: Option<usize>, end_line: Option<usize>) -> (usize, usize) {
+fn line_range_to_bytes(
+    s: &str,
+    start_line: Option<usize>,
+    end_line: Option<usize>,
+) -> (usize, usize) {
     let start_1 = start_line.unwrap_or(1).max(1);
     let end_1 = end_line.unwrap_or(usize::MAX);
 
@@ -473,7 +489,7 @@ fn find_match_line_numbers_normalized(original: &str, norm_old: &str) -> Vec<usi
     let norm_full = normalize(original);
     let mut results = Vec::new();
     let mut search_start = 0;
-    while let Some(pos) = norm_full[search_start..].find(&norm_old[..]) {
+    while let Some(pos) = norm_full[search_start..].find(norm_old) {
         let abs_pos = search_start + pos;
         let line = norm_full[..abs_pos].matches('\n').count() + 1;
         results.push(line);
@@ -522,11 +538,10 @@ fn similarity_score(window: &str, old_string: &str) -> f32 {
 fn lines_to_byte_range(content: &str, line_start: usize, window_size: usize) -> (usize, usize) {
     let mut byte_start = 0usize;
     let mut byte_end = content.len();
-    let mut line_idx = 0usize;
     let mut cursor = 0usize;
     let mut started = false;
 
-    for line in content.split('\n') {
+    for (line_idx, line) in content.split('\n').enumerate() {
         if line_idx == line_start {
             byte_start = cursor;
             started = true;
@@ -536,7 +551,6 @@ fn lines_to_byte_range(content: &str, line_start: usize, window_size: usize) -> 
             break;
         }
         cursor += line.len() + 1; // +1 for '\n'
-        line_idx += 1;
     }
     if !started {
         byte_start = 0;
@@ -577,8 +591,11 @@ fn narrow_fuzzy_match(
     }
 
     // Map best_sub_start back to byte offset within content
-    let sub_byte_start =
-        lines_to_byte_range(content, byte_start_line(content, byte_start) + best_sub_start, n);
+    let sub_byte_start = lines_to_byte_range(
+        content,
+        byte_start_line(content, byte_start) + best_sub_start,
+        n,
+    );
     Some(sub_byte_start)
 }
 
@@ -599,7 +616,12 @@ fn apply_replace_all(
     start_line: Option<usize>,
     end_line: Option<usize>,
 ) -> ReplaceAllResult {
-    let matcher = Matcher { content, old_string, start_line, end_line };
+    let matcher = Matcher {
+        content,
+        old_string,
+        start_line,
+        end_line,
+    };
 
     // Try exact replace_all
     let (search_str, _offset) = matcher.scoped_content();
@@ -612,7 +634,11 @@ fn apply_replace_all(
     // Try normalized single match
     if let Some(r) = matcher.try_normalized(true) {
         match r {
-            MatchResult::Found { byte_start, byte_end, .. } => {
+            MatchResult::Found {
+                byte_start,
+                byte_end,
+                ..
+            } => {
                 if byte_start == usize::MAX {
                     // normalized replace_all – fallback to normalized replace
                     let norm_old = normalize(old_string);
@@ -640,9 +666,15 @@ fn apply_replace_all(
                 // Simplest: do str::replace with original strings but zero exact matches,
                 // so just return content unchanged and call it done...
                 // Actually if normalized finds multiple, we just accept that.
-                return ReplaceAllResult::ReplacedAll { new_content: content.to_string() };
+                return ReplaceAllResult::ReplacedAll {
+                    new_content: content.to_string(),
+                };
             }
-            MatchResult::NotFound { closest_similarity, closest_preview, closest_line } => {
+            MatchResult::NotFound {
+                closest_similarity,
+                closest_preview,
+                closest_line,
+            } => {
                 return ReplaceAllResult::NotFound {
                     closest_similarity,
                     closest_preview,
@@ -654,7 +686,11 @@ fn apply_replace_all(
 
     // Fuzzy
     match matcher.try_fuzzy() {
-        MatchResult::Found { byte_start, byte_end, .. } => {
+        MatchResult::Found {
+            byte_start,
+            byte_end,
+            ..
+        } => {
             let mut new_content = content.to_string();
             new_content.replace_range(byte_start..byte_end, new_string);
             ReplaceAllResult::ReplacedOne { new_content }
@@ -662,9 +698,15 @@ fn apply_replace_all(
         MatchResult::Ambiguous { .. } => ReplaceAllResult::ReplacedAll {
             new_content: content.to_string(),
         },
-        MatchResult::NotFound { closest_similarity, closest_preview, closest_line } => {
-            ReplaceAllResult::NotFound { closest_similarity, closest_preview, closest_line }
-        }
+        MatchResult::NotFound {
+            closest_similarity,
+            closest_preview,
+            closest_line,
+        } => ReplaceAllResult::NotFound {
+            closest_similarity,
+            closest_preview,
+            closest_line,
+        },
     }
 }
 
@@ -772,13 +814,15 @@ impl Tool for EditTool {
         // Build the new content via the 3-tier strategy
         let (new_content, strategy, confidence) = if replace_all {
             match apply_replace_all(&content, old_string, new_string, start_line, end_line) {
-                ReplaceAllResult::ReplacedAll { new_content } => {
-                    (new_content, "exact", 1.0f32)
-                }
+                ReplaceAllResult::ReplacedAll { new_content } => (new_content, "exact", 1.0f32),
                 ReplaceAllResult::ReplacedOne { new_content } => {
                     (new_content, "normalized", 0.95f32)
                 }
-                ReplaceAllResult::NotFound { closest_similarity, closest_preview, closest_line } => {
+                ReplaceAllResult::NotFound {
+                    closest_similarity,
+                    closest_preview,
+                    closest_line,
+                } => {
                     let msg = format_not_found(
                         path_str,
                         closest_similarity,
@@ -789,9 +833,19 @@ impl Tool for EditTool {
                 }
             }
         } else {
-            let matcher = Matcher { content: &content, old_string, start_line, end_line };
+            let matcher = Matcher {
+                content: &content,
+                old_string,
+                start_line,
+                end_line,
+            };
             match matcher.run(false) {
-                MatchResult::Found { byte_start, byte_end, strategy, confidence } => {
+                MatchResult::Found {
+                    byte_start,
+                    byte_end,
+                    strategy,
+                    confidence,
+                } => {
                     if byte_start == usize::MAX {
                         // Shouldn't happen for replace_all=false, but handle gracefully
                         let mut nc = content.clone();
@@ -817,7 +871,11 @@ impl Tool for EditTool {
                         lines_str
                     ));
                 }
-                MatchResult::NotFound { closest_similarity, closest_preview, closest_line } => {
+                MatchResult::NotFound {
+                    closest_similarity,
+                    closest_preview,
+                    closest_line,
+                } => {
                     let msg = format_not_found(
                         path_str,
                         closest_similarity,
@@ -987,7 +1045,11 @@ mod tests {
             }))
             .await;
         assert!(out.is_error);
-        assert!(out.content.contains("not found"), "content: {}", out.content);
+        assert!(
+            out.content.contains("not found"),
+            "content: {}",
+            out.content
+        );
     }
 
     #[tokio::test]
@@ -1057,7 +1119,8 @@ mod tests {
         // File has "fn new()" at two locations → error lists both lines.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("f.rs");
-        let content = "line1\nline2\nline3\nline4\nfn new() {}\nline6\nline7\nline8\nline9\nfn new() {}\n";
+        let content =
+            "line1\nline2\nline3\nline4\nfn new() {}\nline6\nline7\nline8\nline9\nfn new() {}\n";
         std::fs::write(&path, content).unwrap();
         let tool = EditTool::new(dir.path().to_path_buf());
         let out = tool
@@ -1085,7 +1148,8 @@ mod tests {
         // File has "fn new() {}" at lines 5 and 10; start_line=8 → matches line 10 only.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("f.rs");
-        let content = "line1\nline2\nline3\nline4\nfn new() {}\nline6\nline7\nline8\nline9\nfn new() {}\n";
+        let content =
+            "line1\nline2\nline3\nline4\nfn new() {}\nline6\nline7\nline8\nline9\nfn new() {}\n";
         std::fs::write(&path, content).unwrap();
         let tool = EditTool::new(dir.path().to_path_buf());
         let out = tool
@@ -1101,7 +1165,11 @@ mod tests {
         // Line 5 should still have "fn new() {}"
         let lines: Vec<&str> = result.lines().collect();
         assert_eq!(lines[4], "fn new() {}", "line 5 should be unchanged");
-        assert!(lines[9].contains("todo"), "line 10 should be replaced: {}", lines[9]);
+        assert!(
+            lines[9].contains("todo"),
+            "line 10 should be replaced: {}",
+            lines[9]
+        );
     }
 
     #[tokio::test]
@@ -1120,7 +1188,11 @@ mod tests {
                 "new_string": "fn example() {\n    let value = 100;\n    println!(\"{}\", value);\n}"
             }))
             .await;
-        assert!(!out.is_error, "expected fuzzy match to succeed, got: {}", out.content);
+        assert!(
+            !out.is_error,
+            "expected fuzzy match to succeed, got: {}",
+            out.content
+        );
         let result = std::fs::read_to_string(&path).unwrap();
         assert!(result.contains("100"), "result: {}", result);
     }

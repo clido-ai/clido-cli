@@ -28,7 +28,9 @@ pub fn run_memory(cmd: &MemoryCmd) -> Result<(), anyhow::Error> {
 fn run_memory_list(limit: usize) -> Result<(), anyhow::Error> {
     let path = memory_db_path()?;
     let store = MemoryStore::open(&path).map_err(|e| CliError::Usage(e.to_string()))?;
-    let entries = store.list(limit).map_err(|e| CliError::Usage(e.to_string()))?;
+    let entries = store
+        .list(limit)
+        .map_err(|e| CliError::Usage(e.to_string()))?;
     if entries.is_empty() {
         println!("No memories stored.");
         return Ok(());
@@ -49,8 +51,13 @@ fn run_memory_prune(keep: Option<usize>) -> Result<(), anyhow::Error> {
     let keep_n = keep.unwrap_or(100);
     let path = memory_db_path()?;
     let mut store = MemoryStore::open(&path).map_err(|e| CliError::Usage(e.to_string()))?;
-    let deleted = store.prune_old(keep_n).map_err(|e| CliError::Usage(e.to_string()))?;
-    println!("Pruned {} memories (keeping {} most recent).", deleted, keep_n);
+    let deleted = store
+        .prune_old(keep_n)
+        .map_err(|e| CliError::Usage(e.to_string()))?;
+    println!(
+        "Pruned {} memories (keeping {} most recent).",
+        deleted, keep_n
+    );
     Ok(())
 }
 

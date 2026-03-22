@@ -1,7 +1,7 @@
 //! Handler for `clido plan` subcommands.
 
 use crate::cli::{Cli, PlanCmd};
-use clido_planner::{list_plans, load_plan, delete_plan, TaskStatus};
+use clido_planner::{delete_plan, list_plans, load_plan, TaskStatus};
 use std::path::Path;
 
 pub async fn run_plan(cmd: &PlanCmd, cli: &Cli) -> anyhow::Result<()> {
@@ -24,7 +24,10 @@ fn run_plan_list(workspace_root: &Path) -> anyhow::Result<()> {
         println!("No saved plans. Use --plan with a prompt to generate and save one.");
         return Ok(());
     }
-    println!("{:<20}  {:<8}  {:<8}  {:<8}  {}", "ID", "Tasks", "Done", "Failed", "Goal");
+    println!(
+        "{:<20}  {:<8}  {:<8}  {:<8}  Goal",
+        "ID", "Tasks", "Done", "Failed"
+    );
     for s in &summaries {
         println!(
             "{:<20}  {:<8}  {:<8}  {:<8}  {}",
@@ -50,12 +53,31 @@ fn run_plan_show(workspace_root: &Path, id: &str) -> anyhow::Result<()> {
     println!();
 
     let total = plan.tasks.len();
-    let done = plan.tasks.iter().filter(|t| t.status == TaskStatus::Done).count();
-    let failed = plan.tasks.iter().filter(|t| t.status == TaskStatus::Failed).count();
-    let skipped = plan.tasks.iter().filter(|t| t.status == TaskStatus::Skipped).count();
-    let pending = plan.tasks.iter().filter(|t| t.status == TaskStatus::Pending).count();
+    let done = plan
+        .tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Done)
+        .count();
+    let failed = plan
+        .tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Failed)
+        .count();
+    let skipped = plan
+        .tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Skipped)
+        .count();
+    let pending = plan
+        .tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Pending)
+        .count();
 
-    println!("Progress: {}/{} done  {} failed  {} skipped  {} pending", done, total, failed, skipped, pending);
+    println!(
+        "Progress: {}/{} done  {} failed  {} skipped  {} pending",
+        done, total, failed, skipped, pending
+    );
     println!();
 
     for task in &plan.tasks {

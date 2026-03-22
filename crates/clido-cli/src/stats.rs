@@ -77,7 +77,7 @@ pub fn run_stats(session_id: Option<&str>, json: bool) -> Result<(), anyhow::Err
             println!("No sessions found.");
             return Ok(());
         }
-        println!("{:<36}  {:>4}  {:>8}  {}", "session", "msgs", "cost", "preview");
+        println!("{:<36}  {:>4}  {:>8}  preview", "session", "msgs", "cost");
         println!("{}", "-".repeat(80));
         for s in &sessions {
             let date = if s.start_time.len() >= 16 {
@@ -87,11 +87,7 @@ pub fn run_stats(session_id: Option<&str>, json: bool) -> Result<(), anyhow::Err
             };
             println!(
                 "{:<36}  {:>4}  ${:>7.4}  {}",
-                format!(
-                    "{}  {}",
-                    &s.session_id[..s.session_id.len().min(8)],
-                    date
-                ),
+                format!("{}  {}", &s.session_id[..s.session_id.len().min(8)], date),
                 s.num_turns,
                 s.total_cost_usd,
                 s.preview.chars().take(40).collect::<String>()

@@ -372,7 +372,10 @@ fn cli_json_output_error_has_schema() {
     let _ = std::fs::remove_dir(&tmp);
     // Binary should exit non-zero (API error) but stdout must be valid JSON.
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.trim().is_empty(), "expected JSON on stdout; got empty");
+    assert!(
+        !stdout.trim().is_empty(),
+        "expected JSON on stdout; got empty"
+    );
     let v: serde_json::Value = serde_json::from_str(stdout.trim())
         .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {stdout}"));
     assert_eq!(v["schema_version"], 1, "schema_version must be 1");

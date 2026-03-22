@@ -32,7 +32,7 @@ default_profile = "default"
 
 [profile.default]
 # Provider name. Required.
-# Valid values: "anthropic", "openai", "openrouter", "local"
+# Valid values: "anthropic", "openai", "openrouter", "alibabacloud", "local"
 provider = "anthropic"
 
 # Model name as recognised by the provider. Required.
@@ -63,6 +63,20 @@ api_key_env = "OPENROUTER_API_KEY"
 provider = "local"
 model    = "llama3.2"
 base_url = "http://localhost:11434"
+
+[profile.alibaba]
+provider    = "alibabacloud"
+model       = "qwen-max"
+api_key_env = "DASHSCOPE_API_KEY"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [roles]
+# Map role names to model IDs for use by /fast, /smart, /role in the TUI.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[roles]
+fast      = "claude-haiku-4-5-20251001"
+reasoning = "claude-opus-4-6"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # [agent]
@@ -149,7 +163,7 @@ post_tool_use = ""
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `provider` | string | Yes | Provider: `anthropic`, `openai`, `openrouter`, `local` |
+| `provider` | string | Yes | Provider: `anthropic`, `openai`, `openrouter`, `alibabacloud`, `local` |
 | `model` | string | Yes | Model name |
 | `api_key` | string | No | API key (stored in plain text) |
 | `api_key_env` | string | No | Environment variable name for API key |
@@ -189,6 +203,28 @@ post_tool_use = ""
 |-----|------|---------|-------------|
 | `pre_tool_use` | string | `""` | Shell command before each tool call |
 | `post_tool_use` | string | `""` | Shell command after each tool call |
+
+### `[roles]`
+
+Maps role names to model IDs. Used by `/fast`, `/smart`, and `/role <name>` TUI commands.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `fast` | string | `claude-haiku-4-5-20251001` | Model for `/fast` |
+| `reasoning` | string | `claude-opus-4-6` | Model for `/smart` |
+| `critic` | string | — | Model for `/role critic` |
+| `planner` | string | — | Model for `/role planner` |
+| *(any name)* | string | — | Arbitrary role, accessible via `/role <name>` |
+
+```toml
+[roles]
+fast      = "claude-haiku-4-5-20251001"
+reasoning = "claude-opus-4-6"
+critic    = "claude-opus-4-6"
+planner   = "claude-sonnet-4-6"
+```
+
+User-level role overrides and model favorites/recency are stored in `~/.config/clido/model_prefs.json` and managed through the TUI (`/fav`, `/role`, `/models`).
 
 ## `permission_mode` values
 

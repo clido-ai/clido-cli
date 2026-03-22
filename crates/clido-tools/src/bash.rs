@@ -19,11 +19,17 @@ impl BashTool {
         Self::default()
     }
     pub fn new_with_blocked(blocked: Vec<PathBuf>) -> Self {
-        Self { blocked, sandbox: false }
+        Self {
+            blocked,
+            sandbox: false,
+        }
     }
     /// Create a sandboxed Bash tool.
     pub fn new_sandboxed(blocked: Vec<PathBuf>) -> Self {
-        Self { blocked, sandbox: true }
+        Self {
+            blocked,
+            sandbox: true,
+        }
     }
 }
 
@@ -79,19 +85,22 @@ async fn build_sandboxed_command(command: &str) -> std::io::Result<std::process:
         if bwrap_check.map(|o| o.status.success()).unwrap_or(false) {
             tokio::process::Command::new("bwrap")
                 .args([
-                    "--ro-bind", "/", "/",
-                    "--tmpfs", "/tmp",
+                    "--ro-bind",
+                    "/",
+                    "/",
+                    "--tmpfs",
+                    "/tmp",
                     "--unshare-net",
                     "--die-with-parent",
-                    "sh", "-c", command,
+                    "sh",
+                    "-c",
+                    command,
                 ])
                 .output()
                 .await
         } else {
             // bwrap not available — fall back to unsandboxed with a warning.
-            tracing::warn!(
-                "sandbox requested but bwrap not found; running unsandboxed"
-            );
+            tracing::warn!("sandbox requested but bwrap not found; running unsandboxed");
             tokio::process::Command::new("sh")
                 .arg("-c")
                 .arg(command)

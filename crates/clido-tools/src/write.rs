@@ -22,10 +22,16 @@ impl WriteTool {
         }
     }
     pub fn new_with_guard(guard: PathGuard) -> Self {
-        Self { guard, tracker: None }
+        Self {
+            guard,
+            tracker: None,
+        }
     }
     pub fn new_with_tracker(guard: PathGuard, tracker: FileTracker) -> Self {
-        Self { guard, tracker: Some(tracker) }
+        Self {
+            guard,
+            tracker: Some(tracker),
+        }
     }
 }
 

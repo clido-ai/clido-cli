@@ -64,16 +64,16 @@ fn parse_ddg_results(json: &serde_json::Value, num_results: usize) -> Vec<Search
                 continue;
             }
             let text = topic.get("Text").and_then(|v| v.as_str()).unwrap_or("");
-            let first_url = topic
-                .get("FirstURL")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let first_url = topic.get("FirstURL").and_then(|v| v.as_str()).unwrap_or("");
             if text.is_empty() || first_url.is_empty() {
                 continue;
             }
             // The text often starts with the title followed by a dash or description
             let (title, snippet) = if let Some(idx) = text.find(" - ") {
-                (text[..idx].trim().to_string(), text[idx + 3..].trim().to_string())
+                (
+                    text[..idx].trim().to_string(),
+                    text[idx + 3..].trim().to_string(),
+                )
             } else {
                 (text.chars().take(60).collect::<String>(), text.to_string())
             };
@@ -114,15 +114,7 @@ fn format_results(results: &[SearchResult]) -> String {
     results
         .iter()
         .enumerate()
-        .map(|(i, r)| {
-            format!(
-                "{}. **{}**\n   {}\n   {}",
-                i + 1,
-                r.title,
-                r.url,
-                r.snippet
-            )
-        })
+        .map(|(i, r)| format!("{}. **{}**\n   {}\n   {}", i + 1, r.title, r.url, r.snippet))
         .collect::<Vec<_>>()
         .join("\n\n")
 }

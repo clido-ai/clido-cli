@@ -8,7 +8,7 @@
 //! after a file has changed on disk.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 /// Maximum number of entries kept in the cache.
@@ -38,9 +38,12 @@ impl ReadCache {
     ///
     /// Returns `Some(content)` only when the cached entry's hash matches
     /// the supplied `content_hash` (i.e. the file hasn't changed).
-    pub fn get(&self, path: &PathBuf, content_hash: &str) -> Option<String> {
+    pub fn get(&self, path: &Path, content_hash: &str) -> Option<String> {
         let inner = self.inner.lock().unwrap();
-        inner.map.get(&(path.clone(), content_hash.to_string())).cloned()
+        inner
+            .map
+            .get(&(path.to_path_buf(), content_hash.to_string()))
+            .cloned()
     }
 
     /// Insert a file's content into the cache.
@@ -49,9 +52,9 @@ impl ReadCache {
     pub fn insert(&self, path: PathBuf, content_hash: String, content: String) {
         let mut inner = self.inner.lock().unwrap();
         let key = (path.clone(), content_hash.clone());
-        if inner.map.contains_key(&key) {
+        if let std::collections::hash_map::Entry::Occupied(mut e) = inner.map.entry(key.clone()) {
             // Already present — just refresh (no eviction needed).
-            inner.map.insert(key, content);
+            *e.get_mut() = content;
             return;
         }
         // Evict oldest entry if at capacity.
@@ -87,7 +90,11 @@ mod tests {
     fn insert_and_get() {
         let cache = ReadCache::new();
         let path = PathBuf::from("/tmp/foo.rs");
-        cache.insert(path.clone(), "abc123".to_string(), "content here".to_string());
+        cache.insert(
+            path.clone(),
+            "abc123".to_string(),
+            "content here".to_string(),
+        );
         assert_eq!(cache.get(&path, "abc123"), Some("content here".to_string()));
         // Different hash → miss.
         assert_eq!(cache.get(&path, "deadbeef"), None);

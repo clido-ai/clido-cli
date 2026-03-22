@@ -69,8 +69,7 @@ fn format_diagnostics(lines: &[String]) -> String {
 /// Run `cargo check --message-format json` and parse the NDJSON output.
 async fn run_rust(path: &Path) -> Result<Vec<String>, String> {
     // Find the workspace root (the dir containing Cargo.toml) closest to path.
-    let workspace = find_ancestor_with(path, "Cargo.toml")
-        .unwrap_or_else(|| path.to_path_buf());
+    let workspace = find_ancestor_with(path, "Cargo.toml").unwrap_or_else(|| path.to_path_buf());
 
     let output = tokio::time::timeout(
         Duration::from_secs(60),
@@ -139,7 +138,11 @@ async fn run_rust(path: &Path) -> Result<Vec<String>, String> {
 
         let primary_span = spans
             .iter()
-            .find(|s| s.get("is_primary").and_then(|v| v.as_bool()).unwrap_or(false))
+            .find(|s| {
+                s.get("is_primary")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            })
             .or_else(|| spans.first());
 
         if let Some(span) = primary_span {
@@ -147,15 +150,15 @@ async fn run_rust(path: &Path) -> Result<Vec<String>, String> {
                 .get("file_name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            let line_num = span
-                .get("line_start")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            let line_num = span.get("line_start").and_then(|v| v.as_u64()).unwrap_or(0);
             let col = span
                 .get("column_start")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            diags.push(format!("{}:{}:{}: {}: {}{}", file, line_num, col, level, code, text));
+            diags.push(format!(
+                "{}:{}:{}: {}: {}{}",
+                file, line_num, col, level, code, text
+            ));
         } else {
             diags.push(format!("?: {}: {}{}", level, code, text));
         }
@@ -167,7 +170,9 @@ async fn run_rust(path: &Path) -> Result<Vec<String>, String> {
 /// Run `python3 -m py_compile <file>` and parse stderr.
 async fn run_python(path: &Path) -> Result<Vec<String>, String> {
     if !path.is_file() {
-        return Ok(vec!["python: path must be a file for py_compile".to_string()]);
+        return Ok(vec![
+            "python: path must be a file for py_compile".to_string()
+        ]);
     }
 
     let output = tokio::time::timeout(
@@ -212,7 +217,9 @@ async fn run_ts(path: &Path) -> Result<Vec<String>, String> {
         .unwrap_or_else(|| dir.clone());
 
     if !tsconfig.join("tsconfig.json").exists() {
-        return Ok(vec!["ts: no tsconfig.json found, skipping TypeScript check.".to_string()]);
+        return Ok(vec![
+            "ts: no tsconfig.json found, skipping TypeScript check.".to_string(),
+        ]);
     }
 
     let output = tokio::time::timeout(
@@ -338,10 +345,7 @@ impl Tool for DiagnosticsTool {
     }
 
     async fn execute(&self, input: serde_json::Value) -> ToolOutput {
-        let path_str = input
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
+        let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
         let path = PathBuf::from(path_str);
 
         // Resolve language: explicit > extension > workspace marker.
@@ -408,7 +412,10 @@ mod tests {
             }))
             .await;
 
-        assert!(!out.is_error, "tool should not return is_error for a clean project");
+        assert!(
+            !out.is_error,
+            "tool should not return is_error for a clean project"
+        );
         assert_eq!(
             out.content.trim(),
             "No diagnostics found.",

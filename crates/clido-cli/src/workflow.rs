@@ -285,7 +285,10 @@ async fn run_workflow_check(path: &Path, json: bool) -> Result<(), anyhow::Error
                 serde_json::json!({ "name": c.name, "status": status, "message": msg })
             })
             .collect();
-        println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&items).unwrap_or_default()
+        );
     } else {
         for check in &result.checks {
             let (icon, msg) = match &check.status {

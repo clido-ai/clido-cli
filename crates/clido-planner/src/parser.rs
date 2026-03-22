@@ -45,14 +45,13 @@ pub fn parse_plan_with_meta(llm_output: &str) -> Result<Plan, PlanParseError> {
     let graph: TaskGraph = serde_json::from_value(v.clone())?;
     graph.validate()?;
 
-    let id = v["id"]
-        .as_str()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            let goal = graph.goal.as_str();
-            let hash: u64 = goal.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
-            format!("plan-{:08x}", hash as u32)
-        });
+    let id = v["id"].as_str().map(|s| s.to_string()).unwrap_or_else(|| {
+        let goal = graph.goal.as_str();
+        let hash: u64 = goal
+            .bytes()
+            .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+        format!("plan-{:08x}", hash as u32)
+    });
 
     let created_at = v["created_at"]
         .as_str()
@@ -60,7 +59,11 @@ pub fn parse_plan_with_meta(llm_output: &str) -> Result<Plan, PlanParseError> {
         .unwrap_or_else(|| "2026-01-01T00:00:00Z".to_string());
 
     Ok(Plan {
-        meta: PlanMeta { id, goal: graph.goal.clone(), created_at },
+        meta: PlanMeta {
+            id,
+            goal: graph.goal.clone(),
+            created_at,
+        },
         tasks: graph.tasks,
     })
 }

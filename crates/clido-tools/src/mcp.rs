@@ -66,12 +66,14 @@ impl McpClient {
         let mut child = cmd
             .spawn()
             .map_err(|e| anyhow::anyhow!("Failed to spawn MCP server '{}': {}", config.name, e))?;
-        let stdin = child.stdin.take().ok_or_else(|| {
-            anyhow::anyhow!("MCP server '{}' stdin not available", config.name)
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| {
-            anyhow::anyhow!("MCP server '{}' stdout not available", config.name)
-        })?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("MCP server '{}' stdin not available", config.name))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("MCP server '{}' stdout not available", config.name))?;
         Ok(Self {
             _child: child,
             stdin: Mutex::new(stdin),
@@ -115,8 +117,13 @@ impl McpClient {
         if resp_line.trim().is_empty() {
             return Err(anyhow::anyhow!("MCP server returned empty response"));
         }
-        let resp: JsonRpcResponse = serde_json::from_str(&resp_line)
-            .map_err(|e| anyhow::anyhow!("Failed to parse MCP response: {} — raw: {}", e, resp_line.trim()))?;
+        let resp: JsonRpcResponse = serde_json::from_str(&resp_line).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse MCP response: {} — raw: {}",
+                e,
+                resp_line.trim()
+            )
+        })?;
         if let Some(err) = resp.error {
             return Err(anyhow::anyhow!("MCP server error: {}", err));
         }
@@ -188,10 +195,13 @@ impl McpClient {
 pub fn load_mcp_config(path: &std::path::Path) -> anyhow::Result<McpConfig> {
     let s = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("Failed to read MCP config: {}", e))?;
-    if path.extension().map(|e| e == "yaml" || e == "yml").unwrap_or(false) {
-        serde_json::from_str(
-            &serde_yaml_to_json(&s)?
-        ).map_err(|e| anyhow::anyhow!("Failed to parse MCP config YAML: {}", e))
+    if path
+        .extension()
+        .map(|e| e == "yaml" || e == "yml")
+        .unwrap_or(false)
+    {
+        serde_json::from_str(&serde_yaml_to_json(&s)?)
+            .map_err(|e| anyhow::anyhow!("Failed to parse MCP config YAML: {}", e))
     } else {
         serde_json::from_str(&s)
             .map_err(|e| anyhow::anyhow!("Failed to parse MCP config JSON: {}", e))
@@ -278,17 +288,18 @@ mod tests {
         let cfg: McpConfig = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.servers.len(), 2);
         assert_eq!(cfg.servers[0].name, "srv1");
-        assert_eq!(cfg.servers[1].env.get("KEY").map(String::as_str), Some("val"));
+        assert_eq!(
+            cfg.servers[1].env.get("KEY").map(String::as_str),
+            Some("val")
+        );
     }
 
     #[test]
     fn load_mcp_config_from_json_file() {
         use std::io::Write;
         let mut f = tempfile::NamedTempFile::new().unwrap();
-        f.write_all(
-            br#"{"servers":[{"name":"s","command":"cat","args":[]}]}"#,
-        )
-        .unwrap();
+        f.write_all(br#"{"servers":[{"name":"s","command":"cat","args":[]}]}"#)
+            .unwrap();
         f.flush().unwrap();
         let cfg = load_mcp_config(f.path()).unwrap();
         assert_eq!(cfg.servers.len(), 1);

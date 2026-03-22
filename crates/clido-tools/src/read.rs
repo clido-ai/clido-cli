@@ -22,17 +22,29 @@ impl ReadTool {
         }
     }
     pub fn new_with_guard(guard: PathGuard) -> Self {
-        Self { guard, tracker: None, read_cache: None }
+        Self {
+            guard,
+            tracker: None,
+            read_cache: None,
+        }
     }
     pub fn new_with_tracker(guard: PathGuard, tracker: FileTracker) -> Self {
-        Self { guard, tracker: Some(tracker), read_cache: None }
+        Self {
+            guard,
+            tracker: Some(tracker),
+            read_cache: None,
+        }
     }
     pub fn new_with_cache(
         guard: PathGuard,
         tracker: FileTracker,
         read_cache: clido_context::read_cache::ReadCache,
     ) -> Self {
-        Self { guard, tracker: Some(tracker), read_cache: Some(read_cache) }
+        Self {
+            guard,
+            tracker: Some(tracker),
+            read_cache: Some(read_cache),
+        }
     }
 }
 

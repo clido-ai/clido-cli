@@ -69,6 +69,7 @@ impl PreflightResult {
 /// 1. Validates the workflow (unique step ids, retry rules).
 /// 2. Checks that required profiles exist in the provided profile list.
 /// 3. Checks that step tools are in the provided tool list.
+///
 /// Returns a PreflightResult with a pass/warn/fail per check.
 pub fn preflight(
     def: &WorkflowDef,
@@ -100,10 +101,7 @@ pub fn preflight(
         } else {
             checks.push(PreflightCheck {
                 name: format!("profile:{}", profile),
-                status: PreflightStatus::Fail(format!(
-                    "Profile '{}' not found in config",
-                    profile
-                )),
+                status: PreflightStatus::Fail(format!("Profile '{}' not found in config", profile)),
             });
         }
     }

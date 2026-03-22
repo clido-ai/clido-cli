@@ -78,12 +78,7 @@ fn run_git(cwd: &Path, args: &[&str]) -> Option<String> {
     let output = std::thread::spawn({
         let cwd = cwd.to_path_buf();
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-        move || {
-            Command::new("git")
-                .args(&args)
-                .current_dir(&cwd)
-                .output()
-        }
+        move || Command::new("git").args(&args).current_dir(&cwd).output()
     })
     .join()
     .ok()? // propagate join error as None
@@ -102,7 +97,11 @@ mod tests {
     use std::process::Command;
 
     fn git_init(dir: &Path) {
-        Command::new("git").args(["init"]).current_dir(dir).output().unwrap();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
         Command::new("git")
             .args(["config", "user.email", "test@example.com"])
             .current_dir(dir)
@@ -129,7 +128,11 @@ mod tests {
         git_init(tmp.path());
         // Need at least one commit for HEAD to be valid
         std::fs::write(tmp.path().join("readme.txt"), "hello").unwrap();
-        Command::new("git").args(["add", "."]).current_dir(tmp.path()).output().unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(tmp.path())
+            .output()
+            .unwrap();
         Command::new("git")
             .args(["commit", "-m", "init"])
             .current_dir(tmp.path())
@@ -183,7 +186,11 @@ mod tests {
         };
         let section = ctx.to_prompt_section();
         // "1 changed file" (no trailing 's')
-        assert!(section.contains("1 changed file"), "Expected singular: {}", section);
+        assert!(
+            section.contains("1 changed file"),
+            "Expected singular: {}",
+            section
+        );
         assert!(!section.contains("1 changed files"));
     }
 }

@@ -2,8 +2,9 @@
 
 use clido_agent::{session_lines_to_messages, AgentLoop};
 use clido_core::ClidoError;
-use clido_planner;
-use clido_storage::{list_sessions, stale_paths, AuditLog, SessionLine, SessionReader, SessionWriter};
+use clido_storage::{
+    list_sessions, stale_paths, AuditLog, SessionLine, SessionReader, SessionWriter,
+};
 use std::env;
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -43,9 +44,10 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
 
     // Hooks from config.
     let loaded = clido_core::load_config(&workspace_root).ok();
-    let hooks = loaded.as_ref().map(|l| l.hooks.clone()).filter(|h| {
-        h.pre_tool_use.is_some() || h.post_tool_use.is_some()
-    });
+    let hooks = loaded
+        .as_ref()
+        .map(|l| l.hooks.clone())
+        .filter(|h| h.pre_tool_use.is_some() || h.post_tool_use.is_some());
 
     let cancel = make_cancel_token();
     let start = std::time::Instant::now();
@@ -121,7 +123,12 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
                                 if t.depends_on.is_empty() {
                                     println!("  {}: {}", t.id, t.description);
                                 } else {
-                                    println!("  {}: {}  (depends: {})", t.id, t.description, t.depends_on.join(", "));
+                                    println!(
+                                        "  {}: {}  (depends: {})",
+                                        t.id,
+                                        t.description,
+                                        t.depends_on.join(", ")
+                                    );
                                 }
                             }
                         }

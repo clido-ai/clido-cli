@@ -9,14 +9,10 @@ fn resolve_store(cli: &Cli, session_id: Option<&str>) -> anyhow::Result<Checkpoi
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
 
-    let sid = session_id.ok_or_else(|| {
-        anyhow::anyhow!("No session ID provided. Use --session <id>.")
-    })?;
+    let sid =
+        session_id.ok_or_else(|| anyhow::anyhow!("No session ID provided. Use --session <id>."))?;
 
-    let store_dir = workspace_root
-        .join(".clido")
-        .join("checkpoints")
-        .join(sid);
+    let store_dir = workspace_root.join(".clido").join("checkpoints").join(sid);
 
     Ok(CheckpointStore::new(store_dir))
 }
@@ -29,7 +25,7 @@ pub async fn run_checkpoint(cmd: &CheckpointCmd, cli: &Cli) -> anyhow::Result<()
             if metas.is_empty() {
                 println!("No checkpoints found.");
             } else {
-                println!("{:<20}  {:<30}  {:<6}  {}", "ID", "Name", "Files", "Created");
+                println!("{:<20}  {:<30}  {:<6}  Created", "ID", "Name", "Files");
                 for m in &metas {
                     println!(
                         "{:<20}  {:<30}  {:<6}  {}",
@@ -48,7 +44,10 @@ pub async fn run_checkpoint(cmd: &CheckpointCmd, cli: &Cli) -> anyhow::Result<()
                 .clone()
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
             // Without a session context here, save to a "manual" session dir.
-            let store_dir = workspace_root.join(".clido").join("checkpoints").join("manual");
+            let store_dir = workspace_root
+                .join(".clido")
+                .join("checkpoints")
+                .join("manual");
             let store = CheckpointStore::new(store_dir);
             let cp = store
                 .create(name.as_deref(), false, &[])
@@ -60,7 +59,10 @@ pub async fn run_checkpoint(cmd: &CheckpointCmd, cli: &Cli) -> anyhow::Result<()
                 .workdir
                 .clone()
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
-            let store_dir = workspace_root.join(".clido").join("checkpoints").join("manual");
+            let store_dir = workspace_root
+                .join(".clido")
+                .join("checkpoints")
+                .join("manual");
             let store = CheckpointStore::new(store_dir);
 
             let checkpoint_id = id.as_deref().ok_or_else(|| {
@@ -92,18 +94,23 @@ pub async fn run_checkpoint(cmd: &CheckpointCmd, cli: &Cli) -> anyhow::Result<()
             let restored = store
                 .restore(checkpoint_id)
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
-            println!("Restored {} file(s) from checkpoint {}.", restored.len(), checkpoint_id);
+            println!(
+                "Restored {} file(s) from checkpoint {}.",
+                restored.len(),
+                checkpoint_id
+            );
         }
         CheckpointCmd::Diff { id } => {
             let workspace_root = cli
                 .workdir
                 .clone()
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
-            let store_dir = workspace_root.join(".clido").join("checkpoints").join("manual");
+            let store_dir = workspace_root
+                .join(".clido")
+                .join("checkpoints")
+                .join("manual");
             let store = CheckpointStore::new(store_dir);
-            let diffs = store
-                .diff_since(id)
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let diffs = store.diff_since(id).map_err(|e| anyhow::anyhow!("{}", e))?;
             if diffs.is_empty() {
                 println!("No changes since checkpoint {}.", id);
             } else {
@@ -137,12 +144,7 @@ pub async fn run_rollback(
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
 
     let sid = session.unwrap_or("manual");
-    let store = CheckpointStore::new(
-        workspace_root
-            .join(".clido")
-            .join("checkpoints")
-            .join(sid),
-    );
+    let store = CheckpointStore::new(workspace_root.join(".clido").join("checkpoints").join(sid));
 
     let checkpoint_id = id.ok_or_else(|| {
         anyhow::anyhow!("Checkpoint ID required. Usage: clido rollback <checkpoint-id>")
@@ -173,6 +175,10 @@ pub async fn run_rollback(
     let restored = store
         .restore(checkpoint_id)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
-    println!("Restored {} file(s) from checkpoint {}.", restored.len(), checkpoint_id);
+    println!(
+        "Restored {} file(s) from checkpoint {}.",
+        restored.len(),
+        checkpoint_id
+    );
     Ok(())
 }

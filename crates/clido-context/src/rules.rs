@@ -83,8 +83,7 @@ pub fn discover(cwd: &Path, no_rules: bool, rules_file_override: Option<&Path>) 
 
 /// Returns the path to the global rules file (~/.config/clido/rules.md).
 fn global_rules_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "clido")
-        .map(|d| d.config_dir().join("rules.md"))
+    directories::ProjectDirs::from("", "", "clido").map(|d| d.config_dir().join("rules.md"))
 }
 
 /// Load a rules file, processing import directives. Returns None if the file cannot be read.
@@ -103,7 +102,12 @@ fn load_rules_file(path: &Path) -> Option<RulesFile> {
 /// Process `[import: ./path/to/file.md]` directives in content.
 /// Recursion depth is limited to MAX_IMPORT_DEPTH.
 /// Cycles are detected via the `seen` HashSet.
-fn process_imports(content: &str, source_file: &Path, seen: &mut HashSet<PathBuf>, depth: usize) -> String {
+fn process_imports(
+    content: &str,
+    source_file: &Path,
+    seen: &mut HashSet<PathBuf>,
+    depth: usize,
+) -> String {
     if depth >= MAX_IMPORT_DEPTH {
         return content.to_string();
     }

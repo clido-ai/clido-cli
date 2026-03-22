@@ -26,7 +26,7 @@ pub fn run_audit(
     let reader = std::io::BufReader::new(file);
     let mut entries: Vec<AuditEntry> = reader
         .lines()
-        .filter_map(|l| l.ok())
+        .map_while(Result::ok)
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| serde_json::from_str(&l).ok())
         .collect();
@@ -53,7 +53,7 @@ pub fn run_audit(
             println!("No audit entries match.");
             return Ok(());
         }
-        println!("{:<20}  {:<12}  {:>6}  {}", "time", "tool", "ms", "input");
+        println!("{:<20}  {:<12}  {:>6}  input", "time", "tool", "ms");
         println!("{}", "-".repeat(72));
         for e in &entries {
             let time = if e.timestamp.len() >= 16 {

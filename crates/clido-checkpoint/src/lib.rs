@@ -441,11 +441,15 @@ mod tests {
         let file_a = tmp.path().join("sort_test.txt");
         write_file(&file_a, "v1");
 
-        let ck1 = store.create(Some("first"), false, &[file_a.clone()]).unwrap();
+        let ck1 = store
+            .create(Some("first"), false, &[file_a.clone()])
+            .unwrap();
         // Sleep just enough for chrono timestamps to differ.
         std::thread::sleep(std::time::Duration::from_millis(10));
         write_file(&file_a, "v2");
-        let ck2 = store.create(Some("second"), false, &[file_a.clone()]).unwrap();
+        let ck2 = store
+            .create(Some("second"), false, &[file_a.clone()])
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         write_file(&file_a, "v3");
         let ck3 = store.create(Some("third"), false, &[file_a]).unwrap();

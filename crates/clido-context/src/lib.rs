@@ -11,7 +11,11 @@ use clido_core::{ClidoError, ContentBlock, Message, Result};
 /// This is the main entry point for the rules feature.
 ///
 /// Returns an empty string if no rules files are found or `no_rules` is true.
-pub fn load_and_assemble_rules(cwd: &std::path::Path, no_rules: bool, rules_file: Option<&std::path::Path>) -> String {
+pub fn load_and_assemble_rules(
+    cwd: &std::path::Path,
+    no_rules: bool,
+    rules_file: Option<&std::path::Path>,
+) -> String {
     let files = rules::discover(cwd, no_rules, rules_file);
     rules::assemble_rules_prompt(&files)
 }

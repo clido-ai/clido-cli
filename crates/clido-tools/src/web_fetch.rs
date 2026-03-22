@@ -146,11 +146,7 @@ impl Tool for WebFetchTool {
 
         let status = response.status();
         if !status.is_success() {
-            return ToolOutput::err(format!(
-                "HTTP error {} fetching {}",
-                status.as_u16(),
-                url
-            ));
+            return ToolOutput::err(format!("HTTP error {} fetching {}", status.as_u16(), url));
         }
 
         let body = match response.text().await {
@@ -162,9 +158,7 @@ impl Tool for WebFetchTool {
 
         let (content, truncated) = if text.len() > max_chars {
             // Truncate at a newline boundary if possible.
-            let cutoff = text[..max_chars]
-                .rfind('\n')
-                .unwrap_or(max_chars);
+            let cutoff = text[..max_chars].rfind('\n').unwrap_or(max_chars);
             let truncated_text = &text[..cutoff];
             (
                 format!(

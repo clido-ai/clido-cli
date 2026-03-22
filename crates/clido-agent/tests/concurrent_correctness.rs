@@ -51,8 +51,9 @@ impl ModelProvider for MockProvider {
         _messages: &[Message],
         _tools: &[ToolSchema],
         _config: &AgentConfig,
-    ) -> clido_core::Result<Pin<Box<dyn Stream<Item = clido_core::Result<clido_providers::StreamEvent>> + Send>>>
-    {
+    ) -> clido_core::Result<
+        Pin<Box<dyn Stream<Item = clido_core::Result<clido_providers::StreamEvent>> + Send>>,
+    > {
         unimplemented!("stream not used in this test")
     }
 }
@@ -85,8 +86,7 @@ async fn concurrent_agents_return_correct_responses() {
         .map(|i| {
             let response_text = expected.to_string();
             tokio::spawn(async move {
-                let provider: Arc<dyn ModelProvider> =
-                    Arc::new(MockProvider { response_text });
+                let provider: Arc<dyn ModelProvider> = Arc::new(MockProvider { response_text });
                 let tmp = std::env::temp_dir();
                 let registry = default_registry_with_blocked(tmp, vec![]);
                 let config = test_config("mock-model");
@@ -100,11 +100,7 @@ async fn concurrent_agents_return_correct_responses() {
     for task in tasks {
         let (i, result) = task.await.expect("task panicked");
         let text = result.unwrap_or_else(|e| panic!("agent {} failed: {}", i, e));
-        assert_eq!(
-            text, expected,
-            "agent {} returned unexpected response",
-            i
-        );
+        assert_eq!(text, expected, "agent {} returned unexpected response", i);
     }
 }
 
@@ -125,7 +121,10 @@ async fn concurrent_cost_tracking_is_independent() {
                 let mut agent = AgentLoop::new(provider, registry, config, None);
                 let _ = agent.run("ping", None, None, None).await;
                 // Each agent should have independent token counts
-                (agent.cumulative_input_tokens, agent.cumulative_output_tokens)
+                (
+                    agent.cumulative_input_tokens,
+                    agent.cumulative_output_tokens,
+                )
             })
         })
         .collect();

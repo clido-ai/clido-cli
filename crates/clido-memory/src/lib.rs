@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use uuid::Uuid;
 
 /// A stored memory entry.
@@ -331,7 +331,9 @@ mod tests {
         let mut store = open_test_store();
         store.insert("rust borrow checker lifetime", &[]).unwrap();
         store.insert("cooking pasta carbonara recipe", &[]).unwrap();
-        store.insert("machine learning neural networks", &[]).unwrap();
+        store
+            .insert("machine learning neural networks", &[])
+            .unwrap();
 
         // Search for rust-related content
         let results = store.search_keyword("borrow", 10).unwrap();

@@ -85,7 +85,10 @@ impl Tool for GitTool {
             ));
         }
 
-        let path_arg = input.get("path").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let path_arg = input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let count = input
             .get("count")
             .and_then(|v| v.as_u64())
@@ -167,7 +170,11 @@ mod tests {
     use std::process::Command;
 
     fn init_git_repo(dir: &std::path::Path) {
-        Command::new("git").args(["init"]).current_dir(dir).output().unwrap();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
         Command::new("git")
             .args(["config", "user.email", "test@test.com"])
             .current_dir(dir)
@@ -242,7 +249,11 @@ mod tests {
         init_git_repo(tmp.path());
         for i in 0..2 {
             std::fs::write(tmp.path().join(format!("f{}.txt", i)), format!("{}", i)).unwrap();
-            Command::new("git").args(["add", "."]).current_dir(tmp.path()).output().unwrap();
+            Command::new("git")
+                .args(["add", "."])
+                .current_dir(tmp.path())
+                .output()
+                .unwrap();
             Command::new("git")
                 .args(["commit", "-m", &format!("commit {}", i)])
                 .current_dir(tmp.path())

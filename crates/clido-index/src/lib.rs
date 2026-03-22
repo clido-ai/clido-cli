@@ -6,7 +6,7 @@ use anyhow::Context as AnyhowContext;
 use glob::Pattern;
 use ignore::WalkBuilder;
 use regex::Regex;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 
 /// A file entry in the index.
 #[derive(Debug, Clone)]
@@ -36,7 +36,7 @@ pub struct BuildStats {
 }
 
 /// Options for `RepoIndex::build`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BuildOptions {
     /// File extensions to include (empty = all extensions).
     pub extensions: Vec<String>,
@@ -44,16 +44,6 @@ pub struct BuildOptions {
     pub exclude_patterns: Vec<String>,
     /// When `true`, `.gitignore`, global git ignore, and `.clido-ignore` are all bypassed.
     pub include_ignored: bool,
-}
-
-impl Default for BuildOptions {
-    fn default() -> Self {
-        Self {
-            extensions: Vec::new(),
-            exclude_patterns: Vec::new(),
-            include_ignored: false,
-        }
-    }
 }
 
 /// SQLite-backed repository index for files and symbols.
@@ -109,7 +99,8 @@ impl RepoIndex {
         opts: &BuildOptions,
     ) -> anyhow::Result<BuildStats> {
         // Clear existing data
-        self.db.execute_batch("DELETE FROM symbols; DELETE FROM files;")?;
+        self.db
+            .execute_batch("DELETE FROM symbols; DELETE FROM files;")?;
 
         // Pre-compile glob exclude patterns for performance.
         let compiled_excludes: Vec<Pattern> = opts
@@ -192,12 +183,7 @@ impl RepoIndex {
                             .unwrap_or("")
                             .to_string();
                         if !name.is_empty() {
-                            rowid_buf.push((
-                                rel_path.clone(),
-                                name,
-                                kind.to_string(),
-                                line_no,
-                            ));
+                            rowid_buf.push((rel_path.clone(), name, kind.to_string(), line_no));
                         }
                     }
                 }
@@ -467,7 +453,10 @@ mod tests {
         // Only main.rs should be indexed; target/output.rs should be skipped by gitignore
         assert_eq!(stats.indexed, 1, "Only main.rs should be indexed");
         let results = idx.search_files("output").unwrap();
-        assert!(results.is_empty(), "target/output.rs should not be in index");
+        assert!(
+            results.is_empty(),
+            "target/output.rs should not be in index"
+        );
     }
 
     #[test]
@@ -495,7 +484,10 @@ mod tests {
         // snapshot.snap should be skipped by .clido-ignore
         assert_eq!(stats.indexed, 1, "Only lib.rs should be indexed");
         let snap_results = idx.search_files("snapshot").unwrap();
-        assert!(snap_results.is_empty(), "snapshot.snap should be excluded by .clido-ignore");
+        assert!(
+            snap_results.is_empty(),
+            "snapshot.snap should be excluded by .clido-ignore"
+        );
     }
 
     #[test]
@@ -529,9 +521,16 @@ mod tests {
         let stats = idx.build_with_options(dir.path(), &opts).unwrap();
 
         // Both files should be indexed since gitignore is bypassed
-        assert_eq!(stats.indexed, 2, "Both files should be indexed with include_ignored=true");
+        assert_eq!(
+            stats.indexed, 2,
+            "Both files should be indexed with include_ignored=true"
+        );
         let results = idx.search_files("output").unwrap();
-        assert_eq!(results.len(), 1, "target/output.rs should be in index when include_ignored=true");
+        assert_eq!(
+            results.len(),
+            1,
+            "target/output.rs should be in index when include_ignored=true"
+        );
     }
 
     #[test]
@@ -556,7 +555,13 @@ mod tests {
 
         // Cargo.lock should be excluded; main.rs and Cargo.toml should be indexed
         let lock_results = idx.search_files("Cargo.lock").unwrap();
-        assert!(lock_results.is_empty(), "Cargo.lock should be excluded by exclude_patterns");
-        assert!(stats.indexed >= 2, "main.rs and Cargo.toml should be indexed");
+        assert!(
+            lock_results.is_empty(),
+            "Cargo.lock should be excluded by exclude_patterns"
+        );
+        assert!(
+            stats.indexed >= 2,
+            "main.rs and Cargo.toml should be indexed"
+        );
     }
 }

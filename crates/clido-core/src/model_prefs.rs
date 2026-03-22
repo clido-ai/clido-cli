@@ -75,5 +75,5 @@ impl ModelPrefs {
 
 fn prefs_path() -> Option<std::path::PathBuf> {
     directories::ProjectDirs::from("", "", "clido")
-        .map(|d| d.config_dir().join("model_prefs.json"))
+        .map(|d: directories::ProjectDirs| d.config_dir().join("model_prefs.json"))
 }

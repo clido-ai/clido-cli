@@ -2,19 +2,19 @@
 
 mod agent_setup;
 mod audit_cmd;
-pub(crate) mod image_input;
 mod checkpoint_cmd;
-mod plan_cmd;
 mod cli;
 mod commit;
 mod config;
 mod doctor;
 mod errors;
 mod git_context;
+pub(crate) mod image_input;
 mod index_cmd;
 mod memory_cmd;
 mod models;
 mod notify;
+mod plan_cmd;
 mod pricing_cmd;
 mod provider;
 mod repl;
@@ -185,7 +185,13 @@ async fn dispatch(cli: cli::Cli) -> Result<(), anyhow::Error> {
             since,
             json,
         }) => {
-            return audit_cmd::run_audit(*tail, session.as_deref(), tool.as_deref(), since.as_deref(), *json);
+            return audit_cmd::run_audit(
+                *tail,
+                session.as_deref(),
+                tool.as_deref(),
+                since.as_deref(),
+                *json,
+            );
         }
         Some(cli::Subcommand::Memory { cmd }) => {
             return memory_cmd::run_memory(cmd);
@@ -201,22 +207,16 @@ async fn dispatch(cli: cli::Cli) -> Result<(), anyhow::Error> {
             return checkpoint_cmd::run_checkpoint(cmd, &cli).await;
         }
         Some(cli::Subcommand::Rollback { id, session, yes }) => {
-            return checkpoint_cmd::run_rollback(
-                id.as_deref(),
-                session.as_deref(),
-                *yes,
-                &cli,
-            )
-            .await;
+            return checkpoint_cmd::run_rollback(id.as_deref(), session.as_deref(), *yes, &cli)
+                .await;
         }
         Some(cli::Subcommand::Plan { cmd }) => {
             return plan_cmd::run_plan(cmd, &cli).await;
         }
         Some(cli::Subcommand::Commit { yes, dry_run }) => {
-            let workspace_root = cli
-                .workdir
-                .clone()
-                .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+            let workspace_root = cli.workdir.clone().unwrap_or_else(|| {
+                env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
             return commit::run_commit(&workspace_root, *yes, *dry_run, &cli).await;
         }
         Some(cli::Subcommand::Run { prompt }) => {

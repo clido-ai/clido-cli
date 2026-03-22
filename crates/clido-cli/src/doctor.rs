@@ -248,11 +248,7 @@ fn check_rules_files(cwd: &std::path::Path, use_color: bool, warnings: &mut Vec<
             let char_count = f.content.chars().count();
             print_ok(
                 use_color,
-                &format!(
-                    "Rules files: {} ({} chars)",
-                    f.path.display(),
-                    char_count
-                ),
+                &format!("Rules files: {} ({} chars)", f.path.display(), char_count),
             );
             if char_count > 8000 {
                 warnings.push(format!(

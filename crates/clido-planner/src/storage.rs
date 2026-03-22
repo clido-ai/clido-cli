@@ -68,9 +68,21 @@ pub fn list_plans(workspace_root: &Path) -> Result<Vec<PlanSummary>, StorageErro
             Ok(p) => p,
             Err(_) => continue,
         };
-        let pending = plan.tasks.iter().filter(|t| t.status == TaskStatus::Pending).count();
-        let done = plan.tasks.iter().filter(|t| t.status == TaskStatus::Done).count();
-        let failed = plan.tasks.iter().filter(|t| t.status == TaskStatus::Failed).count();
+        let pending = plan
+            .tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Pending)
+            .count();
+        let done = plan
+            .tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Done)
+            .count();
+        let failed = plan
+            .tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Failed)
+            .count();
         summaries.push(PlanSummary {
             id: plan.meta.id.clone(),
             goal: plan.meta.goal.clone(),

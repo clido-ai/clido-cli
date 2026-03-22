@@ -57,7 +57,12 @@ impl ImageAttachment {
             other => other,
         };
         let kb = (self.file_size + 511) / 1024; // round up
-        format!("Image attached: {} ({}, {}KB)", self.display_name(), kind, kb)
+        format!(
+            "Image attached: {} ({}, {}KB)",
+            self.display_name(),
+            kind,
+            kb
+        )
     }
 }
 

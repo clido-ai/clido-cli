@@ -297,7 +297,10 @@ pub enum IndexCmd {
         /// File extensions to index, comma-separated.
         /// Default includes Web3/smart-contract languages (sol,move,vy,fe,yul,cairo)
         /// plus common general-purpose languages.
-        #[arg(long, default_value = "sol,move,vy,fe,yul,rell,cairo,rs,py,js,ts,go,java,c,cpp,h,md")]
+        #[arg(
+            long,
+            default_value = "sol,move,vy,fe,yul,rell,cairo,rs,py,js,ts,go,java,c,cpp,h,md"
+        )]
         ext: String,
         /// Bypass .gitignore rules and index all files including build artifacts.
         #[arg(long)]

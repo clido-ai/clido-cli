@@ -21,9 +21,9 @@ pub struct AuditLog {
 impl AuditLog {
     /// Open (or create) the audit log for a project.
     pub fn open(project_path: &Path) -> anyhow::Result<Self> {
-        let dir = crate::paths::data_dir()?.join("audit").join(
-            crate::paths::sanitize_for_audit(project_path)
-        );
+        let dir = crate::paths::data_dir()?
+            .join("audit")
+            .join(crate::paths::sanitize_for_audit(project_path));
         std::fs::create_dir_all(&dir)?;
         let path = dir.join("audit.jsonl");
         let file = std::fs::OpenOptions::new()

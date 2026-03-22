@@ -14,8 +14,8 @@ mod read;
 mod registry;
 pub mod secrets;
 mod semantic_search;
-pub mod test_runner;
 mod test_loop;
+pub mod test_runner;
 pub mod web_fetch;
 pub mod web_search;
 mod write;
@@ -32,7 +32,7 @@ pub use file_tracker::FileTracker;
 pub use git_tool::GitTool;
 pub use glob_tool::GlobTool;
 pub use grep_tool::GrepTool;
-pub use mcp::{load_mcp_config, McpClient, McpConfig, McpServerConfig, McpToolDef, McpTool};
+pub use mcp::{load_mcp_config, McpClient, McpConfig, McpServerConfig, McpTool, McpToolDef};
 pub use path_guard::PathGuard;
 pub use read::ReadTool;
 pub use registry::ToolRegistry;
@@ -71,7 +71,11 @@ pub fn default_registry_with_options(
     } else {
         r.register(BashTool::new_with_blocked(blocked));
     }
-    r.register(ReadTool::new_with_cache(guard.clone(), tracker.clone(), read_cache));
+    r.register(ReadTool::new_with_cache(
+        guard.clone(),
+        tracker.clone(),
+        read_cache,
+    ));
     r.register(WriteTool::new_with_tracker(guard.clone(), tracker.clone()));
     r.register(EditTool::new_with_tracker(guard.clone(), tracker.clone()));
     r.register(GlobTool::new_with_guard(guard.clone()));

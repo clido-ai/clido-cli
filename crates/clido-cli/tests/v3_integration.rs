@@ -89,8 +89,7 @@ steps:
     let def = load(f.path()).unwrap();
     validate(&def).unwrap();
 
-    let inputs =
-        WorkflowContext::resolve_inputs(&def, &[]).unwrap();
+    let inputs = WorkflowContext::resolve_inputs(&def, &[]).unwrap();
     let ctx = WorkflowContext::new(inputs);
 
     let prompt = render(&def.steps[0].prompt, &ctx).unwrap();
@@ -110,9 +109,15 @@ fn memory_insert_search_prune_reset() {
     let mut store = MemoryStore::open(f.path()).unwrap();
 
     // Insert
-    let id1 = store.insert("rust ownership system", &["rust", "memory"]).unwrap();
-    let id2 = store.insert("python garbage collection", &["python"]).unwrap();
-    let _id3 = store.insert("async programming patterns", &["async"]).unwrap();
+    let id1 = store
+        .insert("rust ownership system", &["rust", "memory"])
+        .unwrap();
+    let id2 = store
+        .insert("python garbage collection", &["python"])
+        .unwrap();
+    let _id3 = store
+        .insert("async programming patterns", &["async"])
+        .unwrap();
 
     assert_eq!(store.count().unwrap(), 3);
 
@@ -182,7 +187,9 @@ async fn sub_agent_isolation_from_cli_crate() {
             Ok(ModelResponse {
                 id: "mock".to_string(),
                 model: "mock".to_string(),
-                content: vec![ContentBlock::Text { text: self.0.clone() }],
+                content: vec![ContentBlock::Text {
+                    text: self.0.clone(),
+                }],
                 stop_reason: StopReason::EndTurn,
                 usage: Usage {
                     input_tokens: 5,
@@ -309,7 +316,13 @@ fn mcp_config_roundtrip() {
     assert_eq!(cfg.servers.len(), 2);
     assert_eq!(cfg.servers[0].name, "filesystem");
     assert_eq!(cfg.servers[0].command, "npx");
-    assert_eq!(cfg.servers[1].env.get("GITHUB_PERSONAL_ACCESS_TOKEN").map(String::as_str), Some("ghp_test"));
+    assert_eq!(
+        cfg.servers[1]
+            .env
+            .get("GITHUB_PERSONAL_ACCESS_TOKEN")
+            .map(String::as_str),
+        Some("ghp_test")
+    );
 
     // Serialize back to JSON
     let back = serde_json::to_string(&cfg).unwrap();
@@ -322,10 +335,8 @@ fn mcp_load_config_from_file() {
     use clido_tools::load_mcp_config;
 
     let mut f = tempfile::NamedTempFile::new().unwrap();
-    f.write_all(
-        br#"{"servers":[{"name":"test-srv","command":"python","args":["srv.py"]}]}"#,
-    )
-    .unwrap();
+    f.write_all(br#"{"servers":[{"name":"test-srv","command":"python","args":["srv.py"]}]}"#)
+        .unwrap();
     f.flush().unwrap();
 
     let cfg = load_mcp_config(f.path()).unwrap();

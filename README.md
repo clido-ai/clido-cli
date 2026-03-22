@@ -32,7 +32,7 @@ cargo build --release
 
 On first launch, clido will run an interactive wizard (`clido init`) that:
 
-1. Prompts for your preferred provider (anthropic, openrouter, local)
+1. Prompts for your preferred provider (anthropic, openrouter, alibabacloud, local)
 2. Asks for your API key or base URL
 3. Writes `~/.config/clido/config.toml`
 
@@ -67,6 +67,8 @@ Switch profiles with `--profile fast` or `CLIDO_PROFILE=fast`.
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `OPENAI_API_KEY` | OpenAI / OpenRouter API key |
+| `OPENROUTER_API_KEY` | OpenRouter API key |
+| `DASHSCOPE_API_KEY` | Alibaba Cloud (DashScope / Qwen) API key |
 | `CLIDO_PROFILE` | Active profile name |
 | `CLIDO_MODEL` | Model override |
 | `CLIDO_PROVIDER` | Provider override |
@@ -165,7 +167,7 @@ clido <SUBCOMMAND>
 
 Run `clido` (no arguments, at a TTY) to launch the full-screen interactive TUI. The TUI shows:
 - A scrollable conversation panel with assistant responses, tool calls, and diffs.
-- A header strip with provider, model, and session ID.
+- A header strip with provider, model, session ID, cost, and context window usage (% filled).
 - A status strip with live tool activity.
 - A hint bar with key bindings.
 
@@ -176,17 +178,27 @@ Type `/` in the input bar to see completions. Available commands:
 | Command | Description |
 |---|---|
 | `/clear` | Clear the conversation |
-| `/help` | Show all key bindings and slash commands |
-| `/model` | Show current provider and model |
+| `/help` | Show all key bindings and slash commands (grouped by category) |
 | `/session` | Show current session ID |
 | `/sessions` | Open session picker (list and resume recent sessions) |
-| `/workdir` | Show working directory |
+| `/quit` | Exit |
+| `/model [name]` | Show or switch the active model |
+| `/models` | Open interactive model picker (filter, favorites, pricing) |
+| `/fast` | Switch to the fast model (respects `[roles] fast` in config) |
+| `/smart` | Switch to the smart model (respects `[roles] reasoning` in config) |
+| `/role <name>` | Switch to the model assigned to a named role |
+| `/fav` | Toggle the current model as a favorite |
 | `/cost` | Show session cost so far |
 | `/tokens` | Show input and output token usage |
-| `/memory <query>` | Note about memory search (agent uses memory automatically) |
+| `/compact` | Compact the context window immediately |
+| `/memory <query>` | Search long-term memory |
 | `/plan` | Show current task plan (when `--planner` is active) |
+| `/ship [msg]` | Stage all changes, commit, and push |
+| `/save [msg]` | Stage all changes and commit locally |
+| `/undo` | Undo the last committed change |
 | `/index` | Show repo index status |
-| `/quit` | Exit |
+| `/rules` | Show active CLIDO.md rules files |
+| `/image <path>` | Attach an image to the next message |
 
 **Key bindings:** `Enter` send · `Ctrl+Enter` interrupt & send · `↑↓` history · `PgUp/PgDn` scroll · `Ctrl+U` clear input · `Ctrl+C` quit.
 

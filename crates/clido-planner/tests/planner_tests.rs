@@ -28,11 +28,7 @@ fn node(id: &str, deps: &[&str]) -> TaskNode {
 fn three_task_dag() -> TaskGraph {
     TaskGraph {
         goal: "multi-file refactor".to_string(),
-        tasks: vec![
-            node("t1", &[]),
-            node("t2", &["t1"]),
-            node("t3", &["t2"]),
-        ],
+        tasks: vec![node("t1", &[]), node("t2", &["t1"]), node("t3", &["t2"])],
     }
 }
 
@@ -147,7 +143,12 @@ fn test_parallel_batches() {
     };
     let batches = graph.parallel_batches().unwrap();
     // root → [a, b] → c  ⇒ 3 batches
-    assert_eq!(batches.len(), 3, "expected 3 batches, got {}", batches.len());
+    assert_eq!(
+        batches.len(),
+        3,
+        "expected 3 batches, got {}",
+        batches.len()
+    );
 
     let ids_0: Vec<&str> = batches[0].iter().map(|n| n.id.as_str()).collect();
     let ids_1: Vec<&str> = batches[1].iter().map(|n| n.id.as_str()).collect();
@@ -226,12 +227,18 @@ async fn test_plan_executor() {
     let build = &result.task_results[1];
     assert_eq!(build.task_id, "build");
     // build should have seen setup's output in context
-    assert!(build.output.contains("setup="), "build should see setup output in context");
+    assert!(
+        build.output.contains("setup="),
+        "build should see setup output in context"
+    );
 
     let test = &result.task_results[2];
     assert_eq!(test.task_id, "test");
     // test should have seen build's output in context
-    assert!(test.output.contains("build="), "test should see build output in context");
+    assert!(
+        test.output.contains("build="),
+        "test should see build output in context"
+    );
 }
 
 // ── Planner improves success rate (structural proof) ─────────────────────────

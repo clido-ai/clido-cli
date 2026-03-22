@@ -28,7 +28,11 @@ impl AnthropicProvider {
             .connect_timeout(Duration::from_secs(15))
             .build()
             .unwrap_or_default();
-        Self { client, api_key, model }
+        Self {
+            client,
+            api_key,
+            model,
+        }
     }
 
     /// Build request body and POST to API, with robust retry/backoff.
@@ -177,8 +181,8 @@ impl AnthropicProvider {
             }
 
             if status.is_success() {
-                let json: serde_json::Value = serde_json::from_str(&text)
-                    .map_err(|e| ClidoError::Provider(e.to_string()))?;
+                let json: serde_json::Value =
+                    serde_json::from_str(&text).map_err(|e| ClidoError::Provider(e.to_string()))?;
                 return parse_anthropic_response(&json);
             }
 
@@ -275,7 +279,10 @@ fn content_block_to_anthropic(b: &ContentBlock) -> Result<serde_json::Value> {
             "type": "thinking",
             "thinking": thinking
         })),
-        ContentBlock::Image { media_type, base64_data } => Ok(serde_json::json!({
+        ContentBlock::Image {
+            media_type,
+            base64_data,
+        } => Ok(serde_json::json!({
             "type": "image",
             "source": {
                 "type": "base64",

@@ -55,7 +55,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin --locked --version 0.31.6
+        run: cargo install cargo-tarpaulin --version 0.31.6
 
       - name: Coverage
         run: cargo tarpaulin --workspace --timeout 120 --out Xml --exclude-files "*/benches/*" --fail-under 50

@@ -100,7 +100,7 @@ async fn build_sandboxed_command(command: &str) -> std::io::Result<std::process:
                 .await
         } else {
             // bwrap not available — fall back to unsandboxed with a warning.
-            tracing::warn!("sandbox requested but bwrap not found; running unsandboxed");
+            eprintln!("warning: sandbox requested but bwrap not found; running unsandboxed");
             tokio::process::Command::new("sh")
                 .arg("-c")
                 .arg(command)

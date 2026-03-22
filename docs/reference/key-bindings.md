@@ -66,6 +66,33 @@ Opened with `/sessions`.
 | `Backspace` | Picker | Delete last character from filter |
 | `Ctrl+U` | Picker | Clear the filter string |
 
+## Plan editor (full-screen overlay)
+
+Opened automatically when `--plan` generates a plan, or via `/plan edit`.
+
+### Task list
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Move task selection |
+| `Enter` | Open inline edit form for the selected task |
+| `d` | Delete the selected task (blocked if other tasks depend on it) |
+| `n` | Add a new task at the end and open its edit form |
+| `Space` | Toggle skip on the selected task |
+| `r` | Move selected task up one position (reorder) |
+| `s` | Save plan to `.clido/plans/<id>.json` |
+| `x` | Execute the plan (sends tasks as a structured prompt to the agent) |
+| `Esc` | Abort — close editor without executing |
+
+### Inline task edit form
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Move focus to next field (Description → Notes → Complexity) |
+| `←` / `→` | Cycle complexity when Complexity field is focused |
+| `Enter` | Save edits and return to task list |
+| `Esc` | Discard edits and return to task list |
+
 ## Error modal
 
 Appears when a non-recoverable error occurs.

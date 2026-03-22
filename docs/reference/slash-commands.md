@@ -6,15 +6,25 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 
 | Command | Description | Example | Notes |
 |---------|-------------|---------|-------|
-| `/help` | Display all available slash commands | `/help` | Output appears in the chat pane |
-| `/sessions` | Open the session picker | `/sessions` | Use arrow keys to select, Enter to open |
-| `/new` | Start a new session, discarding the current one | `/new` | The current session file is preserved; you just stop using it |
+| `/help` | Display all key bindings and slash commands | `/help` | Output appears in the chat pane |
 | `/clear` | Clear the chat display | `/clear` | The session JSONL file is not modified; history is preserved |
-| `/plan` | Show the current planner task graph | `/plan` | Only meaningful when `--planner` is active |
-| `/memory <query>` | Search long-term memory and display matches | `/memory error handling` | Full-text search over memory DB |
-| `/cost` | Print accumulated cost and token usage for this session | `/cost` | Equivalent to the status strip numbers |
-| `/model` | Show the currently active model and provider | `/model` | |
-| `/tools` | List all available tools (built-in + MCP) | `/tools` | |
+| `/session` | Show the current session ID | `/session` | |
+| `/sessions` | Open the session picker | `/sessions` | Use arrow keys to select, Enter to resume |
+| `/workdir` | Show the current working directory | `/workdir` | |
+| `/cost` | Print accumulated cost for this session | `/cost` | Mirrors the status strip numbers |
+| `/tokens` | Print input and output token usage | `/tokens` | |
+| `/model [name]` | Show or switch the active model | `/model claude-opus-4-6` | Switches immediately; reverts after session ends |
+| `/fast` | Switch to the fast (cheap) model | `/fast` | `claude-haiku-4-5-20251001` |
+| `/smart` | Switch to the smart (powerful) model | `/smart` | `claude-opus-4-6` |
+| `/plan` | Show the current task plan | `/plan` | Active when `--plan` or `--planner` flag is set |
+| `/plan edit` | Re-open the plan editor overlay | `/plan edit` | Edit tasks, complexity, notes before executing |
+| `/plan save` | Save the current plan to `.clido/plans/` | `/plan save` | Saved plans can be resumed with `clido plan run` |
+| `/plan list` | List all saved plans | `/plan list` | Shows id, task count, done count, and goal |
+| `/memory <query>` | Search long-term memory | `/memory error handling` | The agent also uses memory automatically |
+| `/check` | Run diagnostics on the current project | `/check` | Invokes the DiagnosticsTool |
+| `/image <path>` | Attach an image to the next message | `/image screenshot.png` | Supports PNG, JPEG, GIF, WebP |
+| `/index` | Show repo index stats | `/index` | Build with `clido index build` |
+| `/rules` | Show active CLIDO.md rules files | `/rules` | Overlay listing all discovered rules |
 | `/quit` | Exit clido | `/quit` | Equivalent to pressing `Ctrl+C` when idle |
 
 ## Using slash commands

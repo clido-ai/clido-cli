@@ -22,7 +22,9 @@ Flags can also be set via environment variables — see the `Env` column.
 | `--resume-ignore-stale` | — | flag | false | — | Skip stale file check when resuming |
 | `--mcp-config` | — | path | — | — | Path to MCP server config (JSON) |
 | `--sandbox` | — | flag | false | — | Enable Bash sandboxing |
-| `--planner` | — | flag | false | — | Enable task decomposition planner (experimental) |
+| `--planner` / `--plan` | — | flag | false | — | Enable interactive plan mode: decompose task into editable DAG before executing |
+| `--plan-dry-run` | — | flag | false | — | With `--plan`: show editor but never execute |
+| `--plan-no-edit` | — | flag | false | — | With `--plan`: skip editor, execute immediately (CI-friendly) |
 | `--max-parallel-tools` | — | integer | `4` | `CLIDO_MAX_PARALLEL_TOOLS` | Max concurrent read-only tool calls |
 | `--system-prompt` | — | string | — | `CLIDO_SYSTEM_PROMPT` | Replace the default system prompt |
 | `--system-prompt-file` | — | path | — | — | Read system prompt from a file |
@@ -119,9 +121,15 @@ Path to a JSON file describing MCP servers to start. See [MCP Servers](/guide/mc
 
 Enable sandboxed Bash execution. Uses `sandbox-exec` on macOS and `bwrap` on Linux. The agent's shell commands run in a restricted environment that cannot access files outside the working directory or make network connections.
 
-### `--planner`
+### `--plan` / `--planner`
 
-Enable the experimental task decomposition planner. See [Planner](/guide/planner).
+Enable interactive plan mode. clido calls the LLM once to generate a structured task graph (DAG), then opens a full-screen plan editor in the TUI before executing anything. See [Plan Mode](/guide/planner).
+
+```bash
+clido --plan "migrate all deprecated API calls to v2"
+clido --plan --plan-dry-run "refactor auth"   # preview only
+clido --plan --plan-no-edit "fix clippy"      # skip editor
+```
 
 ### `--max-parallel-tools`
 

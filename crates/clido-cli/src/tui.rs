@@ -344,6 +344,26 @@ struct SessionPickerState {
     scroll_offset: usize,
 }
 
+// ── Profile picker popup state ─────────────────────────────────────────────────
+
+struct ProfilePickerState {
+    /// All profiles, sorted by name: (profile_name, entry).
+    profiles: Vec<(String, clido_core::ProfileEntry)>,
+    selected: usize,
+    scroll_offset: usize,
+    /// Currently active profile name (shown with ▶ marker).
+    active: String,
+}
+
+// ── Role picker popup state ────────────────────────────────────────────────────
+
+struct RolePickerState {
+    /// All configured roles, sorted by name: (role_name, model_id).
+    roles: Vec<(String, String)>,
+    selected: usize,
+    scroll_offset: usize,
+}
+
 // ── Model picker popup state ──────────────────────────────────────────────────
 
 /// One row in the model picker.
@@ -730,6 +750,10 @@ struct App {
     session_picker: Option<SessionPickerState>,
     /// Model picker popup state (Some = popup visible).
     model_picker: Option<ModelPickerState>,
+    /// Profile picker popup state (Some = popup visible).
+    profile_picker: Option<ProfilePickerState>,
+    /// Role picker popup state (Some = popup visible).
+    role_picker: Option<RolePickerState>,
     /// Settings editor popup (Some = visible).
     settings: Option<SettingsState>,
     /// All known models (built at startup from pricing table + profiles).
@@ -837,6 +861,8 @@ impl App {
             queued: None,
             session_picker: None,
             model_picker: None,
+            profile_picker: None,
+            role_picker: None,
             settings: None,
             known_models,
             model_prefs,
@@ -1595,6 +1621,140 @@ fn render(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block(&title, Color::Magenta)),
+            popup_rect,
+        );
+    }
+
+    // ── Profile picker popup ──────────────────────────────────────────────────
+    if let Some(ref picker) = app.profile_picker {
+        const VISIBLE: usize = 12;
+        let n_rows = picker.profiles.len().min(VISIBLE) as u16;
+        let popup_h = (n_rows + 4).min(area.height.saturating_sub(4)).max(5);
+        let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
+        let inner_w = popup_rect.width.saturating_sub(4) as usize;
+
+        let mut content: Vec<Line<'static>> = vec![
+            Line::from(Span::styled(
+                format!("  {:<20}  {}", "profile", "provider / model"),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )),
+            Line::raw(""),
+        ];
+
+        let end = (picker.scroll_offset + VISIBLE).min(picker.profiles.len());
+        for (di, (name, entry)) in picker.profiles[picker.scroll_offset..end]
+            .iter()
+            .enumerate()
+        {
+            let selected = picker.scroll_offset + di == picker.selected;
+            let is_active = name == &picker.active;
+            let bg = if selected { Color::Blue } else { Color::Reset };
+            let fg = if selected { Color::White } else { Color::Gray };
+            let marker = if selected { "▶" } else { " " };
+            let active_mark = if is_active { "●" } else { " " };
+            let model_display: String = format!("{} / {}", entry.provider, entry.model)
+                .chars()
+                .take(inner_w.saturating_sub(24))
+                .collect();
+            content.push(Line::from(Span::styled(
+                format!("{} {} {:<20}  {}", marker, active_mark, name, model_display),
+                Style::default().fg(fg).bg(bg),
+            )));
+        }
+
+        let above = picker.scroll_offset;
+        let below = picker
+            .profiles
+            .len()
+            .saturating_sub(picker.scroll_offset + VISIBLE);
+        if above > 0 || below > 0 {
+            let mut parts = Vec::new();
+            if above > 0 {
+                parts.push(format!("↑↑ {} more", above));
+            }
+            if below > 0 {
+                parts.push(format!("↓↓ {} more", below));
+            }
+            content.push(Line::from(Span::styled(
+                format!("  {}", parts.join("  ")),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )));
+        }
+
+        let title = format!(
+            " Profiles — {}  (↑↓ navigate  Enter=switch  Esc=close) ",
+            picker.active
+        );
+        frame.render_widget(Clear, popup_rect);
+        frame.render_widget(
+            Paragraph::new(content).block(modal_block(&title, Color::Cyan)),
+            popup_rect,
+        );
+    }
+
+    // ── Role picker popup ─────────────────────────────────────────────────────
+    if let Some(ref picker) = app.role_picker {
+        const VISIBLE: usize = 10;
+        let n_rows = picker.roles.len().min(VISIBLE) as u16;
+        let popup_h = (n_rows + 4).min(area.height.saturating_sub(4)).max(5);
+        let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
+        let inner_w = popup_rect.width.saturating_sub(4) as usize;
+
+        let mut content: Vec<Line<'static>> = vec![
+            Line::from(Span::styled(
+                format!("  {:<16}  {}", "role", "model"),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )),
+            Line::raw(""),
+        ];
+
+        let end = (picker.scroll_offset + VISIBLE).min(picker.roles.len());
+        for (di, (role, model)) in picker.roles[picker.scroll_offset..end].iter().enumerate() {
+            let selected = picker.scroll_offset + di == picker.selected;
+            let bg = if selected { Color::Blue } else { Color::Reset };
+            let fg = if selected { Color::White } else { Color::Gray };
+            let marker = if selected { "▶" } else { " " };
+            let model_display: String = model.chars().take(inner_w.saturating_sub(20)).collect();
+            content.push(Line::from(Span::styled(
+                format!("{} {:<16}  {}", marker, role, model_display),
+                Style::default().fg(fg).bg(bg),
+            )));
+        }
+
+        let above = picker.scroll_offset;
+        let below = picker
+            .roles
+            .len()
+            .saturating_sub(picker.scroll_offset + VISIBLE);
+        if above > 0 || below > 0 {
+            let mut parts = Vec::new();
+            if above > 0 {
+                parts.push(format!("↑↑ {} more", above));
+            }
+            if below > 0 {
+                parts.push(format!("↓↓ {} more", below));
+            }
+            content.push(Line::from(Span::styled(
+                format!("  {}", parts.join("  ")),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )));
+        }
+
+        let title = format!(
+            " Roles — {}  (↑↓ navigate  Enter=switch model  Esc=close) ",
+            picker.roles.len()
+        );
+        frame.render_widget(Clear, popup_rect);
+        frame.render_widget(
+            Paragraph::new(content).block(modal_block(&title, Color::Yellow)),
             popup_rect,
         );
     }
@@ -2496,21 +2656,21 @@ fn execute_slash(app: &mut App, cmd: &str) {
         _ if cmd == "/model" || cmd.starts_with("/model ") => {
             let arg = cmd.trim_start_matches("/model").trim();
             if arg.is_empty() {
-                let fav = if app.model_prefs.is_favorite(&app.model) {
-                    " ★"
+                // No name given → open the interactive model picker (same as /models).
+                let models = app.known_models.clone();
+                if models.is_empty() {
+                    app.push(ChatLine::Info(
+                        "  no models in pricing table — run `clido update-pricing` to populate"
+                            .into(),
+                    ));
                 } else {
-                    ""
-                };
-                app.push(ChatLine::Info(format!(
-                    "  provider: {}   model: {}{}",
-                    app.provider, app.model, fav
-                )));
-                app.push(ChatLine::Info(
-                    "  session: /models picker  /model <name>  /fast  /smart  /role <name>".into(),
-                ));
-                app.push(ChatLine::Info(
-                    "  default: /settings → Default model  (changes saved to config.toml)".into(),
-                ));
+                    app.model_picker = Some(ModelPickerState {
+                        models,
+                        filter: String::new(),
+                        selected: 0,
+                        scroll_offset: 0,
+                    });
+                }
             } else {
                 let new_model = arg.to_string();
                 app.model = new_model.clone();
@@ -2538,15 +2698,14 @@ fn execute_slash(app: &mut App, cmd: &str) {
         _ if cmd == "/role" || cmd.starts_with("/role ") => {
             let role = cmd.trim_start_matches("/role").trim();
             if role.is_empty() {
-                // Show all configured roles — clone first to avoid borrow conflict.
+                // No name given → open interactive role picker.
                 let mut roles: Vec<(String, String)> = app
                     .config_roles
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
                 roles.sort_by(|a, b| a.0.cmp(&b.0));
-                let has_roles = !roles.is_empty() || !app.model_prefs.roles.is_empty();
-                if !has_roles {
+                if roles.is_empty() {
                     app.push(ChatLine::Info(
                         "  no roles configured — add a [roles] section to config.toml".into(),
                     ));
@@ -2554,10 +2713,11 @@ fn execute_slash(app: &mut App, cmd: &str) {
                         "  example:  fast = \"claude-haiku-4-5-20251001\"".into(),
                     ));
                 } else {
-                    app.push(ChatLine::Info("  configured roles:".into()));
-                    for (name, model) in &roles {
-                        app.push(ChatLine::Info(format!("    {:12} → {}", name, model)));
-                    }
+                    app.role_picker = Some(RolePickerState {
+                        roles,
+                        selected: 0,
+                        scroll_offset: 0,
+                    });
                 }
             } else {
                 // Resolve: prefs override config.
@@ -3043,10 +3203,33 @@ fn execute_slash(app: &mut App, cmd: &str) {
             }
         },
         "/profile" => {
-            app.push(ChatLine::Info(format!(
-                "  active profile: {}  (use /profile <name> to switch)",
-                app.current_profile
-            )));
+            // No name given → open interactive profile picker.
+            match clido_core::load_config(&app.workspace_root) {
+                Err(e) => app.push(ChatLine::Info(format!(
+                    "  profile: error loading config: {}",
+                    e
+                ))),
+                Ok(loaded) => {
+                    let active = loaded.default_profile.clone();
+                    let mut profiles: Vec<(String, clido_core::ProfileEntry)> =
+                        loaded.profiles.into_iter().collect();
+                    profiles.sort_by(|a, b| a.0.cmp(&b.0));
+                    if profiles.is_empty() {
+                        app.push(ChatLine::Info(
+                            "  no profiles configured — run `clido profile create` to add one"
+                                .into(),
+                        ));
+                    } else {
+                        let selected = profiles.iter().position(|(n, _)| n == &active).unwrap_or(0);
+                        app.profile_picker = Some(ProfilePickerState {
+                            profiles,
+                            selected,
+                            scroll_offset: 0,
+                            active,
+                        });
+                    }
+                }
+            }
         }
         cmd if cmd.starts_with("/profile ") => {
             let name = cmd.trim_start_matches("/profile ").trim();
@@ -4093,6 +4276,103 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Esc => {
                 app.session_picker = None;
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // ── Profile picker (modal) ────────────────────────────────────────────────
+    if app.profile_picker.is_some() {
+        const VISIBLE: usize = 12;
+        match event.code {
+            Up => {
+                if let Some(picker) = &mut app.profile_picker {
+                    if picker.selected > 0 {
+                        picker.selected -= 1;
+                        if picker.selected < picker.scroll_offset {
+                            picker.scroll_offset = picker.selected;
+                        }
+                    }
+                }
+            }
+            Down => {
+                if let Some(picker) = &mut app.profile_picker {
+                    if picker.selected + 1 < picker.profiles.len() {
+                        picker.selected += 1;
+                        if picker.selected >= picker.scroll_offset + VISIBLE {
+                            picker.scroll_offset = picker.selected - VISIBLE + 1;
+                        }
+                    }
+                }
+            }
+            Enter => {
+                if let Some(picker) = app.profile_picker.take() {
+                    let (name, _) = &picker.profiles[picker.selected];
+                    if name == &picker.active {
+                        app.push(ChatLine::Info(format!(
+                            "  profile '{}' is already active.",
+                            name
+                        )));
+                    } else {
+                        app.push(ChatLine::Info(format!(
+                            "  switching to profile '{}'…",
+                            name
+                        )));
+                        app.wants_profile_switch = Some(name.clone());
+                        app.quit = true;
+                    }
+                }
+            }
+            Esc => {
+                app.profile_picker = None;
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // ── Role picker (modal) ───────────────────────────────────────────────────
+    if app.role_picker.is_some() {
+        const VISIBLE: usize = 10;
+        match event.code {
+            Up => {
+                if let Some(picker) = &mut app.role_picker {
+                    if picker.selected > 0 {
+                        picker.selected -= 1;
+                        if picker.selected < picker.scroll_offset {
+                            picker.scroll_offset = picker.selected;
+                        }
+                    }
+                }
+            }
+            Down => {
+                if let Some(picker) = &mut app.role_picker {
+                    if picker.selected + 1 < picker.roles.len() {
+                        picker.selected += 1;
+                        if picker.selected >= picker.scroll_offset + VISIBLE {
+                            picker.scroll_offset = picker.selected - VISIBLE + 1;
+                        }
+                    }
+                }
+            }
+            Enter => {
+                if let Some(picker) = app.role_picker.take() {
+                    let (role_name, model_id) = &picker.roles[picker.selected];
+                    let model_id = model_id.clone();
+                    let role_name = role_name.clone();
+                    app.model = model_id.clone();
+                    let _ = app.model_switch_tx.send(model_id.clone());
+                    app.model_prefs.push_recent(&model_id);
+                    app.model_prefs.save();
+                    app.push(ChatLine::Info(format!(
+                        "  model switched to {} (role: {})",
+                        model_id, role_name
+                    )));
+                }
+            }
+            Esc => {
+                app.role_picker = None;
             }
             _ => {}
         }

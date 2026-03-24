@@ -10,3 +10,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Documentation: development plan, CLI interface specification, release plans, testing strategy, local development testing guide, schemas, and algorithm specs.
+- **Agent Profiles**: multiple named profiles with `clido profile list/create/switch/edit/delete`. Each profile carries a main agent and optional per-profile `worker`/`reviewer` sub-agent slots that override the global agent config. Active profile is shown in the TUI header; `/profile <name>` and `/profiles` slash commands allow in-session switching. Profile switching takes effect immediately for the next interaction.

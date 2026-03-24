@@ -1336,19 +1336,9 @@ fn render(frame: &mut Frame, app: &mut App) {
     // ── Slash command popup ──
     let rows = slash_completion_rows(&app.input);
     if !rows.is_empty() && app.pending_perm.is_none() && app.session_picker.is_none() {
-        // Use nearly the full terminal width so descriptions are readable.
-        // Cap at 120 to avoid comically wide popups on ultra-wide displays.
-        let popup_w = area.width.saturating_sub(4).min(120);
-        let cmd_col_w = 18usize; // wide enough for "/plan edit", "/rollback", etc.
+        const VISIBLE: usize = 12;
 
-        // Cap height to available space above the input; leave 2 rows margin at top.
-        let available_h = input_area.y.saturating_sub(2).max(6);
-        let needed_h = rows.len() as u16 + 2; // +2 for block borders
-        let popup_h = needed_h.min(available_h);
-        let visible_rows = (popup_h as usize).saturating_sub(2);
-
-        // Find which rendered-row index the selected command occupies so we can
-        // scroll the viewport to keep it visible.
+        // Find the rendered-row index of the selected command.
         let selected_row_idx = app
             .selected_cmd
             .and_then(|sel| {
@@ -1357,21 +1347,30 @@ fn render(frame: &mut Frame, app: &mut App) {
                 )
             })
             .unwrap_or(0);
-        let scroll: u16 = if selected_row_idx + 1 > visible_rows {
-            (selected_row_idx + 1 - visible_rows) as u16
-        } else {
-            0
-        };
 
+        // Scroll so the selected item sits at the bottom of the visible window —
+        // same behaviour as the session / model pickers.
+        let scroll_offset = selected_row_idx.saturating_sub(VISIBLE - 1);
+        let end = (scroll_offset + VISIBLE).min(rows.len());
+        let visible_slice = &rows[scroll_offset..end];
+
+        let has_above = scroll_offset > 0;
+        let has_below = rows.len() > scroll_offset + VISIBLE;
+        let indicator = usize::from(has_above || has_below);
+        let popup_h = (visible_slice.len() + 2 + indicator) as u16;
+
+        // Use nearly the full terminal width; cap at 120 for ultra-wide displays.
+        let popup_w = area.width.saturating_sub(4).min(120);
+        // 2 chars for marker (▶ / space), 18 for command = 20 total left column.
+        let cmd_col_w = 20usize;
         let popup_rect = popup_above_input(input_area, popup_h, popup_w);
-        let desc_w = (popup_rect.width as usize).saturating_sub(cmd_col_w + 4);
-        frame.render_widget(Clear, popup_rect);
+        let desc_w = (popup_rect.width as usize).saturating_sub(cmd_col_w + 3);
 
-        let items: Vec<Line<'static>> = rows
+        let mut content: Vec<Line<'static>> = visible_slice
             .iter()
             .map(|row| match row {
                 CompletionRow::Header(section) => Line::from(Span::styled(
-                    format!(" ── {} ", section),
+                    format!("  ── {} ", section),
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
@@ -1382,13 +1381,14 @@ fn render(frame: &mut Frame, app: &mut App) {
                     desc,
                 } => {
                     let selected = app.selected_cmd == Some(*flat_idx);
+                    let marker = if selected { "▶" } else { " " };
                     let desc_str = if desc.len() > desc_w {
                         format!("{}…", &desc[..desc_w.saturating_sub(1)])
                     } else {
                         desc.to_string()
                     };
                     modal_row_two_col(
-                        format!(" {:<width$}", cmd, width = cmd_col_w - 1),
+                        format!("{} {:<width$}", marker, cmd, width = cmd_col_w - 2),
                         format!(" {}", desc_str),
                         Color::Cyan,
                         Color::DarkGray,
@@ -1398,10 +1398,37 @@ fn render(frame: &mut Frame, app: &mut App) {
             })
             .collect();
 
+        // Scroll indicators — same style as session / model pickers.
+        if has_above || has_below {
+            let mut parts = Vec::new();
+            if has_above {
+                parts.push(format!("↑↑ {} more", scroll_offset));
+            }
+            if has_below {
+                parts.push(format!(
+                    "↓↓ {} more",
+                    rows.len() - (scroll_offset + VISIBLE)
+                ));
+            }
+            content.push(Line::from(Span::styled(
+                format!("  {}", parts.join("  ")),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )));
+        }
+
+        let n_cmds = rows
+            .iter()
+            .filter(|r| matches!(r, CompletionRow::Cmd { .. }))
+            .count();
+        let title = format!(
+            " {} commands  (↑↓ navigate  Tab/Enter select  Esc close) ",
+            n_cmds
+        );
+        frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(items)
-                .scroll((scroll, 0))
-                .block(modal_block("", Color::Blue)),
+            Paragraph::new(content).block(modal_block(&title, Color::Blue)),
             popup_rect,
         );
     }

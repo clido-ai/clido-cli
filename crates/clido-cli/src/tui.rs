@@ -2466,7 +2466,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 new_model
             )));
         }
-        _ if cmd.starts_with("/model") && !cmd.starts_with("/models") => {
+        _ if cmd == "/model" || cmd.starts_with("/model ") => {
             let arg = cmd.trim_start_matches("/model").trim();
             if arg.is_empty() {
                 let fav = if app.model_prefs.is_favorite(&app.model) {
@@ -2508,7 +2508,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 });
             }
         }
-        _ if cmd.starts_with("/role") => {
+        _ if cmd == "/role" || cmd.starts_with("/role ") => {
             let role = cmd.trim_start_matches("/role").trim();
             if role.is_empty() {
                 // Show all configured roles — clone first to avoid borrow conflict.
@@ -2614,7 +2614,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
         "/quit" => {
             app.quit = true;
         }
-        _ if cmd.starts_with("/memory") => {
+        _ if cmd == "/memory" || cmd.starts_with("/memory ") => {
             let query = cmd.trim_start_matches("/memory").trim();
             if query.is_empty() {
                 app.push(ChatLine::Info(
@@ -2668,7 +2668,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                     .to_string(),
             );
         }
-        _ if cmd.starts_with("/rollback") => {
+        _ if cmd == "/rollback" || cmd.starts_with("/rollback ") => {
             let id = cmd.trim_start_matches("/rollback").trim();
             if id.is_empty() {
                 app.send_now(
@@ -2760,7 +2760,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 app.pending_error = Some(format!("list plans: {}", e));
             }
         },
-        _ if cmd.starts_with("/branch") => {
+        _ if cmd == "/branch" || cmd.starts_with("/branch ") => {
             let name = cmd.trim_start_matches("/branch").trim().to_string();
             if name.is_empty() {
                 app.push(ChatLine::Info("  usage: /branch <name>".into()));
@@ -2835,7 +2835,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 9. Print the PR URL."
             ));
         }
-        _ if cmd.starts_with("/ship") => {
+        _ if cmd == "/ship" || cmd.starts_with("/ship ") => {
             let custom_msg = cmd.trim_start_matches("/ship").trim();
             let msg_instruction = if custom_msg.is_empty() {
                 "Generate a commit message from the staged diff: imperative mood, ≤72 chars subject, \
@@ -2867,7 +2867,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 9. Report the commit hash and pushed branch."
             ));
         }
-        _ if cmd.starts_with("/save") => {
+        _ if cmd == "/save" || cmd.starts_with("/save ") => {
             let custom_msg = cmd.trim_start_matches("/save").trim();
             let msg_instruction = if custom_msg.is_empty() {
                 "Generate a commit message from the staged diff: imperative mood, ≤72 chars subject, \
@@ -2920,7 +2920,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 );
             }
         }
-        _ if cmd.starts_with("/image") => {
+        _ if cmd == "/image" || cmd.starts_with("/image ") => {
             let path_str = cmd.trim_start_matches("/image").trim();
             if path_str.is_empty() {
                 app.push(ChatLine::Info(

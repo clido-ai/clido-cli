@@ -43,13 +43,37 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "Session",
         &[
             ("/clear", "clear the conversation"),
-            ("/sessions", "list & resume recent sessions"),
-            ("/session", "show current session ID"),
             ("/help", "show key bindings and all slash commands"),
             ("/quit", "exit clido"),
+            ("/sessions", "list & resume recent sessions"),
+            ("/session", "show current session ID"),
             (
                 "/init",
                 "re-run setup wizard — reconfigure provider, model, API key, roles",
+            ),
+        ],
+    ),
+    (
+        "Git",
+        &[
+            ("/ship", "stage → commit → push. Usage: /ship [message]"),
+            (
+                "/save",
+                "stage → commit locally, no push. Usage: /save [message]",
+            ),
+            ("/pr", "create a pull request. Usage: /pr [title]"),
+            (
+                "/branch",
+                "create + switch to a new branch. Usage: /branch <name>",
+            ),
+            ("/undo", "undo last committed change (git reset HEAD~1)"),
+            (
+                "/rollback",
+                "restore to a checkpoint. Usage: /rollback [id]",
+            ),
+            (
+                "/sync",
+                "pull --rebase from upstream, resolve conflicts if needed",
             ),
         ],
     ),
@@ -83,30 +107,6 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
-        "Git",
-        &[
-            (
-                "/branch",
-                "create + switch to a new branch. Usage: /branch <name>",
-            ),
-            (
-                "/sync",
-                "pull --rebase from upstream, resolve conflicts if needed",
-            ),
-            ("/pr", "create a pull request. Usage: /pr [title]"),
-            ("/ship", "stage → commit → push. Usage: /ship [message]"),
-            (
-                "/save",
-                "stage → commit locally, no push. Usage: /save [message]",
-            ),
-            ("/undo", "undo last committed change (git reset HEAD~1)"),
-            (
-                "/rollback",
-                "restore to a checkpoint. Usage: /rollback [id]",
-            ),
-        ],
-    ),
-    (
         "Plan",
         &[
             ("/plan", "show current task plan (requires --plan flag)"),
@@ -118,39 +118,62 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
     (
         "Project",
         &[
-            ("/workdir", "show working directory"),
-            ("/check", "run diagnostics on current project"),
-            ("/index", "show repo index stats"),
-            ("/rules", "show active project rules files (CLIDO.md)"),
-            (
-                "/image",
-                "attach an image to the next message. Usage: /image <path>",
-            ),
             (
                 "/agents",
                 "show current agent configuration (main, worker, reviewer)",
             ),
             ("/profiles", "list all profiles with active model per slot"),
             ("/profile", "switch active profile. Usage: /profile <name>"),
+            ("/check", "run diagnostics on current project"),
+            ("/rules", "show active project rules files (CLIDO.md)"),
             (
                 "/settings",
                 "open settings editor (roles, default model) — changes saved to config.toml",
             ),
+            (
+                "/image",
+                "attach an image to the next message. Usage: /image <path>",
+            ),
+            ("/workdir", "show working directory"),
+            ("/index", "show repo index stats"),
         ],
     ),
 ];
 
 /// Flat list derived from sections — used for autocomplete and command matching.
+/// Must stay in the same order as SLASH_COMMAND_SECTIONS.
 const SLASH_COMMANDS: &[(&str, &str)] = &[
+    // Session
     ("/clear", "clear the conversation"),
-    ("/sessions", "list & resume recent sessions"),
-    ("/session", "show current session ID"),
     ("/help", "show key bindings and all slash commands"),
     ("/quit", "exit clido"),
+    ("/sessions", "list & resume recent sessions"),
+    ("/session", "show current session ID"),
     (
         "/init",
         "re-run setup wizard — reconfigure provider, model, API key, roles",
     ),
+    // Git
+    ("/ship", "stage → commit → push. Usage: /ship [message]"),
+    (
+        "/save",
+        "stage → commit locally, no push. Usage: /save [message]",
+    ),
+    ("/pr", "create a pull request. Usage: /pr [title]"),
+    (
+        "/branch",
+        "create + switch to a new branch. Usage: /branch <name>",
+    ),
+    ("/undo", "undo last committed change (git reset HEAD~1)"),
+    (
+        "/rollback",
+        "restore to a checkpoint. Usage: /rollback [id]",
+    ),
+    (
+        "/sync",
+        "pull --rebase from upstream, resolve conflicts if needed",
+    ),
+    // Model
     (
         "/models",
         "open interactive model picker (search, filter, favorites)",
@@ -166,51 +189,35 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
         "switch to model assigned to a role. Usage: /role <name>",
     ),
     ("/fav", "toggle favorite on current model"),
+    // Context
     ("/cost", "show session cost so far"),
     ("/tokens", "show token usage so far"),
     ("/compact", "compact context window now (summarise history)"),
     ("/memory", "search long-term memory. Usage: /memory <query>"),
-    (
-        "/branch",
-        "create + switch to a new branch. Usage: /branch <name>",
-    ),
-    (
-        "/sync",
-        "pull --rebase from upstream, resolve conflicts if needed",
-    ),
-    ("/pr", "create a pull request. Usage: /pr [title]"),
-    ("/ship", "stage → commit → push. Usage: /ship [message]"),
-    (
-        "/save",
-        "stage → commit locally, no push. Usage: /save [message]",
-    ),
-    ("/undo", "undo last committed change (git reset HEAD~1)"),
-    (
-        "/rollback",
-        "restore to a checkpoint. Usage: /rollback [id]",
-    ),
+    // Plan
     ("/plan", "show current task plan (requires --plan flag)"),
     ("/plan edit", "open plan editor for the current plan"),
     ("/plan save", "save current plan to .clido/plans/"),
     ("/plan list", "list all saved plans"),
-    ("/workdir", "show working directory"),
-    ("/check", "run diagnostics on current project"),
-    ("/index", "show repo index stats"),
-    ("/rules", "show active project rules files (CLIDO.md)"),
-    (
-        "/image",
-        "attach an image to the next message. Usage: /image <path>",
-    ),
+    // Project
     (
         "/agents",
         "show current agent configuration (main, worker, reviewer)",
     ),
     ("/profiles", "list all profiles with active model per slot"),
     ("/profile", "switch active profile. Usage: /profile <name>"),
+    ("/check", "run diagnostics on current project"),
+    ("/rules", "show active project rules files (CLIDO.md)"),
     (
         "/settings",
         "open settings editor (roles, default model) — changes saved to config.toml",
     ),
+    (
+        "/image",
+        "attach an image to the next message. Usage: /image <path>",
+    ),
+    ("/workdir", "show working directory"),
+    ("/index", "show repo index stats"),
 ];
 
 // ── Permission grant options ───────────────────────────────────────────────────
@@ -684,6 +691,8 @@ enum ChatLine {
     Diff(String),
 
     Info(String),
+    /// Section heading in /help output (rendered brighter than Info).
+    Section(String),
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -1325,38 +1334,74 @@ fn render(frame: &mut Frame, app: &mut App) {
     //   modal_row(label, selected)          → selectable option Line
 
     // ── Slash command popup ──
-    let completions = slash_completions(&app.input);
-    if !completions.is_empty() && app.pending_perm.is_none() && app.session_picker.is_none() {
-        let popup_h = completions.len() as u16 + 2;
+    let rows = slash_completion_rows(&app.input);
+    if !rows.is_empty() && app.pending_perm.is_none() && app.session_picker.is_none() {
         // Use nearly the full terminal width so descriptions are readable.
         // Cap at 120 to avoid comically wide popups on ultra-wide displays.
         let popup_w = area.width.saturating_sub(4).min(120);
         let cmd_col_w = 18usize; // wide enough for "/plan edit", "/rollback", etc.
+
+        // Cap height to available space above the input; leave 2 rows margin at top.
+        let available_h = input_area.y.saturating_sub(2).max(6);
+        let needed_h = rows.len() as u16 + 2; // +2 for block borders
+        let popup_h = needed_h.min(available_h);
+        let visible_rows = (popup_h as usize).saturating_sub(2);
+
+        // Find which rendered-row index the selected command occupies so we can
+        // scroll the viewport to keep it visible.
+        let selected_row_idx = app
+            .selected_cmd
+            .and_then(|sel| {
+                rows.iter().position(
+                    |r| matches!(r, CompletionRow::Cmd { flat_idx, .. } if *flat_idx == sel),
+                )
+            })
+            .unwrap_or(0);
+        let scroll: u16 = if selected_row_idx + 1 > visible_rows {
+            (selected_row_idx + 1 - visible_rows) as u16
+        } else {
+            0
+        };
+
         let popup_rect = popup_above_input(input_area, popup_h, popup_w);
         let desc_w = (popup_rect.width as usize).saturating_sub(cmd_col_w + 4);
         frame.render_widget(Clear, popup_rect);
-        let items: Vec<Line<'static>> = completions
+
+        let items: Vec<Line<'static>> = rows
             .iter()
-            .enumerate()
-            .map(|(i, (cmd, desc))| {
-                let selected = app.selected_cmd == Some(i);
-                // Truncate description to fit the available width.
-                let desc_str = if desc.len() > desc_w {
-                    format!("{}…", &desc[..desc_w.saturating_sub(1)])
-                } else {
-                    desc.to_string()
-                };
-                modal_row_two_col(
-                    format!(" {:<width$}", cmd, width = cmd_col_w - 1),
-                    format!(" {}", desc_str),
-                    Color::Cyan,
-                    Color::DarkGray,
-                    selected,
-                )
+            .map(|row| match row {
+                CompletionRow::Header(section) => Line::from(Span::styled(
+                    format!(" ── {} ", section),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
+                )),
+                CompletionRow::Cmd {
+                    flat_idx,
+                    cmd,
+                    desc,
+                } => {
+                    let selected = app.selected_cmd == Some(*flat_idx);
+                    let desc_str = if desc.len() > desc_w {
+                        format!("{}…", &desc[..desc_w.saturating_sub(1)])
+                    } else {
+                        desc.to_string()
+                    };
+                    modal_row_two_col(
+                        format!(" {:<width$}", cmd, width = cmd_col_w - 1),
+                        format!(" {}", desc_str),
+                        Color::Cyan,
+                        Color::DarkGray,
+                        selected,
+                    )
+                }
             })
             .collect();
+
         frame.render_widget(
-            Paragraph::new(items).block(modal_block("", Color::Blue)),
+            Paragraph::new(items)
+                .scroll((scroll, 0))
+                .block(modal_block("", Color::Blue)),
             popup_rect,
         );
     }
@@ -2276,6 +2321,45 @@ fn slash_completions(input: &str) -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// A row in the autocomplete popup: either a non-selectable section header or a
+/// selectable command. `flat_idx` is the index into `slash_completions()` output.
+enum CompletionRow {
+    Header(&'static str),
+    Cmd {
+        flat_idx: usize,
+        cmd: &'static str,
+        desc: &'static str,
+    },
+}
+
+/// Grouped version of `slash_completions`: same matches but interleaved with
+/// section headers so the popup can show them visually.
+fn slash_completion_rows(input: &str) -> Vec<CompletionRow> {
+    if !input.starts_with('/') {
+        return vec![];
+    }
+    let mut rows = Vec::new();
+    let mut flat_idx = 0usize;
+    for (section, cmds) in SLASH_COMMAND_SECTIONS {
+        let matches: Vec<_> = cmds
+            .iter()
+            .filter(|(cmd, _)| cmd.starts_with(input))
+            .collect();
+        if !matches.is_empty() {
+            rows.push(CompletionRow::Header(section));
+            for (cmd, desc) in matches {
+                rows.push(CompletionRow::Cmd {
+                    flat_idx,
+                    cmd,
+                    desc,
+                });
+                flat_idx += 1;
+            }
+        }
+    }
+    rows
+}
+
 /// Parse `@model-name remaining prompt` per-turn override syntax.
 /// Returns `Some((model_id, prompt))` only when input starts with `@` followed
 /// by a model name token and a space-separated prompt.
@@ -2301,38 +2385,42 @@ fn execute_slash(app: &mut App, cmd: &str) {
         }
         "/help" => {
             app.push(ChatLine::Info("".into()));
-            app.push(ChatLine::Info("  Navigation".into()));
-            app.push(ChatLine::Info("  Enter              send message".into()));
+            app.push(ChatLine::Section("Navigation".into()));
+            app.push(ChatLine::Info("Enter              send message".into()));
+            app.push(ChatLine::Info("Ctrl+Enter         interrupt & send".into()));
             app.push(ChatLine::Info(
-                "  Ctrl+Enter         interrupt & send".into(),
+                "↑↓ / PgUp/PgDn    scroll conversation".into(),
             ));
             app.push(ChatLine::Info(
-                "  ↑↓ / PgUp/PgDn    scroll conversation".into(),
+                "↑↓ (with input)   history navigation".into(),
+            ));
+            app.push(ChatLine::Info("Ctrl+U             clear input".into()));
+            app.push(ChatLine::Info(
+                "Mouse scroll       scroll conversation".into(),
+            ));
+            app.push(ChatLine::Info("".into()));
+            app.push(ChatLine::Section("Agent Controls".into()));
+            app.push(ChatLine::Info("Ctrl+C             quit".into()));
+            app.push(ChatLine::Info(
+                "Ctrl+Enter         interrupt current run & send".into(),
             ));
             app.push(ChatLine::Info(
-                "  ↑↓ (with input)   history navigation".into(),
-            ));
-            app.push(ChatLine::Info("  Ctrl+U             clear input".into()));
-            app.push(ChatLine::Info(
-                "  Mouse scroll       scroll conversation".into(),
+                "Queue              type while agent runs, sends on finish".into(),
             ));
             app.push(ChatLine::Info("".into()));
             for (section, cmds) in SLASH_COMMAND_SECTIONS {
-                app.push(ChatLine::Info(format!("  {}", section)));
+                app.push(ChatLine::Section((*section).to_string()));
                 for (cmd, desc) in *cmds {
-                    app.push(ChatLine::Info(format!("  {:<18} {}", cmd, desc)));
+                    app.push(ChatLine::Info(format!("{:<18} {}", cmd, desc)));
                 }
                 app.push(ChatLine::Info("".into()));
             }
-            app.push(ChatLine::Info("  @model-name <msg>  one-turn model override (e.g. @claude-opus-4-6 refactor this)".into()));
-            app.push(ChatLine::Info("".into()));
-            app.push(ChatLine::Info("  Agent Controls".into()));
-            app.push(ChatLine::Info("  Ctrl+C             quit".into()));
+            app.push(ChatLine::Section("Per-turn Override".into()));
             app.push(ChatLine::Info(
-                "  Ctrl+Enter         interrupt current run & send".into(),
+                "@model-name <msg>  use a different model for one turn".into(),
             ));
             app.push(ChatLine::Info(
-                "  Queue              type while agent runs, sends on finish".into(),
+                "                   e.g. @claude-opus-4-6 refactor this".into(),
             ));
             app.push(ChatLine::Info("".into()));
         }
@@ -3121,6 +3209,14 @@ fn build_lines(app: &App) -> Vec<Line<'static>> {
                         format!("  {}", text)
                     },
                     Style::default().fg(Color::DarkGray),
+                )]));
+            }
+            ChatLine::Section(text) => {
+                out.push(Line::from(vec![Span::styled(
+                    format!("  {}", text),
+                    Style::default()
+                        .fg(Color::Gray)
+                        .add_modifier(Modifier::BOLD),
                 )]));
             }
         }

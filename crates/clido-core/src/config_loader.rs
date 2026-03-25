@@ -80,7 +80,7 @@ fn default_max_turns() -> u32 {
     200
 }
 fn default_max_budget() -> Option<f64> {
-    Some(5.0)
+    None
 }
 fn default_true() -> bool {
     true
@@ -714,7 +714,7 @@ mod tests {
     fn agent_section_default_values() {
         let s = AgentSection::default();
         assert_eq!(s.max_turns, 200);
-        assert_eq!(s.max_budget_usd, Some(5.0));
+        assert_eq!(s.max_budget_usd, None);
         assert!(!s.quiet);
         assert!(!s.no_rules);
         assert!(s.rules_file.is_none());

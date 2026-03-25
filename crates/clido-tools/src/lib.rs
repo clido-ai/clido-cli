@@ -67,9 +67,9 @@ pub fn default_registry_with_options(
     let mut r = ToolRegistry::new();
     r.register(ExitPlanModeTool);
     if sandbox {
-        r.register(BashTool::new_sandboxed(blocked));
+        r.register(BashTool::new_sandboxed(blocked).with_workspace(workspace_root.clone()));
     } else {
-        r.register(BashTool::new_with_blocked(blocked));
+        r.register(BashTool::new_with_blocked(blocked).with_workspace(workspace_root.clone()));
     }
     r.register(ReadTool::new_with_cache(
         guard.clone(),

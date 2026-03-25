@@ -2,11 +2,16 @@
 //!
 //! Both tools live in `clido-cli` rather than `clido-tools` to avoid a circular dependency:
 //! `clido-agent` depends on `clido-tools`, so `clido-tools` cannot import `clido-agent`.
+//!
+//! The reviewer can be paused at runtime (e.g. via `/reviewer off` in the TUI) through the
+//! shared `enabled: Arc<AtomicBool>` flag.  When false, `SpawnReviewerTool::execute` returns
+//! a polite "disabled" message so the main agent knows to skip the review step.
 
 use async_trait::async_trait;
 use clido_core::AgentConfig;
 use clido_providers::ModelProvider;
 use clido_tools::{default_registry, Tool, ToolOutput};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 /// Spawn a worker sub-agent for mechanical subtasks (filtering, summarizing, extracting, formatting).
@@ -76,11 +81,30 @@ impl Tool for SpawnWorkerTool {
         };
         let context = input["context"].as_str().unwrap_or("").to_string();
         let output_format = input["output_format"].as_str().unwrap_or("plain text");
+        tracing::info!(
+            "SpawnWorker starting (model={}, task={})",
+            self.config.model,
+            task
+        );
 
         let prompt = format!(
-            "You are a focused worker agent. Complete this task and return only the result.\n\
-             Output format: {}\n\n\
-             Context:\n{}\n\n\
+            "You are a focused worker sub-agent inside a larger engineering assistant called clido.\n\
+             Your job is to complete a single, bounded mechanical task and return the result.\n\
+             \n\
+             Rules:\n\
+             - Return ONLY the result. No preamble, no explanation, no trailing commentary.\n\
+             - Stay within the task scope. Do not expand, interpret, or improve on the request.\n\
+             - If the output format is specified, follow it exactly.\n\
+             - You have access to file system tools (Read, Grep, Glob, Bash). Use them if needed.\n\
+             - If something is ambiguous, pick the most reasonable interpretation and proceed.\n\
+             - If you cannot complete the task, return a single line starting with ERROR: \
+               followed by the reason.\n\
+             \n\
+             Output format: {}\n\
+             \n\
+             Context:\n\
+             {}\n\
+             \n\
              Task: {}",
             output_format, context, task
         );
@@ -97,10 +121,15 @@ impl Tool for SpawnWorkerTool {
 }
 
 /// Spawn a reviewer sub-agent to check the quality of a completed task output.
+///
+/// The reviewer can be disabled at runtime by setting `enabled` to `false`.
+/// This lets the user pause reviews via `/reviewer off` without restarting the session.
 pub struct SpawnReviewerTool {
     provider: Arc<dyn ModelProvider>,
     config: AgentConfig,
     workspace: std::path::PathBuf,
+    /// Runtime toggle shared with the TUI. `false` → return a "disabled" response immediately.
+    enabled: Arc<AtomicBool>,
 }
 
 impl SpawnReviewerTool {
@@ -108,11 +137,13 @@ impl SpawnReviewerTool {
         provider: Arc<dyn ModelProvider>,
         config: AgentConfig,
         workspace: std::path::PathBuf,
+        enabled: Arc<AtomicBool>,
     ) -> Self {
         Self {
             provider,
             config,
             workspace,
+            enabled,
         }
     }
 }
@@ -151,6 +182,13 @@ impl Tool for SpawnReviewerTool {
     }
 
     async fn execute(&self, input: serde_json::Value) -> ToolOutput {
+        if !self.enabled.load(Ordering::Relaxed) {
+            return ToolOutput::ok(
+                "Reviewer is currently disabled (use `/reviewer on` to re-enable). \
+                 Complete the task without a review."
+                    .into(),
+            );
+        }
         let output = match input["output"].as_str() {
             Some(o) => o.to_string(),
             None => return ToolOutput::err("SpawnReviewer: missing 'output' field".into()),
@@ -158,11 +196,28 @@ impl Tool for SpawnReviewerTool {
         let criteria = input["criteria"]
             .as_str()
             .unwrap_or("correctness and completeness");
+        tracing::info!(
+            "SpawnReviewer starting (model={}, criteria_len={})",
+            self.config.model,
+            criteria.len()
+        );
 
         let prompt = format!(
-            "You are a reviewer agent. Evaluate the following output and return a concise review.\n\
-             Criteria: {}\n\n\
-             Output to review:\n{}",
+            "You are a reviewer sub-agent inside a larger engineering assistant called clido.\n\
+             Your job is to perform a focused quality check on completed work.\n\
+             \n\
+             Rules:\n\
+             - Start your response with either PASS or FAIL on its own line.\n\
+             - If FAIL: list each issue as a bullet point, be specific and actionable.\n\
+             - If PASS: one sentence confirming what was verified.\n\
+             - Do not restate the output. Do not add praise or filler.\n\
+             - You have access to file system tools (Read, Grep, Glob) to verify claims if needed.\n\
+             - Focus only on the criteria given. Do not invent new requirements.\n\
+             \n\
+             Criteria: {}\n\
+             \n\
+             Output to review:\n\
+             {}",
             criteria, output
         );
 
@@ -257,6 +312,7 @@ mod tests {
             Arc::new(NullProvider),
             dummy_config(),
             std::path::PathBuf::from("."),
+            Arc::new(AtomicBool::new(true)),
         );
         assert_eq!(t.name(), "SpawnReviewer");
     }
@@ -267,6 +323,7 @@ mod tests {
             Arc::new(NullProvider),
             dummy_config(),
             std::path::PathBuf::from("."),
+            Arc::new(AtomicBool::new(true)),
         );
         assert!(t.is_read_only());
     }
@@ -277,6 +334,7 @@ mod tests {
             Arc::new(NullProvider),
             dummy_config(),
             std::path::PathBuf::from("."),
+            Arc::new(AtomicBool::new(true)),
         );
         let schema = t.schema();
         let required = schema["required"]
@@ -299,6 +357,7 @@ mod tests {
             Arc::new(NullProvider),
             dummy_config(),
             std::path::PathBuf::from("."),
+            Arc::new(AtomicBool::new(true)),
         );
         assert!(!t.description().is_empty());
     }
@@ -320,11 +379,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn spawn_reviewer_disabled_returns_ok_not_error() {
+        let t = SpawnReviewerTool::new(
+            Arc::new(NullProvider),
+            dummy_config(),
+            std::path::PathBuf::from("."),
+            Arc::new(AtomicBool::new(false)), // disabled
+        );
+        let result = t
+            .execute(serde_json::json!({ "output": "some code", "criteria": "correctness" }))
+            .await;
+        assert!(
+            !result.is_error,
+            "disabled reviewer should return ok, not error"
+        );
+        assert!(result.content.contains("disabled"));
+    }
+
+    #[tokio::test]
     async fn spawn_reviewer_missing_output_returns_error() {
         let t = SpawnReviewerTool::new(
             Arc::new(NullProvider),
             dummy_config(),
             std::path::PathBuf::from("."),
+            Arc::new(AtomicBool::new(true)),
         );
         let result = t
             .execute(serde_json::json!({ "criteria": "correctness" }))

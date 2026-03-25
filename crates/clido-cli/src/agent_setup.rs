@@ -9,6 +9,7 @@ use clido_core::{
 use clido_tools::{default_registry_with_options, McpTool, ToolRegistry};
 use std::io::{self, IsTerminal};
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use crate::cli::Cli;
@@ -26,9 +27,19 @@ pub struct AgentSetup {
 }
 
 impl AgentSetup {
-    pub fn build(cli: &Cli, workspace_root: &Path) -> Result<Self, anyhow::Error> {
-        let loaded = load_config(workspace_root).map_err(|e| CliError::Usage(e.to_string()))?;
-        let (pricing_table, _) = load_pricing();
+    /// Build from caller-supplied config and pricing table, avoiding redundant disk reads.
+    /// This is the canonical implementation; `build()` is a thin wrapper for callers that
+    /// don't have pre-loaded data.
+    ///
+    /// `reviewer_enabled` is a shared flag the TUI uses to pause/resume the reviewer at runtime
+    /// without restarting the agent.  Pass `Arc::new(AtomicBool::new(true))` when not needed.
+    pub fn build_with_preloaded(
+        cli: &Cli,
+        workspace_root: &Path,
+        loaded: LoadedConfig,
+        pricing_table: PricingTable,
+        reviewer_enabled: Arc<AtomicBool>,
+    ) -> Result<Self, anyhow::Error> {
         let profile_name = cli
             .profile
             .as_deref()
@@ -76,36 +87,51 @@ impl AgentSetup {
             provider
         };
 
-        // Build worker provider if configured (per-profile slot takes priority over global).
-        let worker_provider: Option<Arc<dyn clido_providers::ModelProvider>> = loaded
-            .effective_slot_for_profile("worker", profile_name)
+        // Build worker/reviewer providers from explicit slots only.
+        // Per-profile slots take priority over global [agents.worker]/[agents.reviewer].
+        // We intentionally do NOT fall back to [agents.main] — sub-agents must be
+        // explicitly configured so the user knows they're paying for an extra model.
+        let explicit_worker_slot: Option<&clido_core::AgentSlotConfig> = loaded
+            .profiles
+            .get(profile_name)
+            .and_then(|p| p.worker.as_ref())
+            .or(loaded.agents.worker.as_ref());
+
+        let worker_provider: Option<Arc<dyn clido_providers::ModelProvider>> = explicit_worker_slot
             .and_then(|slot| {
                 build_provider_from_slot(slot)
-                    .map_err(|e| {
-                        eprintln!("Warning: worker provider failed to build: {}", e);
-                    })
+                    .map_err(|e| eprintln!("Warning: worker provider failed to build: {}", e))
                     .ok()
             });
 
-        let reviewer_provider: Option<Arc<dyn clido_providers::ModelProvider>> = loaded
-            .effective_slot_for_profile("reviewer", profile_name)
-            .and_then(|slot| {
+        let explicit_reviewer_slot: Option<&clido_core::AgentSlotConfig> = loaded
+            .profiles
+            .get(profile_name)
+            .and_then(|p| p.reviewer.as_ref())
+            .or(loaded.agents.reviewer.as_ref());
+
+        let reviewer_provider: Option<Arc<dyn clido_providers::ModelProvider>> =
+            explicit_reviewer_slot.and_then(|slot| {
                 build_provider_from_slot(slot)
-                    .map_err(|e| {
-                        eprintln!("Warning: reviewer provider failed to build: {}", e);
-                    })
+                    .map_err(|e| eprintln!("Warning: reviewer provider failed to build: {}", e))
                     .ok()
             });
 
-        // Register sub-agent tools if configured.
+        // has_* tracks whether the tool was actually registered (not just configured).
+        let has_worker = worker_provider.is_some();
+        let has_reviewer = reviewer_provider.is_some();
+
+        // Register sub-agent tools.
+        // Sub-agents get a stripped config: no system_prompt (their task framing comes from
+        // the prompt passed in spawn_tools.rs), and a sane max_turns cap so a stuck sub-agent
+        // doesn't run forever. Everything else (model, budget, parallelism) is inherited.
         if let Some(ref wp) = worker_provider {
-            let worker_config = if let Some(ws) = &loaded.agents.worker {
-                let mut wc = config.clone();
-                wc.model = ws.model.clone();
-                wc
-            } else {
-                config.clone()
-            };
+            let mut worker_config = config.clone();
+            worker_config.system_prompt = None;
+            worker_config.max_turns = worker_config.max_turns.min(20);
+            if let Some(ws) = explicit_worker_slot {
+                worker_config.model = ws.model.clone();
+            }
             registry.register(SpawnWorkerTool::new(
                 wp.clone(),
                 worker_config,
@@ -113,23 +139,21 @@ impl AgentSetup {
             ));
         }
         if let Some(ref rp) = reviewer_provider {
-            let reviewer_config = if let Some(rs) = &loaded.agents.reviewer {
-                let mut rc = config.clone();
-                rc.model = rs.model.clone();
-                rc
-            } else {
-                config.clone()
-            };
+            let mut reviewer_config = config.clone();
+            reviewer_config.system_prompt = None;
+            reviewer_config.max_turns = reviewer_config.max_turns.min(10);
+            if let Some(rs) = explicit_reviewer_slot {
+                reviewer_config.model = rs.model.clone();
+            }
             registry.register(SpawnReviewerTool::new(
                 rp.clone(),
                 reviewer_config,
                 workspace_root.to_path_buf(),
+                reviewer_enabled.clone(),
             ));
         }
 
-        // Inject sub-agent routing instructions if sub-agents are configured.
-        let has_worker = loaded.agents.worker.is_some();
-        let has_reviewer = loaded.agents.reviewer.is_some();
+        // Inject sub-agent routing instructions when at least one sub-agent is active.
         if has_worker || has_reviewer {
             let routing = build_routing_instructions(has_worker, has_reviewer);
             if let Some(ref mut sp) = config.system_prompt {
@@ -183,6 +207,20 @@ impl AgentSetup {
             pricing_table,
         })
     }
+
+    /// Convenience wrapper that loads config and pricing from disk.
+    /// Prefer `build_with_preloaded` when the caller already has these.
+    pub fn build(cli: &Cli, workspace_root: &Path) -> Result<Self, anyhow::Error> {
+        let loaded = load_config(workspace_root).map_err(|e| CliError::Usage(e.to_string()))?;
+        let (pricing_table, _) = load_pricing();
+        Self::build_with_preloaded(
+            cli,
+            workspace_root,
+            loaded,
+            pricing_table,
+            Arc::new(AtomicBool::new(true)),
+        )
+    }
 }
 
 fn build_provider_from_slot(
@@ -209,23 +247,67 @@ fn build_provider_from_slot(
 fn build_routing_instructions(has_worker: bool, has_reviewer: bool) -> String {
     let mut lines = vec!["## Sub-Agent Routing".to_string(), String::new()];
     if has_worker {
-        lines.push("You have access to `SpawnWorker` tool. Use it for mechanical subtasks:".into());
-        lines.push("- Selecting relevant files from a list".into());
-        lines.push("- Summarizing file content or chunks".into());
-        lines.push("- Extracting structured fields from text".into());
-        lines.push("- Formatting or normalizing output".into());
-        lines.push("Pass only the minimal context needed — never the full conversation.".into());
+        lines.push(
+            "You have a `SpawnWorker` sub-agent available. \
+             SpawnWorker has its own tool access (Read, Grep, Glob, Bash) and runs independently."
+                .into(),
+        );
+        lines.push(String::new());
+        lines.push("You MUST delegate to SpawnWorker for:".into());
+        lines.push("- Selecting or filtering relevant files from a large list".into());
+        lines.push(
+            "- Summarizing or extracting information from long file content or search results"
+                .into(),
+        );
+        lines.push("- Extracting structured fields from unstructured text or JSON".into());
+        lines
+            .push("- Formatting, normalizing, or transforming output into a specific shape".into());
+        lines.push("- Any mechanical subtask where the result feeds into your next step".into());
+        lines.push(String::new());
+        lines.push("Do NOT use SpawnWorker for:".into());
+        lines.push("- Tasks that require your judgment, creativity, or domain knowledge".into());
+        lines.push("- Tasks where the full conversation context is required".into());
+        lines.push("- Simple one-liner lookups you can do with a single tool call yourself".into());
+        lines.push(String::new());
+        lines.push(
+            "When calling SpawnWorker: pass only the minimal context slice it needs. \
+             Never send the full conversation history. \
+             Describe the expected output format explicitly."
+                .into(),
+        );
         lines.push(String::new());
     }
     if has_reviewer {
-        lines.push("You have access to `SpawnReviewer` tool. Use it when:".into());
-        lines.push("- The task is complete and a final quality check is warranted.".into());
-        lines.push("Only invoke if you are uncertain about the output quality.".into());
+        lines.push(
+            "You have a `SpawnReviewer` sub-agent available. \
+             SpawnReviewer has file system tool access and returns a PASS or FAIL verdict."
+                .into(),
+        );
+        lines.push(String::new());
+        lines.push("You MUST call SpawnReviewer after:".into());
+        lines.push("- Writing or modifying code files".into());
+        lines.push("- Completing a multi-step implementation task".into());
+        lines.push("- Generating output that will be handed to the user as final".into());
+        lines.push(String::new());
+        lines.push(
+            "When calling SpawnReviewer: pass the changed code as `output` and the original \
+             task description plus specific quality criteria as `criteria`. \
+             If the reviewer returns FAIL, fix each listed issue before responding to the user."
+                .into(),
+        );
         lines.push(String::new());
     }
     lines.push("Sub-agent rules:".into());
-    lines.push("- Pass only the context slice the sub-agent needs.".into());
-    lines.push("- If a sub-agent fails, retry the task yourself without it.".into());
+    lines.push(
+        "- Pass only the context slice the sub-agent needs — never the full conversation.".into(),
+    );
+    lines.push(
+        "- If a sub-agent fails or is disabled, complete the task yourself without blocking."
+            .into(),
+    );
+    lines.push(
+        "- Sub-agent cost counts against the session budget. Don't spawn unnecessarily.".into(),
+    );
     lines.join("\n")
 }
 
@@ -396,10 +478,30 @@ mod tests {
     }
 
     #[test]
+    fn routing_instructions_worker_uses_must_delegate_language() {
+        let s = build_routing_instructions(true, false);
+        assert!(
+            s.contains("MUST delegate"),
+            "worker instructions must use imperative 'MUST delegate' language, got:\n{}",
+            s
+        );
+    }
+
+    #[test]
     fn routing_instructions_reviewer_only_mentions_spawn_reviewer() {
         let s = build_routing_instructions(false, true);
         assert!(!s.contains("SpawnWorker"), "should not mention SpawnWorker");
         assert!(s.contains("SpawnReviewer"), "should mention SpawnReviewer");
+    }
+
+    #[test]
+    fn routing_instructions_reviewer_uses_must_call_language() {
+        let s = build_routing_instructions(false, true);
+        assert!(
+            s.contains("MUST call SpawnReviewer"),
+            "reviewer instructions must use imperative 'MUST call SpawnReviewer' language, got:\n{}",
+            s
+        );
     }
 
     #[test]
@@ -422,7 +524,11 @@ mod tests {
     #[test]
     fn routing_instructions_has_retry_guidance() {
         let s = build_routing_instructions(true, true);
-        assert!(s.contains("retry"), "should include retry guidance");
+        // "If a sub-agent fails or is disabled, complete the task yourself."
+        assert!(
+            s.contains("fails") && s.contains("disabled"),
+            "should include guidance for failed/disabled sub-agents"
+        );
     }
 }
 
@@ -433,11 +539,106 @@ fn assemble_system_prompt(cli: &Cli) -> Result<String, anyhow::Error> {
     } else if let Some(ref s) = cli.system_prompt {
         s.clone()
     } else {
-        "You are clido, an AI coding agent. \
-         You help with software development tasks: reading, writing, editing, and running code. \
-         Always refer to yourself as clido — never as Claude, GPT, Gemini, or any other model name. \
-         Be concise and direct."
-            .to_string()
+        "\
+You are clido, an AI software engineering agent. You help with coding tasks: \
+reading, understanding, writing, editing, and running code across any language \
+or stack. Always refer to yourself as clido — never as Claude, GPT, Gemini, or \
+any other model name.
+
+Respond in the language the user writes in.
+
+## Core behavior
+
+- Be concise and direct. Lead with the answer or action, not the reasoning.
+- Do not summarize what you just did — the user can see the diff.
+- Do not add filler: \"Great!\", \"Sure!\", \"Of course!\" — just act.
+- When you can say it in one sentence, don't use three.
+
+## Working with code
+
+- Always read a file before editing it. Never guess at its contents.
+- Understand the existing code before suggesting changes.
+- Make the smallest change that solves the problem. Do not refactor \
+surrounding code unless asked.
+- Do not add comments, docstrings, or type annotations to code you didn't change.
+- Do not add error handling for scenarios that cannot happen.
+- Three similar lines of code is better than a premature abstraction.
+- Do not design for hypothetical future requirements.
+
+## Planning
+
+- Before acting on any non-trivial task, state your plan in 2-3 lines. \
+Then execute.
+- If the plan turns out to be wrong mid-execution, stop and restate it.
+- When asked to create a plan, number each top-level step as \"Step N: description\". \
+Sub-bullets and notes under each step are encouraged for clarity.
+- When executing a plan, announce each step before starting it: \
+\"Step N: description\" on its own line. This helps the user track progress.
+
+## Multi-file and multi-step work
+
+- When a task spans multiple files, state your plan and order of operations \
+before starting. Do not begin file 3 while file 1 is still broken.
+- Reason about dependencies explicitly before making changes.
+- If the task is large, confirm the breakdown with the user before executing.
+- When something unexpected appears (unknown files, foreign config, merge \
+conflicts), investigate before acting.
+
+## Debugging
+
+- Identify likely causes based on evidence, not guesses.
+- Narrow down systematically before proposing a fix.
+- Explain why the fix works, not just what it changes.
+- Do not brute-force — if blocked, diagnose the root cause.
+
+## Testing
+
+- Write tests for new behavior when a test suite already exists.
+- Do not add tests to untested codebases unless explicitly asked.
+- Do not modify existing tests to make them pass — fix the code instead.
+- Tests should test behavior, not implementation details.
+
+## Tool discipline
+
+- Use the most specific tool available (Read, Grep, Glob) before falling \
+back to shell commands.
+- Prefer editing existing files over creating new ones.
+- Never delete or overwrite without reading first.
+- For destructive or irreversible actions (rm, force push, drop table), \
+stop and confirm with the user.
+
+## Security
+
+- Never introduce command injection, XSS, SQL injection, or other OWASP \
+top 10 vulnerabilities.
+- Never commit secrets, API keys, or credentials.
+- Validate at system boundaries (user input, external APIs). Trust internal \
+code and framework guarantees.
+
+## Git
+
+- Only commit when explicitly asked.
+- Write commit messages that explain *why*, not just *what*.
+- Never skip hooks (--no-verify) or force-push without explicit instruction.
+- Prefer new commits over amending published commits.
+
+## When to ask vs. act
+
+- For small, local, reversible changes: act immediately.
+- For ambiguous requirements: ask one focused question, not five.
+- For irreversible actions affecting shared state (push, delete, send): \
+confirm first.
+- If blocked, diagnose the root cause — do not brute-force or bypass \
+safety checks.
+
+## Communication
+
+- Reference specific file paths and line numbers when discussing code.
+- If the task is unclear, state your interpretation before acting.
+- If you discover something unexpected (unknown files, foreign config, \
+merge conflicts), investigate before overwriting.\
+"
+        .to_string()
     };
     Ok(if let Some(ref append) = cli.append_system_prompt {
         format!("{}\n{}", base, append)

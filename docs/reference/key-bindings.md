@@ -9,36 +9,27 @@ These keys are active when the agent is not running and no modal is open.
 | Key | Action |
 |-----|--------|
 | `Enter` | Send the message in the input field |
-| `Ctrl+J` | Insert a newline into the input field (multi-line input) |
 | `Ctrl+C` | Quit clido |
-| `q` | Quit clido (only when the input field is empty) |
-| `Esc` | Cancel partial input / dismiss inline hints |
-| `Up` | Scroll chat history up one line |
-| `Down` | Scroll chat history down one line |
+| `Ctrl+/` | Interrupt current run without sending a follow-up message |
+| `Ctrl+Y` | Copy last assistant message (OSC 52) |
+| `Esc` | Dismiss inline hints/modals when applicable |
+| `Up` | Scroll chat up, or recall history when editing input |
+| `Down` | Scroll chat down, or move forward in history |
 | `Page Up` | Scroll chat history up by one page |
 | `Page Down` | Scroll chat history down by one page |
-| `Home` | Scroll chat history to the top |
-| `End` | Scroll chat history to the bottom (re-enable auto-scroll) |
-| `Up` (empty input) | Recall previous input from history |
-| `Down` (in history) | Move forward through input history |
-| `Ctrl+L` | Clear the input field |
-| `Ctrl+A` | Move cursor to start of input |
-| `Ctrl+E` | Move cursor to end of input |
-| `Ctrl+W` | Delete word before cursor |
 | `Ctrl+U` | Delete everything before cursor |
-| `Ctrl+K` | Delete everything after cursor |
+| `Home` | Move cursor to start of input |
+| `End` | Move cursor to end of input |
 | `Left` | Move cursor left |
 | `Right` | Move cursor right |
-| `Ctrl+Left` | Move cursor one word left |
-| `Ctrl+Right` | Move cursor one word right |
 
 ## While agent is running
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+C` | Cancel the running agent turn and stop execution |
+| `Ctrl+Enter` | Cancel running turn and send current input immediately |
+| `Ctrl+/` | Cancel running turn without sending current input |
 | Any text | Type a message; it is queued and sent after the agent finishes |
-| `Esc` | Dismiss any inline notifications |
 
 ## Permission prompt (modal)
 
@@ -46,11 +37,9 @@ Appears when the agent calls a state-changing tool and `--permission-mode defaul
 
 | Key | Action |
 |-----|--------|
-| `y` | Allow this tool call |
-| `Enter` | Allow this tool call |
-| `n` | Deny this tool call |
+| `↑` / `↓` | Move option selection |
+| `Enter` | Confirm selected option |
 | `Esc` | Deny this tool call |
-| `a` | Allow all remaining tool calls in this session (equivalent to `accept-all`) |
 
 ## Session picker
 
@@ -106,5 +95,5 @@ Appears when a non-recoverable error occurs.
 ## Notes
 
 - Key bindings are not currently user-configurable. Custom bindings are planned for a future release.
-- On some terminals, `Ctrl+J` may be indistinguishable from `Enter`. Use a terminal emulator that sends distinct escape sequences (most modern ones do).
+- `Ctrl+Y` and `/copy` rely on OSC 52 clipboard integration and may be blocked by some terminals or SSH hops.
 - macOS Terminal.app has limited key support. iTerm2 or Warp are recommended for the best TUI experience.

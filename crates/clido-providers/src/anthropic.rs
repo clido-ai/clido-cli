@@ -9,7 +9,7 @@ use futures::stream;
 use futures::Stream;
 use std::pin::Pin;
 use std::time::Duration;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 use crate::provider::{ModelProvider, StreamEvent};
 
@@ -142,7 +142,7 @@ impl AnthropicProvider {
                     let delay = retry_after.unwrap_or_else(|| {
                         Duration::from_secs(rate_limit_backoff_secs(rate_limit_attempts))
                     });
-                    info!(
+                    debug!(
                         "Rate limited (attempt {}/{}), waiting {:.0}s…",
                         rate_limit_attempts,
                         MAX_RATE_LIMIT_ATTEMPTS,

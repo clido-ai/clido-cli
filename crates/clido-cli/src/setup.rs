@@ -129,6 +129,7 @@ struct SetupState {
     role_edit_field: RoleEditField,
     role_input: String, // text being typed in a role field
     // ── Sub-agent configuration ────────────────────────────────
+    subagent_intro_cursor: usize,
     configure_worker: bool,
     configure_reviewer: bool,
     worker_provider: usize,
@@ -185,6 +186,7 @@ impl SetupState {
             role_cursor: 0,
             role_edit_field: RoleEditField::None,
             role_input: String::new(),
+            subagent_intro_cursor: 0,
             configure_worker: false,
             configure_reviewer: false,
             worker_provider: 0,
@@ -244,6 +246,7 @@ impl SetupState {
             role_cursor: 0,
             role_edit_field: RoleEditField::None,
             role_input: String::new(),
+            subagent_intro_cursor: 0,
             configure_worker: false,
             configure_reviewer: false,
             worker_provider: provider_idx,
@@ -399,7 +402,7 @@ fn draw_setup(f: &mut Frame, s: &SetupState) {
         SetupStep::Credential => draw_credential(f, body, s),
         SetupStep::FetchingModels => draw_fetching(f, body),
         SetupStep::Model => draw_model(f, body, s),
-        SetupStep::SubAgentIntro => draw_subagent_intro(f, body),
+        SetupStep::SubAgentIntro => draw_subagent_intro(f, body, s),
         SetupStep::WorkerProvider | SetupStep::ReviewerProvider => {
             draw_subagent_provider(f, body, s, s.step == SetupStep::ReviewerProvider)
         }
@@ -434,7 +437,7 @@ fn draw_setup(f: &mut Frame, s: &SetupState) {
             SetupStep::Model if s.model_list_mode() => {
                 "  ↑↓ navigate   Enter select   type to search   Backspace erase   Esc back   Ctrl+C cancel"
             }
-            SetupStep::SubAgentIntro => "  Enter/y configure worker   r add reviewer too   Esc/n skip",
+            SetupStep::SubAgentIntro => "  ↑↓ navigate   Enter select   Ctrl+C cancel",
             SetupStep::WorkerProvider | SetupStep::ReviewerProvider => {
                 "  ↑↓ navigate   Enter select   Esc skip this sub-agent   Ctrl+C cancel"
             }
@@ -448,7 +451,7 @@ fn draw_setup(f: &mut Frame, s: &SetupState) {
                 "  ↑↓ navigate   Enter select   type to search   Backspace erase   Esc back   Ctrl+C cancel"
             }
             SetupStep::Roles if s.role_edit_field == RoleEditField::None => {
-                "  ↑↓ navigate   n add   d delete   Enter edit   Tab skip→finish   Ctrl+C cancel"
+                "  ↑↓ navigate   Enter edit/select   n new role   d delete   Tab finish   Ctrl+C cancel"
             }
             SetupStep::Roles => "  Enter confirm   Backspace edit   Esc cancel edit   Ctrl+C cancel",
             _ => "  Enter confirm   Backspace edit   Esc back   Ctrl+C cancel",
@@ -830,70 +833,76 @@ fn draw_text_input(f: &mut Frame, area: Rect, title: &str, value: &str, _masked:
     f.set_cursor_position((area.x + 2 + value.chars().count() as u16, area.y + 1));
 }
 
-fn draw_subagent_intro(f: &mut Frame, area: Rect) {
-    let lines =
-        vec![
-            Line::raw(""),
-            Line::from(vec![Span::styled(
-            "  Sub-agents can reduce cost by routing mechanical tasks to smaller, cheaper models.",
+/// Options shown on the sub-agent intro screen.
+const SUBAGENT_OPTIONS: &[(&str, &str)] = &[
+    (
+        "Worker sub-agent",
+        "cheaper model handles file filtering, summarizing, formatting",
+    ),
+    (
+        "Worker + Reviewer",
+        "worker for mechanical tasks, reviewer for quality checks",
+    ),
+    ("Skip for now", "can add sub-agents later via /settings"),
+];
+
+fn draw_subagent_intro(f: &mut Frame, area: Rect, s: &SetupState) {
+    let mut lines = vec![
+        Line::raw(""),
+        Line::from(vec![Span::styled(
+            "  Sub-agents route mechanical tasks to a smaller, cheaper model — reducing cost.",
             Style::default().fg(Color::Gray),
         )]),
-            Line::from(vec![Span::styled(
-            "  The main agent routes tasks automatically — you never think about this during use.",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+        Line::from(vec![Span::styled(
+            "  The main agent handles routing automatically; you never think about it.",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         )]),
-            Line::raw(""),
+        Line::raw(""),
+    ];
+
+    for (i, (name, desc)) in SUBAGENT_OPTIONS.iter().enumerate() {
+        let selected = i == s.subagent_intro_cursor;
+        lines.push(if selected {
             Line::from(vec![
                 Span::styled(
-                    "  Examples: ",
+                    " ▶ ",
                     Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::DIM),
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    "file filtering, summarizing, extracting data, formatting",
+                    format!("{:<24}", name),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("  {}", desc), Style::default().fg(Color::DarkGray)),
+            ])
+        } else {
+            Line::from(vec![
+                Span::raw("   "),
+                Span::styled(
+                    format!("{:<24}", name),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("  {}", desc),
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
                 ),
-            ]),
-            Line::raw(""),
-            Line::from(vec![Span::styled(
-                "  You can skip this and add sub-agents later via /settings.",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
-            )]),
-            Line::raw(""),
-            Line::raw(""),
-            modal_option_line("  Enter / y", "configure worker sub-agent", true),
-            modal_option_line(
-                "  r        ",
-                "configure worker + reviewer sub-agents",
-                false,
-            ),
-            modal_option_line("  Esc / n  ", "skip — keep it simple", false),
-        ];
+            ])
+        });
+    }
+    lines.push(Line::raw(""));
+
     let block = Block::default()
         .title(" Sub-Agents  (optional) ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
     f.render_widget(Paragraph::new(lines).block(block), area);
-}
-
-fn modal_option_line(key: &str, desc: &str, bold: bool) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(
-            key.to_string(),
-            Style::default().fg(Color::Cyan).add_modifier(if bold {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            }),
-        ),
-        Span::styled("  ", Style::default()),
-        Span::styled(desc.to_string(), Style::default().fg(Color::Gray)),
-    ])
 }
 
 fn draw_subagent_provider(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: bool) {
@@ -1530,22 +1539,41 @@ fn setup_event_loop(
 
                 // ── Sub-agent intro ───────────────────────────────────────
                 SetupStep::SubAgentIntro => match key.code {
-                    KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
-                        s.configure_worker = true;
-                        s.configure_reviewer = false;
-                        s.worker_provider = s.provider;
-                        s.step = SetupStep::WorkerProvider;
+                    KeyCode::Up => {
+                        if s.subagent_intro_cursor > 0 {
+                            s.subagent_intro_cursor -= 1;
+                        }
                     }
-                    KeyCode::Char('r') | KeyCode::Char('R') => {
-                        s.configure_worker = true;
-                        s.configure_reviewer = true;
-                        s.worker_provider = s.provider;
-                        s.step = SetupStep::WorkerProvider;
+                    KeyCode::Down => {
+                        if s.subagent_intro_cursor < SUBAGENT_OPTIONS.len() - 1 {
+                            s.subagent_intro_cursor += 1;
+                        }
                     }
-                    KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
-                        s.step = SetupStep::Roles;
-                        s.role_cursor = 0;
-                        s.role_edit_field = RoleEditField::None;
+                    KeyCode::Enter => match s.subagent_intro_cursor {
+                        0 => {
+                            // Worker only
+                            s.configure_worker = true;
+                            s.configure_reviewer = false;
+                            s.worker_provider = s.provider;
+                            s.step = SetupStep::WorkerProvider;
+                        }
+                        1 => {
+                            // Worker + Reviewer
+                            s.configure_worker = true;
+                            s.configure_reviewer = true;
+                            s.worker_provider = s.provider;
+                            s.step = SetupStep::WorkerProvider;
+                        }
+                        _ => {
+                            // Skip
+                            s.step = SetupStep::Roles;
+                            s.role_cursor = 0;
+                            s.role_edit_field = RoleEditField::None;
+                        }
+                    },
+                    KeyCode::Esc => {
+                        // Esc = go back to model step
+                        s.step = SetupStep::Model;
                     }
                     _ => {}
                 },
@@ -2162,7 +2190,7 @@ fn draw_roles(f: &mut Frame, area: Rect, s: &SetupState) {
     lines.push(Line::raw(""));
 
     let block = Block::default()
-        .title(" Roles  (optional — n add   d delete   Enter edit) ")
+        .title(" Roles  (optional) ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
     f.render_widget(Paragraph::new(lines).block(block), list_area);

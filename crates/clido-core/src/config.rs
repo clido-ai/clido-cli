@@ -56,7 +56,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             max_turns: 200,
-            max_budget_usd: Some(5.0),
+            max_budget_usd: None,
             model: String::new(),
             system_prompt: None,
             permission_mode: PermissionMode::Default,
@@ -147,7 +147,7 @@ mod tests {
     fn agent_config_defaults() {
         let c = AgentConfig::default();
         assert_eq!(c.max_turns, 200);
-        assert_eq!(c.max_budget_usd, Some(5.0));
+        assert_eq!(c.max_budget_usd, None);
         assert_eq!(c.permission_mode, PermissionMode::Default);
         assert!(!c.use_planner);
         assert!(!c.use_index);

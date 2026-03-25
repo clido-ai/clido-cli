@@ -184,7 +184,7 @@ impl OpenAICompatProvider {
                     let delay = retry_after.unwrap_or_else(|| {
                         Duration::from_secs(rate_limit_backoff_secs(rate_limit_attempts))
                     });
-                    tracing::info!(
+                    tracing::debug!(
                         "Rate limited (attempt {}/{}), waiting {:.0}s…",
                         rate_limit_attempts,
                         MAX_RATE_LIMIT_ATTEMPTS,

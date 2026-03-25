@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::env;
 use std::io::{stdout, Write as _};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -14,7 +14,10 @@ use clido_agent::{
 use clido_core::ClidoError;
 use clido_storage::SessionWriter;
 use crossterm::{
-    event::{Event, EventStream, KeyCode, KeyModifiers, MouseEventKind},
+    event::{
+        DisableBracketedPaste, EnableBracketedPaste, Event, EventStream, KeyCode, KeyModifiers,
+        MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -36,6 +39,11 @@ use crate::image_input::ImageAttachment;
 use clido_planner::{Complexity, Plan, PlanEditor, TaskStatus};
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/// Truecolor accent for borders and highlights — avoids saturated ANSI blue.
+const TUI_SOFT_ACCENT: Color = Color::Rgb(150, 200, 255);
+/// Selected row background in pickers and completion lists (muted slate).
+const TUI_SELECTION_BG: Color = Color::Rgb(52, 62, 78);
 
 /// Slash commands grouped by section: (section_label, [(cmd, description)])
 const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
@@ -95,6 +103,10 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "switch to model assigned to a role. Usage: /role <name>",
             ),
             ("/fav", "toggle favorite on current model"),
+            (
+                "/reviewer",
+                "toggle reviewer sub-agent on/off. Usage: /reviewer [on|off]",
+            ),
         ],
     ),
     (
@@ -109,7 +121,10 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
     (
         "Plan",
         &[
-            ("/plan", "show current task plan (requires --plan flag)"),
+            (
+                "/plan",
+                "show current plan, or: /plan <task> to have agent plan before executing",
+            ),
             ("/plan edit", "open plan editor for the current plan"),
             ("/plan save", "save current plan to .clido/plans/"),
             ("/plan list", "list all saved plans"),
@@ -123,7 +138,15 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "show current agent configuration (main, worker, reviewer)",
             ),
             ("/profiles", "list all profiles with active model per slot"),
-            ("/profile", "switch active profile. Usage: /profile <name>"),
+            (
+                "/profile",
+                "open profile picker — switch, create, or edit profiles",
+            ),
+            ("/profile new", "create a new profile via the guided wizard"),
+            (
+                "/profile edit",
+                "edit a profile via the guided wizard. Usage: /profile edit [name]",
+            ),
             ("/check", "run diagnostics on current project"),
             ("/rules", "show active project rules files (CLIDO.md)"),
             (
@@ -134,7 +157,15 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "/image",
                 "attach an image to the next message. Usage: /image <path>",
             ),
-            ("/workdir", "show working directory"),
+            (
+                "/workdir",
+                "show or set working directory. Usage: /workdir [path]",
+            ),
+            ("/stop", "interrupt current run without sending a message"),
+            (
+                "/copy",
+                "copy last assistant message to clipboard (OSC 52 sequence)",
+            ),
             ("/index", "show repo index stats"),
         ],
     ),
@@ -189,13 +220,20 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
         "switch to model assigned to a role. Usage: /role <name>",
     ),
     ("/fav", "toggle favorite on current model"),
+    (
+        "/reviewer",
+        "toggle reviewer sub-agent on/off. Usage: /reviewer [on|off]",
+    ),
     // Context
     ("/cost", "show session cost so far"),
     ("/tokens", "show token usage so far"),
     ("/compact", "compact context window now (summarise history)"),
     ("/memory", "search long-term memory. Usage: /memory <query>"),
     // Plan
-    ("/plan", "show current task plan (requires --plan flag)"),
+    (
+        "/plan",
+        "show current plan, or: /plan <task> to have agent plan before executing",
+    ),
     ("/plan edit", "open plan editor for the current plan"),
     ("/plan save", "save current plan to .clido/plans/"),
     ("/plan list", "list all saved plans"),
@@ -205,7 +243,15 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
         "show current agent configuration (main, worker, reviewer)",
     ),
     ("/profiles", "list all profiles with active model per slot"),
-    ("/profile", "switch active profile. Usage: /profile <name>"),
+    (
+        "/profile",
+        "open profile picker — switch, create, or edit profiles",
+    ),
+    ("/profile new", "create a new profile via the guided wizard"),
+    (
+        "/profile edit",
+        "edit a profile via the guided wizard. Usage: /profile edit [name]",
+    ),
     ("/check", "run diagnostics on current project"),
     ("/rules", "show active project rules files (CLIDO.md)"),
     (
@@ -216,7 +262,15 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
         "/image",
         "attach an image to the next message. Usage: /image <path>",
     ),
-    ("/workdir", "show working directory"),
+    (
+        "/workdir",
+        "show or set working directory. Usage: /workdir [path]",
+    ),
+    ("/stop", "interrupt current run without sending a message"),
+    (
+        "/copy",
+        "copy last assistant message to clipboard (OSC 52 sequence)",
+    ),
     ("/index", "show repo index stats"),
 ];
 
@@ -306,6 +360,41 @@ enum AgentEvent {
 }
 
 // ── Plan editor state ─────────────────────────────────────────────────────────
+
+/// Simple nano-style full-screen plan text editor.
+struct PlanTextEditor {
+    lines: Vec<String>,
+    cursor_row: usize,
+    cursor_col: usize,
+    scroll: usize,
+}
+
+impl PlanTextEditor {
+    fn from_raw(text: &str) -> Self {
+        let lines = text.lines().map(|l| l.to_string()).collect();
+        Self {
+            lines,
+            cursor_row: 0,
+            cursor_col: 0,
+            scroll: 0,
+        }
+    }
+
+    fn to_tasks(&self) -> Vec<String> {
+        parse_plan_from_text(&self.lines.join("\n"))
+    }
+
+    fn clamp_col(&mut self) {
+        let max = self
+            .lines
+            .get(self.cursor_row)
+            .map(|l| l.chars().count())
+            .unwrap_or(0);
+        if self.cursor_col > max {
+            self.cursor_col = max;
+        }
+    }
+}
 
 /// Which field is focused in the inline task edit form.
 #[derive(Debug, Clone, PartialEq)]
@@ -744,6 +833,8 @@ struct App {
     resume_tx: mpsc::UnboundedSender<String>,
     /// Channel to switch the session model in agent_task.
     model_switch_tx: mpsc::UnboundedSender<String>,
+    /// Channel to update tool workspace in agent_task.
+    workdir_tx: mpsc::UnboundedSender<std::path::PathBuf>,
     /// Queued input typed while agent was busy — sent automatically when agent finishes.
     queued: Option<String>,
     /// Session picker popup state (Some = popup visible).
@@ -773,6 +864,12 @@ struct App {
     wants_reinit: bool,
     /// When Some(name), the TUI exits and the active profile is switched then TUI restarts.
     wants_profile_switch: Option<String>,
+    /// When true, the TUI exits and the profile-creation wizard runs, then TUI restarts.
+    wants_profile_create: bool,
+    /// When Some(name), the TUI exits and the profile-edit wizard runs, then TUI restarts.
+    wants_profile_edit: Option<String>,
+    /// When Some(id), restart TUI and resume this session immediately.
+    restart_resume_session: Option<String>,
     provider: String,
     model: String,
     /// Active profile name, shown in the header.
@@ -797,14 +894,23 @@ struct App {
     context_max_tokens: u64,
     /// Channel to trigger immediate context compaction in agent_task.
     compact_now_tx: mpsc::UnboundedSender<()>,
-    /// Last plan produced by the planner (--planner mode), stored for /plan command.
+    /// Last plan produced by the planner (--planner mode) or parsed from a /plan <task> response.
     last_plan: Option<Vec<String>>,
+    /// Raw text of the last plan response — used by the text editor to show unmodified formatting.
+    last_plan_raw: Option<String>,
+    /// Set to true when /plan <task> is sent; cleared after the agent responds and the plan is parsed.
+    awaiting_plan_response: bool,
     /// Rules overlay: Some = popup visible, None = hidden.
     /// Each entry is (file_path_display, first_3_lines_preview).
     rules_overlay: Option<Vec<(String, String)>>,
     /// When true, fire desktop notification + terminal bell after each agent turn
     /// (subject to the MIN_ELAPSED_SECS gate in `notify.rs`).
     notify_enabled: bool,
+    /// Shared flag that gates SpawnReviewerTool execution.  Toggle with `/reviewer on|off`.
+    reviewer_enabled: Arc<AtomicBool>,
+    /// True when an explicit reviewer slot is configured in config.toml.
+    /// Controls whether the reviewer badge and /reviewer command are shown.
+    reviewer_configured: bool,
     /// Timestamp of when the current agent turn was submitted; used to compute elapsed time.
     turn_start: Option<std::time::Instant>,
     /// Previous model to revert to after a per-turn `@model` override completes.
@@ -814,7 +920,7 @@ struct App {
     /// Shared state: image to attach to the next prompt.  Written by the TUI on send,
     /// drained by agent_task before calling run/run_next_turn.
     image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>>,
-    /// When `Some`, the plan editor full-screen overlay is active.
+    /// When `Some`, the plan editor full-screen overlay is active (--plan flag mode).
     plan_editor: Option<PlanEditor>,
     /// Currently selected task index in the plan editor list.
     plan_selected_task: usize,
@@ -822,6 +928,13 @@ struct App {
     plan_task_editing: Option<TaskEditState>,
     /// Whether we're in plan dry-run mode (show editor but never execute).
     plan_dry_run: bool,
+    /// Simple nano-style text editor for /plan edit.
+    plan_text_editor: Option<PlanTextEditor>,
+    /// Current plan step being executed, extracted from agent text (e.g. "Step 3: Write contract").
+    current_step: Option<String>,
+    /// The step number most recently seen while the agent was executing a plan.
+    /// Used after agent finishes to show which steps remain.
+    last_executed_step_num: Option<usize>,
 }
 
 impl App {
@@ -830,6 +943,7 @@ impl App {
         prompt_tx: mpsc::UnboundedSender<String>,
         resume_tx: mpsc::UnboundedSender<String>,
         model_switch_tx: mpsc::UnboundedSender<String>,
+        workdir_tx: mpsc::UnboundedSender<std::path::PathBuf>,
         compact_now_tx: mpsc::UnboundedSender<()>,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         provider: String,
@@ -842,6 +956,8 @@ impl App {
         model_prefs: clido_core::ModelPrefs,
         config_roles: std::collections::HashMap<String, String>,
         current_profile: String,
+        reviewer_enabled: Arc<AtomicBool>,
+        reviewer_configured: bool,
     ) -> Self {
         let mut app = Self {
             messages: Vec::new(),
@@ -858,6 +974,7 @@ impl App {
             prompt_tx,
             resume_tx,
             model_switch_tx,
+            workdir_tx,
             queued: None,
             session_picker: None,
             model_picker: None,
@@ -873,6 +990,9 @@ impl App {
             quit: false,
             wants_reinit: false,
             wants_profile_switch: None,
+            wants_profile_create: false,
+            wants_profile_edit: None,
+            restart_resume_session: None,
             provider,
             model,
             current_profile,
@@ -888,8 +1008,12 @@ impl App {
             context_max_tokens: 0,
             compact_now_tx,
             last_plan: None,
+            last_plan_raw: None,
+            awaiting_plan_response: false,
             rules_overlay: None,
             notify_enabled,
+            reviewer_enabled,
+            reviewer_configured,
             turn_start: None,
             per_turn_prev_model: None,
             pending_image: None,
@@ -897,6 +1021,9 @@ impl App {
             plan_editor: None,
             plan_selected_task: 0,
             plan_task_editing: None,
+            plan_text_editor: None,
+            current_step: None,
+            last_executed_step_num: None,
             plan_dry_run,
         };
         for line in crate::ui::BANNER.lines() {
@@ -916,6 +1043,18 @@ impl App {
 
     /// Send immediately (not busy). Moves input → chat + agent.
     /// If input starts with `@model-name prompt`, applies a per-turn model override.
+    /// Send `prompt` to the agent without showing anything in the chat.
+    fn send_silent(&mut self, prompt: String) {
+        let _ = self.prompt_tx.send(prompt);
+        self.input.clear();
+        self.cursor = 0;
+        self.busy = true;
+        self.following = true;
+        self.turn_start = Some(std::time::Instant::now());
+        self.history_idx = None;
+        self.history_draft.clear();
+    }
+
     fn send_now(&mut self, text: String) {
         // If a pending image was attached via /image, publish it to the shared image_state
         // so agent_task can prepend an Image ContentBlock to this user message.
@@ -998,6 +1137,16 @@ impl App {
         }
     }
 
+    /// Interrupt current run without sending a follow-up prompt.
+    fn stop_only(&mut self) {
+        if self.pending_perm.is_some() || !self.busy {
+            return;
+        }
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.push(ChatLine::Info("  (interrupted)".into()));
+    }
+
     fn push_status(&mut self, name: String, detail: String) {
         self.status_log.push_back(StatusEntry {
             name,
@@ -1029,8 +1178,105 @@ impl App {
     fn on_agent_done(&mut self) {
         self.busy = false;
         self.status_log.clear();
+        self.current_step = None;
         self.cancel
             .store(false, std::sync::atomic::Ordering::Relaxed);
+
+        // Show elapsed time for the completed turn.
+        if let Some(start) = self.turn_start {
+            let elapsed = start.elapsed();
+            let elapsed_str = if elapsed.as_secs() >= 60 {
+                format!(
+                    "  done in {}m {}s",
+                    elapsed.as_secs() / 60,
+                    elapsed.as_secs() % 60
+                )
+            } else if elapsed.as_secs() >= 1 {
+                format!("  done in {:.1}s", elapsed.as_secs_f64())
+            } else {
+                format!("  done in {}ms", elapsed.as_millis())
+            };
+            self.push(ChatLine::Info(elapsed_str));
+        }
+
+        // If a plan was running and not all steps were completed, show remaining steps.
+        if let Some(last_num) = self.last_executed_step_num {
+            if let Some(plans) = self.last_plan.clone() {
+                let total = plans.len();
+                if last_num < total {
+                    self.push(ChatLine::Info(format!(
+                        "  plan: {}/{} steps done. Remaining:",
+                        last_num, total
+                    )));
+                    for (i, step) in plans[last_num..].iter().enumerate() {
+                        let n = last_num + i + 1;
+                        self.push(ChatLine::Info(format!("    {}. {}", n, step)));
+                    }
+                }
+            }
+        }
+        self.last_executed_step_num = None;
+        if self.awaiting_plan_response {
+            self.awaiting_plan_response = false;
+            if let Some(text) = self.last_assistant_text().map(|s| s.to_string()) {
+                self.last_plan_raw = Some(text.clone());
+                let mut tasks = parse_plan_from_text(&text);
+                // Fallback: if structured parsing found nothing, treat every non-empty line as a step
+                if tasks.is_empty() {
+                    tasks = text
+                        .lines()
+                        .map(|l| l.trim().to_string())
+                        .filter(|l| !l.is_empty())
+                        .collect();
+                }
+                if !tasks.is_empty() {
+                    // Auto-save to disk so /plan list works
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let slug: String = tasks
+                        .first()
+                        .unwrap_or(&String::new())
+                        .chars()
+                        .filter(|c| c.is_alphanumeric() || *c == ' ')
+                        .take(30)
+                        .collect::<String>()
+                        .trim()
+                        .replace(' ', "_")
+                        .to_lowercase();
+                    let id = format!("{}_{}", slug, ts);
+                    let plan = clido_planner::Plan {
+                        meta: clido_planner::PlanMeta {
+                            id,
+                            goal: tasks.first().cloned().unwrap_or_default(),
+                            created_at: ts.to_string(),
+                        },
+                        tasks: tasks
+                            .iter()
+                            .enumerate()
+                            .map(|(i, t)| clido_planner::TaskNode {
+                                id: format!("{}", i + 1),
+                                description: t.clone(),
+                                status: clido_planner::TaskStatus::Pending,
+                                depends_on: vec![],
+                                complexity: clido_planner::Complexity::Medium,
+                                notes: String::new(),
+                                tools: None,
+                                skip: false,
+                            })
+                            .collect(),
+                    };
+                    if let Err(e) = clido_planner::save_plan(&self.workspace_root, &plan) {
+                        self.push(ChatLine::Info(format!(
+                            "  warning: could not save plan: {}",
+                            e
+                        )));
+                    }
+                    self.last_plan = Some(tasks);
+                }
+            }
+        }
         if let Some(queued) = self.queued.take() {
             self.send_now(queued);
         }
@@ -1041,12 +1287,25 @@ impl App {
             self.spinner_tick = (self.spinner_tick + 1) % SPINNER.len();
         }
     }
+
+    fn last_assistant_text(&self) -> Option<&str> {
+        self.messages.iter().rev().find_map(|line| match line {
+            ChatLine::Assistant(text) if !text.trim().is_empty() => Some(text.as_str()),
+            _ => None,
+        })
+    }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
 
 fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
+
+    // ── Plan text editor (nano-style) full-screen overlay ───────────────────
+    if app.plan_text_editor.is_some() {
+        render_plan_text_editor(frame, app, area);
+        return;
+    }
 
     // ── Plan editor full-screen overlay ─────────────────────────────────────
     if app.plan_editor.is_some() {
@@ -1092,6 +1351,24 @@ fn render(frame: &mut Frame, app: &mut App) {
                 .add_modifier(Modifier::DIM),
         ),
     ];
+    // Reviewer badge — only shown when a reviewer is configured.
+    if app.reviewer_configured {
+        let (dot, color) = if app.reviewer_enabled.load(Ordering::Relaxed) {
+            ("●", Color::Green)
+        } else {
+            ("○", Color::DarkGray)
+        };
+        header_spans.push(Span::styled(
+            format!("  rev{}", dot),
+            Style::default().fg(color).add_modifier(Modifier::DIM),
+        ));
+    }
+    header_spans.push(Span::styled(
+        format!("  cwd:{}", app.workspace_root.display()),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM),
+    ));
     if app.session_cost_usd > 0.0 {
         let in_tok = app.session_input_tokens;
         let tok_str = if in_tok >= 1000 {
@@ -1202,6 +1479,19 @@ fn render(frame: &mut Frame, app: &mut App) {
                         .add_modifier(Modifier::DIM),
                 ),
             ])
+        } else if let Some(ref step) = app.current_step {
+            Line::from(vec![
+                Span::styled(
+                    "  ▶ ",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
+                ),
+                Span::styled(
+                    truncate_chars(step, 80),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
+                ),
+            ])
         } else {
             Line::raw("")
         };
@@ -1280,11 +1570,14 @@ fn render(frame: &mut Frame, app: &mut App) {
             frame.set_cursor_position((input_area.x + 2 + cursor_col, input_area.y + 1));
         }
     } else {
-        let idle_title = " Ask anything  (Enter=send  ↑↓=history  /help=commands) ".to_string();
+        let idle_title = Line::from(vec![Span::styled(
+            " Ask anything  (Enter=send  ↑↓=history  /help=commands) ",
+            Style::default().fg(TUI_SOFT_ACCENT),
+        )]);
         let block = Block::default()
             .title(idle_title)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue));
+            .border_style(Style::default().fg(TUI_SOFT_ACCENT));
         let para = Paragraph::new(format!(" {}", input_display)).block(block);
         frame.render_widget(para, input_area);
         frame.set_cursor_position((input_area.x + 2 + cursor_col, input_area.y + 1));
@@ -1297,6 +1590,8 @@ fn render(frame: &mut Frame, app: &mut App) {
     let mut hint_spans = vec![
         Span::styled("  Enter", Style::default().fg(Color::DarkGray)),
         Span::styled(" send  ", hint_dim),
+        Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+        Span::styled(" clear  ", hint_dim),
         Span::styled("↑↓", Style::default().fg(Color::DarkGray)),
         Span::styled(" history  ", hint_dim),
         Span::styled("PgUp/PgDn", Style::default().fg(Color::DarkGray)),
@@ -1305,8 +1600,14 @@ fn render(frame: &mut Frame, app: &mut App) {
         Span::styled(" config  ", hint_dim),
         Span::styled("/help", Style::default().fg(Color::DarkGray)),
         Span::styled(" commands  ", hint_dim),
+        Span::styled("Ctrl+/", Style::default().fg(Color::DarkGray)),
+        Span::styled(" stop  ", hint_dim),
         Span::styled("Ctrl+C", Style::default().fg(Color::DarkGray)),
-        Span::styled(" quit", hint_dim),
+        Span::styled(" quit  ", hint_dim),
+        Span::styled("Ctrl+L", Style::default().fg(Color::DarkGray)),
+        Span::styled(" redraw  ", hint_dim),
+        Span::styled("Shift+drag", Style::default().fg(Color::DarkGray)),
+        Span::styled(" copy", hint_dim),
     ];
     if app.session_cost_usd > 0.0 {
         hint_spans.push(Span::styled(
@@ -1357,7 +1658,7 @@ fn render(frame: &mut Frame, app: &mut App) {
     // Shared helpers used by every modal:
     //   popup_above_input(input_area, h, w) → Rect anchored just above input
     //   modal_block(title, border_color)    → styled Block
-    //   modal_row(label, selected)          → selectable option Line
+    //   modal_row_two_col(...)              → two-column selectable row
 
     // ── Slash command popup ──
     let rows = slash_completion_rows(&app.input);
@@ -1454,7 +1755,7 @@ fn render(frame: &mut Frame, app: &mut App) {
         );
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content).block(modal_block(&title, Color::Blue)),
+            Paragraph::new(content).block(modal_block(&title, TUI_SOFT_ACCENT)),
             popup_rect,
         );
     }
@@ -1493,7 +1794,11 @@ fn render(frame: &mut Frame, app: &mut App) {
             .enumerate()
         {
             let selected = picker.scroll_offset + di == picker.selected;
-            let bg = if selected { Color::Blue } else { Color::Reset };
+            let bg = if selected {
+                TUI_SELECTION_BG
+            } else {
+                Color::Reset
+            };
             let fg = if selected { Color::White } else { Color::Gray };
             let id_short = &s.session_id[..s.session_id.len().min(8)];
             let date_str = if s.start_time.len() >= 16 {
@@ -1574,7 +1879,11 @@ fn render(frame: &mut Frame, app: &mut App) {
         let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
         for (di, m) in filtered[picker.scroll_offset..end].iter().enumerate() {
             let selected = picker.scroll_offset + di == picker.selected;
-            let bg = if selected { Color::Blue } else { Color::Reset };
+            let bg = if selected {
+                TUI_SELECTION_BG
+            } else {
+                Color::Reset
+            };
             let fg = if selected { Color::White } else { Color::Gray };
             let fav = if m.is_favorite { "★" } else { "  " };
             let ctx = m
@@ -1628,7 +1937,7 @@ fn render(frame: &mut Frame, app: &mut App) {
     // ── Profile picker popup ──────────────────────────────────────────────────
     if let Some(ref picker) = app.profile_picker {
         const VISIBLE: usize = 12;
-        let n_rows = picker.profiles.len().min(VISIBLE) as u16;
+        let n_rows = picker.profiles.len().clamp(1, VISIBLE) as u16;
         let popup_h = (n_rows + 4).min(area.height.saturating_sub(4)).max(5);
         let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
         let inner_w = popup_rect.width.saturating_sub(4) as usize;
@@ -1643,6 +1952,13 @@ fn render(frame: &mut Frame, app: &mut App) {
             Line::raw(""),
         ];
 
+        if picker.profiles.is_empty() {
+            content.push(Line::from(Span::styled(
+                "  no profiles — press n to create one",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
         let end = (picker.scroll_offset + VISIBLE).min(picker.profiles.len());
         for (di, (name, entry)) in picker.profiles[picker.scroll_offset..end]
             .iter()
@@ -1650,7 +1966,11 @@ fn render(frame: &mut Frame, app: &mut App) {
         {
             let selected = picker.scroll_offset + di == picker.selected;
             let is_active = name == &picker.active;
-            let bg = if selected { Color::Blue } else { Color::Reset };
+            let bg = if selected {
+                TUI_SELECTION_BG
+            } else {
+                Color::Reset
+            };
             let fg = if selected { Color::White } else { Color::Gray };
             let marker = if selected { "▶" } else { " " };
             let active_mark = if is_active { "●" } else { " " };
@@ -1686,7 +2006,7 @@ fn render(frame: &mut Frame, app: &mut App) {
         }
 
         let title = format!(
-            " Profiles — {}  (↑↓ navigate  Enter=switch  Esc=close) ",
+            " Profiles — {}  (↑↓ navigate  Enter=switch  n=new  e=edit  Esc=close) ",
             picker.active
         );
         frame.render_widget(Clear, popup_rect);
@@ -1717,7 +2037,11 @@ fn render(frame: &mut Frame, app: &mut App) {
         let end = (picker.scroll_offset + VISIBLE).min(picker.roles.len());
         for (di, (role, model)) in picker.roles[picker.scroll_offset..end].iter().enumerate() {
             let selected = picker.scroll_offset + di == picker.selected;
-            let bg = if selected { Color::Blue } else { Color::Reset };
+            let bg = if selected {
+                TUI_SELECTION_BG
+            } else {
+                Color::Reset
+            };
             let fg = if selected { Color::White } else { Color::Gray };
             let marker = if selected { "▶" } else { " " };
             let model_display: String = model.chars().take(inner_w.saturating_sub(20)).collect();
@@ -1766,16 +2090,19 @@ fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Permission popup ─────────────────────────────────────────────────────
     if let Some(perm) = &app.pending_perm {
-        // 1 preview + 1 blank + 4 options + 2 borders = 8
-        let popup_rect = popup_above_input(input_area, 8, input_area.width);
+        // 1 preview + 1 blank + 4 options + 1 hint + 2 borders = 9
+        let popup_rect = popup_above_input(input_area, 9, input_area.width);
         let inner_w = popup_rect.width.saturating_sub(4) as usize;
         let preview = truncate_chars(&perm.preview, inner_w);
 
-        const OPTIONS: &[&str] = &[
-            "Allow once",
-            "Allow always — this session",
-            "Allow all in workdir — this session",
-            "Deny",
+        const OPTIONS: &[(&str, &str)] = &[
+            ("Allow once", "this invocation only"),
+            ("Allow for session", "all calls to this tool until you quit"),
+            (
+                "Allow all tools",
+                "skip permission checks for the rest of this session",
+            ),
+            ("Deny", "block this call"),
         ];
 
         let mut content = vec![
@@ -1785,9 +2112,46 @@ fn render(frame: &mut Frame, app: &mut App) {
             )]),
             Line::raw(""),
         ];
-        for (i, label) in OPTIONS.iter().enumerate() {
-            content.push(modal_row(label, i == app.perm_selected));
+        for (i, (label, hint)) in OPTIONS.iter().enumerate() {
+            let selected = i == app.perm_selected;
+            if selected {
+                content.push(Line::from(vec![
+                    Span::styled(
+                        " ▶ ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("{:<28}", label),
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(format!("  {}", hint), Style::default().fg(Color::DarkGray)),
+                ]));
+            } else {
+                content.push(Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(
+                        format!("{:<28}", label),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(
+                        format!("  {}", hint),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::DIM),
+                    ),
+                ]));
+            }
         }
+        content.push(Line::from(vec![Span::styled(
+            "  ↑↓ navigate   Enter select   Esc deny",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        )]));
 
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
@@ -2018,7 +2382,11 @@ fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
                 continue;
             }
             let selected = i == app.plan_selected_task;
-            let bg = if selected { Color::Blue } else { Color::Reset };
+            let bg = if selected {
+                TUI_SELECTION_BG
+            } else {
+                Color::Reset
+            };
             let fg = if selected { Color::White } else { Color::Gray };
 
             let status_icon = match task.status {
@@ -2102,6 +2470,101 @@ fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         )])),
         hint_area,
     );
+}
+
+// ── Plan text editor (nano-style) ────────────────────────────────────────────
+
+fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) {
+    let ed = match &app.plan_text_editor {
+        Some(e) => e,
+        None => return,
+    };
+
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Plan Editor  (Ctrl+S save · Esc close) ")
+        .borders(Borders::ALL)
+        .border_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let [edit_area, hint_area] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(inner);
+
+    let visible_rows = edit_area.height as usize;
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for (i, line) in ed.lines.iter().enumerate().skip(ed.scroll) {
+        if lines.len() >= visible_rows {
+            break;
+        }
+        if i == ed.cursor_row {
+            // Render cursor inline
+            let chars: Vec<char> = line.chars().collect();
+            let col = ed.cursor_col.min(chars.len());
+            let before: String = chars[..col].iter().collect();
+            let cursor_ch: String = if col < chars.len() {
+                chars[col].to_string()
+            } else {
+                " ".to_string()
+            };
+            let after: String = if col < chars.len() {
+                chars[col + 1..].iter().collect()
+            } else {
+                String::new()
+            };
+            lines.push(Line::from(vec![
+                Span::raw(before),
+                Span::styled(
+                    cursor_ch,
+                    Style::default().bg(Color::White).fg(Color::Black),
+                ),
+                Span::raw(after),
+            ]));
+        } else {
+            lines.push(Line::raw(line.clone()));
+        }
+    }
+
+    frame.render_widget(Paragraph::new(lines), edit_area);
+
+    let hint = Paragraph::new(Line::from(vec![
+        Span::styled("  ↑↓←→", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            " navigate  ",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ),
+        Span::styled("Enter", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            " new line  ",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ),
+        Span::styled("Ctrl+S", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            " save  ",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ),
+        Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            " close",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ),
+    ]));
+    frame.render_widget(hint, hint_area);
 }
 
 // ── Settings editor rendering ─────────────────────────────────────────────────
@@ -2395,31 +2858,6 @@ fn modal_block(title: &str, border_color: Color) -> Block<'static> {
         .border_style(Style::default().fg(border_color))
 }
 
-/// Single selectable option row with ▶ marker for selected state.
-fn modal_row(label: &str, selected: bool) -> Line<'static> {
-    if selected {
-        Line::from(vec![
-            Span::styled(
-                " ▶ ",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                label.to_string(),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ])
-    } else {
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled(label.to_string(), Style::default().fg(Color::DarkGray)),
-        ])
-    }
-}
-
 /// Two-column row (e.g. for slash completions): cmd | description, with highlight on selection.
 fn modal_row_two_col(
     left: String,
@@ -2428,7 +2866,11 @@ fn modal_row_two_col(
     right_color: Color,
     selected: bool,
 ) -> Line<'static> {
-    let bg = if selected { Color::Blue } else { Color::Reset };
+    let bg = if selected {
+        TUI_SELECTION_BG
+    } else {
+        Color::Reset
+    };
     Line::from(vec![
         Span::styled(
             left,
@@ -2442,6 +2884,85 @@ fn modal_row_two_col(
 }
 
 /// Truncate a string to at most `max_chars` characters, appending `…` if cut.
+/// Parse a numbered step list out of free-form agent text.
+/// Matches top-level step lines only — not sub-bullets or indented items.
+/// Supported formats (at start of line, not indented):
+///   "1. foo"  "1) foo"  "Step 1: foo"  "Step 1. foo"
+fn parse_plan_from_text(text: &str) -> Vec<String> {
+    let mut tasks = Vec::new();
+    for line in text.lines() {
+        // Skip indented lines — they are sub-bullets, not steps
+        if line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // "Step N: text" or "Step N. text"
+        let step_prefix = trimmed
+            .strip_prefix("Step ")
+            .or_else(|| trimmed.strip_prefix("step "));
+        if let Some(rest) = step_prefix {
+            // consume digits
+            let after_digits = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+            if let Some(content) = after_digits
+                .strip_prefix(": ")
+                .or_else(|| after_digits.strip_prefix(". "))
+            {
+                let content = content.trim();
+                if !content.is_empty() {
+                    tasks.push(content.to_string());
+                }
+                continue;
+            }
+        }
+
+        // "N. text" or "N) text"
+        if let Some(digit_end) = trimmed.find(|c: char| !c.is_ascii_digit()) {
+            if digit_end > 0 {
+                let rest = &trimmed[digit_end..];
+                if let Some(content) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
+                    let content = content.trim();
+                    if !content.is_empty() {
+                        tasks.push(content.to_string());
+                    }
+                }
+            }
+        }
+    }
+    tasks
+}
+
+/// Scan text for a "Step N: ..." line and return the full step label if found.
+fn extract_current_step_full(text: &str) -> Option<(usize, String)> {
+    for line in text.lines() {
+        let t = line.trim();
+        // Match "Step N: ..." or "▶ Step N: ..."
+        let rest = t.strip_prefix("▶ ").unwrap_or(t);
+        if let Some(after) = rest
+            .strip_prefix("Step ")
+            .or_else(|| rest.strip_prefix("step "))
+        {
+            let after_digits = after.trim_start_matches(|c: char| c.is_ascii_digit());
+            if let Some(label) = after_digits
+                .strip_prefix(": ")
+                .or_else(|| after_digits.strip_prefix(". "))
+            {
+                let label = label.trim();
+                if !label.is_empty() {
+                    let n: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    if let Ok(num) = n.parse::<usize>() {
+                        return Some((num, format!("Step {}: {}", n, label)));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn truncate_chars(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         s.to_string()
@@ -2487,7 +3008,7 @@ fn tool_color(name: &str, done: bool, is_error: bool) -> Color {
         return Color::DarkGray;
     }
     match name {
-        "Read" | "Glob" | "Grep" => Color::Blue,
+        "Read" | "Glob" | "Grep" => TUI_SOFT_ACCENT,
         "Write" | "Edit" => Color::Green,
         "Bash" => Color::Yellow,
         "SemanticSearch" => Color::Cyan,
@@ -2594,14 +3115,17 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 "↑↓ (with input)   history navigation".into(),
             ));
             app.push(ChatLine::Info("Ctrl+U             clear input".into()));
-            app.push(ChatLine::Info(
-                "Mouse scroll       scroll conversation".into(),
-            ));
             app.push(ChatLine::Info("".into()));
             app.push(ChatLine::Section("Agent Controls".into()));
             app.push(ChatLine::Info("Ctrl+C             quit".into()));
             app.push(ChatLine::Info(
                 "Ctrl+Enter         interrupt current run & send".into(),
+            ));
+            app.push(ChatLine::Info(
+                "Ctrl+/             interrupt current run only".into(),
+            ));
+            app.push(ChatLine::Info(
+                "Ctrl+Y             copy last assistant message".into(),
             ));
             app.push(ChatLine::Info(
                 "Queue              type while agent runs, sends on finish".into(),
@@ -2766,6 +3290,32 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 }
             )));
         }
+        _ if cmd == "/reviewer" || cmd.starts_with("/reviewer ") => {
+            if !app.reviewer_configured {
+                app.push(ChatLine::Info(
+                    "  reviewer not configured — run /init to add a reviewer sub-agent".into(),
+                ));
+            } else {
+                let arg = cmd.trim_start_matches("/reviewer").trim();
+                let new_state = match arg {
+                    "on" => Some(true),
+                    "off" => Some(false),
+                    "" => None, // no arg → just show status
+                    _ => {
+                        app.push(ChatLine::Info(
+                            "  reviewer: usage: /reviewer [on|off]".into(),
+                        ));
+                        return;
+                    }
+                };
+                if let Some(state) = new_state {
+                    app.reviewer_enabled.store(state, Ordering::Relaxed);
+                }
+                let current = app.reviewer_enabled.load(Ordering::Relaxed);
+                let status = if current { "on ●" } else { "off ○" };
+                app.push(ChatLine::Info(format!("  reviewer: {}", status)));
+            }
+        }
         "/session" => match &app.current_session_id {
             Some(id) => app.push(ChatLine::Info(format!("  session: {}", id))),
             None => app.push(ChatLine::Info("  no active session yet".into())),
@@ -2792,12 +3342,40 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 }
             }
         }
-        "/workdir" => {
-            let wd = std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| "?".into());
-            app.push(ChatLine::Info(format!("  workdir: {}", wd)));
+        "/workdir" => app.push(ChatLine::Info(format!(
+            "  workdir: {}",
+            app.workspace_root.display()
+        ))),
+        _ if cmd.starts_with("/workdir ") => {
+            let arg = cmd.trim_start_matches("/workdir").trim();
+            match resolve_workdir_arg(arg) {
+                Ok(path) => {
+                    app.workspace_root = path.clone();
+                    let _ = app.workdir_tx.send(path.clone());
+                    app.push(ChatLine::Info(format!(
+                        "  workdir set to {}",
+                        path.display()
+                    )));
+                }
+                Err(e) => app.push(ChatLine::Info(format!("  workdir: {}", e))),
+            }
         }
+        "/stop" => {
+            if app.busy {
+                app.stop_only();
+            } else {
+                app.push(ChatLine::Info("  no active run to stop".into()));
+            }
+        }
+        "/copy" => match app.last_assistant_text() {
+            Some(text) => match copy_to_clipboard_osc52(text) {
+                Ok(()) => app.push(ChatLine::Info(
+                    "  copied last assistant message via OSC 52".into(),
+                )),
+                Err(e) => app.push(ChatLine::Info(format!("  copy failed: {}", e))),
+            },
+            None => app.push(ChatLine::Info("  nothing to copy yet".into())),
+        },
         "/quit" => {
             app.quit = true;
         }
@@ -2885,68 +3463,97 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 ));
             }
         }
-        "/plan" => {
-            let plan_snapshot = app.last_plan.clone();
-            match plan_snapshot {
-                Some(tasks) if !tasks.is_empty() => {
-                    app.push(ChatLine::Info("  plan  ┌─ Current plan:".into()));
-                    let count = tasks.len();
-                    for (i, task) in tasks.iter().enumerate() {
-                        let prefix = if i + 1 == count {
-                            "        └─"
-                        } else {
-                            "        ├─"
-                        };
-                        app.push(ChatLine::Info(format!("{} {}", prefix, task)));
+        _ if cmd == "/plan" || cmd.starts_with("/plan ") => {
+            let sub = cmd.trim_start_matches("/plan").trim().to_string();
+            match sub.as_str() {
+                "edit" => {
+                    if let Some(raw) = app.last_plan_raw.clone() {
+                        app.plan_text_editor = Some(PlanTextEditor::from_raw(&raw));
+                    } else if let Some(tasks) = app.last_plan.clone() {
+                        // fallback for plans from --plan mode (no raw text available)
+                        let raw = tasks
+                            .iter()
+                            .enumerate()
+                            .map(|(i, t)| format!("Step {}: {}", i + 1, t))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        app.plan_text_editor = Some(PlanTextEditor::from_raw(&raw));
+                    } else {
+                        app.push(ChatLine::Info(
+                            "  no plan yet — use /plan <task> to create one".into(),
+                        ));
                     }
                 }
-                _ => {
-                    app.push(ChatLine::Info(
-                        "  no active plan — run with --plan to enable task decomposition".into(),
-                    ));
-                }
-            }
-        }
-        "/plan edit" => {
-            if app.plan_editor.is_none() {
-                app.push(ChatLine::Info(
-                    "  no active plan editor — start a task with --plan to generate one".into(),
-                ));
-            }
-            // If plan_editor is Some, it's already showing. Just inform.
-        }
-        "/plan save" => {
-            if let Some(ref editor) = app.plan_editor {
-                match clido_planner::save_plan(&app.workspace_root, &editor.plan) {
-                    Ok(path) => {
-                        app.push(ChatLine::Info(format!("  plan saved: {}", path.display())))
+                "save" => {
+                    if let Some(ref editor) = app.plan_editor {
+                        match clido_planner::save_plan(&app.workspace_root, &editor.plan) {
+                            Ok(path) => app
+                                .push(ChatLine::Info(format!("  plan saved: {}", path.display()))),
+                            Err(e) => app.pending_error = Some(format!("save plan: {}", e)),
+                        }
+                    } else {
+                        app.push(ChatLine::Info("  no active plan to save".into()));
                     }
-                    Err(e) => app.pending_error = Some(format!("save plan: {}", e)),
                 }
-            } else {
-                app.push(ChatLine::Info("  no active plan to save".into()));
+                "list" => match clido_planner::list_plans(&app.workspace_root) {
+                    Ok(summaries) if summaries.is_empty() => {
+                        app.push(ChatLine::Info("  no saved plans found".into()));
+                    }
+                    Ok(summaries) => {
+                        app.push(ChatLine::Info("  saved plans:".into()));
+                        for s in &summaries {
+                            app.push(ChatLine::Info(format!(
+                                "    {}  ({} tasks, {} done)  {}",
+                                s.id,
+                                s.task_count,
+                                s.done,
+                                truncate_chars(&s.goal, 50)
+                            )));
+                        }
+                    }
+                    Err(e) => {
+                        app.pending_error = Some(format!("list plans: {}", e));
+                    }
+                },
+                "" => {
+                    // /plan with no task — show existing plan if any
+                    let plan_snapshot = app.last_plan.clone();
+                    match plan_snapshot {
+                        Some(tasks) if !tasks.is_empty() => {
+                            app.push(ChatLine::Info("  plan  ┌─ Current plan:".into()));
+                            let count = tasks.len();
+                            for (i, t) in tasks.iter().enumerate() {
+                                let prefix = if i + 1 == count {
+                                    "        └─"
+                                } else {
+                                    "        ├─"
+                                };
+                                app.push(ChatLine::Info(format!("{} {}", prefix, t)));
+                            }
+                        }
+                        _ => {
+                            app.push(ChatLine::Info(
+                                "  usage: /plan <task>  — have the agent plan before executing"
+                                    .into(),
+                            ));
+                        }
+                    }
+                }
+                task => {
+                    // /plan <task> — ask the agent to plan first, then wait for confirmation
+                    let task = task.to_string();
+                    app.awaiting_plan_response = true;
+                    let prompt = format!(
+                        "Create a detailed step-by-step plan for the following task. \
+                         Number each top-level step as \"Step N: description\". \
+                         You may add sub-bullets or notes under each step for clarity. \
+                         Present the complete plan and then STOP — do not execute anything \
+                         until the user explicitly confirms.\n\nTask: {task}"
+                    );
+                    app.send_silent(prompt);
+                }
             }
         }
-        "/plan list" => match clido_planner::list_plans(&app.workspace_root) {
-            Ok(summaries) if summaries.is_empty() => {
-                app.push(ChatLine::Info("  no saved plans found".into()));
-            }
-            Ok(summaries) => {
-                app.push(ChatLine::Info("  saved plans:".into()));
-                for s in &summaries {
-                    app.push(ChatLine::Info(format!(
-                        "    {}  ({} tasks, {} done)  {}",
-                        s.id,
-                        s.task_count,
-                        s.done,
-                        truncate_chars(&s.goal, 50)
-                    )));
-                }
-            }
-            Err(e) => {
-                app.pending_error = Some(format!("list plans: {}", e));
-            }
-        },
         _ if cmd == "/branch" || cmd.starts_with("/branch ") => {
             let name = cmd.trim_start_matches("/branch").trim().to_string();
             if name.is_empty() {
@@ -3197,7 +3804,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                     }
                 }
                 app.push(ChatLine::Info(
-                    "  Use /profile <name> to switch, or 'clido profile create' to add a profile."
+                    "  /profile → pick & switch  |  /profile new → create  |  /profile edit → edit"
                         .into(),
                 ));
             }
@@ -3214,22 +3821,37 @@ fn execute_slash(app: &mut App, cmd: &str) {
                     let mut profiles: Vec<(String, clido_core::ProfileEntry)> =
                         loaded.profiles.into_iter().collect();
                     profiles.sort_by(|a, b| a.0.cmp(&b.0));
-                    if profiles.is_empty() {
-                        app.push(ChatLine::Info(
-                            "  no profiles configured — run `clido profile create` to add one"
-                                .into(),
-                        ));
-                    } else {
-                        let selected = profiles.iter().position(|(n, _)| n == &active).unwrap_or(0);
-                        app.profile_picker = Some(ProfilePickerState {
-                            profiles,
-                            selected,
-                            scroll_offset: 0,
-                            active,
-                        });
-                    }
+                    let selected = profiles.iter().position(|(n, _)| n == &active).unwrap_or(0);
+                    app.profile_picker = Some(ProfilePickerState {
+                        profiles,
+                        selected,
+                        scroll_offset: 0,
+                        active,
+                    });
                 }
             }
+        }
+        "/profile new" => {
+            app.push(ChatLine::Info(
+                "  launching profile creation wizard…".into(),
+            ));
+            app.wants_profile_create = true;
+            app.quit = true;
+        }
+        cmd if cmd == "/profile edit" || cmd.starts_with("/profile edit ") => {
+            let arg = cmd.trim_start_matches("/profile edit").trim();
+            let name = if arg.is_empty() {
+                app.current_profile.clone()
+            } else {
+                arg.to_string()
+            };
+            app.push(ChatLine::Info(format!(
+                "  launching editor for profile '{}'…",
+                name
+            )));
+            app.restart_resume_session = app.current_session_id.clone();
+            app.wants_profile_edit = Some(name);
+            app.quit = true;
         }
         cmd if cmd.starts_with("/profile ") => {
             let name = cmd.trim_start_matches("/profile ").trim();
@@ -3241,7 +3863,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 Ok(loaded) => {
                     if !loaded.profiles.contains_key(name) {
                         app.push(ChatLine::Info(format!(
-                            "  profile '{}' not found. Use /profiles to list.",
+                            "  profile '{}' not found. Use /profiles to list or /profile new to create.",
                             name
                         )));
                     } else if name == loaded.default_profile {
@@ -3254,6 +3876,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                             "  switching to profile '{}'…",
                             name
                         )));
+                        app.restart_resume_session = app.current_session_id.clone();
                         app.wants_profile_switch = Some(name.to_string());
                         app.quit = true;
                     }
@@ -3539,7 +4162,7 @@ fn render_markdown(text: &str) -> Vec<Line<'static>> {
                         current_line_spans.push(Span::styled(
                             String::new(),
                             Style::default()
-                                .fg(Color::Blue)
+                                .fg(TUI_SOFT_ACCENT)
                                 .add_modifier(Modifier::UNDERLINED),
                         ));
                     }
@@ -3696,6 +4319,143 @@ fn scroll_down(app: &mut App, lines: u16) {
     } else {
         app.scroll = new_scroll;
         app.following = false;
+    }
+}
+
+// ── Plan text editor key handling (nano-style) ───────────────────────────────
+
+fn handle_plan_text_editor_key(app: &mut App, event: crossterm::event::KeyEvent) {
+    use KeyCode::*;
+    use KeyModifiers as Km;
+
+    let save_and_close = |app: &mut App| {
+        if let Some(ed) = app.plan_text_editor.take() {
+            let tasks = ed.to_tasks();
+            if !tasks.is_empty() {
+                app.last_plan = Some(tasks);
+            }
+        }
+    };
+
+    match (event.modifiers, event.code) {
+        (_, Esc) => save_and_close(app),
+        (Km::CONTROL, Char('s')) => save_and_close(app),
+        (Km::CONTROL, Char('c')) => {
+            app.plan_text_editor = None;
+        }
+        (_, Up) => {
+            if let Some(ed) = &mut app.plan_text_editor {
+                if ed.cursor_row > 0 {
+                    ed.cursor_row -= 1;
+                    if ed.cursor_row < ed.scroll {
+                        ed.scroll = ed.cursor_row;
+                    }
+                    ed.clamp_col();
+                }
+            }
+        }
+        (_, Down) => {
+            if let Some(ed) = &mut app.plan_text_editor {
+                if ed.cursor_row + 1 < ed.lines.len() {
+                    ed.cursor_row += 1;
+                    ed.clamp_col();
+                }
+            }
+        }
+        (_, Left) => {
+            if let Some(ed) = &mut app.plan_text_editor {
+                if ed.cursor_col > 0 {
+                    ed.cursor_col -= 1;
+                } else if ed.cursor_row > 0 {
+                    ed.cursor_row -= 1;
+                    ed.cursor_col = ed.lines[ed.cursor_row].chars().count();
+                }
+            }
+        }
+        (_, Right) => {
+            if let Some(ed) = &mut app.plan_text_editor {
+                let line_len = ed.lines[ed.cursor_row].chars().count();
+                if ed.cursor_col < line_len {
+                    ed.cursor_col += 1;
+                } else if ed.cursor_row + 1 < ed.lines.len() {
+                    ed.cursor_row += 1;
+                    ed.cursor_col = 0;
+                }
+            }
+        }
+        (_, Home) => {
+            if let Some(ed) = &mut app.plan_text_editor {
+                ed.cursor_col = 0;
+            }
+        }
+        (_, End) => {
+            if let Some(ed) = &mut app.plan_text_editor {
+                ed.cursor_col = ed.lines[ed.cursor_row].chars().count();
+            }
+        }
+        (_, Enter) => {
+            if let Some(ed) = &mut app.plan_text_editor {
+                let line = ed.lines[ed.cursor_row].clone();
+                let chars: Vec<char> = line.chars().collect();
+                let col = ed.cursor_col.min(chars.len());
+                let left: String = chars[..col].iter().collect();
+                let right: String = chars[col..].iter().collect();
+                ed.lines[ed.cursor_row] = left;
+                ed.cursor_row += 1;
+                ed.cursor_col = 0;
+                ed.lines.insert(ed.cursor_row, right);
+            }
+        }
+        (_, Backspace) => {
+            if let Some(ed) = &mut app.plan_text_editor {
+                if ed.cursor_col > 0 {
+                    let line = &mut ed.lines[ed.cursor_row];
+                    let mut chars: Vec<char> = line.chars().collect();
+                    chars.remove(ed.cursor_col - 1);
+                    *line = chars.iter().collect();
+                    ed.cursor_col -= 1;
+                } else if ed.cursor_row > 0 {
+                    let current = ed.lines.remove(ed.cursor_row);
+                    ed.cursor_row -= 1;
+                    ed.cursor_col = ed.lines[ed.cursor_row].chars().count();
+                    ed.lines[ed.cursor_row].push_str(&current);
+                }
+            }
+        }
+        (_, Delete) => {
+            if let Some(ed) = &mut app.plan_text_editor {
+                let line_len = ed.lines[ed.cursor_row].chars().count();
+                if ed.cursor_col < line_len {
+                    let line = &mut ed.lines[ed.cursor_row];
+                    let mut chars: Vec<char> = line.chars().collect();
+                    chars.remove(ed.cursor_col);
+                    *line = chars.iter().collect();
+                } else if ed.cursor_row + 1 < ed.lines.len() {
+                    let next = ed.lines.remove(ed.cursor_row + 1);
+                    ed.lines[ed.cursor_row].push_str(&next);
+                }
+            }
+        }
+        (km, Char(c)) if km == Km::NONE || km == Km::SHIFT => {
+            if let Some(ed) = &mut app.plan_text_editor {
+                let line = &mut ed.lines[ed.cursor_row];
+                let mut chars: Vec<char> = line.chars().collect();
+                let col = ed.cursor_col.min(chars.len());
+                chars.insert(col, c);
+                *line = chars.iter().collect();
+                ed.cursor_col += 1;
+            }
+        }
+        _ => {}
+    }
+
+    // Scroll to keep cursor visible (rough: assume terminal ~30 rows for editor area)
+    if let Some(ed) = &mut app.plan_text_editor {
+        if ed.cursor_row < ed.scroll {
+            ed.scroll = ed.cursor_row;
+        } else if ed.cursor_row >= ed.scroll + 20 {
+            ed.scroll = ed.cursor_row - 19;
+        }
     }
 }
 
@@ -3917,6 +4677,33 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         (Km::CONTROL, Char('c')) | (Km::CONTROL, Char('d'))
     ) {
         app.quit = true;
+        return;
+    }
+
+    // Ctrl+/ interrupts the current run without sending follow-up input.
+    if matches!((event.modifiers, event.code), (Km::CONTROL, Char('/'))) {
+        app.stop_only();
+        return;
+    }
+    if matches!((event.modifiers, event.code), (Km::CONTROL, Char('y'))) {
+        match app.last_assistant_text() {
+            Some(text) => {
+                if let Err(e) = copy_to_clipboard_osc52(text) {
+                    app.push(ChatLine::Info(format!("  copy failed: {}", e)));
+                } else {
+                    app.push(ChatLine::Info(
+                        "  copied last assistant message via OSC 52".into(),
+                    ));
+                }
+            }
+            None => app.push(ChatLine::Info("  nothing to copy yet".into())),
+        }
+        return;
+    }
+
+    // ── Plan text editor (nano-style, intercepts all keys) ───────────────────
+    if app.plan_text_editor.is_some() {
+        handle_plan_text_editor_key(app, event);
         return;
     }
 
@@ -4319,6 +5106,7 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                             "  switching to profile '{}'…",
                             name
                         )));
+                        app.restart_resume_session = app.current_session_id.clone();
                         app.wants_profile_switch = Some(name.clone());
                         app.quit = true;
                     }
@@ -4326,6 +5114,27 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Esc => {
                 app.profile_picker = None;
+            }
+            KeyCode::Char('n') => {
+                app.profile_picker = None;
+                app.push(ChatLine::Info(
+                    "  launching profile creation wizard…".into(),
+                ));
+                app.wants_profile_create = true;
+                app.quit = true;
+            }
+            KeyCode::Char('e') => {
+                if let Some(picker) = app.profile_picker.take() {
+                    if let Some((name, _)) = picker.profiles.get(picker.selected) {
+                        app.push(ChatLine::Info(format!(
+                            "  launching editor for profile '{}'…",
+                            name
+                        )));
+                        app.restart_resume_session = app.current_session_id.clone();
+                        app.wants_profile_edit = Some(name.clone());
+                        app.quit = true;
+                    }
+                }
             }
             _ => {}
         }
@@ -4473,6 +5282,13 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     }
 
     match (event.modifiers, event.code) {
+        // Esc: clear the input field.
+        (_, Esc) => {
+            app.input.clear();
+            app.cursor = 0;
+            app.selected_cmd = None;
+            app.history_idx = None;
+        }
         // Ctrl+Enter: interrupt current run and send immediately.
         (Km::CONTROL, Enter) => app.force_send(),
         (_, Enter) => {
@@ -4596,12 +5412,58 @@ fn char_byte_pos(s: &str, char_idx: usize) -> usize {
         .unwrap_or(s.len())
 }
 
+fn resolve_workdir_arg(arg: &str) -> Result<std::path::PathBuf, String> {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return Err("workdir path cannot be empty".into());
+    }
+    let expanded = if let Some(rest) = trimmed.strip_prefix("~/") {
+        std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .map(|h| h.join(rest))
+            .map_err(|_| "HOME is not set".to_string())?
+    } else if trimmed == "~" {
+        std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .map_err(|_| "HOME is not set".to_string())?
+    } else {
+        std::path::PathBuf::from(trimmed)
+    };
+    let absolute = if expanded.is_absolute() {
+        expanded
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("could not resolve current dir: {}", e))?
+            .join(expanded)
+    };
+    let canonical = std::fs::canonicalize(&absolute)
+        .map_err(|e| format!("could not access '{}': {}", absolute.display(), e))?;
+    if !canonical.is_dir() {
+        return Err(format!("not a directory: {}", canonical.display()));
+    }
+    Ok(canonical)
+}
+
+fn copy_to_clipboard_osc52(text: &str) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    if text.is_empty() {
+        return Err("nothing to copy".into());
+    }
+    let encoded = STANDARD.encode(text.as_bytes());
+    print!("\x1b]52;c;{}\x07", encoded);
+    std::io::stdout()
+        .flush()
+        .map_err(|e| format!("clipboard write failed: {}", e))?;
+    Ok(())
+}
+
 // ── Agent background task ─────────────────────────────────────────────────────
 
 enum AgentAction {
     Run(String),
     Resume(String),
     SwitchModel(String),
+    SetWorkspace(std::path::PathBuf),
     CompactNow,
 }
 
@@ -4609,16 +5471,30 @@ enum AgentAction {
 async fn agent_task(
     cli: Cli,
     workspace_root: std::path::PathBuf,
+    preloaded_config: Option<clido_core::LoadedConfig>,
+    preloaded_pricing: clido_core::PricingTable,
     mut prompt_rx: mpsc::UnboundedReceiver<String>,
     mut resume_rx: mpsc::UnboundedReceiver<String>,
     mut model_switch_rx: mpsc::UnboundedReceiver<String>,
+    mut workdir_rx: mpsc::UnboundedReceiver<std::path::PathBuf>,
     mut compact_now_rx: mpsc::UnboundedReceiver<()>,
     event_tx: mpsc::UnboundedSender<AgentEvent>,
     perm_tx: mpsc::UnboundedSender<PermRequest>,
     cancel: std::sync::Arc<AtomicBool>,
     image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>>,
+    reviewer_enabled: Arc<AtomicBool>,
 ) {
-    let mut setup = match AgentSetup::build(&cli, &workspace_root) {
+    let setup_result = match preloaded_config {
+        Some(loaded) => AgentSetup::build_with_preloaded(
+            &cli,
+            &workspace_root,
+            loaded,
+            preloaded_pricing,
+            reviewer_enabled,
+        ),
+        None => AgentSetup::build(&cli, &workspace_root),
+    };
+    let mut setup = match setup_result {
         Ok(s) => s,
         Err(e) => {
             let _ = event_tx.send(AgentEvent::Err(e.to_string()));
@@ -4629,8 +5505,17 @@ async fn agent_task(
     let perms = Arc::new(Mutex::new(PermsState::default()));
     setup.ask_user = Some(Arc::new(TuiAskUser { perm_tx, perms }));
 
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let mut writer = match SessionWriter::create(&workspace_root, &session_id) {
+    let session_id = if let Some(id) = &cli.resume {
+        id.clone()
+    } else {
+        uuid::Uuid::new_v4().to_string()
+    };
+    let writer = if cli.resume.is_some() {
+        SessionWriter::append(&workspace_root, &session_id)
+    } else {
+        SessionWriter::create(&workspace_root, &session_id)
+    };
+    let mut writer = match writer {
         Ok(w) => w,
         Err(e) => {
             let _ = event_tx.send(AgentEvent::Err(e.to_string()));
@@ -4656,6 +5541,61 @@ async fn agent_task(
     const MAX_AUTO_CONTINUES: u32 = 5;
     let mut auto_continue_count: u32 = 0;
 
+    if let Some(resume_session_id) = cli.resume.clone() {
+        match clido_storage::SessionReader::load(&workspace_root, &resume_session_id) {
+            Err(e) => {
+                let _ = event_tx.send(AgentEvent::Err(format!("resume failed: {}", e)));
+            }
+            Ok(lines) => {
+                let new_history = clido_agent::session_lines_to_messages(&lines);
+                agent.replace_history(new_history);
+                match SessionWriter::append(&workspace_root, &resume_session_id) {
+                    Ok(new_writer) => {
+                        writer = new_writer;
+                    }
+                    Err(e) => {
+                        let _ = event_tx.send(AgentEvent::Err(format!("resume writer: {}", e)));
+                    }
+                }
+                let mut msgs: Vec<(String, String)> = Vec::new();
+                for line in &lines {
+                    match line {
+                        clido_storage::SessionLine::UserMessage { content, .. } => {
+                            if let Some(t) = content
+                                .first()
+                                .and_then(|c| c.get("text"))
+                                .and_then(|v| v.as_str())
+                            {
+                                msgs.push(("user".to_string(), t.to_string()));
+                            }
+                        }
+                        clido_storage::SessionLine::AssistantMessage { content } => {
+                            let text: String = content
+                                .iter()
+                                .filter_map(|c| {
+                                    if c.get("type").and_then(|v| v.as_str()) == Some("text") {
+                                        c.get("text")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join("");
+                            if !text.trim().is_empty() {
+                                msgs.push(("assistant".to_string(), text));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                first_turn = false;
+                let _ = event_tx.send(AgentEvent::ResumedSession { messages: msgs });
+            }
+        }
+    }
+
     loop {
         let action = tokio::select! {
             msg = prompt_rx.recv() => {
@@ -4676,6 +5616,12 @@ async fn agent_task(
                     None => break,
                 }
             }
+            new_workspace = workdir_rx.recv() => {
+                match new_workspace {
+                    Some(path) => AgentAction::SetWorkspace(path),
+                    None => break,
+                }
+            }
             compact = compact_now_rx.recv() => {
                 match compact {
                     Some(()) => AgentAction::CompactNow,
@@ -4690,6 +5636,17 @@ async fn agent_task(
                 let _ = event_tx.send(AgentEvent::ModelSwitched {
                     to_model: model_name,
                 });
+            }
+            AgentAction::SetWorkspace(new_workspace) => {
+                match AgentSetup::build(&cli, &new_workspace) {
+                    Ok(new_setup) => {
+                        agent.replace_tools(new_setup.registry);
+                    }
+                    Err(e) => {
+                        let _ =
+                            event_tx.send(AgentEvent::Err(format!("workdir switch failed: {}", e)));
+                    }
+                }
             }
             AgentAction::CompactNow => {
                 match agent.compact_history_now().await {
@@ -4886,9 +5843,11 @@ async fn agent_task(
                         }
                     }
                     Err(ClidoError::BudgetExceeded) => {
-                        // Budget limit is a real stop — always show it.
-                        let _ = event_tx.send(AgentEvent::Err(
-                            "Budget limit reached. Increase --max-budget-usd or check your config."
+                        // Show a warning in chat but don't block — user can keep going
+                        // by sending another message. Remove or raise --max-budget-usd to silence.
+                        let _ = event_tx.send(AgentEvent::Response(
+                            "  ⚠ budget limit reached (set via --max-budget-usd or config). \
+                             You can keep sending messages; raise or remove the limit to suppress this warning."
                                 .to_string(),
                         ));
                     }
@@ -4968,26 +5927,6 @@ async fn agent_task(
     }
 
     let _ = writer.flush();
-}
-
-fn read_provider_model(cli: &Cli, workspace_root: &std::path::Path) -> (String, String) {
-    use clido_core::load_config;
-    let Ok(loaded) = load_config(workspace_root) else {
-        return ("?".into(), "?".into());
-    };
-    let profile_name = cli
-        .profile
-        .as_deref()
-        .unwrap_or(loaded.default_profile.as_str());
-    let Ok(profile) = loaded.get_profile(profile_name) else {
-        return ("?".into(), "?".into());
-    };
-    let model = cli.model.clone().unwrap_or_else(|| profile.model.clone());
-    let provider = cli
-        .provider
-        .clone()
-        .unwrap_or_else(|| profile.provider.clone());
-    (provider, model)
 }
 
 // ── Model list builder ────────────────────────────────────────────────────────
@@ -5073,17 +6012,50 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         .clone()
         .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
 
-    let (provider, model) = read_provider_model(&cli, &workspace_root);
+    // Load config, pricing table, and model prefs concurrently to minimise startup latency.
+    let wr = workspace_root.clone();
+    let (config_res, pricing_res, prefs_res) = tokio::join!(
+        tokio::task::spawn_blocking(move || clido_core::load_config(&wr)),
+        tokio::task::spawn_blocking(clido_core::load_pricing),
+        tokio::task::spawn_blocking(clido_core::ModelPrefs::load),
+    );
+    let loaded_config: Option<clido_core::LoadedConfig> = config_res.ok().and_then(|r| r.ok());
+    let (pricing_table, _) =
+        pricing_res.unwrap_or_else(|_| (clido_core::PricingTable::default(), None));
+    let model_prefs = prefs_res.unwrap_or_else(|_| clido_core::ModelPrefs::default());
+
+    // Derive provider + model from the loaded config (mirrors read_provider_model logic).
+    let (provider, model) = {
+        let profile_name = cli.profile.as_deref().unwrap_or_else(|| {
+            loaded_config
+                .as_ref()
+                .map(|c| c.default_profile.as_str())
+                .unwrap_or("default")
+        });
+        match loaded_config
+            .as_ref()
+            .and_then(|c| c.get_profile(profile_name).ok())
+        {
+            Some(profile) => {
+                let model = cli.model.clone().unwrap_or_else(|| profile.model.clone());
+                let provider = cli
+                    .provider
+                    .clone()
+                    .unwrap_or_else(|| profile.provider.clone());
+                (provider, model)
+            }
+            None => ("?".to_string(), "?".to_string()),
+        }
+    };
 
     // Resolve notify setting: CLI flags take priority over config.
-    // `--notify` forces on; `--no-notify` forces off; otherwise use config default.
     let notify_enabled = if cli.no_notify {
         false
     } else if cli.notify {
         true
     } else {
-        // Read config to get the persisted default.
-        clido_core::load_config(&workspace_root)
+        loaded_config
+            .as_ref()
             .map(|c| c.agent.notify)
             .unwrap_or(false)
     };
@@ -5091,6 +6063,7 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     let (prompt_tx, prompt_rx) = mpsc::unbounded_channel::<String>();
     let (resume_tx, resume_rx) = mpsc::unbounded_channel::<String>();
     let (model_switch_tx, model_switch_rx) = mpsc::unbounded_channel::<String>();
+    let (workdir_tx, workdir_rx) = mpsc::unbounded_channel::<std::path::PathBuf>();
     let (compact_now_tx, compact_now_rx) = mpsc::unbounded_channel::<()>();
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<AgentEvent>();
     let (perm_tx, mut perm_rx) = mpsc::unbounded_channel::<PermRequest>();
@@ -5099,17 +6072,29 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     let image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
 
+    // Reviewer toggle: shared between App (TUI control) and SpawnReviewerTool (enforcement).
+    // Derive initial state from config: enabled by default if reviewer is configured.
+    let reviewer_configured = loaded_config
+        .as_ref()
+        .map(|c| c.agents.reviewer.is_some())
+        .unwrap_or(false);
+    let reviewer_enabled = Arc::new(AtomicBool::new(true));
+
     tokio::spawn(agent_task(
         cli.clone(),
         workspace_root.clone(),
+        loaded_config.clone(),
+        pricing_table.clone(),
         prompt_rx,
         resume_rx,
         model_switch_rx,
+        workdir_rx,
         compact_now_rx,
         event_tx,
         perm_tx,
         cancel.clone(),
         image_state.clone(),
+        reviewer_enabled.clone(),
     ));
 
     // Install a panic hook so the terminal is always restored even on crash.
@@ -5137,32 +6122,27 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
 
     enable_raw_mode()?;
     let mut out = stdout();
-    execute!(out, EnterAlternateScreen)?;
-    // Enable X10 mouse button-press events + SGR coordinate extension.
-    // This gives us scroll-wheel (buttons 4/5) without capturing drag events,
-    // so the terminal emulator can still perform native text selection.
-    // Deliberately NOT using EnableMouseCapture, which also enables button-motion
-    // tracking (\x1b[?1002h) and prevents the user from selecting/copying text.
-    write!(out, "\x1b[?1000h\x1b[?1006h")?;
-    out.flush()?;
+    execute!(
+        out,
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        crossterm::event::EnableMouseCapture
+    )?;
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
 
     let plan_dry_run = cli.plan_dry_run;
 
-    // Build model list from pricing table + loaded config (for the /models picker).
-    let (pricing_table, _) = clido_core::load_pricing();
-    let model_prefs = clido_core::ModelPrefs::load();
+    // Build model list from already-loaded config + pricing (no extra disk I/O needed).
     let (config_roles, known_models, current_profile) = {
-        let loaded = clido_core::load_config(&workspace_root).ok();
-        let roles = loaded
+        let roles = loaded_config
             .as_ref()
             .map(|c| c.roles.as_map())
             .unwrap_or_default();
         let profile = cli
             .profile
             .clone()
-            .or_else(|| loaded.as_ref().map(|c| c.default_profile.clone()))
+            .or_else(|| loaded_config.as_ref().map(|c| c.default_profile.clone()))
             .unwrap_or_else(|| "default".to_string());
         let models = build_model_list(&pricing_table, &roles, &model_prefs);
         (roles, models, profile)
@@ -5172,6 +6152,7 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         prompt_tx,
         resume_tx,
         model_switch_tx,
+        workdir_tx,
         compact_now_tx,
         cancel,
         provider,
@@ -5184,21 +6165,48 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         model_prefs,
         config_roles,
         current_profile,
+        reviewer_enabled,
+        reviewer_configured,
     );
     let result = event_loop(&mut app, &mut terminal, &mut event_rx, &mut perm_rx).await;
 
     let _ = disable_raw_mode();
-    // Disable the X10 button-press + SGR mouse modes we enabled at startup.
-    let _ = write!(terminal.backend_mut(), "\x1b[?1000l\x1b[?1006l");
-    let _ = terminal.backend_mut().flush();
-    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    let _ = execute!(
+        terminal.backend_mut(),
+        crossterm::event::DisableMouseCapture,
+        DisableBracketedPaste,
+        LeaveAlternateScreen
+    );
 
     // Handle /profile <name> switch request.
     if let Some(profile_name) = app.wants_profile_switch.take() {
         if let Some(config_path) = clido_core::global_config_path() {
             let _ = clido_core::switch_active_profile(&config_path, &profile_name);
         }
+        let mut next_cli = cli.clone();
+        next_cli.resume = app.restart_resume_session.take();
+        return run_tui(next_cli).await;
+    }
+
+    // Handle /profile new — create a new profile via the guided wizard, then restart TUI.
+    if app.wants_profile_create {
+        crate::setup::run_create_profile(None).await?;
         return run_tui(cli).await;
+    }
+
+    // Handle /profile edit <name> — edit existing profile via wizard, then restart TUI.
+    if let Some(profile_name) = app.wants_profile_edit.take() {
+        let entry = clido_core::load_config(&workspace_root)
+            .ok()
+            .and_then(|c| c.profiles.get(&profile_name).cloned());
+        if let Some(entry) = entry {
+            crate::setup::run_edit_profile(profile_name, entry).await?;
+        } else {
+            eprintln!("profile '{}' not found", profile_name);
+        }
+        let mut next_cli = cli.clone();
+        next_cli.resume = app.restart_resume_session.take();
+        return run_tui(next_cli).await;
     }
 
     // Handle /init reinit request.
@@ -5265,13 +6273,42 @@ async fn event_loop(
             }
             maybe = crossterm_events.next() => {
                 match maybe {
-                    Some(Ok(Event::Key(key))) => handle_key(app, key),
-                    Some(Ok(Event::Mouse(m))) => match m.kind {
-                        MouseEventKind::ScrollUp => scroll_up(app, 1),
-                        MouseEventKind::ScrollDown => scroll_down(app, 1),
-                        _ => {}
-                    },
-                    Some(Ok(Event::Resize(_, _))) => {}
+                    Some(Ok(Event::Key(key))) => {
+                        // Ctrl+L: force a full terminal redraw (screen recovery).
+                        if key.modifiers == KeyModifiers::CONTROL
+                            && key.code == KeyCode::Char('l')
+                        {
+                            let _ = terminal.clear();
+                        } else {
+                            handle_key(app, key);
+                        }
+                    }
+                    Some(Ok(Event::Paste(mut text))) => {
+                        if text.ends_with("\r\n") {
+                            text.truncate(text.len().saturating_sub(2));
+                        } else if text.ends_with('\n') || text.ends_with('\r') {
+                            text.pop();
+                        }
+                        text = text.replace(['\r', '\n'], " ");
+                        if !text.is_empty() {
+                            let byte_pos = char_byte_pos(&app.input, app.cursor);
+                            app.input.insert_str(byte_pos, &text);
+                            app.cursor += text.chars().count();
+                            app.selected_cmd = None;
+                            app.history_idx = None;
+                        }
+                    }
+                    Some(Ok(Event::Mouse(m))) => {
+                        match m.kind {
+                            MouseEventKind::ScrollDown => scroll_down(app, 3),
+                            MouseEventKind::ScrollUp => scroll_up(app, 3),
+                            _ => {}
+                        }
+                    }
+                    Some(Ok(Event::Resize(_, _))) => {
+                        // Force a clean redraw after terminal resize to avoid stale cells.
+                        let _ = terminal.clear();
+                    }
                     None => break,
                     _ => {}
                 }
@@ -5300,10 +6337,18 @@ async fn event_loop(
                         }
                     }
                     Some(AgentEvent::Thinking(text)) => {
+                        if let Some((num, step)) = extract_current_step_full(&text) {
+                            app.current_step = Some(step);
+                            app.last_executed_step_num = Some(num);
+                        }
                         app.push(ChatLine::Thinking(text));
                         // Don't call on_agent_done — the agent is still running.
                     }
                     Some(AgentEvent::Response(text)) => {
+                        if let Some((num, step)) = extract_current_step_full(&text) {
+                            app.current_step = Some(step);
+                            app.last_executed_step_num = Some(num);
+                        }
                         app.push(ChatLine::Assistant(text));
                         // Fire desktop notification + bell if enabled.
                         if app.notify_enabled {
@@ -5545,6 +6590,22 @@ mod tests {
     fn completions_empty_for_non_slash() {
         assert!(slash_completions("hello").is_empty());
         assert!(slash_completions("").is_empty());
+    }
+
+    #[test]
+    fn resolve_workdir_arg_accepts_absolute_dir() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let p = td.path().to_path_buf();
+        let resolved = resolve_workdir_arg(p.to_str().expect("utf8 path")).expect("resolve");
+        assert_eq!(std::fs::canonicalize(p).expect("canonicalize"), resolved);
+    }
+
+    #[test]
+    fn resolve_workdir_arg_rejects_missing_path() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let missing = td.path().join("does-not-exist-12345");
+        let err = resolve_workdir_arg(missing.to_str().expect("utf8 path")).expect_err("must fail");
+        assert!(err.contains("could not access"));
     }
 
     // ── is_known_slash_cmd ────────────────────────────────────────────────────

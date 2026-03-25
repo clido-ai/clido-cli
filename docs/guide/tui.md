@@ -45,7 +45,7 @@ clido --resume abc123     # resume a specific session by ID prefix
 |------|-------------|
 | **Chat pane** (top) | Scrollable conversation history. Assistant messages, tool calls, and tool results appear here in order. |
 | **Status strip** (middle) | Session ID prefix, accumulated cost, token count, turn count, and current tool activity. |
-| **Input field** (bottom) | Multi-line text input. Press Enter to send, Ctrl+J for a newline. |
+| **Input field** (bottom) | Single-line text input. Press Enter to send. Pasted text is inserted and waits for manual Enter. |
 
 ## Key bindings
 
@@ -54,19 +54,19 @@ clido --resume abc123     # resume a specific session by ID prefix
 | Key | Action |
 |-----|--------|
 | `Enter` | Send the message in the input field |
-| `Ctrl+J` | Insert a newline into the input field |
 | `Ctrl+C` | Quit |
-| `q` | Quit (only when input field is empty) |
-| `Up` / `Down` | Scroll chat history |
+| `Ctrl+/` | Interrupt current run without sending a new message |
+| `Ctrl+Y` | Copy the last assistant message via OSC 52 |
+| `Up` / `Down` | Scroll chat history (or history navigation when typing) |
 | `Page Up` / `Page Down` | Scroll chat history by page |
-| `Ctrl+L` | Clear the input field |
-| `Up` (empty input) | Recall previous input from history |
+| `Ctrl+U` | Clear the input field |
 
 ### While agent is running
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+C` | Cancel the running agent turn |
+| `Ctrl+Enter` | Cancel current run and send the current input immediately |
+| `Ctrl+/` | Cancel current run without sending a follow-up prompt |
 | Any text | Queue a message to send after the agent finishes |
 
 ### Permission prompt (modal)
@@ -100,13 +100,14 @@ Type a slash command in the input field and press Enter:
 |---------|-------------|---------|
 | `/help` | Show all slash commands | `/help` |
 | `/sessions` | Open the session picker | `/sessions` |
-| `/new` | Start a new session (discards current) | `/new` |
 | `/clear` | Clear the chat display (session is preserved) | `/clear` |
 | `/plan` | Show the current planner task graph (if `--planner` is active) | `/plan` |
 | `/memory` | Search long-term memory | `/memory refactor patterns` |
 | `/cost` | Print accumulated cost and token usage | `/cost` |
-| `/model` | Show the active model | `/model` |
-| `/tools` | List available tools | `/tools` |
+| `/model` | Show or switch active model | `/model gpt-4.1` |
+| `/workdir` | Show or set workdir used by tools | `/workdir ~/src/project` |
+| `/stop` | Interrupt current run without sending | `/stop` |
+| `/copy` | Copy last assistant message (OSC 52) | `/copy` |
 | `/quit` | Quit clido | `/quit` |
 
 ## Permission prompts
@@ -173,3 +174,11 @@ The TUI remembers your last 50 inputs per session. Press `Up` when the input fie
 ## Queueing messages
 
 You can type a message while the agent is running. The message is queued and sent automatically when the current agent turn completes. The queued message is shown with a subtle indicator in the status strip.
+
+## Clipboard notes
+
+`/copy` and `Ctrl+Y` use OSC 52 clipboard integration. Support depends on your terminal and SSH setup.
+
+- Works in most modern local terminals.
+- Over SSH, clipboard support may require explicit terminal settings.
+- If OSC 52 is blocked, clido shows a copy error and your clipboard is unchanged.

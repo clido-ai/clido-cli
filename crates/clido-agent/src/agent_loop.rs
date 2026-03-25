@@ -246,6 +246,11 @@ impl AgentLoop {
         &self.config.model
     }
 
+    /// Replace the active tool registry (used by TUI workdir changes).
+    pub fn replace_tools(&mut self, tools: ToolRegistry) {
+        self.tools = tools;
+    }
+
     /// Retrieve relevant memories for the given prompt and prepend them to
     /// the system prompt override for one turn.
     fn inject_memories(&self, prompt: &str) -> Option<String> {

@@ -12,6 +12,8 @@ pub struct BashTool {
     blocked: Vec<PathBuf>,
     /// When true, wrap command in a sandbox (sandbox-exec on macOS, bwrap on Linux).
     sandbox: bool,
+    /// Working directory for shell commands. None → inherit process cwd.
+    workspace_root: Option<PathBuf>,
 }
 
 impl BashTool {
@@ -22,6 +24,7 @@ impl BashTool {
         Self {
             blocked,
             sandbox: false,
+            workspace_root: None,
         }
     }
     /// Create a sandboxed Bash tool.
@@ -29,7 +32,13 @@ impl BashTool {
         Self {
             blocked,
             sandbox: true,
+            workspace_root: None,
         }
+    }
+    /// Set the working directory for shell commands.
+    pub fn with_workspace(mut self, root: PathBuf) -> Self {
+        self.workspace_root = Some(root);
+        self
     }
 }
 
@@ -38,12 +47,16 @@ fn default_timeout_ms() -> u64 {
 }
 
 /// Plain (unsandboxed) command execution.
-async fn build_plain_command(command: &str) -> std::io::Result<std::process::Output> {
-    tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(command)
-        .output()
-        .await
+async fn build_plain_command(
+    command: &str,
+    cwd: Option<&PathBuf>,
+) -> std::io::Result<std::process::Output> {
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.arg("-c").arg(command);
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    cmd.output().await
 }
 
 /// Sandboxed command execution.
@@ -51,7 +64,10 @@ async fn build_plain_command(command: &str) -> std::io::Result<std::process::Out
 /// On macOS uses `sandbox-exec` with a restrictive profile.
 /// On Linux uses `bwrap` if available, otherwise falls back to a plain run with a warning
 /// emitted to stderr (bwrap unavailable in many CI environments).
-async fn build_sandboxed_command(command: &str) -> std::io::Result<std::process::Output> {
+async fn build_sandboxed_command(
+    command: &str,
+    cwd: Option<&PathBuf>,
+) -> std::io::Result<std::process::Output> {
     #[cfg(target_os = "macos")]
     {
         // macOS sandbox-exec profile: deny everything except process exec,
@@ -65,14 +81,12 @@ async fn build_sandboxed_command(command: &str) -> std::io::Result<std::process:
             "(allow network-outbound)",
             "(allow signal (target self))",
         );
-        tokio::process::Command::new("sandbox-exec")
-            .arg("-p")
-            .arg(PROFILE)
-            .arg("sh")
-            .arg("-c")
-            .arg(command)
-            .output()
-            .await
+        let mut cmd = tokio::process::Command::new("sandbox-exec");
+        cmd.arg("-p").arg(PROFILE).arg("sh").arg("-c").arg(command);
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
+        cmd.output().await
     }
 
     #[cfg(target_os = "linux")]
@@ -83,29 +97,32 @@ async fn build_sandboxed_command(command: &str) -> std::io::Result<std::process:
             .output()
             .await;
         if bwrap_check.map(|o| o.status.success()).unwrap_or(false) {
-            tokio::process::Command::new("bwrap")
-                .args([
-                    "--ro-bind",
-                    "/",
-                    "/",
-                    "--tmpfs",
-                    "/tmp",
-                    "--unshare-net",
-                    "--die-with-parent",
-                    "sh",
-                    "-c",
-                    command,
-                ])
-                .output()
-                .await
+            let mut cmd = tokio::process::Command::new("bwrap");
+            cmd.args([
+                "--ro-bind",
+                "/",
+                "/",
+                "--tmpfs",
+                "/tmp",
+                "--unshare-net",
+                "--die-with-parent",
+                "sh",
+                "-c",
+                command,
+            ]);
+            if let Some(dir) = cwd {
+                cmd.current_dir(dir);
+            }
+            cmd.output().await
         } else {
             // bwrap not available — fall back to unsandboxed with a warning.
             eprintln!("warning: sandbox requested but bwrap not found; running unsandboxed");
-            tokio::process::Command::new("sh")
-                .arg("-c")
-                .arg(command)
-                .output()
-                .await
+            let mut cmd = tokio::process::Command::new("sh");
+            cmd.arg("-c").arg(command);
+            if let Some(dir) = cwd {
+                cmd.current_dir(dir);
+            }
+            cmd.output().await
         }
     }
 
@@ -113,11 +130,12 @@ async fn build_sandboxed_command(command: &str) -> std::io::Result<std::process:
     {
         // Unsupported platform — run unsandboxed.
         tracing::warn!("sandbox not supported on this platform; running unsandboxed");
-        tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .output()
-            .await
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.arg("-c").arg(command);
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
+        cmd.output().await
     }
 }
 
@@ -166,11 +184,12 @@ impl Tool for BashTool {
             .and_then(|v| v.as_u64())
             .unwrap_or_else(default_timeout_ms);
 
+        let cwd = self.workspace_root.as_ref();
         let run_result = tokio::time::timeout(Duration::from_millis(timeout_ms), async {
             if self.sandbox {
-                build_sandboxed_command(&command).await
+                build_sandboxed_command(&command, cwd).await
             } else {
-                build_plain_command(&command).await
+                build_plain_command(&command, cwd).await
             }
         })
         .await;
@@ -313,5 +332,17 @@ mod tests {
     #[test]
     fn default_timeout_is_30s() {
         assert_eq!(default_timeout_ms(), 30_000);
+    }
+
+    #[tokio::test]
+    async fn with_workspace_sets_cwd() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tool = BashTool::new().with_workspace(tmp.path().to_path_buf());
+        let out = tool.execute(serde_json::json!({ "command": "pwd" })).await;
+        assert!(!out.is_error, "error: {}", out.content);
+        // Resolve symlinks on both sides to handle macOS /var -> /private/var
+        let got = std::fs::canonicalize(out.content.trim()).unwrap();
+        let expected = std::fs::canonicalize(tmp.path()).unwrap();
+        assert_eq!(got, expected, "bash should run in workspace_root");
     }
 }

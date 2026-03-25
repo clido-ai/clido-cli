@@ -9,11 +9,16 @@
 #   tui           — open the interactive TUI (no prompt)
 #   <anything>    — pass directly to clido (e.g. doctor, sessions list, run "fix bug")
 #
-# Override test dir: CLIDO_TEST_DIR=/path/to/dir ./scripts/run-in-test-env.sh
+# Override test dir:  CLIDO_TEST_DIR=/path/to/dir ./scripts/run-in-test-env.sh
+# Override workdir:   CLIDO_WORKDIR=/your/project  ./scripts/run-in-test-env.sh tui
 
 set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
+
+# Workdir for clido: honour CLIDO_WORKDIR env var, otherwise default to REPO_ROOT.
+# Set CLIDO_WORKDIR before calling so clido picks it up automatically.
+export CLIDO_WORKDIR="${CLIDO_WORKDIR:-$REPO_ROOT}"
 
 TEST_DIR="${CLIDO_TEST_DIR:-/tmp/clido-test-env}"
 export CLIDO_CONFIG="$TEST_DIR/config.toml"

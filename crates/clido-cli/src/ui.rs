@@ -1,4 +1,4 @@
-//! Terminal UI helpers: ANSI codes, color detection, banners.
+//! Terminal UI helpers: ANSI codes, color detection.
 
 use std::env;
 use std::io::{self, IsTerminal};
@@ -33,19 +33,6 @@ pub fn setup_use_color() -> bool {
 pub fn setup_use_rich_ui() -> bool {
     io::stdin().is_terminal() || io::stderr().is_terminal()
 }
-
-/// ASCII banner shown on interactive text startup.
-pub const BANNER: &str = r#"          ▄▄   ▄▄                ▄▄
-        ▀███   ██              ▀███
-          ██                     ██
- ▄██▀██   ██ ▀███    ██     ▄█▀▀███   ▄██▀██▄
-██▀  ██   ██   ██    ▀▀   ▄██    ██  ██▀   ▀██
-██        ██   ██         ███    ██  ██     ██
-██▄    ▄  ██   ██    ▄▄   ▀██    ██  ██▄   ▄██
- █████▀ ▄████▄████▄  ▀█    ▀████▀███▄ ▀█████▀
-                      ▀
-
-"#;
 
 /// ASCII fallback for setup when not a TTY.
 pub const SETUP_BANNER_ASCII: &str = "  --- Clido setup ---\n  Answer each question: type your choice, then press Enter. Defaults in [brackets].";

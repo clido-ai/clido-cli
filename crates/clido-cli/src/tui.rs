@@ -28,7 +28,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
     Frame, Terminal,
 };
 use tokio::sync::{mpsc, oneshot};
@@ -802,6 +802,10 @@ enum ChatLine {
     Info(String),
     /// Section heading in /help output (rendered brighter than Info).
     Section(String),
+    /// Welcome brand line with highlighted semicolon (compact, used for resumed sessions).
+    WelcomeBrand,
+    /// Full startup splash: centered panel widget (rendered directly, not as chat lines).
+    WelcomeSplash,
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -1026,13 +1030,7 @@ impl App {
             last_executed_step_num: None,
             plan_dry_run,
         };
-        for line in crate::ui::BANNER.lines() {
-            app.messages.push(ChatLine::Info(line.to_string()));
-        }
-        app.messages.push(ChatLine::Info(String::new()));
-        app.messages.push(ChatLine::Info(
-            "Type your message and press Enter. Use /help for commands, /sessions to resume a session.".into(),
-        ));
+        app.messages.push(ChatLine::WelcomeSplash);
         app
     }
 
@@ -1313,62 +1311,56 @@ fn render(frame: &mut Frame, app: &mut App) {
         return;
     }
 
-    // Layout: header | chat | status (2) | queue (1) | hint (1) | input (3)
-    let [header_area, chat_area, status_area, queue_area, hint_area, input_area] =
-        Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(2),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(3),
-        ])
-        .areas(area);
-
-    // ── Header ──
+    // ── Header spans (built before layout so we can measure and pick height) ──
     let version = env!("CARGO_PKG_VERSION");
-    let mut header_spans = vec![
+    let dim = Style::default()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::DIM);
+
+    // Line 1: brand · version · provider/model · profile · reviewer
+    let mut hline1: Vec<Span<'static>> = vec![
         Span::styled(
-            "clido",
+            "cli",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::Rgb(210, 220, 240))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            ";",
+            Style::default()
+                .fg(TUI_SOFT_ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "do",
+            Style::default()
+                .fg(Color::Rgb(210, 220, 240))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("  v{}  ", version),
             Style::default().fg(Color::DarkGray),
         ),
-        Span::styled(
-            format!("{}  {}", app.provider, app.model),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
-        ),
-        Span::styled(
-            format!("  [{}]", app.current_profile),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
-        ),
+        Span::styled(format!("{}  {}", app.provider, app.model), dim),
+        Span::styled(format!("  [{}]", app.current_profile), dim),
     ];
-    // Reviewer badge — only shown when a reviewer is configured.
     if app.reviewer_configured {
         let (dot, color) = if app.reviewer_enabled.load(Ordering::Relaxed) {
             ("●", Color::Green)
         } else {
             ("○", Color::DarkGray)
         };
-        header_spans.push(Span::styled(
+        hline1.push(Span::styled(
             format!("  rev{}", dot),
             Style::default().fg(color).add_modifier(Modifier::DIM),
         ));
     }
-    header_spans.push(Span::styled(
+
+    // Line 2: cwd · cost/tokens
+    let mut hline2: Vec<Span<'static>> = vec![Span::styled(
         format!("  cwd:{}", app.workspace_root.display()),
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
-    ));
+        dim,
+    )];
     if app.session_cost_usd > 0.0 {
         let in_tok = app.session_input_tokens;
         let tok_str = if in_tok >= 1000 {
@@ -1382,30 +1374,61 @@ fn render(frame: &mut Frame, app: &mut App) {
         } else {
             String::new()
         };
-        header_spans.push(Span::styled(
+        hline2.push(Span::styled(
             format!("   ${:.4}  {}{}", app.session_cost_usd, tok_str, ctx_str),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
+            dim,
         ));
     }
-    let header = Paragraph::new(Line::from(header_spans));
-    frame.render_widget(header, header_area);
+
+    // Decide header height: 1 line if everything fits side-by-side, else 2.
+    let w = area.width as usize;
+    let line1_w: usize = hline1.iter().map(|s| s.content.chars().count()).sum();
+    let line2_w: usize = hline2.iter().map(|s| s.content.chars().count()).sum();
+    let header_h: u16 = if line1_w + line2_w <= w { 1 } else { 2 };
+
+    // Layout: header | chat | status (2) | queue (1) | hint (1) | input (3)
+    let [header_area, chat_area, status_area, queue_area, hint_area, input_area] =
+        Layout::vertical([
+            Constraint::Length(header_h),
+            Constraint::Min(0),
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(3),
+        ])
+        .areas(area);
+
+    // ── Header render ──
+    let header_para = if header_h == 1 {
+        // Everything on one line — append line2 to line1 and fit to width.
+        hline1.extend(hline2);
+        Paragraph::new(Line::from(fit_spans(hline1, w)))
+    } else {
+        // Two lines: fit each independently.
+        let l1 = fit_spans(hline1, w);
+        let l2 = fit_spans(hline2, w);
+        Paragraph::new(vec![Line::from(l1), Line::from(l2)])
+    };
+    frame.render_widget(header_para, header_area);
 
     // ── Chat ──
-    // Use ratatui's own line_count() so the scroll calculation matches actual rendering.
-    let lines = build_lines(app);
-    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
-    let total_height = para.line_count(chat_area.width) as u16;
-    let max_scroll = total_height.saturating_sub(chat_area.height);
-    // Store for use in handle_key (Up/PageUp need the current max_scroll).
-    app.max_scroll = max_scroll;
-    let scroll = if app.following {
-        max_scroll
+    if is_welcome_only(app) {
+        render_welcome(frame, app, chat_area);
     } else {
-        app.scroll.min(max_scroll)
-    };
-    frame.render_widget(para.scroll((scroll, 0)), chat_area);
+        // Use ratatui's own line_count() so the scroll calculation matches actual rendering.
+        let lines = build_lines(app);
+        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+        let total_height = para.line_count(chat_area.width) as u16;
+        let max_scroll = total_height.saturating_sub(chat_area.height);
+        // Store for use in handle_key (Up/PageUp need the current max_scroll).
+        app.max_scroll = max_scroll;
+        let scroll = if app.following {
+            max_scroll
+        } else {
+            app.scroll.min(max_scroll)
+        };
+        frame.render_widget(para.scroll((scroll, 0)), chat_area);
+    }
 
     // ── Status strip ──
     {
@@ -1627,6 +1650,7 @@ fn render(frame: &mut Frame, app: &mut App) {
                 .add_modifier(Modifier::DIM),
         ));
     }
+    let hint_spans = fit_spans(hint_spans, hint_area.width as usize);
     let hint = Paragraph::new(Line::from(hint_spans));
     frame.render_widget(hint, hint_area);
 
@@ -2834,6 +2858,94 @@ fn render_settings(frame: &mut Frame, area: Rect, input_area: Rect, st: &Setting
     frame.render_widget(Paragraph::new(hint), hint_area);
 }
 
+// ── Welcome panel ─────────────────────────────────────────────────────────────
+
+fn is_welcome_only(app: &App) -> bool {
+    app.messages.len() == 1 && matches!(app.messages[0], ChatLine::WelcomeSplash)
+}
+
+/// Centered welcome panel rendered when no conversation has started yet.
+fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
+    let muted = Style::default().fg(Color::Rgb(110, 125, 150));
+    let soft = Style::default().fg(Color::Rgb(185, 195, 215));
+    let accent = Style::default()
+        .fg(TUI_SOFT_ACCENT)
+        .add_modifier(Modifier::BOLD);
+
+    // Shorten workdir to ~/...
+    let home = std::env::var("HOME").unwrap_or_default();
+    let raw = app.workspace_root.display().to_string();
+    let workdir = if !home.is_empty() && raw.starts_with(&home) {
+        format!("~{}", &raw[home.len()..])
+    } else {
+        raw
+    };
+
+    let content: Vec<Line<'static>> = vec![
+        Line::raw(""),
+        Line::from(Span::styled(format!("    {}", workdir), muted)),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("    profile  ".to_string(), muted),
+            Span::styled(
+                app.current_profile.clone(),
+                soft.add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ·  ".to_string(), muted),
+            Span::styled(app.model.clone(), soft),
+        ]),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "    /help   /sessions   /model   /workdir".to_string(),
+            accent,
+        )),
+        Line::from(Span::styled(
+            "    Enter=send   Ctrl+/=stop   Ctrl+Enter=interrupt+send".to_string(),
+            muted,
+        )),
+        Line::raw(""),
+    ];
+
+    let border_color = Color::Rgb(55, 70, 95);
+    let panel_w = 64u16.min(area.width.saturating_sub(4));
+    let panel_h = (content.len() as u16 + 2).min(area.height.saturating_sub(4));
+    let x = area.x + area.width.saturating_sub(panel_w) / 2;
+    let y = area.y + area.height.saturating_sub(panel_h) / 2;
+    let panel_area = Rect::new(x, y, panel_w, panel_h);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .title(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                "cli".to_string(),
+                Style::default()
+                    .fg(Color::Rgb(210, 220, 240))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                ";".to_string(),
+                Style::default()
+                    .fg(TUI_SOFT_ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "do".to_string(),
+                Style::default()
+                    .fg(Color::Rgb(210, 220, 240))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+        ]))
+        .title_alignment(Alignment::Left);
+
+    let inner = block.inner(panel_area);
+    frame.render_widget(block, panel_area);
+    frame.render_widget(Paragraph::new(content), inner);
+}
+
 // ── Modal component helpers ───────────────────────────────────────────────────
 
 /// Rect anchored just above the input field (grows upward).
@@ -2997,6 +3109,22 @@ fn word_wrap(text: &str, width: usize) -> Vec<String> {
         }
     }
     lines
+}
+
+/// Drop spans from the right until the total char width fits within `max_width`.
+/// Prevents mid-span clipping in single-line bars.
+fn fit_spans(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Span<'static>> {
+    let mut used = 0usize;
+    let mut out = Vec::new();
+    for span in spans {
+        let w = span.content.chars().count();
+        if used + w > max_width {
+            break;
+        }
+        used += w;
+        out.push(span);
+    }
+    out
 }
 
 /// Return the semantic color for a tool call based on its type and state.
@@ -4062,6 +4190,61 @@ fn build_lines(app: &App) -> Vec<Line<'static>> {
                         .fg(Color::Gray)
                         .add_modifier(Modifier::BOLD),
                 )]));
+            }
+            ChatLine::WelcomeBrand => {
+                out.push(Line::from(vec![
+                    Span::styled("  ── ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "cli",
+                        Style::default()
+                            .fg(Color::Gray)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        ";",
+                        Style::default()
+                            .fg(TUI_SOFT_ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "do",
+                        Style::default()
+                            .fg(Color::Gray)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        " ─────────────────────",
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+            ChatLine::WelcomeSplash => {
+                // Shown only when scrolling back past the start of a resumed conversation.
+                out.push(Line::from(vec![
+                    Span::styled("  ── ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "cli",
+                        Style::default()
+                            .fg(Color::Gray)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        ";",
+                        Style::default()
+                            .fg(TUI_SOFT_ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "do",
+                        Style::default()
+                            .fg(Color::Gray)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        " ─────────────────────",
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
             }
         }
     }
@@ -6122,12 +6305,7 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
 
     enable_raw_mode()?;
     let mut out = stdout();
-    execute!(
-        out,
-        EnterAlternateScreen,
-        EnableBracketedPaste,
-        crossterm::event::EnableMouseCapture
-    )?;
+    execute!(out, EnterAlternateScreen, EnableBracketedPaste)?;
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
 
@@ -6173,7 +6351,6 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     let _ = disable_raw_mode();
     let _ = execute!(
         terminal.backend_mut(),
-        crossterm::event::DisableMouseCapture,
         DisableBracketedPaste,
         LeaveAlternateScreen
     );
@@ -6404,10 +6581,7 @@ async fn event_loop(
                     }
                     Some(AgentEvent::ResumedSession { messages }) => {
                         app.messages.clear();
-                        for line in crate::ui::BANNER.lines() {
-                            app.messages.push(ChatLine::Info(line.to_string()));
-                        }
-                        app.messages.push(ChatLine::Info(String::new()));
+                        app.messages.push(ChatLine::WelcomeBrand);
                         app.messages.push(ChatLine::Info("  — resumed session —".into()));
                         for (role, text) in messages {
                             if role == "user" {

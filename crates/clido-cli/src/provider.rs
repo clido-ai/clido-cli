@@ -50,6 +50,7 @@ pub fn default_api_key_env(provider: &str) -> &'static str {
         "openrouter" => "OPENROUTER_API_KEY",
         "openai" => "OPENAI_API_KEY",
         "mistral" => "MISTRAL_API_KEY",
+        "minimax" => "MINIMAX_API_KEY",
         "alibabacloud" => "DASHSCOPE_API_KEY",
         _ => "",
     }
@@ -83,6 +84,11 @@ mod tests {
     #[test]
     fn default_api_key_env_mistral() {
         assert_eq!(default_api_key_env("mistral"), "MISTRAL_API_KEY");
+    }
+
+    #[test]
+    fn default_api_key_env_minimax() {
+        assert_eq!(default_api_key_env("minimax"), "MINIMAX_API_KEY");
     }
 
     #[test]
@@ -173,6 +179,21 @@ mod tests {
         };
         // Override to local (no key needed)
         let result = make_provider("default", &profile, Some("local"), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn make_provider_minimax() {
+        let profile = ProfileEntry {
+            provider: "minimax".to_string(),
+            model: "MiniMax-M2.7".to_string(),
+            api_key: Some("sk-minimax-test".to_string()),
+            api_key_env: None,
+            base_url: None,
+            worker: None,
+            reviewer: None,
+        };
+        let result = make_provider("default", &profile, None, None);
         assert!(result.is_ok());
     }
 

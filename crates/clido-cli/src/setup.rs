@@ -31,7 +31,7 @@ use clido_providers::ModelEntry;
 // ── Provider metadata ─────────────────────────────────────────────────────────
 
 /// (display name, internal provider ID, description)
-const PROVIDERS: [(&str, &str, &str); 6] = [
+const PROVIDERS: [(&str, &str, &str); 7] = [
     (
         "OpenRouter",
         "openrouter",
@@ -45,6 +45,11 @@ const PROVIDERS: [(&str, &str, &str); 6] = [
     ("OpenAI", "openai", "GPT & o-series — platform.openai.com"),
     ("Mistral", "mistral", "Mistral models — console.mistral.ai"),
     (
+        "MiniMax",
+        "minimax",
+        "MiniMax-M2.7 coding model — minimax.io",
+    ),
+    (
         "Alibaba Cloud",
         "alibabacloud",
         "Qwen models — dashscope.aliyuncs.com",
@@ -56,11 +61,12 @@ const PROVIDERS: [(&str, &str, &str); 6] = [
     ),
 ];
 
-const PROVIDER_KEY_ENV: [&str; 6] = [
+const PROVIDER_KEY_ENV: [&str; 7] = [
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "MISTRAL_API_KEY",
+    "MINIMAX_API_KEY",
     "DASHSCOPE_API_KEY",
     "", // local: no key
 ];
@@ -274,7 +280,7 @@ impl SetupState {
     }
 
     fn is_local(&self) -> bool {
-        self.provider == 5
+        self.provider == PROVIDERS.len() - 1
     }
 
     fn key_env(&self) -> &'static str {
@@ -2884,7 +2890,7 @@ mod tests {
     #[test]
     fn build_toml_local_provider() {
         let mut s = SetupState::new();
-        s.provider = 5; // Local / Ollama
+        s.provider = 6; // Local / Ollama
         s.model = "llama3.2".to_string();
         s.credential.clear();
         let toml = build_toml(&s);
@@ -2897,7 +2903,7 @@ mod tests {
     #[test]
     fn build_toml_local_provider_custom_url() {
         let mut s = SetupState::new();
-        s.provider = 5;
+        s.provider = 6;
         s.model = "mistral".to_string();
         s.credential = "http://127.0.0.1:8080".to_string();
         let toml = build_toml(&s);
@@ -2951,6 +2957,18 @@ mod tests {
     }
 
     #[test]
+    fn build_toml_minimax_provider() {
+        let mut s = SetupState::new();
+        s.provider = 4; // MiniMax
+        s.model = "MiniMax-M2.7".to_string();
+        s.credential = "sk-minimax-test".to_string();
+        let toml = build_toml(&s);
+        assert!(toml.contains("provider = \"minimax\""));
+        assert!(toml.contains("model = \"MiniMax-M2.7\""));
+        assert!(toml.contains("api_key = \"sk-minimax-test\""));
+    }
+
+    #[test]
     fn setup_state_new_defaults() {
         let s = SetupState::new();
         assert_eq!(s.step, SetupStep::Provider);
@@ -2966,7 +2984,7 @@ mod tests {
     #[test]
     fn setup_state_is_local() {
         let mut s = SetupState::new();
-        s.provider = 5; // Local / Ollama is index 5
+        s.provider = 6; // Local / Ollama is index 6
         assert!(s.is_local());
         s.provider = 0;
         assert!(!s.is_local());
@@ -3091,7 +3109,7 @@ mod tests {
         s.model = "claude-sonnet-4-5".to_string();
         s.credential = "sk-ant-key".to_string();
         s.configure_worker = true;
-        s.worker_provider = 5; // Local
+        s.worker_provider = 6; // Local
         s.worker_model = "llama3.2".to_string();
         s.worker_credential = "http://127.0.0.1:8080".to_string();
         let toml = build_toml(&s);

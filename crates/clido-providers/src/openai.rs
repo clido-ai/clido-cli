@@ -75,6 +75,16 @@ impl OpenAICompatProvider {
         Self::new(api_key, model, MISTRAL_BASE_URL.to_string(), vec![])
     }
 
+    /// MiniMax: OpenAI-compatible API.
+    pub fn new_minimax(api_key: String, model: String) -> Self {
+        Self::new(
+            api_key,
+            model,
+            "https://api.minimax.io/v1".to_string(),
+            vec![],
+        )
+    }
+
     fn request_url(&self) -> String {
         let base = self.base_url.trim_end_matches('/');
         format!("{}/chat/completions", base)

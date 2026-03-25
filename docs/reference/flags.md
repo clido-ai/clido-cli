@@ -47,7 +47,7 @@ clido --model claude-3-haiku-20240307 "quick question"
 
 ### `--provider`
 
-Override the provider for this invocation. Must be a valid provider name: `anthropic`, `openai`, `openrouter`, `local`.
+Override the provider for this invocation. Must be a valid provider name: `anthropic`, `openai`, `openrouter`, `minimax`, `alibabacloud`, `local`.
 
 ```bash
 clido --provider openrouter --model anthropic/claude-3-5-sonnet "task"

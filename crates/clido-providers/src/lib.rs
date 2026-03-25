@@ -27,6 +27,7 @@ pub fn build_provider(
         ))),
         "openai" => Ok(Arc::new(OpenAICompatProvider::new_openai(api_key, model))),
         "mistral" => Ok(Arc::new(OpenAICompatProvider::new_mistral(api_key, model))),
+        "minimax" => Ok(Arc::new(OpenAICompatProvider::new_minimax(api_key, model))),
         "local" => {
             let url = base_url.unwrap_or("http://localhost:11434").to_string();
             Ok(Arc::new(OpenAICompatProvider::new(
@@ -48,7 +49,7 @@ pub fn build_provider(
             )))
         }
         p => Err(ClidoError::Config(format!(
-            "Provider '{}' is not supported. Available: anthropic, openrouter, openai, mistral, local, alibabacloud.",
+            "Provider '{}' is not supported. Available: anthropic, openrouter, openai, mistral, minimax, local, alibabacloud.",
             p
         ))),
     }
@@ -127,6 +128,18 @@ mod tests {
             "".to_string(),
             "mistral".to_string(),
             Some("http://127.0.0.1:8080"),
+        )
+        .unwrap();
+        assert!(Arc::strong_count(&p) >= 1);
+    }
+
+    #[test]
+    fn build_provider_minimax_returns_ok() {
+        let p = build_provider(
+            "minimax",
+            "sk-minimax-fake".to_string(),
+            "MiniMax-M2.7".to_string(),
+            None,
         )
         .unwrap();
         assert!(Arc::strong_count(&p) >= 1);

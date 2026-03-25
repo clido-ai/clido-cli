@@ -9,6 +9,7 @@ clido supports multiple LLM providers. Each provider is configured as a profile 
 | Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | Default; supports prompt caching |
 | OpenAI-compatible | `openai` | `OPENAI_API_KEY` | Any OpenAI-API endpoint |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | Multi-model aggregator |
+| MiniMax | `minimax` | `MINIMAX_API_KEY` | MiniMax-M2.7 coding model; 204k context |
 | Alibaba Cloud | `alibabacloud` | `DASHSCOPE_API_KEY` | DashScope / Qwen models |
 | Local (Ollama) | `local` | — | No API key required |
 
@@ -76,6 +77,24 @@ api_key_env = "OPENROUTER_API_KEY"
 | `mistralai/mistral-large` | Mistral Large |
 | `google/gemini-pro-1.5` | Gemini Pro 1.5 |
 | `meta-llama/llama-3.1-70b-instruct` | Meta Llama 3.1 70B |
+
+## MiniMax
+
+Connects to `https://api.minimax.io/v1`. Get an API key at [platform.minimax.io](https://platform.minimax.io).
+
+```toml
+[profile.minimax]
+provider    = "minimax"
+model       = "MiniMax-M2.7"
+api_key_env = "MINIMAX_API_KEY"
+```
+
+### Recommended models
+
+| Model | Description |
+|-------|-------------|
+| `MiniMax-M2.7` | Latest coding model; 204k context window |
+| `MiniMax-M1` | Previous generation reasoning model |
 
 ## Local (Ollama)
 

@@ -32,7 +32,7 @@ default_profile = "default"
 
 [profile.default]
 # Provider name. Required.
-# Valid values: "anthropic", "openai", "openrouter", "alibabacloud", "local"
+# Valid values: "anthropic", "openai", "openrouter", "minimax", "alibabacloud", "local"
 provider = "anthropic"
 
 # Model name as recognised by the provider. Required.
@@ -63,6 +63,11 @@ api_key_env = "OPENROUTER_API_KEY"
 provider = "local"
 model    = "llama3.2"
 base_url = "http://localhost:11434"
+
+[profile.minimax]
+provider    = "minimax"
+model       = "MiniMax-M2.7"
+api_key_env = "MINIMAX_API_KEY"
 
 [profile.alibaba]
 provider    = "alibabacloud"
@@ -163,7 +168,7 @@ post_tool_use = ""
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `provider` | string | Yes | Provider: `anthropic`, `openai`, `openrouter`, `alibabacloud`, `local` |
+| `provider` | string | Yes | Provider: `anthropic`, `openai`, `openrouter`, `minimax`, `alibabacloud`, `local` |
 | `model` | string | Yes | Model name |
 | `api_key` | string | No | API key (stored in plain text) |
 | `api_key_env` | string | No | Environment variable name for API key |

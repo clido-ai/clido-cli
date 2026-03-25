@@ -79,6 +79,7 @@ pub enum ProviderType {
     Anthropic,
     OpenAI,
     OpenRouter,
+    MiniMax,
     Alibaba,
     Local,
 }

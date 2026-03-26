@@ -291,6 +291,17 @@ pub enum Subcommand {
         #[command(subcommand)]
         cmd: ProfileCmd,
     },
+
+    /// Deprecated: use `sessions list` instead.
+    #[command(hide = true, name = "list-sessions")]
+    ListSessions,
+
+    /// Deprecated: use `sessions show <id>` instead.
+    #[command(hide = true, name = "show-session")]
+    ShowSession {
+        /// Session ID to display.
+        id: String,
+    },
 }
 
 #[derive(clap::Subcommand, Debug, Clone)]
@@ -506,6 +517,8 @@ impl Cli {
             Some(Subcommand::Rollback { .. }) => false,
             Some(Subcommand::Plan { .. }) => false,
             Some(Subcommand::Profile { .. }) => false,
+            Some(Subcommand::ListSessions) => false,
+            Some(Subcommand::ShowSession { .. }) => false,
         }
     }
 }

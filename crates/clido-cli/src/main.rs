@@ -302,6 +302,18 @@ async fn dispatch(cli: cli::Cli) -> Result<(), anyhow::Error> {
         Some(cli::Subcommand::Profile { cmd }) => {
             return profiles::run_profile(cmd).await;
         }
+        Some(cli::Subcommand::ListSessions) => {
+            eprintln!(
+                "Warning: 'clido list-sessions' is deprecated. Use 'clido sessions list' instead."
+            );
+            return sessions::run_sessions_list().await;
+        }
+        Some(cli::Subcommand::ShowSession { id }) => {
+            eprintln!(
+                "Warning: 'clido show-session' is deprecated. Use 'clido sessions show' instead."
+            );
+            return sessions::run_sessions_show(id).await;
+        }
         Some(cli::Subcommand::Commit { yes, dry_run }) => {
             let workspace_root = cli.workdir.clone().unwrap_or_else(|| {
                 env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))

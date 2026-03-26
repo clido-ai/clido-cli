@@ -81,10 +81,10 @@ impl Default for AgentSection {
 }
 
 fn default_max_turns() -> u32 {
-    200
+    50
 }
 fn default_max_budget() -> Option<f64> {
-    None
+    Some(5.0)
 }
 fn default_true() -> bool {
     true
@@ -722,8 +722,8 @@ mod tests {
     #[test]
     fn agent_section_default_values() {
         let s = AgentSection::default();
-        assert_eq!(s.max_turns, 200);
-        assert_eq!(s.max_budget_usd, None);
+        assert_eq!(s.max_turns, 50);
+        assert_eq!(s.max_budget_usd, Some(5.0));
         assert!(!s.quiet);
         assert!(!s.no_rules);
         assert!(s.rules_file.is_none());
@@ -898,7 +898,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.model, "claude-haiku");
-        assert_eq!(cfg.max_turns, 200);
+        assert_eq!(cfg.max_turns, 50);
         assert_eq!(cfg.max_parallel_tools, 4);
         assert_eq!(cfg.permission_mode, crate::config::PermissionMode::Default);
         assert!(!cfg.quiet);

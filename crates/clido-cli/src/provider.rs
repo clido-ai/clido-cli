@@ -19,7 +19,6 @@ impl AskUser for StdinAskUser {
         let tool_name = req.tool_name.clone();
         let description = req.description.clone();
         let diff = req.diff.clone();
-        let prompt = format!("Allow {} with input {}? [y/N] ", tool_name, description);
         let result = tokio::task::spawn_blocking(move || {
             // Show the unified diff before the permission prompt in diff-review mode.
             if let Some(d) = &diff {
@@ -31,26 +30,44 @@ impl AskUser for StdinAskUser {
                     }
                 }
             }
-            if cli_use_color() {
-                eprint!("{}{}{}", ansi::DIM, prompt, ansi::RESET);
-            } else {
-                eprint!("{}", prompt);
-            }
-            let _ = io::stderr().flush();
-            let mut line = String::new();
-            if io::stdin().read_line(&mut line).is_ok() {
-                let t = line.trim();
-                t.eq_ignore_ascii_case("y") || t.eq_ignore_ascii_case("yes")
-            } else {
-                false
+            loop {
+                let prompt = format!(
+                    "Allow {}? [y]es / [n]o / [a]lways / [d]isallow / [?]help: ",
+                    tool_name
+                );
+                if cli_use_color() {
+                    eprint!("{}{}{}", ansi::DIM, prompt, ansi::RESET);
+                } else {
+                    eprint!("{}", prompt);
+                }
+                let _ = io::stderr().flush();
+                let mut line = String::new();
+                if io::stdin().read_line(&mut line).is_err() {
+                    return PermGrant::Deny;
+                }
+                match line.trim().to_lowercase().as_str() {
+                    "y" | "yes" => return PermGrant::Allow,
+                    "n" | "no" => return PermGrant::Deny,
+                    "a" | "always" => return PermGrant::AllowAll,
+                    "d" | "disallow" => return PermGrant::Deny,
+                    "?" | "help" => {
+                        eprintln!("  Tool:  {}", tool_name);
+                        eprintln!("  Input: {}", description);
+                        eprintln!("  [y]es      — allow this invocation");
+                        eprintln!("  [n]o       — deny this invocation");
+                        eprintln!(
+                            "  [a]lways   — allow all tool calls for the rest of this session"
+                        );
+                        eprintln!("  [d]isallow — deny this invocation");
+                    }
+                    _ => {
+                        eprintln!("Unrecognised answer. Enter y, n, a, d, or ?");
+                    }
+                }
             }
         })
         .await;
-        if result.unwrap_or(false) {
-            PermGrant::Allow
-        } else {
-            PermGrant::Deny
-        }
+        result.unwrap_or(PermGrant::Deny)
     }
 }
 

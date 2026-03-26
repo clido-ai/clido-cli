@@ -147,6 +147,10 @@ pub struct AgentLoop {
     pub cumulative_input_tokens: u64,
     /// Cumulative output tokens from last run.
     pub cumulative_output_tokens: u64,
+    /// Cumulative cache-read input tokens from last run.
+    pub cumulative_cache_read_tokens: u64,
+    /// Cumulative cache-creation input tokens from last run.
+    pub cumulative_cache_creation_tokens: u64,
     /// Optional audit log for recording tool calls.
     audit_log: Option<Arc<std::sync::Mutex<AuditLog>>>,
     /// Optional hooks config for pre/post tool use.
@@ -182,6 +186,8 @@ impl AgentLoop {
             cumulative_cost_usd: 0.0,
             cumulative_input_tokens: 0,
             cumulative_output_tokens: 0,
+            cumulative_cache_read_tokens: 0,
+            cumulative_cache_creation_tokens: 0,
             audit_log: None,
             hooks: None,
             memory: None,
@@ -217,6 +223,8 @@ impl AgentLoop {
             cumulative_cost_usd: 0.0,
             cumulative_input_tokens: 0,
             cumulative_output_tokens: 0,
+            cumulative_cache_read_tokens: 0,
+            cumulative_cache_creation_tokens: 0,
             audit_log: None,
             hooks: None,
             memory: None,
@@ -301,6 +309,8 @@ impl AgentLoop {
         self.cumulative_cost_usd = 0.0;
         self.cumulative_input_tokens = 0;
         self.cumulative_output_tokens = 0;
+        self.cumulative_cache_read_tokens = 0;
+        self.cumulative_cache_creation_tokens = 0;
     }
 
     /// Immediately compact the conversation history, regardless of the compaction threshold.
@@ -378,6 +388,8 @@ impl AgentLoop {
         self.cumulative_cost_usd = 0.0;
         self.cumulative_input_tokens = 0;
         self.cumulative_output_tokens = 0;
+        self.cumulative_cache_read_tokens = 0;
+        self.cumulative_cache_creation_tokens = 0;
         const DEFAULT_INPUT_USD_PER_1M: f64 = 3.0;
         const DEFAULT_OUTPUT_USD_PER_1M: f64 = 15.0;
 
@@ -434,6 +446,10 @@ impl AgentLoop {
             self.cumulative_cost_usd += turn_cost;
             self.cumulative_input_tokens += response.usage.input_tokens;
             self.cumulative_output_tokens += response.usage.output_tokens;
+            self.cumulative_cache_read_tokens +=
+                response.usage.cache_read_input_tokens.unwrap_or(0);
+            self.cumulative_cache_creation_tokens +=
+                response.usage.cache_creation_input_tokens.unwrap_or(0);
 
             if let Some(limit) = self.config.max_budget_usd {
                 if self.cumulative_cost_usd > limit {
@@ -819,6 +835,8 @@ impl AgentLoop {
         self.cumulative_cost_usd = 0.0;
         self.cumulative_input_tokens = 0;
         self.cumulative_output_tokens = 0;
+        self.cumulative_cache_read_tokens = 0;
+        self.cumulative_cache_creation_tokens = 0;
         const DEFAULT_INPUT_USD_PER_1M: f64 = 3.0;
         const DEFAULT_OUTPUT_USD_PER_1M: f64 = 15.0;
 
@@ -875,6 +893,10 @@ impl AgentLoop {
             self.cumulative_cost_usd += turn_cost;
             self.cumulative_input_tokens += response.usage.input_tokens;
             self.cumulative_output_tokens += response.usage.output_tokens;
+            self.cumulative_cache_read_tokens +=
+                response.usage.cache_read_input_tokens.unwrap_or(0);
+            self.cumulative_cache_creation_tokens +=
+                response.usage.cache_creation_input_tokens.unwrap_or(0);
 
             if let Some(limit) = self.config.max_budget_usd {
                 if self.cumulative_cost_usd > limit {

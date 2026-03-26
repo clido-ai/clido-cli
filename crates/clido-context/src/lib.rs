@@ -3,7 +3,9 @@
 pub mod read_cache;
 pub mod rules;
 
-pub use rules::{assemble_rules_prompt, discover as discover_rules, RulesFile};
+pub use rules::{
+    assemble_rules_prompt, discover as discover_rules, discover_with_trust, RulesFile, TrustStore,
+};
 
 use clido_core::{ClidoError, ContentBlock, Message, Result};
 
@@ -17,6 +19,18 @@ pub fn load_and_assemble_rules(
     rules_file: Option<&std::path::Path>,
 ) -> String {
     let files = rules::discover(cwd, no_rules, rules_file);
+    rules::assemble_rules_prompt(&files)
+}
+
+/// Discover rules, applying trust-on-first-use gating for project-local files,
+/// then assemble them into a prompt string.
+pub fn load_and_assemble_rules_with_trust(
+    cwd: &std::path::Path,
+    no_rules: bool,
+    rules_file: Option<&std::path::Path>,
+    is_tty: bool,
+) -> String {
+    let files = rules::discover_with_trust(cwd, no_rules, rules_file, is_tty);
     rules::assemble_rules_prompt(&files)
 }
 

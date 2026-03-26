@@ -124,7 +124,15 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
     let cancel = make_cancel_token();
     let start = std::time::Instant::now();
 
-    let (result, num_turns, total_cost_usd, input_tokens, output_tokens) = match &resume_lines {
+    let (
+        result,
+        num_turns,
+        total_cost_usd,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_creation_tokens,
+    ) = match &resume_lines {
         Some(lines) => {
             let history = session_lines_to_messages(lines);
             if history.is_empty() {
@@ -153,6 +161,8 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
                     loop_.cumulative_cost_usd,
                     loop_.cumulative_input_tokens,
                     loop_.cumulative_output_tokens,
+                    loop_.cumulative_cache_read_tokens,
+                    loop_.cumulative_cache_creation_tokens,
                 )
             } else {
                 let mut loop_ = AgentLoop::new_with_history(
@@ -180,6 +190,8 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
                     loop_.cumulative_cost_usd,
                     loop_.cumulative_input_tokens,
                     loop_.cumulative_output_tokens,
+                    loop_.cumulative_cache_read_tokens,
+                    loop_.cumulative_cache_creation_tokens,
                 )
             }
         }
@@ -243,6 +255,8 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
                 loop_.cumulative_cost_usd,
                 loop_.cumulative_input_tokens,
                 loop_.cumulative_output_tokens,
+                loop_.cumulative_cache_read_tokens,
+                loop_.cumulative_cache_creation_tokens,
             )
         }
     };
@@ -284,6 +298,8 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
             model: &model,
             input_tokens,
             output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
         },
     )
 }
@@ -369,6 +385,8 @@ pub(crate) struct EmitResultParams<'a> {
     pub model: &'a str,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_creation_tokens: u64,
 }
 
 pub(crate) fn emit_result(
@@ -385,10 +403,14 @@ pub(crate) fn emit_result(
         model,
         input_tokens,
         output_tokens,
+        cache_read_tokens,
+        cache_creation_tokens,
     } = p;
     let usage = serde_json::json!({
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
+        "cache_read_input_tokens": cache_read_tokens,
+        "cache_creation_input_tokens": cache_creation_tokens,
     });
     match result {
         Ok(text) => {
@@ -586,6 +608,8 @@ mod tests {
                 model: "claude-sonnet-4-6",
                 input_tokens: 0,
                 output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
             },
         );
         assert!(result.is_ok());
@@ -605,6 +629,8 @@ mod tests {
                 model: "claude-sonnet-4-6",
                 input_tokens: 1500,
                 output_tokens: 45,
+                cache_read_tokens: 200,
+                cache_creation_tokens: 100,
             },
         );
         assert!(result.is_ok());
@@ -624,6 +650,8 @@ mod tests {
                 model: "claude-sonnet-4-6",
                 input_tokens: 800,
                 output_tokens: 30,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
             },
         );
         assert!(result.is_ok());
@@ -643,6 +671,8 @@ mod tests {
                 model: "claude-sonnet-4-6",
                 input_tokens: 50000,
                 output_tokens: 2000,
+                cache_read_tokens: 5000,
+                cache_creation_tokens: 1000,
             },
         );
         assert!(result.is_err());
@@ -662,6 +692,8 @@ mod tests {
                 model: "claude-sonnet-4-6",
                 input_tokens: 500,
                 output_tokens: 20,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
             },
         );
         assert!(result.is_ok());

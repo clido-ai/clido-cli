@@ -78,6 +78,36 @@ impl AgentSetup {
         )
         .map_err(|e| CliError::Usage(e.to_string()))?;
 
+        // Validate config ranges per spec:
+        // max_turns: > 0, ≤ 1000
+        if config.max_turns == 0 || config.max_turns > 1000 {
+            return Err(CliError::Config(format!(
+                "Invalid value for max_turns: {}. Must be > 0 and ≤ 1000.",
+                config.max_turns
+            ))
+            .into());
+        }
+        // max_budget_usd: ≥ 0
+        if let Some(budget) = config.max_budget_usd {
+            if budget < 0.0 {
+                return Err(CliError::Config(format!(
+                    "Invalid value for max_budget_usd: {}. Must be ≥ 0.",
+                    budget
+                ))
+                .into());
+            }
+        }
+        // compaction_threshold: in (0, 1]
+        if let Some(threshold) = config.compaction_threshold {
+            if threshold <= 0.0 || threshold > 1.0 {
+                return Err(CliError::Config(format!(
+                    "Invalid value for context.compaction_threshold: {}. Must be in (0, 1].",
+                    threshold
+                ))
+                .into());
+            }
+        }
+
         // Override with [agents.main] if present (newer config format).
         let provider = if let Some(main_slot) = &loaded.agents.main {
             let new_provider = build_provider_from_slot(main_slot).map_err(CliError::Usage)?;
@@ -166,10 +196,12 @@ impl AgentSetup {
             .rules_file
             .as_deref()
             .or_else(|| config.rules_file.as_ref().map(|s| Path::new(s.as_str())));
-        let rules = clido_context::load_and_assemble_rules(
+        let is_tty = io::stdin().is_terminal();
+        let rules = clido_context::load_and_assemble_rules_with_trust(
             workspace_root,
             cli.no_rules || config.no_rules,
             rules_file_path,
+            is_tty,
         );
         if !rules.is_empty() {
             if let Some(ref mut sp) = config.system_prompt {

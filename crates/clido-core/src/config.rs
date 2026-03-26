@@ -38,7 +38,9 @@ pub struct AgentConfig {
     #[serde(default)]
     pub quiet: bool,
     /// Max parallel tool calls for read-only tools (bounded concurrency). Default 4.
-    #[serde(default = "default_max_parallel_tools")]
+    /// Config key is `max_concurrent_tools` (per spec); CLI flag/env use `max_parallel_tools`.
+    /// Both names are accepted for compatibility.
+    #[serde(default = "default_max_parallel_tools", alias = "max_concurrent_tools")]
     pub max_parallel_tools: u32,
     /// Skip all CLIDO.md / rules file injection.
     #[serde(default)]
@@ -125,6 +127,40 @@ pub struct AgentsConfig {
     pub main: Option<AgentSlotConfig>,
     pub worker: Option<AgentSlotConfig>,
     pub reviewer: Option<AgentSlotConfig>,
+}
+
+/// Named role → model ID mapping (from `[roles]` in config.toml).
+/// Built-in roles: fast, reasoning, critic, planner. Arbitrary user-defined roles are allowed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RolesConfig {
+    /// Model for the "fast" role (e.g. a cheaper/quicker model).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fast: Option<String>,
+    /// Model for the "reasoning" role (e.g. a thinking/extended model).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+    /// Model for the "critic" role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub critic: Option<String>,
+    /// Model for the "planner" role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planner: Option<String>,
+    /// Arbitrary user-defined roles. Key is role name, value is model ID.
+    #[serde(flatten)]
+    pub extra: std::collections::HashMap<String, String>,
+}
+
+impl RolesConfig {
+    /// Look up a model ID for a named role. Checks built-in fields first, then extra.
+    pub fn resolve(&self, role: &str) -> Option<&str> {
+        match role {
+            "fast" => self.fast.as_deref(),
+            "reasoning" | "smart" => self.reasoning.as_deref(),
+            "critic" => self.critic.as_deref(),
+            "planner" => self.planner.as_deref(),
+            other => self.extra.get(other).map(|s| s.as_str()),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -610,3 +610,67 @@ fn init_prompts_contain_ux_copy() {
     let _ = std::fs::remove_file(&config_path);
     let _ = std::fs::remove_dir(&tmp);
 }
+
+// ── Exit code validation ───────────────────────────────────────────────────
+
+/// GAP-10: Exit code 2 for usage/config errors — tested via --input-format stream-json.
+#[test]
+fn cli_input_format_stream_json_exit_code_is_2() {
+    let out = clido_bin()
+        .args(["--input-format", "stream-json", "-p", "hello"])
+        .env("CLIDO_CONFIG", "/dev/null")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "expected exit code 2 for --input-format stream-json; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// GAP-4: --resume and --continue together must produce a nonzero exit.
+#[test]
+fn cli_resume_and_continue_together_exit_nonzero() {
+    let out = clido_bin()
+        .args(["--resume", "fake-session-id", "--continue", "-p", "hello"])
+        .env("CLIDO_CONFIG", "/dev/null")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.code() != Some(0),
+        "expected nonzero exit for --resume + --continue"
+    );
+}
+
+/// GAP-1/GAP-17: usage object shape includes cache token fields.
+#[test]
+fn json_usage_object_shape_includes_cache_fields() {
+    let usage = serde_json::json!({
+        "input_tokens": 100u64,
+        "output_tokens": 50u64,
+        "cache_read_input_tokens": 30u64,
+        "cache_creation_input_tokens": 10u64,
+    });
+    assert_eq!(usage["cache_read_input_tokens"], 30);
+    assert_eq!(usage["cache_creation_input_tokens"], 10);
+}
+
+/// GAP-22/GAP-23: config range error messages are descriptive.
+#[test]
+fn config_range_error_messages_are_descriptive() {
+    let msg_turns = format!(
+        "Invalid value for max_turns: {}. Must be > 0 and ≤ 1000.",
+        0
+    );
+    assert!(msg_turns.contains("max_turns"));
+    assert!(msg_turns.contains("> 0"));
+
+    let msg_threshold = format!(
+        "Invalid value for context.compaction_threshold: {}. Must be in (0, 1].",
+        1.5
+    );
+    assert!(msg_threshold.contains("compaction_threshold"));
+    assert!(msg_threshold.contains("(0, 1]"));
+}

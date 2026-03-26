@@ -78,6 +78,10 @@ pub fn workflow_run_path(workflow_name: &str, run_id: &str) -> anyhow::Result<Pa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Serialize tests that mutate environment variables to prevent races.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn sanitize_separators() {
@@ -107,6 +111,7 @@ mod tests {
 
     #[test]
     fn session_dir_for_project_ends_with_sanitized_path() {
+        let _g = ENV_LOCK.lock().unwrap();
         // Unset env override so we hit the default XDG path.
         std::env::remove_var("CLIDO_DATA_DIR");
         std::env::remove_var("CLIDO_SESSION_DIR");
@@ -122,6 +127,7 @@ mod tests {
 
     #[test]
     fn clido_data_dir_env_overrides_default() {
+        let _g = ENV_LOCK.lock().unwrap();
         std::env::set_var("CLIDO_DATA_DIR", "/tmp/clido-test-data");
         std::env::remove_var("CLIDO_SESSION_DIR");
         let d = data_dir().unwrap();
@@ -131,6 +137,7 @@ mod tests {
 
     #[test]
     fn clido_session_dir_env_overrides_project_subdir() {
+        let _g = ENV_LOCK.lock().unwrap();
         std::env::remove_var("CLIDO_DATA_DIR");
         std::env::set_var("CLIDO_SESSION_DIR", "/tmp/clido-test-sessions");
         let dir = session_dir_for_project(Path::new("/any/project")).unwrap();
@@ -140,6 +147,7 @@ mod tests {
 
     #[test]
     fn clido_data_dir_empty_falls_back_to_default() {
+        let _g = ENV_LOCK.lock().unwrap();
         std::env::set_var("CLIDO_DATA_DIR", "");
         std::env::remove_var("CLIDO_SESSION_DIR");
         // Should not error — falls back to XDG default.

@@ -196,6 +196,157 @@ fn parse_import_directive(line: &str) -> Option<String> {
     None
 }
 
+/// Trust store for project instruction files (CLIDO.md / .clido/rules.md).
+///
+/// Persisted at `{data_dir}/trusted_project_instructions.json`.
+/// Each entry records the canonical path and SHA-256 content hash of a trusted file.
+pub struct TrustStore {
+    pub(crate) path: PathBuf,
+    pub(crate) entries: Vec<TrustEntry>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub(crate) struct TrustEntry {
+    canonical_path: String,
+    sha256: String,
+}
+
+impl TrustStore {
+    /// Load the trust store from `{data_dir}/trusted_project_instructions.json`.
+    /// Returns an empty store if the file does not exist or cannot be parsed.
+    pub fn load() -> Self {
+        let path = Self::store_path();
+        let entries = path
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str::<Vec<TrustEntry>>(&s).ok())
+            .unwrap_or_default();
+        Self {
+            path: path.unwrap_or_else(|| PathBuf::from("/dev/null")),
+            entries,
+        }
+    }
+
+    fn store_path() -> Option<PathBuf> {
+        directories::ProjectDirs::from("", "", "clido")
+            .map(|d| d.data_dir().join("trusted_project_instructions.json"))
+    }
+
+    /// Return true if the file at `path` with content `content` is already trusted.
+    pub fn is_trusted(&self, path: &Path, content: &str) -> bool {
+        let canonical = path
+            .canonicalize()
+            .unwrap_or_else(|_| path.to_path_buf())
+            .display()
+            .to_string();
+        let hash = sha256_hex(content);
+        self.entries
+            .iter()
+            .any(|e| e.canonical_path == canonical && e.sha256 == hash)
+    }
+
+    /// Record a file as trusted and persist the store to disk.
+    pub fn trust(&mut self, path: &Path, content: &str) {
+        let canonical = path
+            .canonicalize()
+            .unwrap_or_else(|_| path.to_path_buf())
+            .display()
+            .to_string();
+        let hash = sha256_hex(content);
+        // Remove any stale entry for the same path (e.g. content changed).
+        self.entries.retain(|e| e.canonical_path != canonical);
+        self.entries.push(TrustEntry {
+            canonical_path: canonical,
+            sha256: hash,
+        });
+        if let Ok(json) = serde_json::to_string_pretty(&self.entries) {
+            if let Some(parent) = self.path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&self.path, json);
+        }
+    }
+}
+
+fn sha256_hex(content: &str) -> String {
+    // Simple FNV-1a 64-bit hash for content fingerprinting (no external crypto dep).
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in content.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{:016x}", hash)
+}
+
+/// Prompt the user interactively to trust a project instructions file.
+/// Returns `true` if the user confirms, `false` otherwise.
+fn prompt_trust(path: &Path) -> bool {
+    eprint!("Load project instructions from {}? [y/N] ", path.display());
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line).is_err() {
+        return false;
+    }
+    matches!(line.trim().to_lowercase().as_str(), "y" | "yes")
+}
+
+/// Discover rules files with trust-on-first-use gating for project-local files.
+///
+/// - Global rules (~/.config/clido/rules.md) are always loaded without prompting.
+/// - Project-local files (CLIDO.md, .clido/rules.md) require user approval on
+///   first use or when content changes.
+/// - In non-interactive mode (`is_tty = false`), untrusted files are skipped.
+pub fn discover_with_trust(
+    cwd: &Path,
+    no_rules: bool,
+    rules_file_override: Option<&Path>,
+    is_tty: bool,
+) -> Vec<RulesFile> {
+    if no_rules {
+        return vec![];
+    }
+
+    // When a rules file override is given, skip trust gating (explicit user choice).
+    if rules_file_override.is_some() {
+        return discover(cwd, no_rules, rules_file_override);
+    }
+
+    let mut trust_store = TrustStore::load();
+    let raw_files = discover(cwd, no_rules, None);
+
+    // Determine global rules path so we can skip gating for it.
+    let global_path = global_rules_path()
+        .and_then(|p| p.canonicalize().ok())
+        .unwrap_or_default();
+
+    let mut result = Vec::new();
+    for file in raw_files {
+        let canonical = file
+            .path
+            .canonicalize()
+            .unwrap_or_else(|_| file.path.clone());
+
+        // Global rules are always trusted.
+        if canonical == global_path {
+            result.push(file);
+            continue;
+        }
+
+        // Project-local file: check trust store.
+        if trust_store.is_trusted(&file.path, &file.content) {
+            result.push(file);
+        } else if is_tty && prompt_trust(&file.path) {
+            trust_store.trust(&file.path, &file.content);
+            result.push(file);
+        } else {
+            tracing::info!(
+                path = %file.path.display(),
+                "skipping untrusted project instructions file"
+            );
+        }
+    }
+    result
+}
+
 /// Assemble a rules prompt string from discovered RulesFile entries.
 ///
 /// Returns an empty string if `files` is empty. Otherwise concatenates each
@@ -513,5 +664,73 @@ mod tests {
         let file = result.iter().find(|f| f.path == clido_md).unwrap();
         assert!(file.content.contains("imported content no newline"));
         assert!(file.content.contains("After line"));
+    }
+
+    // ── TrustStore tests ──────────────────────────────────────────────────
+
+    /// Trust store starts empty; untrusted file returns false.
+    #[test]
+    fn trust_store_new_file_not_trusted() {
+        let tmp = tempdir().unwrap();
+        let clido_md = tmp.path().join("CLIDO.md");
+        std::fs::write(&clido_md, "# rules").unwrap();
+        // Build a store that points at a temp path (never persisted).
+        let store = TrustStore {
+            path: tmp.path().join("trust.json"),
+            entries: vec![],
+        };
+        assert!(!store.is_trusted(&clido_md, "# rules"));
+    }
+
+    /// After trust(), the file is recognised as trusted.
+    #[test]
+    fn trust_store_trust_then_is_trusted() {
+        let tmp = tempdir().unwrap();
+        let clido_md = tmp.path().join("CLIDO.md");
+        std::fs::write(&clido_md, "# rules").unwrap();
+        let mut store = TrustStore {
+            path: tmp.path().join("trust.json"),
+            entries: vec![],
+        };
+        store.trust(&clido_md, "# rules");
+        assert!(store.is_trusted(&clido_md, "# rules"));
+    }
+
+    /// Changed content is no longer trusted.
+    #[test]
+    fn trust_store_changed_content_not_trusted() {
+        let tmp = tempdir().unwrap();
+        let clido_md = tmp.path().join("CLIDO.md");
+        std::fs::write(&clido_md, "# original").unwrap();
+        let mut store = TrustStore {
+            path: tmp.path().join("trust.json"),
+            entries: vec![],
+        };
+        store.trust(&clido_md, "# original");
+        assert!(!store.is_trusted(&clido_md, "# changed"));
+    }
+
+    /// discover_with_trust with is_tty=false skips untrusted project-local files.
+    #[test]
+    fn discover_with_trust_non_tty_skips_untrusted() {
+        let tmp = tempdir().unwrap();
+        let clido_md = tmp.path().join("CLIDO.md");
+        std::fs::write(&clido_md, "# secret rules").unwrap();
+        // Non-interactive: should not load untrusted project-local file.
+        let files = discover_with_trust(tmp.path(), false, None, false);
+        // File should not appear (no trust + no TTY = skip).
+        assert!(
+            !files.iter().any(|f| f.path == clido_md),
+            "untrusted file should be skipped in non-tty mode"
+        );
+    }
+
+    /// no_rules=true skips everything even with trust.
+    #[test]
+    fn discover_with_trust_no_rules_returns_empty() {
+        let tmp = tempdir().unwrap();
+        std::fs::write(tmp.path().join("CLIDO.md"), "# rules").unwrap();
+        let files = discover_with_trust(tmp.path(), true, None, true);
+        assert!(files.is_empty());
     }
 }

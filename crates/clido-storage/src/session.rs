@@ -87,13 +87,13 @@ fn redact_token(s: &str, start: usize) -> String {
 
 /// Redact known API key patterns from a JSON string before persisting to disk.
 ///
-/// Handles: Anthropic (`sk-ant-`), OpenRouter (`sk-or-`), OpenAI (`sk-proj-`, `sk-`),
-/// AWS access keys (`AKIA`), and common `_key`/`_token`/`_secret` env var assignments.
+/// Handles: Anthropic (`sk-ant-`), OpenRouter (`sk-or-`), OpenAI (`sk-proj-`),
+/// generic `sk-` keys (for providers that share this prefix), and AWS access
+/// keys (`AKIA`).
 /// This operates on the raw JSON string so it works across all field types without
 /// needing to know the schema.
 pub fn redact_secrets(s: &str) -> String {
-    // Ordered: longer/more-specific prefixes first to avoid partial matches.
-    const PREFIXES: &[&str] = &["sk-ant-", "sk-or-", "sk-proj-", "AKIA"];
+    const PREFIXES: &[&str] = &["sk-ant-", "sk-or-", "sk-proj-", "sk-", "AKIA"];
 
     let mut result = s.to_string();
     for prefix in PREFIXES {
@@ -102,6 +102,20 @@ pub fn redact_secrets(s: &str) -> String {
             match result[search_from..].find(prefix) {
                 None => break,
                 Some(rel) => {
+                    // Avoid double-redacting provider-specific keys when scanning generic `sk-`.
+                    if *prefix == "sk-" {
+                        let after = &result[search_from + rel + prefix.len()..];
+                        if after.starts_with("ant-")
+                            || after.starts_with("or-")
+                            || after.starts_with("proj-")
+                        {
+                            search_from = search_from + rel + prefix.len();
+                            if search_from >= result.len() {
+                                break;
+                            }
+                            continue;
+                        }
+                    }
                     let abs = search_from + rel + prefix.len();
                     result = redact_token(&result, abs);
                     // Advance past the prefix to avoid infinite loop.
@@ -259,11 +273,11 @@ pub fn stale_paths(records: &[StaleFileRecord]) -> Vec<String> {
                 .ok()
                 .map(|d| d.as_nanos() as u64)
         });
-        let Ok(content) = std::fs::read_to_string(&r.path) else {
+        let Ok(content) = std::fs::read(&r.path) else {
             stale.push(r.path.clone());
             continue;
         };
-        let hash = Sha256::digest(content.as_bytes());
+        let hash = Sha256::digest(&content);
         let current_hash = hex::encode(hash);
         if mtime_nanos != Some(r.mtime_nanos) || current_hash != r.content_hash {
             stale.push(r.path.clone());
@@ -638,21 +652,30 @@ mod tests {
         assert!(msg.contains("newer than supported"), "got: {}", msg);
     }
 
-    /// Lines 199-200: stale_paths pushes path when file is unreadable as string (binary file).
+    /// stale_paths supports binary files by hashing raw bytes.
     #[cfg(unix)]
     #[test]
-    fn stale_paths_unreadable_file_is_stale() {
+    fn stale_paths_binary_file_with_matching_hash_is_not_stale() {
         let dir = tempfile::tempdir().unwrap();
-        // Write a file with non-UTF8 bytes so read_to_string fails
+        // Non-UTF8 binary bytes.
         let file_path = dir.path().join("binary.bin");
-        std::fs::write(&file_path, &[0xFF, 0xFE, 0x00, 0x01]).unwrap();
+        let bytes = vec![0xFF, 0xFE, 0x00, 0x01, 0xAA];
+        std::fs::write(&file_path, &bytes).unwrap();
+        let meta = std::fs::metadata(&file_path).unwrap();
+        let mtime = meta
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+        let hash = hex::encode(Sha256::digest(&bytes));
         let records = vec![StaleFileRecord {
             path: file_path.to_string_lossy().to_string(),
-            content_hash: "irrelevant".into(),
-            mtime_nanos: 0,
+            content_hash: hash,
+            mtime_nanos: mtime,
         }];
         let stale = stale_paths(&records);
-        assert_eq!(stale.len(), 1);
+        assert!(stale.is_empty(), "matching binary file should not be stale");
     }
 
     /// Line 205: stale_paths detects hash mismatch even when mtime matches.
@@ -755,6 +778,22 @@ mod tests {
         let r = redact_secrets(s);
         assert!(!r.contains("deadbeefcafe1234"));
         assert!(r.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn redact_secrets_replaces_generic_sk_key() {
+        let s = r#"{"token":"sk-legacy-abcdef123456"}"#;
+        let r = redact_secrets(s);
+        assert!(!r.contains("legacy-abcdef123456"));
+        assert!(r.contains("sk-[REDACTED]"));
+    }
+
+    #[test]
+    fn redact_secrets_does_not_double_redact_provider_specific_sk_key() {
+        let s = r#"{"token":"sk-ant-api03-secretvalue123"}"#;
+        let r = redact_secrets(s);
+        assert_eq!(r.matches("[REDACTED]").count(), 1);
+        assert!(r.contains("sk-ant-[REDACTED]"));
     }
 
     #[test]

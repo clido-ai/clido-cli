@@ -7,7 +7,7 @@ use clido_core::{
     Result as CoreResult,
 };
 use clido_storage::{workflow_run_path, SessionWriter};
-use clido_tools::default_registry;
+use clido_tools::default_registry_with_options;
 use clido_workflows::{
     load as load_workflow, preflight as preflight_workflow, render,
     run_workflow as run_workflow_exec, validate as validate_workflow, PreflightStatus,
@@ -17,29 +17,32 @@ use std::env;
 use std::io::Write;
 use std::path::Path;
 
-use crate::cli::WorkflowCmd;
+use crate::cli::{Cli, WorkflowCmd};
 use crate::errors::CliError;
 use crate::provider::make_provider;
 use crate::ui::{ansi, cli_use_color};
 
-pub async fn run_workflow(cmd: &WorkflowCmd) -> Result<(), anyhow::Error> {
+pub async fn run_workflow(cli: &Cli, cmd: &WorkflowCmd) -> Result<(), anyhow::Error> {
     match cmd {
         WorkflowCmd::Run {
             workflow,
             input,
             dry_run,
             yes: _,
-        } => run_workflow_run(workflow, input, *dry_run).await,
+        } => run_workflow_run(cli, workflow, input, *dry_run).await,
         WorkflowCmd::Validate { path } => run_workflow_validate(path).await,
         WorkflowCmd::Inspect { path } => run_workflow_inspect(path).await,
         WorkflowCmd::List => run_workflow_list().await,
-        WorkflowCmd::Check { path, json } => run_workflow_check(path, *json).await,
+        WorkflowCmd::Check { path, json } => run_workflow_check(cli, path, *json).await,
     }
 }
 
 struct CliWorkflowRunner {
     workspace_root: std::path::PathBuf,
     run_id: String,
+    sandbox: bool,
+    mcp_config: Option<std::path::PathBuf>,
+    quiet: bool,
 }
 
 #[async_trait]
@@ -60,7 +63,16 @@ impl WorkflowStepRunner for CliWorkflowRunner {
         let provider =
             make_provider(profile_name, profile, None, None).map_err(ClidoError::Workflow)?;
         let model = profile.model.clone();
-        let mut registry = default_registry(self.workspace_root.clone());
+        let blocked = clido_core::global_config_path()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut registry =
+            default_registry_with_options(self.workspace_root.clone(), blocked, self.sandbox);
+        registry = crate::agent_setup::load_mcp_tools_from_path(
+            self.mcp_config.as_deref(),
+            self.quiet,
+            registry,
+        );
         registry = registry.with_filters(request.tools, None);
         if registry.schemas().is_empty() {
             return Err(ClidoError::Workflow(
@@ -122,6 +134,7 @@ impl WorkflowStepRunner for CliWorkflowRunner {
 }
 
 async fn run_workflow_run(
+    cli: &Cli,
     workflow: &str,
     input: &[String],
     dry_run: bool,
@@ -157,6 +170,9 @@ async fn run_workflow_run(
     let runner = CliWorkflowRunner {
         workspace_root: workspace_root.clone(),
         run_id: run_id.clone(),
+        sandbox: cli.sandbox,
+        mcp_config: cli.mcp_config.clone(),
+        quiet: cli.quiet,
     };
     let audit_path = workflow_run_path(&def.name, &run_id).ok();
     let summary = run_workflow_exec(&def, &mut context, &runner, audit_path.as_deref()).await?;
@@ -253,7 +269,7 @@ async fn run_workflow_list() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-async fn run_workflow_check(path: &Path, json: bool) -> Result<(), anyhow::Error> {
+async fn run_workflow_check(cli: &Cli, path: &Path, json: bool) -> Result<(), anyhow::Error> {
     let workspace_root = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let def = load_workflow(path).map_err(|e| CliError::Usage(e.to_string()))?;
     // Gather available profiles and tools from config
@@ -261,7 +277,16 @@ async fn run_workflow_check(path: &Path, json: bool) -> Result<(), anyhow::Error
         Ok(loaded) => {
             let profiles: Vec<String> = loaded.profiles.keys().cloned().collect();
             let tools: Vec<String> = {
-                let reg = clido_tools::default_registry(workspace_root.clone());
+                let blocked = clido_core::global_config_path()
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                let mut reg =
+                    default_registry_with_options(workspace_root.clone(), blocked, cli.sandbox);
+                reg = crate::agent_setup::load_mcp_tools_from_path(
+                    cli.mcp_config.as_deref(),
+                    cli.quiet,
+                    reg,
+                );
                 reg.schemas().into_iter().map(|s| s.name).collect()
             };
             (profiles, tools)

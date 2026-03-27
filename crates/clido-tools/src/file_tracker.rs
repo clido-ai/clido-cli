@@ -70,7 +70,6 @@ impl FileTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn new_creates_empty_tracker() {

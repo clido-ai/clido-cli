@@ -10,9 +10,17 @@
 use async_trait::async_trait;
 use clido_core::AgentConfig;
 use clido_providers::ModelProvider;
-use clido_tools::{default_registry, Tool, ToolOutput};
+use clido_tools::{default_registry_with_options, Tool, ToolOutput};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+fn subagent_registry(workspace: &std::path::Path) -> clido_tools::ToolRegistry {
+    // Mirror main agent safety rule: never expose the global config file to tools.
+    let blocked = clido_core::global_config_path()
+        .into_iter()
+        .collect::<Vec<_>>();
+    default_registry_with_options(workspace.to_path_buf(), blocked, false)
+}
 
 /// Spawn a worker sub-agent for mechanical subtasks (filtering, summarizing, extracting, formatting).
 /// The worker runs with a narrow context slice and returns structured output.
@@ -109,7 +117,7 @@ impl Tool for SpawnWorkerTool {
             output_format, context, task
         );
 
-        let worker_registry = default_registry(self.workspace.clone());
+        let worker_registry = subagent_registry(&self.workspace);
         let mut sub =
             clido_agent::SubAgent::new(self.provider.clone(), worker_registry, self.config.clone());
 
@@ -221,7 +229,7 @@ impl Tool for SpawnReviewerTool {
             criteria, output
         );
 
-        let reviewer_registry = default_registry(self.workspace.clone());
+        let reviewer_registry = subagent_registry(&self.workspace);
         let mut sub = clido_agent::SubAgent::new(
             self.provider.clone(),
             reviewer_registry,

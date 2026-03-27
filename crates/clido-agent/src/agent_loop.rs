@@ -1217,7 +1217,7 @@ impl AgentLoop {
                         match ask.ask(req).await {
                             PermGrant::Allow | PermGrant::AllowAll => {}
                             PermGrant::Deny | PermGrant::EditInEditor => {
-                                return ToolOutput::err("User denied the tool call.".to_string());
+                                return ToolOutput::err(format!("User denied tool '{}'.", name));
                             }
                         }
                     } else {
@@ -1253,7 +1253,10 @@ impl AgentLoop {
                             PermGrant::Allow => {}
                             PermGrant::AllowAll => {}
                             PermGrant::Deny => {
-                                return ToolOutput::err("Write rejected by user.".to_string());
+                                return ToolOutput::err(format!(
+                                    "User denied tool '{}' in diff-review mode.",
+                                    name
+                                ));
                             }
                             PermGrant::EditInEditor => {
                                 // Open editor, then re-route to write the edited content
@@ -1305,15 +1308,17 @@ impl AgentLoop {
         duration_ms: u64,
     ) {
         if let Some(ref audit) = self.audit_log {
+            let input_summary = clido_storage::redact_secrets(
+                &serde_json::to_string(tool_input).unwrap_or_default(),
+            )
+            .chars()
+            .take(200)
+            .collect();
             let entry = AuditEntry {
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 session_id: String::new(),
                 tool_name: tool_name.to_string(),
-                input_summary: serde_json::to_string(tool_input)
-                    .unwrap_or_default()
-                    .chars()
-                    .take(200)
-                    .collect(),
+                input_summary,
                 is_error: output.is_error,
                 duration_ms,
             };
@@ -1688,6 +1693,15 @@ mod tests {
     use std::pin::Pin;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+
+    struct DenyAskUser;
+
+    #[async_trait]
+    impl AskUser for DenyAskUser {
+        async fn ask(&self, _req: PermRequest) -> PermGrant {
+            PermGrant::Deny
+        }
+    }
 
     /// Minimal mock provider that always returns a fixed text response.
     struct MockProvider {
@@ -2628,6 +2642,35 @@ mod tests {
         assert_eq!(result, "hooked response");
     }
 
+    #[test]
+    fn write_audit_redacts_secret_tokens_in_input_summary() {
+        let provider = Arc::new(MockProvider::new("ok"));
+        let reg = empty_registry();
+        let cfg = mock_config();
+        let project = tempfile::tempdir().unwrap();
+        let audit = clido_storage::AuditLog::open(project.path()).unwrap();
+        let audit = Arc::new(std::sync::Mutex::new(audit));
+        let loop_ = AgentLoop::new(provider, reg, cfg, None).with_audit_log(audit);
+
+        loop_.write_audit(
+            "Bash",
+            &serde_json::json!({"command":"echo sk-or-v1-verysecretkey"}),
+            &clido_tools::ToolOutput::ok("ok".to_string()),
+            1,
+        );
+
+        let audit_path = clido_storage::audit_log_path(project.path()).unwrap();
+        let content = std::fs::read_to_string(audit_path).unwrap();
+        assert!(
+            !content.contains("verysecretkey"),
+            "audit input summary should not contain raw secret values"
+        );
+        assert!(
+            content.contains("[REDACTED]"),
+            "audit input summary should include redaction marker"
+        );
+    }
+
     // ── session_lines_to_messages edge cases ──────────────────────────────
 
     #[test]
@@ -2732,5 +2775,26 @@ mod tests {
             AgentLoop::new(provider, empty_registry(), mock_config(), None).with_emitter(emitter);
         let result = agent.run("hello", None, None, None).await.unwrap();
         assert_eq!(result, "emitted response");
+    }
+
+    #[tokio::test]
+    async fn execute_tool_maybe_gated_denial_mentions_tool_name() {
+        let provider = Arc::new(MockProvider::new("ok"));
+        let mut cfg = mock_config();
+        cfg.permission_mode = PermissionMode::Default;
+        let ask_user: Arc<dyn AskUser> = Arc::new(DenyAskUser);
+        let mut agent = AgentLoop::new(provider, empty_registry(), cfg, Some(ask_user));
+
+        let out = agent
+            .execute_tool_maybe_gated(
+                "Write",
+                &serde_json::json!({"path":"deny_test.txt","content":"x"}),
+            )
+            .await;
+        assert!(out.is_error);
+        assert!(
+            out.content.contains("Write"),
+            "error should include tool name"
+        );
     }
 }

@@ -7,7 +7,19 @@
 set -e
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-RELEASES_DIR="$REPO_ROOT/devdocs/plans/releases"
+RELEASES_DIR=""
+for candidate in "$REPO_ROOT/devdocs/plans/releases" "$REPO_ROOT/docs/plans/releases"; do
+  if [[ -d "$candidate" ]]; then
+    RELEASES_DIR="$candidate"
+    break
+  fi
+done
+
+# Default to legacy location for clearer error messaging when neither exists.
+if [[ -z "$RELEASES_DIR" ]]; then
+  RELEASES_DIR="$REPO_ROOT/devdocs/plans/releases"
+fi
+
 CURRENT_FILE="$RELEASES_DIR/CURRENT"
 
 if ! command -v yq >/dev/null 2>&1; then
@@ -17,6 +29,9 @@ fi
 
 if [[ ! -f "$CURRENT_FILE" ]]; then
   echo "Missing $CURRENT_FILE (active release). Create it with a single line, e.g. v1"
+  if [[ "$RELEASES_DIR" == "$REPO_ROOT/devdocs/plans/releases" ]]; then
+    echo "Tip: if your repo uses docs/ plans, create docs/plans/releases/CURRENT and DoD files there."
+  fi
   exit 1
 fi
 

@@ -295,6 +295,7 @@ impl LoadedConfig {
             "openrouter",
             "openai",
             "mistral",
+            "minimax",
             "local",
             "alibabacloud",
         ];
@@ -805,6 +806,7 @@ mod tests {
             "openrouter",
             "openai",
             "mistral",
+            "minimax",
             "local",
             "alibabacloud",
         ] {

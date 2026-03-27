@@ -216,12 +216,12 @@ Type `/` in the input bar to see completions. Available commands:
 | `/pr [title]` | Create a pull request |
 | `/branch <name>` | Create and switch to a new branch |
 | `/sync` | Pull --rebase from upstream, resolve conflicts if needed |
-| `/undo` | Undo the last committed change |
-| `/rollback [id]` | Restore to a checkpoint |
+| `/undo` | Undo the last commit safely (asks for confirmation before reset) |
+| `/rollback [id]` | Restore to a checkpoint or commit (with explicit destructive-action confirmation) |
 | `/index` | Show repo index status |
 | `/rules` | Show active CLIDO.md rules files |
 | `/settings` | Open settings editor (roles, default model) |
-| `/workdir [path]` | Show or set working directory |
+| `/workdir [path]` | Show or request a working-directory switch (applies after runtime confirmation) |
 | `/check` | Run diagnostics on current project |
 | `/copy` | Copy last assistant message to clipboard |
 | `/image <path>` | Attach an image to the next message |
@@ -329,7 +329,7 @@ cargo test --workspace            # run all tests
 cargo bench -p clido-cli          # run startup benchmarks
 ```
 
-See [Local development and testing](devdocs/guides/local-development-testing.md) for environment setup (API keys, config) and [Implementation bootstrap](devdocs/guides/implementation-bootstrap.md) for contributor workflow.
+See [Building](docs/developer/building.md) for build/test commands and [Contributing](docs/developer/contributing.md) for contributor workflow.
 
 ## Status
 
@@ -339,13 +339,18 @@ See [Local development and testing](devdocs/guides/local-development-testing.md)
 
 | Doc | Description |
 | --- | --- |
-| [Implementation bootstrap](devdocs/guides/implementation-bootstrap.md) | Where to start, canonical doc order, locked pre-build decisions |
-| [Development plan](devdocs/plans/development-plan.md) | Architecture, Rust workspace, phased roadmap |
-| [CLI interface spec](devdocs/plans/cli-interface-specification.md) | Canonical command surface and behavior |
-| [UX requirements](devdocs/plans/ux-requirements.md) | Interactive copy, script intros, visual design (functional and clear) |
-| [Releases](devdocs/plans/releases/README.md) | V1 → V4 scope and exit criteria |
-| [Config reference](devdocs/schemas/config.md) | `config.toml`, `.clido/config.toml`, and `pricing.toml` schema |
-| [Testing strategy](devdocs/guides/testing-strategy-and-master-test-plan.md) | Full validation strategy and test taxonomy |
+| [Architecture](docs/developer/architecture.md) | Runtime architecture and component boundaries |
+| [CLI reference](docs/reference/cli.md) | Canonical command surface and behavior |
+| [Flags reference](docs/reference/flags.md) | Global flags and semantics |
+| [Slash commands](docs/reference/slash-commands.md) | TUI slash command catalog |
+| [Configuration reference](docs/reference/config.md) | `config.toml` and profile schema |
+| [Environment variables](docs/reference/env-vars.md) | Runtime env var overrides |
+| [Output formats](docs/reference/output-formats.md) | Text, JSON, and stream output contracts |
+| [Key bindings](docs/reference/key-bindings.md) | TUI interaction model |
+| [Workflows guide](docs/guide/workflows.md) | Declarative workflow authoring and execution |
+| [Planner guide](docs/guide/planner.md) | Planner behavior, review, and execution |
+| [MCP guide](docs/guide/mcp.md) | MCP server configuration and usage |
+| [Contributing](docs/developer/contributing.md) | Project conventions and contributor workflow |
 
 ## License
 

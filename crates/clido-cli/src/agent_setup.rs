@@ -319,11 +319,15 @@ pub fn global_config_path() -> Option<std::path::PathBuf> {
     directories::ProjectDirs::from("", "", "clido").map(|d| d.config_dir().join("config.toml"))
 }
 
-/// If --mcp-config is provided, spawn MCP servers and register their tools.
+/// If an MCP config path is provided, spawn MCP servers and register their tools.
 /// Errors are printed to stderr but never fatal — the agent runs with whatever
 /// tools were successfully registered.
-fn load_mcp_tools(cli: &Cli, mut registry: ToolRegistry) -> ToolRegistry {
-    let Some(ref mcp_path) = cli.mcp_config else {
+pub(crate) fn load_mcp_tools_from_path(
+    mcp_path: Option<&std::path::Path>,
+    quiet: bool,
+    mut registry: ToolRegistry,
+) -> ToolRegistry {
+    let Some(mcp_path) = mcp_path else {
         return registry;
     };
     use clido_tools::load_mcp_config;
@@ -352,7 +356,7 @@ fn load_mcp_tools(cli: &Cli, mut registry: ToolRegistry) -> ToolRegistry {
                             let tool_name = tool_def.name.clone();
                             let mcp_tool = McpTool::new(tool_def, client_arc.clone());
                             registry.register(mcp_tool);
-                            if !cli.quiet {
+                            if !quiet {
                                 eprintln!("MCP tool registered: {}/{}", server_name, tool_name);
                             }
                         }
@@ -362,6 +366,10 @@ fn load_mcp_tools(cli: &Cli, mut registry: ToolRegistry) -> ToolRegistry {
         }
     }
     registry
+}
+
+fn load_mcp_tools(cli: &Cli, registry: ToolRegistry) -> ToolRegistry {
+    load_mcp_tools_from_path(cli.mcp_config.as_deref(), cli.quiet, registry)
 }
 
 fn build_registry(

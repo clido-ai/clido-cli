@@ -76,7 +76,7 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "/branch",
                 "create + switch to a new branch. Usage: /branch <name>",
             ),
-            ("/undo", "undo last committed change (git reset HEAD~1)"),
+            ("/undo", "undo last commit safely (confirm before reset)"),
             (
                 "/rollback",
                 "restore to a checkpoint. Usage: /rollback [id]",
@@ -212,6 +212,13 @@ struct PermsState {
     workdir_open: bool,
 }
 
+impl PermsState {
+    fn clear_all_grants(&mut self) {
+        self.session_allowed.clear();
+        self.workdir_open = false;
+    }
+}
+
 // ── Agent → TUI events ────────────────────────────────────────────────────────
 
 enum AgentEvent {
@@ -256,6 +263,10 @@ enum AgentEvent {
     /// Emitted when the session model is switched (via /model, /fast, /smart).
     ModelSwitched {
         to_model: String,
+    },
+    /// Emitted when background runtime successfully switches workdir/tooling.
+    WorkdirSwitched {
+        path: std::path::PathBuf,
     },
     /// Plan generated and ready for user review (--plan mode).
     PlanReady {
@@ -827,6 +838,9 @@ struct App {
     /// Channel to trigger immediate context compaction in agent_task.
     compact_now_tx: mpsc::UnboundedSender<()>,
     /// Last plan produced by the planner (--planner mode) or parsed from a /plan <task> response.
+    /// This is the canonical in-memory representation used for save + display.
+    last_plan_snapshot: Option<Plan>,
+    /// Convenience list of top-level task descriptions derived from `last_plan_snapshot`.
     last_plan: Option<Vec<String>>,
     /// Raw text of the last plan response — used by the text editor to show unmodified formatting.
     last_plan_raw: Option<String>,
@@ -942,6 +956,7 @@ impl App {
             session_total_cost_usd: 0.0,
             context_max_tokens: 0,
             compact_now_tx,
+            last_plan_snapshot: None,
             last_plan: None,
             last_plan_raw: None,
             awaiting_plan_response: false,
@@ -1120,7 +1135,8 @@ impl App {
             // Cancel the running agent turn, then queue this as next prompt.
             self.cancel
                 .store(true, std::sync::atomic::Ordering::Relaxed);
-            self.queued.push_back(text);
+            // Prioritize this prompt ahead of already queued inputs.
+            self.queued.push_front(text);
             self.input.clear();
             self.cursor = 0;
             self.push(ChatLine::Info("  (interrupted — sending next)".into()));
@@ -1212,60 +1228,20 @@ impl App {
             self.awaiting_plan_response = false;
             if let Some(text) = self.last_assistant_text().map(|s| s.to_string()) {
                 self.last_plan_raw = Some(text.clone());
-                let mut tasks = parse_plan_from_text(&text);
-                // Fallback: if structured parsing found nothing, treat every non-empty line as a step
-                if tasks.is_empty() {
-                    tasks = text
-                        .lines()
-                        .map(|l| l.trim().to_string())
-                        .filter(|l| !l.is_empty())
-                        .collect();
-                }
-                if !tasks.is_empty() {
-                    // Auto-save to disk so /plan list works
-                    let ts = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let slug: String = tasks
-                        .first()
-                        .unwrap_or(&String::new())
-                        .chars()
-                        .filter(|c| c.is_alphanumeric() || *c == ' ')
-                        .take(30)
-                        .collect::<String>()
-                        .trim()
-                        .replace(' ', "_")
-                        .to_lowercase();
-                    let id = format!("{}_{}", slug, ts);
-                    let plan = clido_planner::Plan {
-                        meta: clido_planner::PlanMeta {
-                            id,
-                            goal: tasks.first().cloned().unwrap_or_default(),
-                            created_at: ts.to_string(),
-                        },
-                        tasks: tasks
-                            .iter()
-                            .enumerate()
-                            .map(|(i, t)| clido_planner::TaskNode {
-                                id: format!("{}", i + 1),
-                                description: t.clone(),
-                                status: clido_planner::TaskStatus::Pending,
-                                depends_on: vec![],
-                                complexity: clido_planner::Complexity::Medium,
-                                notes: String::new(),
-                                tools: None,
-                                skip: false,
-                            })
-                            .collect(),
-                    };
+                if let Some(plan) = build_plan_from_assistant_text(&text) {
                     if let Err(e) = clido_planner::save_plan(&self.workspace_root, &plan) {
                         self.push(ChatLine::Info(format!(
                             "  warning: could not save plan: {}",
                             e
                         )));
                     }
-                    self.last_plan = Some(tasks);
+                    self.last_plan = Some(
+                        plan.tasks
+                            .iter()
+                            .map(|t| t.description.clone())
+                            .collect::<Vec<_>>(),
+                    );
+                    self.last_plan_snapshot = Some(plan);
                 }
             }
         }
@@ -3012,6 +2988,97 @@ fn modal_row_two_col(
     ])
 }
 
+/// Build a deterministic plan snapshot from assistant text.
+/// This is the canonical path used for both saving and display.
+fn build_plan_from_assistant_text(text: &str) -> Option<Plan> {
+    let mut tasks = parse_plan_from_text(text);
+    if tasks.is_empty() {
+        // Deterministic fallback: every non-empty line becomes one step in order.
+        tasks = text
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+    }
+    if tasks.is_empty() {
+        return None;
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let goal = tasks.first().cloned().unwrap_or_default();
+    let slug: String = goal
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ')
+        .take(30)
+        .collect::<String>()
+        .trim()
+        .replace(' ', "_")
+        .to_lowercase();
+    Some(clido_planner::Plan {
+        meta: clido_planner::PlanMeta {
+            id: format!("{}_{}", slug, ts),
+            goal,
+            created_at: ts.to_string(),
+        },
+        tasks: tasks
+            .iter()
+            .enumerate()
+            .map(|(i, t)| clido_planner::TaskNode {
+                id: format!("{}", i + 1),
+                description: t.clone(),
+                status: clido_planner::TaskStatus::Pending,
+                depends_on: vec![],
+                complexity: clido_planner::Complexity::Medium,
+                notes: String::new(),
+                tools: None,
+                skip: false,
+            })
+            .collect(),
+    })
+}
+
+fn build_plan_from_tasks(tasks: &[String]) -> Option<Plan> {
+    if tasks.is_empty() {
+        return None;
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let goal = tasks.first().cloned().unwrap_or_default();
+    let slug: String = goal
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ')
+        .take(30)
+        .collect::<String>()
+        .trim()
+        .replace(' ', "_")
+        .to_lowercase();
+    Some(clido_planner::Plan {
+        meta: clido_planner::PlanMeta {
+            id: format!("{}_{}", slug, ts),
+            goal,
+            created_at: ts.to_string(),
+        },
+        tasks: tasks
+            .iter()
+            .enumerate()
+            .map(|(i, t)| clido_planner::TaskNode {
+                id: format!("{}", i + 1),
+                description: t.clone(),
+                status: clido_planner::TaskStatus::Pending,
+                depends_on: vec![],
+                complexity: clido_planner::Complexity::Medium,
+                notes: String::new(),
+                tools: None,
+                skip: false,
+            })
+            .collect(),
+    })
+}
+
 /// Strip leading markdown noise so plan lines like `**Step 1:**` match.
 fn strip_plan_line_prefix(line: &str) -> String {
     let mut t = line.trim();
@@ -3514,14 +3581,13 @@ fn execute_slash(app: &mut App, cmd: &str) {
             let arg = cmd.trim_start_matches("/workdir").trim();
             match resolve_workdir_arg(arg) {
                 Ok(path) => {
-                    app.workspace_root = path.clone();
                     let _ = app.workdir_tx.send(path.clone());
                     app.push(ChatLine::Info(format!(
-                        "  workdir set to {}",
+                        "  workdir switch requested: {}",
                         path.display()
                     )));
                     app.push(ChatLine::Info(
-                        "  note: session files & resume stay on the original project path until restart."
+                        "  waiting for runtime confirmation; prompts stay on current workdir until then."
                             .into(),
                     ));
                 }
@@ -3625,10 +3691,11 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 Steps:\n\
                 1. Run `git log --oneline -5` to show the 5 most recent commits.\n\
                 2. Run `git status` to check for any uncommitted changes.\n\
-                3. If there is a recent commit to undo, run `git reset HEAD~1` to \
-                   undo the last commit and leave the changes staged.\n\
-                4. Show what files are now staged and a brief summary of what was undone.\n\
-                5. If there are only uncommitted changes (nothing committed yet), \
+                3. Ask the user to confirm before running any reset command.\n\
+                4. If there is a recent commit to undo, run `git reset --soft HEAD~1` to \
+                   undo the last commit and keep the changes staged.\n\
+                5. Show what files are now staged and a brief summary of what was undone.\n\
+                6. If there are only uncommitted changes (nothing committed yet), \
                    ask the user which files to restore before acting."
                     .to_string(),
             );
@@ -3655,11 +3722,13 @@ fn execute_slash(app: &mut App, cmd: &str) {
                     Steps:\n\
                     1. Check if `{id}` looks like a git commit hash (7-40 hex chars) or a \
                        checkpoint ID (starts with `ck_`).\n\
-                    2. For a git commit hash: run `git reset --hard {id}` after confirming \
-                       with the user that any uncommitted changes will be lost.\n\
-                    3. For a checkpoint ID: restore from `.clido/checkpoints/{id}/manifest.json` \
+                    2. For a git commit hash: run `git status` first and show any uncommitted changes.\n\
+                    3. Ask the user for explicit confirmation before any destructive rollback.\n\
+                    4. If confirmed, create a safety backup (for example `git branch backup/before-rollback`) \
+                       before running `git reset --hard {id}`.\n\
+                    5. For a checkpoint ID: restore from `.clido/checkpoints/{id}/manifest.json` \
                        by reading the manifest and restoring each listed file from its blob.\n\
-                    4. Show a summary of what was restored."
+                    6. Show a summary of what was restored."
                 ));
             }
         }
@@ -3668,6 +3737,15 @@ fn execute_slash(app: &mut App, cmd: &str) {
             match sub.as_str() {
                 "edit" => {
                     if let Some(raw) = app.last_plan_raw.clone() {
+                        app.plan_text_editor = Some(PlanTextEditor::from_raw(&raw));
+                    } else if let Some(plan) = app.last_plan_snapshot.clone() {
+                        let raw = plan
+                            .tasks
+                            .iter()
+                            .enumerate()
+                            .map(|(i, t)| format!("Step {}: {}", i + 1, t.description))
+                            .collect::<Vec<_>>()
+                            .join("\n");
                         app.plan_text_editor = Some(PlanTextEditor::from_raw(&raw));
                     } else if let Some(tasks) = app.last_plan.clone() {
                         // fallback for plans from --plan mode (no raw text available)
@@ -3686,7 +3764,22 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 }
                 "save" => {
                     if let Some(ref editor) = app.plan_editor {
+                        app.last_plan_snapshot = Some(editor.plan.clone());
+                        app.last_plan = Some(
+                            editor
+                                .plan
+                                .tasks
+                                .iter()
+                                .map(|t| t.description.clone())
+                                .collect::<Vec<_>>(),
+                        );
                         match clido_planner::save_plan(&app.workspace_root, &editor.plan) {
+                            Ok(path) => app
+                                .push(ChatLine::Info(format!("  plan saved: {}", path.display()))),
+                            Err(e) => app.pending_error = Some(format!("save plan: {}", e)),
+                        }
+                    } else if let Some(ref plan) = app.last_plan_snapshot {
+                        match clido_planner::save_plan(&app.workspace_root, plan) {
                             Ok(path) => app
                                 .push(ChatLine::Info(format!("  plan saved: {}", path.display()))),
                             Err(e) => app.pending_error = Some(format!("save plan: {}", e)),
@@ -3717,25 +3810,44 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 },
                 "" => {
                     // /plan with no task — show existing plan if any
-                    let plan_snapshot = app.last_plan.clone();
-                    match plan_snapshot {
-                        Some(tasks) if !tasks.is_empty() => {
-                            app.push(ChatLine::Info("  plan  ┌─ Current plan:".into()));
-                            let count = tasks.len();
-                            for (i, t) in tasks.iter().enumerate() {
-                                let prefix = if i + 1 == count {
-                                    "        └─"
-                                } else {
-                                    "        ├─"
-                                };
-                                app.push(ChatLine::Info(format!("{} {}", prefix, t)));
-                            }
-                        }
-                        _ => {
+                    if let Some(plan) = app.last_plan_snapshot.clone() {
+                        if plan.tasks.is_empty() {
                             app.push(ChatLine::Info(
                                 "  usage: /plan <task>  — have the agent plan before executing"
                                     .into(),
                             ));
+                            return;
+                        }
+                        app.push(ChatLine::Info("  plan  ┌─ Current plan:".into()));
+                        let count = plan.tasks.len();
+                        for (i, t) in plan.tasks.iter().enumerate() {
+                            let prefix = if i + 1 == count {
+                                "        └─"
+                            } else {
+                                "        ├─"
+                            };
+                            app.push(ChatLine::Info(format!("{} {}", prefix, t.description)));
+                        }
+                    } else {
+                        match app.last_plan.clone() {
+                            Some(tasks) if !tasks.is_empty() => {
+                                app.push(ChatLine::Info("  plan  ┌─ Current plan:".into()));
+                                let count = tasks.len();
+                                for (i, t) in tasks.iter().enumerate() {
+                                    let prefix = if i + 1 == count {
+                                        "        └─"
+                                    } else {
+                                        "        ├─"
+                                    };
+                                    app.push(ChatLine::Info(format!("{} {}", prefix, t)));
+                                }
+                            }
+                            _ => {
+                                app.push(ChatLine::Info(
+                                    "  usage: /plan <task>  — have the agent plan before executing"
+                                        .into(),
+                                ));
+                            }
                         }
                     }
                 }
@@ -4610,7 +4722,8 @@ fn handle_plan_text_editor_key(app: &mut App, event: crossterm::event::KeyEvent)
         if let Some(ed) = app.plan_text_editor.take() {
             let tasks = ed.to_tasks();
             if !tasks.is_empty() {
-                app.last_plan = Some(tasks);
+                app.last_plan = Some(tasks.clone());
+                app.last_plan_snapshot = build_plan_from_tasks(&tasks);
             }
         }
     };
@@ -5574,17 +5687,7 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         }
         // Ctrl+Enter: interrupt current run and send immediately.
         (Km::CONTROL, Enter) => app.force_send(),
-        (_, Enter) => {
-            // Execute slash command if input starts with a known command prefix; otherwise normal send.
-            let trimmed = app.input.trim().to_string();
-            if is_known_slash_cmd(&trimmed) {
-                app.input.clear();
-                app.cursor = 0;
-                execute_slash(app, &trimmed);
-            } else {
-                app.submit();
-            }
-        }
+        (_, Enter) => app.submit(),
         (_, Backspace) => {
             if app.cursor > 0 {
                 let byte_pos = char_byte_pos(&app.input, app.cursor - 1);
@@ -5795,7 +5898,10 @@ async fn agent_task(
     };
 
     let perms = Arc::new(Mutex::new(PermsState::default()));
-    setup.ask_user = Some(Arc::new(TuiAskUser { perm_tx, perms }));
+    setup.ask_user = Some(Arc::new(TuiAskUser {
+        perm_tx,
+        perms: perms.clone(),
+    }));
 
     let session_id = if let Some(id) = &cli.resume {
         id.clone()
@@ -5889,6 +5995,25 @@ async fn agent_task(
     }
 
     loop {
+        // Apply queued workdir changes before other actions so prompts never run
+        // against stale tooling/permissions after a switch command.
+        while let Ok(new_workspace) = workdir_rx.try_recv() {
+            match AgentSetup::build(&cli, &new_workspace) {
+                Ok(new_setup) => {
+                    agent.replace_tools(new_setup.registry);
+                    if let Ok(mut state) = perms.lock() {
+                        state.clear_all_grants();
+                    }
+                    let _ = event_tx.send(AgentEvent::WorkdirSwitched {
+                        path: new_workspace,
+                    });
+                }
+                Err(e) => {
+                    let _ = event_tx.send(AgentEvent::Err(format!("workdir switch failed: {}", e)));
+                }
+            }
+        }
+
         let action = tokio::select! {
             msg = prompt_rx.recv() => {
                 match msg {
@@ -5933,6 +6058,12 @@ async fn agent_task(
                 match AgentSetup::build(&cli, &new_workspace) {
                     Ok(new_setup) => {
                         agent.replace_tools(new_setup.registry);
+                        if let Ok(mut state) = perms.lock() {
+                            state.clear_all_grants();
+                        }
+                        let _ = event_tx.send(AgentEvent::WorkdirSwitched {
+                            path: new_workspace,
+                        });
                     }
                     Err(e) => {
                         let _ =
@@ -6318,6 +6449,61 @@ pub fn run_tui(
     Box::pin(run_tui_inner(cli))
 }
 
+struct AgentRuntimeHandles {
+    prompt_tx: mpsc::UnboundedSender<String>,
+    resume_tx: mpsc::UnboundedSender<String>,
+    model_switch_tx: mpsc::UnboundedSender<String>,
+    workdir_tx: mpsc::UnboundedSender<std::path::PathBuf>,
+    compact_now_tx: mpsc::UnboundedSender<()>,
+    event_rx: mpsc::UnboundedReceiver<AgentEvent>,
+    perm_rx: mpsc::UnboundedReceiver<PermRequest>,
+}
+
+fn start_agent_runtime(
+    cli: Cli,
+    workspace_root: std::path::PathBuf,
+    preloaded_config: Option<clido_core::LoadedConfig>,
+    preloaded_pricing: clido_core::PricingTable,
+    cancel: Arc<AtomicBool>,
+    image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>>,
+    reviewer_enabled: Arc<AtomicBool>,
+) -> AgentRuntimeHandles {
+    let (prompt_tx, prompt_rx) = mpsc::unbounded_channel::<String>();
+    let (resume_tx, resume_rx) = mpsc::unbounded_channel::<String>();
+    let (model_switch_tx, model_switch_rx) = mpsc::unbounded_channel::<String>();
+    let (workdir_tx, workdir_rx) = mpsc::unbounded_channel::<std::path::PathBuf>();
+    let (compact_now_tx, compact_now_rx) = mpsc::unbounded_channel::<()>();
+    let (event_tx, event_rx) = mpsc::unbounded_channel::<AgentEvent>();
+    let (perm_tx, perm_rx) = mpsc::unbounded_channel::<PermRequest>();
+
+    tokio::spawn(agent_task(
+        cli,
+        workspace_root,
+        preloaded_config,
+        preloaded_pricing,
+        prompt_rx,
+        resume_rx,
+        model_switch_rx,
+        workdir_rx,
+        compact_now_rx,
+        event_tx,
+        perm_tx,
+        cancel,
+        image_state,
+        reviewer_enabled,
+    ));
+
+    AgentRuntimeHandles {
+        prompt_tx,
+        resume_tx,
+        model_switch_tx,
+        workdir_tx,
+        compact_now_tx,
+        event_rx,
+        perm_rx,
+    }
+}
+
 async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     let workspace_root = cli
         .workdir
@@ -6372,14 +6558,6 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
             .unwrap_or(false)
     };
 
-    let (prompt_tx, prompt_rx) = mpsc::unbounded_channel::<String>();
-    let (resume_tx, resume_rx) = mpsc::unbounded_channel::<String>();
-    let (model_switch_tx, model_switch_rx) = mpsc::unbounded_channel::<String>();
-    let (workdir_tx, workdir_rx) = mpsc::unbounded_channel::<std::path::PathBuf>();
-    let (compact_now_tx, compact_now_rx) = mpsc::unbounded_channel::<()>();
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<AgentEvent>();
-    let (perm_tx, mut perm_rx) = mpsc::unbounded_channel::<PermRequest>();
-
     let cancel = std::sync::Arc::new(AtomicBool::new(false));
     let image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -6391,23 +6569,15 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         .map(|c| c.agents.reviewer.is_some())
         .unwrap_or(false);
     let reviewer_enabled = Arc::new(AtomicBool::new(true));
-
-    tokio::spawn(agent_task(
+    let mut runtime = start_agent_runtime(
         cli.clone(),
         workspace_root.clone(),
         loaded_config.clone(),
         pricing_table.clone(),
-        prompt_rx,
-        resume_rx,
-        model_switch_rx,
-        workdir_rx,
-        compact_now_rx,
-        event_tx,
-        perm_tx,
         cancel.clone(),
         image_state.clone(),
         reviewer_enabled.clone(),
-    ));
+    );
 
     // Install a panic hook so the terminal is always restored even on crash.
     let original_hook = std::panic::take_hook();
@@ -6456,11 +6626,11 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     };
 
     let mut app = App::new(
-        prompt_tx,
-        resume_tx,
-        model_switch_tx,
-        workdir_tx,
-        compact_now_tx,
+        runtime.prompt_tx.clone(),
+        runtime.resume_tx.clone(),
+        runtime.model_switch_tx.clone(),
+        runtime.workdir_tx.clone(),
+        runtime.compact_now_tx.clone(),
         cancel,
         provider,
         model,
@@ -6475,7 +6645,51 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         reviewer_enabled,
         reviewer_configured,
     );
-    let result = event_loop(&mut app, &mut terminal, &mut event_rx, &mut perm_rx).await;
+    let mut recovery_attempts: u8 = 0;
+    let result = loop {
+        match event_loop(
+            &mut app,
+            &mut terminal,
+            &mut runtime.event_rx,
+            &mut runtime.perm_rx,
+        )
+        .await?
+        {
+            EventLoopExit::Quit => break Ok(()),
+            EventLoopExit::Recover(reason) => {
+                recovery_attempts = recovery_attempts.saturating_add(1);
+                if recovery_attempts > 3 {
+                    break Err(anyhow::anyhow!(
+                        "agent recovery failed after {} attempts: {}",
+                        recovery_attempts - 1,
+                        reason
+                    ));
+                }
+                let backoff_ms = 300u64.saturating_mul(1u64 << (recovery_attempts - 1));
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                runtime = start_agent_runtime(
+                    cli.clone(),
+                    workspace_root.clone(),
+                    loaded_config.clone(),
+                    pricing_table.clone(),
+                    app.cancel.clone(),
+                    app.image_state.clone(),
+                    app.reviewer_enabled.clone(),
+                );
+                app.prompt_tx = runtime.prompt_tx.clone();
+                app.resume_tx = runtime.resume_tx.clone();
+                app.model_switch_tx = runtime.model_switch_tx.clone();
+                app.workdir_tx = runtime.workdir_tx.clone();
+                app.compact_now_tx = runtime.compact_now_tx.clone();
+                app.push(ChatLine::Thinking("↻ recovering runtime…".to_string()));
+                app.busy = false;
+                app.status_log.clear();
+                app.cancel.store(false, Ordering::Relaxed);
+                app.drain_input_queue();
+                continue;
+            }
+        }
+    };
 
     let _ = disable_raw_mode();
     let _ = execute!(
@@ -6562,14 +6776,21 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     result
 }
 
+enum EventLoopExit {
+    Quit,
+    Recover(String),
+}
+
 async fn event_loop(
     app: &mut App,
     terminal: &mut ratatui::Terminal<CrosstermBackend<std::io::Stdout>>,
     event_rx: &mut mpsc::UnboundedReceiver<AgentEvent>,
     perm_rx: &mut mpsc::UnboundedReceiver<PermRequest>,
-) -> Result<(), anyhow::Error> {
+) -> Result<EventLoopExit, anyhow::Error> {
     let mut crossterm_events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(80));
+    let mut last_agent_activity = std::time::Instant::now();
+    const STALL_TIMEOUT_SECS: u64 = 45;
 
     loop {
         terminal.draw(|f| render(f, app))?;
@@ -6577,6 +6798,22 @@ async fn event_loop(
         tokio::select! {
             _ = tick.tick() => {
                 app.tick_spinner();
+                if app.busy && app.pending_perm.is_none() {
+                    let baseline = if let Some(turn_start) = app.turn_start {
+                        if turn_start > last_agent_activity {
+                            turn_start
+                        } else {
+                            last_agent_activity
+                        }
+                    } else {
+                        last_agent_activity
+                    };
+                    if baseline.elapsed().as_secs() >= STALL_TIMEOUT_SECS {
+                        return Ok(EventLoopExit::Recover(
+                            "agent appears stalled (no progress events)".to_string(),
+                        ));
+                    }
+                }
             }
             maybe = crossterm_events.next() => {
                 match maybe {
@@ -6627,6 +6864,7 @@ async fn event_loop(
                         name,
                         detail,
                     }) => {
+                        last_agent_activity = std::time::Instant::now();
                         app.push_status(
                             tool_use_id.clone(),
                             name.clone(),
@@ -6646,6 +6884,7 @@ async fn event_loop(
                         diff,
                         ..
                     }) => {
+                        last_agent_activity = std::time::Instant::now();
                         app.finish_status(&tool_use_id, is_error);
                         for line in app.messages.iter_mut() {
                             if let ChatLine::ToolCall {
@@ -6669,6 +6908,7 @@ async fn event_loop(
                         }
                     }
                     Some(AgentEvent::Thinking(text)) => {
+                        last_agent_activity = std::time::Instant::now();
                         if let Some((num, step)) = extract_current_step_full(&text) {
                             app.current_step = Some(step);
                             app.last_executed_step_num = Some(num);
@@ -6677,6 +6917,7 @@ async fn event_loop(
                         // Don't call on_agent_done — the agent is still running.
                     }
                     Some(AgentEvent::Response(text)) => {
+                        last_agent_activity = std::time::Instant::now();
                         if let Some((num, step)) = extract_current_step_full(&text) {
                             app.current_step = Some(step);
                             app.last_executed_step_num = Some(num);
@@ -6710,14 +6951,30 @@ async fn event_loop(
                         app.on_agent_done();
                     }
                     Some(AgentEvent::ModelSwitched { to_model }) => {
+                        last_agent_activity = std::time::Instant::now();
                         // Confirmation from agent_task that the model was switched.
                         // Update display model in case it diverged.
                         app.model = to_model;
                     }
+                    Some(AgentEvent::WorkdirSwitched { path }) => {
+                        last_agent_activity = std::time::Instant::now();
+                        app.workspace_root = path.clone();
+                        app.push(ChatLine::Info(format!("  workdir set to {}", path.display())));
+                        app.push(ChatLine::Info(
+                            "  permission grants were reset for safety after workdir switch."
+                                .into(),
+                        ));
+                        app.push(ChatLine::Info(
+                            "  note: session files & resume stay on the original project path until restart."
+                                .into(),
+                        ));
+                    }
                     Some(AgentEvent::SessionStarted(id)) => {
+                        last_agent_activity = std::time::Instant::now();
                         app.current_session_id = Some(id);
                     }
                     Some(AgentEvent::Interrupted) => {
+                        last_agent_activity = std::time::Instant::now();
                         // Revert per-turn model override on interruption too.
                         if let Some(prev) = app.per_turn_prev_model.take() {
                             app.model = prev.clone();
@@ -6726,6 +6983,7 @@ async fn event_loop(
                         app.on_agent_done();
                     }
                     Some(AgentEvent::Err(msg)) => {
+                        last_agent_activity = std::time::Instant::now();
                         // Revert per-turn model override on error too.
                         if let Some(prev) = app.per_turn_prev_model.take() {
                             app.model = prev.clone();
@@ -6735,6 +6993,7 @@ async fn event_loop(
                         app.on_agent_done();
                     }
                     Some(AgentEvent::ResumedSession { messages }) => {
+                        last_agent_activity = std::time::Instant::now();
                         app.messages.clear();
                         app.messages.push(ChatLine::WelcomeBrand);
                         app.messages.push(ChatLine::Info("  — resumed session —".into()));
@@ -6748,6 +7007,7 @@ async fn event_loop(
                         app.busy = false;
                     }
                     Some(AgentEvent::TokenUsage { input_tokens, output_tokens, cost_usd, context_max_tokens }) => {
+                        last_agent_activity = std::time::Instant::now();
                         app.session_input_tokens = input_tokens;
                         app.session_output_tokens = output_tokens;
                         app.session_cost_usd = cost_usd;
@@ -6757,12 +7017,14 @@ async fn event_loop(
                         app.context_max_tokens = context_max_tokens;
                     }
                     Some(AgentEvent::Compacted { before, after }) => {
+                        last_agent_activity = std::time::Instant::now();
                         app.push(ChatLine::Info(format!(
                             "  context compacted: {} → {} messages",
                             before, after
                         )));
                     }
                     Some(AgentEvent::PlanCreated { tasks }) => {
+                        last_agent_activity = std::time::Instant::now();
                         // Display the plan in the chat as an info block.
                         app.push(ChatLine::Info("  plan  ┌─ Planned tasks:".to_string()));
                         let count = tasks.len();
@@ -6771,9 +7033,18 @@ async fn event_loop(
                             app.push(ChatLine::Info(format!("{} {}", prefix, task)));
                         }
                         // Store last plan so /plan command can show it later.
-                        app.last_plan = Some(tasks);
+                        app.last_plan = Some(tasks.clone());
+                        app.last_plan_snapshot = build_plan_from_tasks(&tasks);
                     }
                     Some(AgentEvent::PlanReady { plan }) => {
+                        last_agent_activity = std::time::Instant::now();
+                        app.last_plan_snapshot = Some(plan.clone());
+                        app.last_plan = Some(
+                            plan.tasks
+                                .iter()
+                                .map(|t| t.description.clone())
+                                .collect::<Vec<_>>(),
+                        );
                         // Open the plan editor overlay (blocks execution until user presses x or Esc).
                         app.plan_selected_task = 0;
                         app.plan_task_editing = None;
@@ -6781,37 +7052,78 @@ async fn event_loop(
                         // Mark as busy so the spinner shows — agent is paused waiting for plan approval.
                     }
                     Some(AgentEvent::PlanTaskStarted { task_id }) => {
+                        last_agent_activity = std::time::Instant::now();
                         app.push(ChatLine::Info(format!("  ↻ plan task {} started", task_id)));
                     }
                     Some(AgentEvent::PlanTaskDone { task_id, success }) => {
+                        last_agent_activity = std::time::Instant::now();
                         let icon = if success { "✓" } else { "✗" };
                         app.push(ChatLine::Info(format!("  {} plan task {} done", icon, task_id)));
                     }
-                    None => {}
+                    None => {
+                        return Ok(EventLoopExit::Recover(
+                            "agent event channel closed unexpectedly".to_string(),
+                        ));
+                    }
                 }
             }
             maybe = perm_rx.recv() => {
                 if let Some(req) = maybe {
+                    last_agent_activity = std::time::Instant::now();
                     app.pending_perm = Some(PendingPerm {
                         tool_name: req.tool_name,
                         preview: req.preview,
                         reply: req.reply,
                     });
                     // Don't clear busy — agent is still running, awaiting our reply.
+                } else {
+                    return Ok(EventLoopExit::Recover(
+                        "permission channel closed unexpectedly".to_string(),
+                    ));
                 }
             }
         }
 
         if app.quit {
-            break;
+            return Ok(EventLoopExit::Quit);
         }
     }
-    Ok(())
+    Ok(EventLoopExit::Quit)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    fn make_test_app() -> App {
+        let (prompt_tx, _prompt_rx) = mpsc::unbounded_channel();
+        let (resume_tx, _resume_rx) = mpsc::unbounded_channel();
+        let (model_switch_tx, _model_switch_rx) = mpsc::unbounded_channel();
+        let (workdir_tx, _workdir_rx) = mpsc::unbounded_channel();
+        let (compact_now_tx, _compact_now_rx) = mpsc::unbounded_channel();
+        App::new(
+            prompt_tx,
+            resume_tx,
+            model_switch_tx,
+            workdir_tx,
+            compact_now_tx,
+            Arc::new(AtomicBool::new(false)),
+            "openrouter".to_string(),
+            "default-model".to_string(),
+            std::env::temp_dir(),
+            false,
+            Arc::new(Mutex::new(None)),
+            false,
+            Vec::new(),
+            clido_core::ModelPrefs::default(),
+            std::collections::HashMap::new(),
+            "default".to_string(),
+            Arc::new(AtomicBool::new(false)),
+            false,
+        )
+    }
 
     // ── parse_per_turn_model tests ─────────────────────────────────────────────
 
@@ -6931,6 +7243,32 @@ mod tests {
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0], "Fix auth");
         assert_eq!(tasks[1], "Add tests");
+    }
+
+    #[test]
+    fn build_plan_from_assistant_text_preserves_order_for_save_and_render() {
+        let text = "Step 1: Define contract\nStep 2: Implement parser\nStep 3: Add tests";
+        let plan = build_plan_from_assistant_text(text).expect("plan");
+        let tasks: Vec<String> = plan.tasks.iter().map(|t| t.description.clone()).collect();
+        assert_eq!(
+            tasks,
+            vec![
+                "Define contract".to_string(),
+                "Implement parser".to_string(),
+                "Add tests".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn build_plan_from_assistant_text_fallback_is_deterministic() {
+        let text = "alpha\n\n beta  \n gamma";
+        let plan = build_plan_from_assistant_text(text).expect("fallback plan");
+        let tasks: Vec<String> = plan.tasks.iter().map(|t| t.description.clone()).collect();
+        assert_eq!(
+            tasks,
+            vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()]
+        );
     }
 
     #[test]
@@ -7068,6 +7406,169 @@ mod tests {
             slash_commands().len(),
             section_total,
             "slash_commands() and SLASH_COMMAND_SECTIONS are out of sync"
+        );
+    }
+
+    #[test]
+    fn undo_command_description_mentions_confirmation() {
+        let desc = slash_commands()
+            .into_iter()
+            .find_map(|(cmd, desc)| (cmd == "/undo").then_some(desc))
+            .expect("/undo command should exist");
+        assert!(
+            desc.contains("confirm"),
+            "/undo description should mention confirmation for safety"
+        );
+    }
+
+    #[test]
+    fn submit_queues_known_slash_when_busy() {
+        let mut app = make_test_app();
+        app.busy = true;
+        app.input = "/help".to_string();
+        app.cursor = app.input.chars().count();
+
+        app.submit();
+
+        assert_eq!(app.queued.len(), 1);
+        assert_eq!(app.queued.front().map(String::as_str), Some("/help"));
+    }
+
+    #[test]
+    fn force_send_interrupt_prioritizes_prompt_at_queue_front() {
+        let mut app = make_test_app();
+        app.busy = true;
+        app.queued.push_back("older queued item".to_string());
+        app.input = "urgent next prompt".to_string();
+        app.cursor = app.input.chars().count();
+
+        app.force_send();
+
+        assert_eq!(app.queued.len(), 2);
+        assert_eq!(
+            app.queued.front().map(String::as_str),
+            Some("urgent next prompt")
+        );
+        assert!(app.cancel.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn perms_state_clear_all_grants_resets_permissions() {
+        let mut perms = PermsState::default();
+        perms.session_allowed.insert("Edit".to_string());
+        perms.workdir_open = true;
+
+        perms.clear_all_grants();
+
+        assert!(perms.session_allowed.is_empty());
+        assert!(!perms.workdir_open);
+    }
+
+    #[test]
+    fn workdir_command_does_not_switch_before_runtime_confirmation() {
+        let mut app = make_test_app();
+        let original = app.workspace_root.clone();
+        let target_dir = std::env::temp_dir();
+        let cmd = format!("/workdir {}", target_dir.display());
+
+        execute_slash(&mut app, &cmd);
+
+        assert_eq!(
+            app.workspace_root, original,
+            "UI workdir should remain unchanged until runtime confirms switch"
+        );
+    }
+
+    #[tokio::test]
+    async fn tui_ask_user_session_grant_skips_second_prompt_for_same_tool() {
+        let (perm_tx, mut perm_rx) = mpsc::unbounded_channel();
+        let ask = TuiAskUser {
+            perm_tx,
+            perms: Arc::new(Mutex::new(PermsState::default())),
+        };
+
+        let first = tokio::spawn({
+            let ask = TuiAskUser {
+                perm_tx: ask.perm_tx.clone(),
+                perms: ask.perms.clone(),
+            };
+            async move {
+                ask.ask(AgentPermRequest {
+                    tool_name: "Write".to_string(),
+                    description: "{\"path\":\"a.txt\"}".to_string(),
+                    diff: None,
+                    proposed_content: None,
+                    file_path: None,
+                })
+                .await
+            }
+        });
+        let pending = perm_rx.recv().await.expect("first prompt expected");
+        pending
+            .reply
+            .send(PermGrant::Session)
+            .expect("reply should send");
+        let first_grant = first.await.expect("first ask task should complete");
+        assert!(matches!(first_grant, AgentPermGrant::AllowAll));
+
+        let second_grant = ask
+            .ask(AgentPermRequest {
+                tool_name: "Write".to_string(),
+                description: "{\"path\":\"a.txt\"}".to_string(),
+                diff: None,
+                proposed_content: None,
+                file_path: None,
+            })
+            .await;
+        assert!(matches!(second_grant, AgentPermGrant::Allow));
+        assert!(
+            perm_rx.try_recv().is_err(),
+            "second ask for same tool should not prompt again"
+        );
+    }
+
+    #[tokio::test]
+    async fn tui_ask_user_workdir_grant_skips_prompt_for_other_tools() {
+        let (perm_tx, mut perm_rx) = mpsc::unbounded_channel();
+        let ask = TuiAskUser {
+            perm_tx,
+            perms: Arc::new(Mutex::new(PermsState::default())),
+        };
+
+        let first_req = AgentPermRequest {
+            tool_name: "Edit".to_string(),
+            description: "{}".to_string(),
+            diff: None,
+            proposed_content: None,
+            file_path: None,
+        };
+        let first = tokio::spawn({
+            let ask = TuiAskUser {
+                perm_tx: ask.perm_tx.clone(),
+                perms: ask.perms.clone(),
+            };
+            async move { ask.ask(first_req).await }
+        });
+        let pending = perm_rx.recv().await.expect("first prompt expected");
+        pending
+            .reply
+            .send(PermGrant::Workdir)
+            .expect("reply should send");
+        let first_grant = first.await.expect("first ask task should complete");
+        assert!(matches!(first_grant, AgentPermGrant::AllowAll));
+
+        let second_req = AgentPermRequest {
+            tool_name: "Write".to_string(),
+            description: "{}".to_string(),
+            diff: None,
+            proposed_content: None,
+            file_path: None,
+        };
+        let second_grant = ask.ask(second_req).await;
+        assert!(matches!(second_grant, AgentPermGrant::Allow));
+        assert!(
+            perm_rx.try_recv().is_err(),
+            "workdir grant should avoid prompting for other tools"
         );
     }
 }

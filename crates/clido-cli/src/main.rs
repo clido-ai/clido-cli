@@ -208,7 +208,7 @@ async fn dispatch(cli: cli::Cli) -> Result<(), anyhow::Error> {
         Some(cli::Subcommand::Init) => return setup::run_init().await,
         Some(cli::Subcommand::Doctor) => return doctor::run_doctor().await,
         Some(cli::Subcommand::Config { cmd }) => return config::run_config(cmd).await,
-        Some(cli::Subcommand::Workflow { cmd }) => return workflow::run_workflow(cmd).await,
+        Some(cli::Subcommand::Workflow { cmd }) => return workflow::run_workflow(&cli, cmd).await,
         Some(cli::Subcommand::ListModels { provider, json }) => {
             return models::run_list_models(provider.as_deref(), *json).await;
         }

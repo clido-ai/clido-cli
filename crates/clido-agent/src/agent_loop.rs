@@ -1482,7 +1482,12 @@ impl AgentLoop {
                     let name = name.clone();
                     let input = input.clone();
                     async move {
-                        let _permit = sem.acquire().await.expect("semaphore closed");
+                        let _permit = match sem.acquire().await {
+                            Ok(p) => p,
+                            Err(_) => {
+                                return ToolOutput::err("internal: semaphore closed".to_string())
+                            }
+                        };
                         match tools.get(&name) {
                             Some(tool) => tool.execute(input).await,
                             None => ToolOutput::err(format!("Tool not found: {}", name)),

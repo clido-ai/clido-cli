@@ -36,6 +36,9 @@ pub struct McpToolDef {
     pub description: String,
     #[serde(default)]
     pub input_schema: serde_json::Value,
+    /// Hint from the MCP server that this tool is read-only (safe for parallel execution).
+    #[serde(default)]
+    pub read_only: bool,
 }
 
 /// JSON-RPC 2.0 response.
@@ -190,10 +193,21 @@ impl McpClient {
                 .get("inputSchema")
                 .cloned()
                 .unwrap_or(serde_json::json!({"type": "object"}));
+            // Infer read-only from description keywords (e.g. "read", "list", "search", "get").
+            let read_only = {
+                let desc_lower = description.to_lowercase();
+                let name_lower = name.to_lowercase();
+                [
+                    "read", "list", "search", "get", "fetch", "find", "query", "show", "view",
+                ]
+                .iter()
+                .any(|kw| desc_lower.starts_with(kw) || name_lower.starts_with(kw))
+            };
             defs.push(McpToolDef {
                 name,
                 description,
                 input_schema,
+                read_only,
             });
         }
         Ok(defs)
@@ -251,6 +265,10 @@ impl crate::Tool for McpTool {
 
     fn schema(&self) -> serde_json::Value {
         self.def.input_schema.clone()
+    }
+
+    fn is_read_only(&self) -> bool {
+        self.def.read_only
     }
 
     async fn execute(&self, input: serde_json::Value) -> crate::ToolOutput {

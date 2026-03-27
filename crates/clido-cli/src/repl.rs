@@ -85,9 +85,10 @@ async fn handle_slash_command(
             eprintln!(
                 "  /resume <id>       — restart with an existing session (use --resume flag)"
             );
-            eprintln!("  /mode plan         — reminder: restart with --permission-mode plan");
+            eprintln!("  /mode plan-only    — reminder: restart with --permission-mode plan-only");
             eprintln!("  /mode agent        — reminder: restart without --permission-mode");
             eprintln!("  /exit  /quit       — end the REPL");
+            eprintln!("  /cls               — clear the screen");
             eprintln!("  //...              — send a literal prompt starting with /");
             eprintln!();
             eprintln!("Agent routing shortcuts:");
@@ -142,16 +143,27 @@ async fn handle_slash_command(
         "/mode" => {
             let mode = parts.get(1).map(|s| s.trim()).unwrap_or("");
             match mode {
-                "plan" => {
-                    eprintln!("To switch to plan mode, restart with: clido --permission-mode plan")
+                "plan" | "plan-only" => {
+                    eprintln!("To switch to plan-only mode, restart with: clido --permission-mode plan-only")
                 }
-                "agent" => eprintln!(
-                    "Currently in agent mode. Restart without --permission-mode to reset."
+                "accept-all" => eprintln!(
+                    "To enable accept-all mode, restart with: clido --permission-mode accept-all"
                 ),
-                _ => eprintln!("Usage: /mode plan | /mode agent"),
+                "diff-review" => eprintln!(
+                    "To enable diff-review mode, restart with: clido --permission-mode diff-review"
+                ),
+                "agent" | "default" => eprintln!(
+                    "Currently in agent mode. Restart without --permission-mode to use default."
+                ),
+                _ => eprintln!("Usage: /mode [plan-only | accept-all | diff-review | default]"),
             }
         }
         "/exit" | "/quit" => return Some(true),
+        "/cls" | "/clear-screen" => {
+            // Clear the terminal screen (ANSI escape: erase + move to top).
+            eprint!("\x1b[2J\x1b[H");
+            let _ = io::stderr().flush();
+        }
         // Unknown: pass to the agent unchanged.
         _ => return None,
     }
@@ -252,7 +264,11 @@ pub async fn run_repl(cli: Cli) -> Result<(), anyhow::Error> {
                         "result": text,
                         "session_id": session_id,
                     });
-                    println!("{}", serde_json::to_string(&out).unwrap());
+                    println!(
+                        "{}",
+                        serde_json::to_string(&out)
+                            .unwrap_or_else(|_| r#"{"error":"serialization_failed"}"#.to_string())
+                    );
                 } else {
                     println!("{}", text);
                 }
@@ -273,7 +289,11 @@ pub async fn run_repl(cli: Cli) -> Result<(), anyhow::Error> {
                         "error_kind": "doom_loop",
                         "result": msg,
                     });
-                    println!("{}", serde_json::to_string(&out).unwrap());
+                    println!(
+                        "{}",
+                        serde_json::to_string(&out)
+                            .unwrap_or_else(|_| r#"{"error":"serialization_failed"}"#.to_string())
+                    );
                 } else {
                     eprintln!("⚠ {}", msg);
                 }
@@ -287,7 +307,11 @@ pub async fn run_repl(cli: Cli) -> Result<(), anyhow::Error> {
                         "is_error": true,
                         "result": msg,
                     });
-                    println!("{}", serde_json::to_string(&out).unwrap());
+                    println!(
+                        "{}",
+                        serde_json::to_string(&out)
+                            .unwrap_or_else(|_| r#"{"error":"serialization_failed"}"#.to_string())
+                    );
                 } else {
                     eprintln!("Error: {}", msg);
                 }

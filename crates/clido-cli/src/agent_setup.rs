@@ -423,10 +423,20 @@ fn build_registry(
 
 pub fn parse_permission_mode(s: Option<&str>) -> PermissionMode {
     match s {
+        None => PermissionMode::Default,
         Some("plan") | Some("plan-only") => PermissionMode::PlanOnly,
         Some("accept-all") => PermissionMode::AcceptAll,
         Some("diff-review") => PermissionMode::DiffReview,
-        _ => PermissionMode::Default,
+        Some("default") => PermissionMode::Default,
+        Some(other) => {
+            eprintln!(
+                "warning: unknown --permission-mode value {:?}. \
+                 Valid values: default, plan-only, accept-all, diff-review. \
+                 Falling back to default.",
+                other
+            );
+            PermissionMode::Default
+        }
     }
 }
 

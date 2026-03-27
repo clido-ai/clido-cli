@@ -45,7 +45,9 @@ pub struct Cli {
     #[arg(long, env = "CLIDO_MAX_BUDGET_USD")]
     pub max_budget_usd: Option<f64>,
 
-    /// Permission mode: default, accept-all, plan.
+    /// Permission mode: default, accept-all, plan-only, diff-review.
+    /// default: ask for each tool call. accept-all: allow all without prompting.
+    /// plan-only: generate a plan and stop (no execution). diff-review: show diffs before writes.
     #[arg(long, env = "CLIDO_PERMISSION_MODE")]
     pub permission_mode: Option<String>,
 

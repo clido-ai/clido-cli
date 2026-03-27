@@ -200,6 +200,8 @@ enum PermGrant {
     Workdir,
     /// Deny.
     Deny,
+    /// Deny with feedback message sent back to the agent.
+    DenyWithFeedback(String),
 }
 
 // ── Session-level permission state (shared between TuiAskUser calls) ──────────
@@ -702,6 +704,7 @@ impl AskUser for TuiAskUser {
                 AgentPermGrant::AllowAll
             }
             PermGrant::Deny => AgentPermGrant::Deny,
+            PermGrant::DenyWithFeedback(fb) => AgentPermGrant::DenyWithFeedback(fb),
         }
     }
 }
@@ -794,8 +797,10 @@ struct App {
     config_roles: std::collections::HashMap<String, String>,
     /// Signal to cancel the current agent run (force send).
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Selected option in the permission popup (0=once, 1=session, 2=workdir, 3=deny).
+    /// Selected option in the permission popup (0=once, 1=session, 2=workdir, 3=deny, 4=deny+feedback).
     perm_selected: usize,
+    /// When user picks "Deny with feedback", this holds the feedback text being typed.
+    perm_feedback_input: Option<String>,
     /// Selected index in the slash-command popup (None = no popup).
     selected_cmd: Option<usize>,
     quit: bool,
@@ -932,6 +937,7 @@ impl App {
             config_roles,
             cancel,
             perm_selected: 0,
+            perm_feedback_input: None,
             selected_cmd: None,
             quit: false,
             wants_reinit: false,
@@ -2100,9 +2106,45 @@ fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Permission popup ─────────────────────────────────────────────────────
     if let Some(perm) = &app.pending_perm {
-        // 1 preview + 1 blank + 4 options + 1 hint + 2 borders = 9
-        let popup_rect = popup_above_input(input_area, 9, input_area.width);
-        let inner_w = popup_rect.width.saturating_sub(4) as usize;
+        let inner_w = input_area.width.saturating_sub(4) as usize;
+
+        // ── Feedback input mode ───────────────────────────────────────────
+        if let Some(ref fb) = app.perm_feedback_input {
+            let popup_rect = popup_above_input(input_area, 6, input_area.width);
+            let preview = truncate_chars(&perm.preview, inner_w);
+            let content = vec![
+                Line::from(vec![Span::styled(
+                    format!("  {}", preview),
+                    Style::default().fg(Color::DarkGray),
+                )]),
+                Line::raw(""),
+                Line::from(vec![
+                    Span::styled(" Feedback: ", Style::default().fg(Color::Yellow)),
+                    Span::styled(fb.as_str(), Style::default().fg(Color::White)),
+                    Span::styled("█", Style::default().fg(Color::Yellow)),
+                ]),
+                Line::raw(""),
+                Line::from(vec![Span::styled(
+                    "  Enter to send feedback   Esc to go back",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
+                )]),
+            ];
+            frame.render_widget(Clear, popup_rect);
+            frame.render_widget(
+                Paragraph::new(content).block(modal_block(
+                    &format!(" Deny {} — add reason for agent ", perm.tool_name),
+                    Color::Red,
+                )),
+                popup_rect,
+            );
+            return;
+        }
+
+        // ── Normal option mode ────────────────────────────────────────────
+        // 1 preview + 1 blank + 5 options + 1 hint + 2 borders = 10
+        let popup_rect = popup_above_input(input_area, 10, input_area.width);
         let preview = truncate_chars(&perm.preview, inner_w);
 
         const OPTIONS: &[(&str, &str)] = &[
@@ -2113,6 +2155,7 @@ fn render(frame: &mut Frame, app: &mut App) {
                 "skip permission checks for the rest of this session",
             ),
             ("Deny", "block this call"),
+            ("Deny with feedback", "block and explain why to the agent"),
         ];
 
         let mut content = vec![
@@ -3336,6 +3379,8 @@ fn execute_slash(app: &mut App, cmd: &str) {
     match cmd {
         "/clear" => {
             app.messages.clear();
+            app.messages.push(ChatLine::WelcomeBrand);
+            app.push(ChatLine::Info("  conversation cleared".into()));
         }
         "/help" => {
             app.push(ChatLine::Info("".into()));
@@ -3349,6 +3394,10 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 "↑↓ (with input)   history navigation".into(),
             ));
             app.push(ChatLine::Info("Ctrl+U             clear input".into()));
+            app.push(ChatLine::Info(
+                "Ctrl+W             delete word backward".into(),
+            ));
+            app.push(ChatLine::Info("Alt+←/→            jump by word".into()));
             app.push(ChatLine::Info("".into()));
             app.push(ChatLine::Section("Agent Controls".into()));
             app.push(ChatLine::Info("Ctrl+C             quit".into()));
@@ -5177,6 +5226,9 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         if st.cursor > 1 && st.cursor > st.roles.len() {
                             st.cursor -= 1;
                         }
+                    } else {
+                        st.status =
+                            Some("  'd' deletes a role — move cursor to a role row first".into());
                     }
                 }
                 Char('s') => {
@@ -5418,6 +5470,23 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     picker.scroll_offset = 0;
                 }
             }
+            KeyCode::Home => {
+                // Jump to first result
+                if let Some(picker) = &mut app.model_picker {
+                    picker.selected = 0;
+                    picker.scroll_offset = 0;
+                }
+            }
+            KeyCode::End => {
+                // Jump to last result
+                if let Some(picker) = &mut app.model_picker {
+                    let n = picker.filtered().len();
+                    if n > 0 {
+                        picker.selected = n - 1;
+                        picker.scroll_offset = picker.selected.saturating_sub(11);
+                    }
+                }
+            }
             _ => {}
         }
         return;
@@ -5449,6 +5518,9 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Enter => {
                 if let Some(picker) = app.session_picker.take() {
+                    if picker.sessions.is_empty() {
+                        return;
+                    }
                     let id = picker.sessions[picker.selected].session_id.clone();
                     if app.current_session_id.as_deref() == Some(&id) {
                         app.push(ChatLine::Info("  already in this session".into()));
@@ -5491,6 +5563,9 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Enter => {
                 if let Some(picker) = app.profile_picker.take() {
+                    if picker.profiles.is_empty() {
+                        return;
+                    }
                     let (name, _) = &picker.profiles[picker.selected];
                     if name == &picker.active {
                         app.push(ChatLine::Info(format!(
@@ -5563,6 +5638,9 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Enter => {
                 if let Some(picker) = app.role_picker.take() {
+                    if picker.roles.is_empty() {
+                        return;
+                    }
                     let (role_name, model_id) = &picker.roles[picker.selected];
                     let model_id = model_id.clone();
                     let role_name = role_name.clone();
@@ -5586,7 +5664,39 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
 
     // ── Permission popup (modal — arrow keys select, Enter confirms) ─────────
     if app.pending_perm.is_some() {
-        const PERM_OPTIONS: usize = 4;
+        const PERM_OPTIONS: usize = 5;
+
+        // ── Feedback input mode ──────────────────────────────────────────
+        if app.perm_feedback_input.is_some() {
+            match event.code {
+                Enter => {
+                    if let (Some(perm), Some(fb)) =
+                        (app.pending_perm.take(), app.perm_feedback_input.take())
+                    {
+                        let _ = perm.reply.send(PermGrant::DenyWithFeedback(fb));
+                        app.perm_selected = 0;
+                    }
+                }
+                Esc => {
+                    // Go back to option selection without sending
+                    app.perm_feedback_input = None;
+                }
+                Backspace => {
+                    if let Some(ref mut fb) = app.perm_feedback_input {
+                        fb.pop();
+                    }
+                }
+                KeyCode::Char(c) => {
+                    if let Some(ref mut fb) = app.perm_feedback_input {
+                        fb.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // ── Normal option selection ──────────────────────────────────────
         match event.code {
             Up => {
                 if app.perm_selected == 0 {
@@ -5599,15 +5709,23 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.perm_selected = (app.perm_selected + 1) % PERM_OPTIONS;
             }
             Enter => {
-                if let Some(perm) = app.pending_perm.take() {
-                    let grant = match app.perm_selected {
-                        0 => PermGrant::Once,
-                        1 => PermGrant::Session,
-                        2 => PermGrant::Workdir,
-                        _ => PermGrant::Deny,
-                    };
-                    let _ = perm.reply.send(grant);
-                    app.perm_selected = 0;
+                match app.perm_selected {
+                    4 => {
+                        // Deny with feedback — switch to feedback input mode
+                        app.perm_feedback_input = Some(String::new());
+                    }
+                    _ => {
+                        if let Some(perm) = app.pending_perm.take() {
+                            let grant = match app.perm_selected {
+                                0 => PermGrant::Once,
+                                1 => PermGrant::Session,
+                                2 => PermGrant::Workdir,
+                                _ => PermGrant::Deny,
+                            };
+                            let _ = perm.reply.send(grant);
+                            app.perm_selected = 0;
+                        }
+                    }
                 }
             }
             Esc => {
@@ -5705,6 +5823,37 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.history_idx = None;
             }
         }
+        // Alt+Left: move cursor to start of previous word.
+        (Km::ALT, Left) => {
+            if app.cursor > 0 {
+                let chars: Vec<char> = app.input.chars().collect();
+                let mut new_cursor = app.cursor;
+                // Skip spaces
+                while new_cursor > 0 && chars[new_cursor - 1] == ' ' {
+                    new_cursor -= 1;
+                }
+                // Skip word characters
+                while new_cursor > 0 && chars[new_cursor - 1] != ' ' {
+                    new_cursor -= 1;
+                }
+                app.cursor = new_cursor;
+            }
+        }
+        // Alt+Right: move cursor to end of next word.
+        (Km::ALT, Right) => {
+            let chars: Vec<char> = app.input.chars().collect();
+            let len = chars.len();
+            let mut new_cursor = app.cursor;
+            // Skip spaces
+            while new_cursor < len && chars[new_cursor] == ' ' {
+                new_cursor += 1;
+            }
+            // Skip word characters
+            while new_cursor < len && chars[new_cursor] != ' ' {
+                new_cursor += 1;
+            }
+            app.cursor = new_cursor;
+        }
         (_, Left) => {
             if app.cursor > 0 {
                 app.cursor -= 1;
@@ -5777,7 +5926,28 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             app.selected_cmd = None;
             app.history_idx = None;
         }
-        // Allow typing at all times (even while busy) for queue/force-send.
+        // Ctrl+W: delete word backward (to previous word boundary).
+        (Km::CONTROL, Char('w')) => {
+            if app.cursor > 0 {
+                let chars: Vec<char> = app.input.chars().collect();
+                let mut new_cursor = app.cursor;
+                // Skip trailing spaces
+                while new_cursor > 0 && chars[new_cursor - 1] == ' ' {
+                    new_cursor -= 1;
+                }
+                // Skip word characters
+                while new_cursor > 0 && chars[new_cursor - 1] != ' ' {
+                    new_cursor -= 1;
+                }
+                let removed: String = chars[new_cursor..app.cursor].iter().collect();
+                let end_byte = char_byte_pos(&app.input, app.cursor);
+                let start_byte = end_byte - removed.len();
+                app.input.drain(start_byte..end_byte);
+                app.cursor = new_cursor;
+                app.selected_cmd = None;
+                app.history_idx = None;
+            }
+        }
         (_, Char(c)) => {
             let byte_pos = char_byte_pos(&app.input, app.cursor);
             app.input.insert(byte_pos, c);

@@ -1085,6 +1085,8 @@ struct App {
     session_total_input_tokens: u64,
     session_total_output_tokens: u64,
     session_total_cost_usd: f64,
+    /// Number of completed agent turns in this TUI session.
+    session_turn_count: u32,
     /// Max context window in tokens for the current model (0 = unknown).
     context_max_tokens: u64,
     /// Channel to trigger immediate context compaction in agent_task.
@@ -1223,6 +1225,7 @@ impl App {
             session_total_input_tokens: 0,
             session_total_output_tokens: 0,
             session_total_cost_usd: 0.0,
+            session_turn_count: 0,
             context_max_tokens: 0,
             compact_now_tx,
             last_plan_snapshot: None,
@@ -1504,6 +1507,7 @@ impl App {
         self.current_step = None;
         self.cancel
             .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.session_turn_count += 1;
 
         // Show elapsed time for the completed turn.
         if let Some(start) = self.turn_start {
@@ -1680,22 +1684,28 @@ fn render(frame: &mut Frame, app: &mut App) {
         dim,
     )];
     if app.session_total_cost_usd > 0.0 {
-        let sum_in = app.session_total_input_tokens;
-        let tok_str = if sum_in >= 1000 {
-            format!("{:.1}k tokens", sum_in as f64 / 1000.0)
+        // Format token count (combined in+out for this session)
+        let sum_tokens = app.session_total_input_tokens + app.session_total_output_tokens;
+        let tok_str = if sum_tokens >= 1_000_000 {
+            format!("{:.2}M tok", sum_tokens as f64 / 1_000_000.0)
+        } else if sum_tokens >= 1000 {
+            format!("{:.1}k tok", sum_tokens as f64 / 1000.0)
         } else {
-            format!("{} tokens", sum_in)
+            format!("{} tok", sum_tokens)
         };
-        let last_in = app.session_input_tokens;
-        let ctx_str = if app.context_max_tokens > 0 && last_in > 0 {
-            let pct = (last_in as f64 / app.context_max_tokens as f64 * 100.0).min(100.0);
-            format!("  {:.0}% ctx", pct)
+
+        // Context window usage — use last-turn input as proxy
+        let ctx_str = if app.context_max_tokens > 0 && app.session_input_tokens > 0 {
+            let pct = (app.session_input_tokens as f64 / app.context_max_tokens as f64 * 100.0)
+                .min(100.0);
+            format!("  {:.0}% window", pct)
         } else {
             String::new()
         };
+
         hline2.push(Span::styled(
             format!(
-                "   ${:.4}  {}{}",
+                "   session: ${:.4}  {}{}",
                 app.session_total_cost_usd, tok_str, ctx_str
             ),
             dim,
@@ -4149,7 +4159,9 @@ fn execute_slash(app: &mut App, cmd: &str) {
         "/clear" => {
             app.messages.clear();
             app.messages.push(ChatLine::WelcomeBrand);
-            app.push(ChatLine::Info("  Conversation cleared".into()));
+            app.push(ChatLine::Info(
+                "  Conversation cleared — new session started".into(),
+            ));
         }
         "/help" => {
             app.push(ChatLine::Info("".into()));
@@ -4621,10 +4633,47 @@ fn execute_slash(app: &mut App, cmd: &str) {
             }
         }
         "/tokens" => {
+            let total = app.session_total_input_tokens + app.session_total_output_tokens;
+            let total_str = if total >= 1000 {
+                format!("{:.1}k", total as f64 / 1000.0)
+            } else {
+                total.to_string()
+            };
+            let ctx_pct = if app.context_max_tokens > 0 && app.session_input_tokens > 0 {
+                let pct = (app.session_input_tokens as f64 / app.context_max_tokens as f64 * 100.0)
+                    .min(100.0);
+                format!(
+                    "  Context window: {:.0}% used ({} / {} tokens)",
+                    pct, app.session_input_tokens, app.context_max_tokens
+                )
+            } else {
+                String::new()
+            };
+            app.push(ChatLine::Info(
+                "  ── Session Token Usage ──────────────────────".into(),
+            ));
             app.push(ChatLine::Info(format!(
-                "  Session tokens: {} in / {} out",
-                app.session_total_input_tokens, app.session_total_output_tokens
+                "  Input tokens:   {}",
+                app.session_total_input_tokens
             )));
+            app.push(ChatLine::Info(format!(
+                "  Output tokens:  {}",
+                app.session_total_output_tokens
+            )));
+            app.push(ChatLine::Info(format!("  Total tokens:   {}", total_str)));
+            app.push(ChatLine::Info(format!(
+                "  Estimated cost: ${:.6}",
+                app.session_total_cost_usd
+            )));
+            if !ctx_pct.is_empty() {
+                app.push(ChatLine::Info(ctx_pct));
+            }
+            if app.session_turn_count > 0 {
+                app.push(ChatLine::Info(format!(
+                    "  Turns completed: {}",
+                    app.session_turn_count
+                )));
+            }
         }
         "/compact" => {
             if app.busy {
@@ -9151,7 +9200,9 @@ async fn event_loop(
                             // Explicit /resume or startup resume: clear and replay.
                             app.messages.clear();
                             app.messages.push(ChatLine::WelcomeBrand);
-                            app.messages.push(ChatLine::Info("  ↺ Session resumed".into()));
+                            let user_turns = messages.iter().filter(|(r, _)| r == "user").count();
+                            let turn_label = if user_turns == 1 { "1 message".to_string() } else { format!("{} messages", user_turns) };
+                            app.messages.push(ChatLine::Info(format!("  ↺ Session resumed — {}", turn_label)));
                             for (role, text) in messages {
                                 if role == "user" {
                                     app.push(ChatLine::User(text));
@@ -9164,12 +9215,29 @@ async fn event_loop(
                     }
                     Some(AgentEvent::TokenUsage { input_tokens, output_tokens, cost_usd, context_max_tokens }) => {
                         last_agent_activity = std::time::Instant::now();
+                        // Cumulative fields on the agent reset at the start of each Run.
+                        // Use delta tracking: if new value < previous, this is a new run.
+                        let delta_in = if input_tokens >= app.session_input_tokens {
+                            input_tokens - app.session_input_tokens
+                        } else {
+                            input_tokens // new run — full value is the delta
+                        };
+                        let delta_out = if output_tokens >= app.session_output_tokens {
+                            output_tokens - app.session_output_tokens
+                        } else {
+                            output_tokens
+                        };
+                        let delta_cost = if cost_usd >= app.session_cost_usd {
+                            cost_usd - app.session_cost_usd
+                        } else {
+                            cost_usd
+                        };
                         app.session_input_tokens = input_tokens;
                         app.session_output_tokens = output_tokens;
                         app.session_cost_usd = cost_usd;
-                        app.session_total_input_tokens += input_tokens;
-                        app.session_total_output_tokens += output_tokens;
-                        app.session_total_cost_usd += cost_usd;
+                        app.session_total_input_tokens += delta_in;
+                        app.session_total_output_tokens += delta_out;
+                        app.session_total_cost_usd += delta_cost;
                         app.context_max_tokens = context_max_tokens;
                     }
                     Some(AgentEvent::Compacted { before, after }) => {

@@ -1481,7 +1481,7 @@ fn render(frame: &mut Frame, app: &mut App) {
             };
             slines.push(Line::from(vec![
                 Span::styled(format!("  {} ", icon), style),
-                Span::styled(entry.name.clone(), style),
+                Span::styled(tool_display_name(&entry.name).to_string(), style),
                 Span::styled(format!("  {}", entry.detail), status_style),
                 Span::styled(elapsed_str, status_style),
             ]));
@@ -2960,7 +2960,7 @@ fn render_settings(frame: &mut Frame, area: Rect, input_area: Rect, st: &Setting
     frame.render_widget(
         Paragraph::new(lines).block(
             Block::default()
-                .title(" Settings (Esc close) ")
+                .title(" Settings  (↑↓ navigate · Enter=edit · n=add · Del=remove · Esc=close) ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan)),
         ),
@@ -3033,11 +3033,11 @@ fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            "    /help   /sessions   /model   /workdir".to_string(),
+            "    /help   /model   /settings   /workdir".to_string(),
             accent,
         )),
         Line::from(Span::styled(
-            "    Enter=send   Ctrl+/=stop   Ctrl+Enter=interrupt+send".to_string(),
+            "    Enter  send   Ctrl+/  stop agent   Ctrl+Enter  interrupt+send".to_string(),
             muted,
         )),
         Line::raw(""),
@@ -3394,6 +3394,19 @@ fn tool_color(name: &str, done: bool, is_error: bool) -> Color {
         "WebFetch" | "WebSearch" => Color::Magenta,
         "SpawnWorker" | "SpawnReviewer" => Color::LightCyan,
         _ => Color::White,
+    }
+}
+
+/// Maps internal tool names to human-readable display labels.
+fn tool_display_name(name: &str) -> &str {
+    match name {
+        "SemanticSearch" => "Search",
+        "SpawnWorker" => "Worker",
+        "SpawnReviewer" => "Reviewer",
+        "TodoWrite" => "Todo",
+        "WebFetch" => "Fetch",
+        "WebSearch" => "Web",
+        other => other,
     }
 }
 
@@ -3812,28 +3825,28 @@ fn execute_slash(app: &mut App, cmd: &str) {
         "/cost" => {
             if app.session_total_cost_usd == 0.0 {
                 app.push(ChatLine::Info(
-                    "  cost: $0.0000 (no billed turns yet)".into(),
+                    "  Session cost: $0.00 (no API calls yet)".into(),
                 ));
             } else {
                 app.push(ChatLine::Info(format!(
-                    "  cost (session total): ${:.4}",
+                    "  Session cost: ${:.4}",
                     app.session_total_cost_usd
                 )));
             }
         }
         "/tokens" => {
             app.push(ChatLine::Info(format!(
-                "  tokens (session total): {} input  {} output",
+                "  Session tokens: {} in / {} out",
                 app.session_total_input_tokens, app.session_total_output_tokens
             )));
         }
         "/compact" => {
             if app.busy {
                 app.push(ChatLine::Info(
-                    "  compact: agent is busy, try again when idle".into(),
+                    "  Agent is busy — try /compact when idle".into(),
                 ));
             } else {
-                app.push(ChatLine::Info("  compacting context window…".into()));
+                app.push(ChatLine::Info("  ↻ Compressing context window…".into()));
                 let _ = app.compact_now_tx.send(());
             }
         }
@@ -3841,12 +3854,11 @@ fn execute_slash(app: &mut App, cmd: &str) {
             let todos = app.todo_store.lock().map(|g| g.clone()).unwrap_or_default();
             if todos.is_empty() {
                 app.push(ChatLine::Info(
-                    "  todo: no items — agent hasn't written a todo list yet (TodoWrite tool)"
-                        .into(),
+                    "  No tasks yet — the agent will create a task list while working".into(),
                 ));
             } else {
                 app.push(ChatLine::Info(format!(
-                    "  todo list ({} item{}):",
+                    "  Tasks ({} item{}):",
                     todos.len(),
                     if todos.len() == 1 { "" } else { "s" }
                 )));
@@ -4195,6 +4207,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
             ));
         }
         "/check" => {
+            app.push(ChatLine::Info("  ↻ Running project diagnostics…".into()));
             // Send a message to the agent asking it to run diagnostics on the current project.
             app.send_now("Run diagnostics on the current project".to_string());
         }
@@ -4256,7 +4269,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
             let path_str = cmd.trim_start_matches("/image").trim();
             if path_str.is_empty() {
                 app.push(ChatLine::Info(
-                    "  image: usage: /image <path>   (attach image to next message)".into(),
+                    "  Usage: /image <path>  (attach an image to the next message)".into(),
                 ));
             } else {
                 let path = std::path::Path::new(path_str);
@@ -4268,7 +4281,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                     }
                     None => {
                         app.push(ChatLine::Info(format!(
-                            "  image: could not load '{}' — file not found or unsupported format (PNG/JPEG/GIF/WebP)",
+                            "  ✗ Could not load image '{}' — supported: PNG, JPEG, GIF, WebP",
                             path_str
                         )));
                     }
@@ -4276,10 +4289,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
             }
         }
         "/agents" => match clido_core::load_config(&app.workspace_root) {
-            Err(e) => app.push(ChatLine::Info(format!(
-                "  agents: error loading config: {}",
-                e
-            ))),
+            Err(e) => app.push(ChatLine::Info(format!("  ✗ Could not load config: {}", e))),
             Ok(loaded) => {
                 app.push(ChatLine::Info("  Agent configuration:".into()));
                 if let Some(main) = &loaded.agents.main {
@@ -4308,14 +4318,11 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 } else {
                     app.push(ChatLine::Info("  reviewer  not configured".into()));
                 }
-                app.push(ChatLine::Info("  Use /init to reconfigure agents.".into()));
+                app.push(ChatLine::Info("  Run /init to reconfigure.".into()));
             }
         },
         "/profiles" => match clido_core::load_config(&app.workspace_root) {
-            Err(e) => app.push(ChatLine::Info(format!(
-                "  profiles: error loading config: {}",
-                e
-            ))),
+            Err(e) => app.push(ChatLine::Info(format!("  ✗ Could not load config: {}", e))),
             Ok(loaded) => {
                 app.push(ChatLine::Info("  Profiles:".into()));
                 let mut names: Vec<&String> = loaded.profiles.keys().collect();
@@ -4350,10 +4357,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
         "/profile" => {
             // No name given → open interactive profile picker.
             match clido_core::load_config(&app.workspace_root) {
-                Err(e) => app.push(ChatLine::Info(format!(
-                    "  profile: error loading config: {}",
-                    e
-                ))),
+                Err(e) => app.push(ChatLine::Info(format!("  ✗ Could not load config: {}", e))),
                 Ok(loaded) => {
                     let active = loaded.default_profile.clone();
                     let mut profiles: Vec<(String, clido_core::ProfileEntry)> =
@@ -4394,10 +4398,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
         cmd if cmd.starts_with("/profile ") => {
             let name = cmd.trim_start_matches("/profile ").trim();
             match clido_core::load_config(&app.workspace_root) {
-                Err(e) => app.push(ChatLine::Info(format!(
-                    "  profile: error loading config: {}",
-                    e
-                ))),
+                Err(e) => app.push(ChatLine::Info(format!("  ✗ Could not load config: {}", e))),
                 Ok(loaded) => {
                     if !loaded.profiles.contains_key(name) {
                         app.push(ChatLine::Info(format!(
@@ -4495,17 +4496,18 @@ fn build_lines(app: &App) -> Vec<Line<'static>> {
                 } else {
                     "↻"
                 };
+                let display_name = tool_display_name(name);
                 let dim = Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM);
                 if detail.is_empty() {
                     out.push(Line::from(vec![Span::styled(
-                        format!("  {} {}", icon, name.clone()),
+                        format!("  {} {}", icon, display_name),
                         style,
                     )]));
                 } else {
                     out.push(Line::from(vec![
-                        Span::styled(format!("  {} {}", icon, name.clone()), style),
+                        Span::styled(format!("  {} {}", icon, display_name), style),
                         Span::styled(format!("  {}", detail.clone()), dim),
                     ]));
                 }

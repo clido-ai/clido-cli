@@ -2,6 +2,7 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::env;
+use std::hash::{Hash, Hasher};
 use std::io::{stdout, Write as _};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -1244,6 +1245,13 @@ struct App {
     prompt_rules: PromptRules,
     /// When Some, holds an enhanced preview that /prompt-preview is waiting to display.
     prompt_preview_text: Option<String>,
+    /// Render cache: maps (content_hash, render_width) to pre-built Line<'static> slices.
+    /// Avoids re-parsing markdown on every 80ms render tick when messages haven't changed.
+    /// Invalidated (cleared) on terminal resize since width affects line-wrapping.
+    render_cache: std::collections::HashMap<(u64, usize), Vec<Line<'static>>>,
+    /// Hash of the messages Vec at the time the cache was last populated.
+    /// Used to detect when messages change and stale entries should be evicted.
+    render_cache_msg_count: usize,
 }
 
 impl App {
@@ -1349,6 +1357,8 @@ impl App {
             prompt_mode: PromptMode::Auto,
             prompt_rules: PromptRules::default(),
             prompt_preview_text: None,
+            render_cache: std::collections::HashMap::new(),
+            render_cache_msg_count: 0,
         };
         app.prompt_mode = load_prompt_mode(&app.workspace_root);
         app.prompt_rules = load_rules(&app.workspace_root);
@@ -1396,12 +1406,18 @@ impl App {
             self.push(ChatLine::User(actual_prompt.clone()));
             if self.input_history.last().map(|s| s.as_str()) != Some(text.as_str()) {
                 self.input_history.push(text);
+                if self.input_history.len() > 1000 {
+                    self.input_history.remove(0);
+                }
             }
             self.prompt_tx.send(actual_prompt)
         } else {
             self.push(ChatLine::User(text.clone()));
             if self.input_history.last().map(|s| s.as_str()) != Some(text.as_str()) {
                 self.input_history.push(text.clone());
+                if self.input_history.len() > 1000 {
+                    self.input_history.remove(0);
+                }
             }
             self.prompt_tx.send(text)
         };
@@ -5990,7 +6006,45 @@ Once built, the agent can search by concept rather than just filename.".into(),
 }
 
 /// Width-aware version; call this from render paths where chat_area.width is known.
-fn build_lines_w(app: &App, width: usize) -> Vec<Line<'static>> {
+/// Uses a per-width render cache keyed by message content hash to avoid re-rendering
+/// unchanged messages on every tick.
+fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
+    // Compute a cheap hash of the current messages state.
+    // Key: (content_hash, width) where content_hash covers message count + last message text.
+    let msg_count = app.messages.len();
+    let content_hash = {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        msg_count.hash(&mut h);
+        // Include last message content so new streaming tokens invalidate the cache.
+        if let Some(last) = app.messages.last() {
+            std::mem::discriminant(last).hash(&mut h);
+            match last {
+                ChatLine::User(t) | ChatLine::Assistant(t) | ChatLine::Thinking(t) => {
+                    t.hash(&mut h);
+                }
+                _ => {}
+            }
+        }
+        h.finish()
+    };
+    let cache_key = (content_hash, width);
+
+    // Evict stale entries when the message list shrinks (e.g. after /compact).
+    if msg_count < app.render_cache_msg_count {
+        app.render_cache.clear();
+    }
+    app.render_cache_msg_count = msg_count;
+
+    if let Some(cached) = app.render_cache.get(&cache_key) {
+        return cached.clone();
+    }
+
+    let result = build_lines_w_uncached(app, width);
+    app.render_cache.insert(cache_key, result.clone());
+    result
+}
+
+fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
     for msg in &app.messages {
         match msg {
@@ -8432,6 +8486,21 @@ async fn agent_task(
                         let _ = event_tx.send(AgentEvent::Err(format!("resume writer: {}", e)));
                     }
                 }
+                // Warn if any files referenced in the session have changed since recording.
+                let stale_records = clido_storage::SessionReader::stale_file_records(&lines);
+                let stale = clido_storage::stale_paths(&stale_records);
+                if !stale.is_empty() {
+                    let list = stale
+                        .iter()
+                        .map(|p| format!("  • {}", p))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let _ = event_tx.send(AgentEvent::Thinking(format!(
+                        "⚠ Some files referenced in this session have changed since it was recorded:\n{}\n\
+                         The agent's context may be stale for these files.",
+                        list
+                    )));
+                }
                 let mut msgs: Vec<(String, String)> = Vec::new();
                 for line in &lines {
                     match line {
@@ -8967,6 +9036,8 @@ struct AgentRuntimeHandles {
     perm_rx: mpsc::UnboundedReceiver<PermRequest>,
     /// Shared todo list written by the agent's TodoWrite tool — readable by the TUI.
     todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
+    /// JoinHandle for the agent background task — aborted on TUI exit to prevent zombies.
+    agent_handle: tokio::task::JoinHandle<()>,
 }
 
 fn start_agent_runtime(
@@ -8990,7 +9061,7 @@ fn start_agent_runtime(
     let todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>> =
         std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
 
-    tokio::spawn(agent_task(
+    let agent_handle = tokio::spawn(agent_task(
         cli,
         workspace_root,
         preloaded_config,
@@ -9017,6 +9088,7 @@ fn start_agent_runtime(
         event_rx,
         perm_rx,
         todo_store,
+        agent_handle,
     }
 }
 
@@ -9025,6 +9097,14 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         .workdir
         .clone()
         .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+
+    // Prune session files older than 30 days in the background (non-fatal).
+    {
+        let wr = workspace_root.clone();
+        tokio::task::spawn_blocking(move || {
+            let _ = clido_storage::prune_old_sessions(&wr, 30);
+        });
+    }
 
     // Load config, pricing table, and model prefs concurrently to minimise startup latency.
     let wr = workspace_root.clone();
@@ -9217,6 +9297,9 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         }
     };
 
+    // Abort the agent background task to prevent zombies after TUI exits.
+    runtime.agent_handle.abort();
+
     let _ = disable_raw_mode();
     let _ = execute!(
         terminal.backend_mut(),
@@ -9319,13 +9402,22 @@ async fn event_loop(
     // Stall timeout: trigger recovery only if truly no activity (heartbeats keep this fresh
     // during long LLM calls, so 120 s is a reliable hard ceiling for genuinely hung agents).
     const STALL_TIMEOUT_SECS: u64 = 120;
+    // Only redraw when state has actually changed to reduce CPU usage.
+    let mut dirty = true;
 
     loop {
-        terminal.draw(|f| render(f, app))?;
+        if dirty {
+            terminal.draw(|f| render(f, app))?;
+            dirty = false;
+        }
 
         tokio::select! {
             _ = tick.tick() => {
-                app.tick_spinner();
+                // Only mark dirty when spinner is actually animating.
+                if app.busy || app.pending_perm.is_some() {
+                    app.tick_spinner();
+                    dirty = true;
+                }
                 if app.busy && app.pending_perm.is_none() {
                     let baseline = if let Some(turn_start) = app.turn_start {
                         if turn_start > last_agent_activity {
@@ -9344,6 +9436,7 @@ async fn event_loop(
                 }
             }
             maybe = crossterm_events.next() => {
+                dirty = true;
                 match maybe {
                     Some(Ok(Event::Key(key))) => {
                         // Ctrl+L: force a full terminal redraw (screen recovery).
@@ -9383,6 +9476,9 @@ async fn event_loop(
                             None
                         };
                         let _ = terminal.clear();
+                        // Width changed — render cache is now stale (line-wrapping differs).
+                        app.render_cache.clear();
+                        app.render_cache_msg_count = 0;
                         // Restore approximate scroll position after redraw recalculates max_scroll.
                         // The actual clamping is done in render_frame when max_scroll is recomputed.
                         app.pending_scroll_ratio = ratio;
@@ -9392,6 +9488,7 @@ async fn event_loop(
                 }
             }
             maybe = event_rx.recv() => {
+                dirty = true;
                 match maybe {
                     Some(AgentEvent::ToolStart {
                         tool_use_id,
@@ -9637,6 +9734,7 @@ async fn event_loop(
                 }
             }
             maybe = perm_rx.recv() => {
+                dirty = true;
                 if let Some(req) = maybe {
                     last_agent_activity = std::time::Instant::now();
                     app.pending_perm = Some(PendingPerm {

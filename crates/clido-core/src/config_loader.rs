@@ -7,6 +7,17 @@ use std::path::{Path, PathBuf};
 use crate::config::{AgentConfig, HooksConfig, PermissionMode};
 use crate::{ClidoError, Result};
 
+/// Write `contents` to `path` atomically: write to a `.tmp` sibling, then rename.
+/// Prevents partial writes from corrupting the config on crash or I/O error.
+fn atomic_write(path: &Path, contents: &str) -> Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, contents)
+        .map_err(|e| ClidoError::Config(format!("Cannot write tmp config: {}", e)))?;
+    std::fs::rename(&tmp, path)
+        .map_err(|e| ClidoError::Config(format!("Cannot rename tmp config: {}", e)))?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileEntry {
     pub provider: String,
@@ -516,8 +527,7 @@ pub fn switch_active_profile(config_path: &Path, name: &str) -> Result<()> {
     }
     let out = toml::to_string_pretty(&root)
         .map_err(|e| ClidoError::Config(format!("Serialize error: {}", e)))?;
-    std::fs::write(config_path, out)
-        .map_err(|e| ClidoError::Config(format!("Cannot write config: {}", e)))?;
+    atomic_write(config_path, &out)?;
     Ok(())
 }
 
@@ -551,8 +561,7 @@ pub fn delete_profile_from_config(config_path: &Path, name: &str) -> Result<()> 
     }
     let out = toml::to_string_pretty(&root)
         .map_err(|e| ClidoError::Config(format!("Serialize error: {}", e)))?;
-    std::fs::write(config_path, out)
-        .map_err(|e| ClidoError::Config(format!("Cannot write config: {}", e)))?;
+    atomic_write(config_path, &out)?;
     Ok(())
 }
 
@@ -606,8 +615,7 @@ pub fn upsert_profile_in_config(
         std::fs::create_dir_all(parent)
             .map_err(|e| ClidoError::Config(format!("Cannot create config dir: {}", e)))?;
     }
-    std::fs::write(config_path, out)
-        .map_err(|e| ClidoError::Config(format!("Cannot write config: {}", e)))?;
+    atomic_write(config_path, &out)?;
     Ok(())
 }
 

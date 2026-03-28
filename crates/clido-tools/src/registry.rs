@@ -37,6 +37,26 @@ impl ToolRegistry {
             .collect()
     }
 
+    /// Return schemas filtered for the current execution context.
+    /// `in_plan_mode` controls whether ExitPlanMode is included (only useful in plan mode).
+    pub fn schemas_for_context(&self, in_plan_mode: bool) -> Vec<ToolSchema> {
+        self.tools
+            .values()
+            .filter(|t| {
+                // ExitPlanMode is only relevant when actually in plan mode.
+                if t.name() == "ExitPlanMode" {
+                    return in_plan_mode;
+                }
+                true
+            })
+            .map(|t| ToolSchema {
+                name: t.name().to_string(),
+                description: t.description().to_string(),
+                input_schema: t.schema(),
+            })
+            .collect()
+    }
+
     /// Apply allow/disallow lists. Disallowed takes precedence. Returns a new registry
     /// with only the allowed tools (or all if allowed is None, minus disallowed).
     pub fn with_filters(

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::Path;
 
 use crate::paths;
@@ -195,6 +195,14 @@ impl SessionWriter {
         self.file.write_all(b"\n")?;
         Ok(())
     }
+
+    /// Write a session line and log any I/O error to stderr (non-fatal).
+    /// Preferred over `let _ = write_line(...)` to avoid silent data loss.
+    pub fn log_write_line(&mut self, line: &SessionLine) {
+        if let Err(e) = self.write_line(line) {
+            eprintln!("[clido] session write error: {e}");
+        }
+    }
 }
 
 impl std::io::Write for SessionWriter {
@@ -210,16 +218,19 @@ impl std::io::Write for SessionWriter {
 pub struct SessionReader;
 
 impl SessionReader {
-    /// Load all lines from a session file. Fails if schema_version > supported.
+    /// Load all lines from a session file using streaming I/O to avoid loading
+    /// large sessions entirely into memory. Fails if schema_version > supported.
     pub fn load(project_path: &Path, session_id: &str) -> anyhow::Result<Vec<SessionLine>> {
         let path = paths::session_file_path(project_path, session_id)?;
-        let content = std::fs::read_to_string(&path)?;
+        let file = std::fs::File::open(&path)?;
+        let reader = std::io::BufReader::new(file);
         let mut lines = Vec::new();
-        for (i, line_str) in content.lines().enumerate() {
+        for (i, raw) in reader.lines().enumerate() {
+            let line_str = raw.map_err(|e| anyhow::anyhow!("line {}: read error: {}", i + 1, e))?;
             if line_str.trim().is_empty() {
                 continue;
             }
-            let line: SessionLine = serde_json::from_str(line_str)
+            let line: SessionLine = serde_json::from_str(&line_str)
                 .map_err(|e| anyhow::anyhow!("line {}: {}", i + 1, e))?;
             if let SessionLine::Meta { schema_version, .. } = &line {
                 if *schema_version > SCHEMA_VERSION {
@@ -284,6 +295,34 @@ pub fn stale_paths(records: &[StaleFileRecord]) -> Vec<String> {
         }
     }
     stale
+}
+
+/// Remove session files older than `max_age_days` days from the session directory.
+/// Called at TUI startup to prevent unbounded disk growth over months of use.
+/// Only affects `.jsonl` files; ignores any other files in the directory.
+pub fn prune_old_sessions(project_path: &Path, max_age_days: u64) -> anyhow::Result<u32> {
+    let dir = paths::session_dir_for_project(project_path)?;
+    if !dir.exists() {
+        return Ok(0);
+    }
+    let cutoff = std::time::SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(max_age_days * 86_400))
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    let mut removed = 0u32;
+    for entry in std::fs::read_dir(&dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+            if let Ok(meta) = std::fs::metadata(&path) {
+                if let Ok(modified) = meta.modified() {
+                    if modified < cutoff && std::fs::remove_file(&path).is_ok() {
+                        removed += 1;
+                    }
+                }
+            }
+        }
+    }
+    Ok(removed)
 }
 
 /// List sessions for a project (newest first). Reads session dir and parses first line for meta.

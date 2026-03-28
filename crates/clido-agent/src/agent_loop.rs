@@ -318,6 +318,16 @@ impl AgentLoop {
         Some(format!("{}\n\n[Relevant memories]\n{}", base, memory_text))
     }
 
+    /// Prune the memory store to keep the most recent 5000 entries, preventing
+    /// unbounded SQLite growth during long-running sessions.
+    fn prune_memory_if_needed(&self) {
+        if let Some(store) = self.memory.as_ref() {
+            if let Ok(mut lock) = store.lock() {
+                let _ = lock.prune_old(5000);
+            }
+        }
+    }
+
     /// Turn count from last run (for session result line).
     pub fn turn_count(&self) -> u32 {
         self.last_turn_count
@@ -491,7 +501,7 @@ impl AgentLoop {
                     .iter()
                     .filter_map(|b| serde_json::to_value(b).ok())
                     .collect();
-                let _ = w.write_line(&SessionLine::AssistantMessage { content });
+                w.log_write_line(&SessionLine::AssistantMessage { content });
             }
 
             match response.stop_reason {
@@ -525,7 +535,7 @@ impl AgentLoop {
 
                     if let Some(ref mut w) = session {
                         for (id, name, input) in &tool_uses {
-                            let _ = w.write_line(&SessionLine::ToolCall {
+                            w.log_write_line(&SessionLine::ToolCall {
                                 tool_use_id: id.clone(),
                                 tool_name: name.clone(),
                                 input: input.clone(),
@@ -666,7 +676,7 @@ impl AgentLoop {
                     for ((id, _, _), (output, duration_ms)) in tool_uses.iter().zip(outputs.iter())
                     {
                         if let Some(ref mut w) = session {
-                            let _ = w.write_line(&SessionLine::ToolResult {
+                            w.log_write_line(&SessionLine::ToolResult {
                                 tool_use_id: id.clone(),
                                 content: output.content.clone(),
                                 is_error: output.is_error,
@@ -729,15 +739,19 @@ impl AgentLoop {
                 .iter()
                 .filter_map(|b| serde_json::to_value(b).ok())
                 .collect();
-            let _ = w.write_line(&SessionLine::UserMessage {
+            w.log_write_line(&SessionLine::UserMessage {
                 role: "user".to_string(),
                 content,
             });
         }
 
         let result = self.run_completion_loop(session, pricing, cancel).await;
-        if result.is_err() && self.history.len() == history_before + 1 {
-            self.history.pop();
+        if result.is_err() {
+            // Roll back ALL messages added during this turn to avoid partial
+            // history pollution (consecutive same-role messages break most APIs).
+            self.history.truncate(history_before);
+        } else {
+            self.prune_memory_if_needed();
         }
         result
     }
@@ -772,7 +786,7 @@ impl AgentLoop {
                 .iter()
                 .filter_map(|b| serde_json::to_value(b).ok())
                 .collect();
-            let _ = w.write_line(&SessionLine::UserMessage {
+            w.log_write_line(&SessionLine::UserMessage {
                 role: "user".to_string(),
                 content,
             });
@@ -781,8 +795,12 @@ impl AgentLoop {
         let result = self.run_completion_loop(session, pricing, cancel).await;
         // If the run failed before any assistant response, rollback the user message
         // so the next call doesn't send consecutive user messages (which most APIs reject).
-        if result.is_err() && self.history.len() == history_before + 1 {
-            self.history.pop();
+        if result.is_err() {
+            // Roll back ALL messages added during this turn to avoid partial
+            // history pollution (consecutive same-role messages break most APIs).
+            self.history.truncate(history_before);
+        } else {
+            self.prune_memory_if_needed();
         }
         result
     }
@@ -817,15 +835,19 @@ impl AgentLoop {
                 .iter()
                 .filter_map(|b| serde_json::to_value(b).ok())
                 .collect();
-            let _ = w.write_line(&SessionLine::UserMessage {
+            w.log_write_line(&SessionLine::UserMessage {
                 role: "user".to_string(),
                 content: content_json,
             });
         }
 
         let result = self.run_completion_loop(session, pricing, cancel).await;
-        if result.is_err() && self.history.len() == history_before + 1 {
-            self.history.pop();
+        if result.is_err() {
+            // Roll back ALL messages added during this turn to avoid partial
+            // history pollution (consecutive same-role messages break most APIs).
+            self.history.truncate(history_before);
+        } else {
+            self.prune_memory_if_needed();
         }
         result
     }
@@ -856,15 +878,19 @@ impl AgentLoop {
                 .iter()
                 .filter_map(|b| serde_json::to_value(b).ok())
                 .collect();
-            let _ = w.write_line(&SessionLine::UserMessage {
+            w.log_write_line(&SessionLine::UserMessage {
                 role: "user".to_string(),
                 content: content_json,
             });
         }
 
         let result = self.run_completion_loop(session, pricing, cancel).await;
-        if result.is_err() && self.history.len() == history_before + 1 {
-            self.history.pop();
+        if result.is_err() {
+            // Roll back ALL messages added during this turn to avoid partial
+            // history pollution (consecutive same-role messages break most APIs).
+            self.history.truncate(history_before);
+        } else {
+            self.prune_memory_if_needed();
         }
         result
     }
@@ -875,7 +901,11 @@ impl AgentLoop {
         pricing: Option<&PricingTable>,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
-        let schemas = self.tools.schemas();
+        let effective_mode = self
+            .permission_mode_override
+            .unwrap_or(self.config.permission_mode);
+        let in_plan_mode = effective_mode == PermissionMode::PlanOnly;
+        let schemas = self.tools.schemas_for_context(in_plan_mode);
         let mut turns = 0;
         self.cumulative_cost_usd = 0.0;
         self.cumulative_input_tokens = 0;
@@ -985,7 +1015,7 @@ impl AgentLoop {
                     .iter()
                     .filter_map(|b| serde_json::to_value(b).ok())
                     .collect();
-                let _ = w.write_line(&SessionLine::AssistantMessage { content });
+                w.log_write_line(&SessionLine::AssistantMessage { content });
             }
 
             match response.stop_reason {
@@ -1038,7 +1068,7 @@ impl AgentLoop {
 
                     if let Some(ref mut w) = session {
                         for (id, name, input) in &tool_uses {
-                            let _ = w.write_line(&SessionLine::ToolCall {
+                            w.log_write_line(&SessionLine::ToolCall {
                                 tool_use_id: id.clone(),
                                 tool_name: name.clone(),
                                 input: input.clone(),
@@ -1180,7 +1210,7 @@ impl AgentLoop {
                         tool_uses.iter().zip(outputs.iter())
                     {
                         if let Some(ref mut w) = session {
-                            let _ = w.write_line(&SessionLine::ToolResult {
+                            w.log_write_line(&SessionLine::ToolResult {
                                 tool_use_id: id.clone(),
                                 content: output.content.clone(),
                                 is_error: output.is_error,
@@ -1637,7 +1667,7 @@ async fn compact_with_summary(
 
     // Find the split point: keep the tail that fits within max_context_tokens.
     // Reserve 512 tokens for the summary message.
-    const SUMMARY_RESERVE: u32 = 512;
+    const SUMMARY_RESERVE: u32 = 2048;
     let mut kept_tokens = 0u32;
     let mut start = msgs.len();
     for (i, m) in msgs.iter().enumerate().rev() {

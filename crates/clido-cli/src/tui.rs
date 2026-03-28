@@ -1176,7 +1176,7 @@ impl App {
             self.queued.push_front(text);
             self.input.clear();
             self.cursor = 0;
-            self.push(ChatLine::Info("  (interrupted — sending next)".into()));
+            self.push(ChatLine::Info("  ↻ Interrupted — sending next".into()));
         } else {
             self.dispatch_user_input(text);
         }
@@ -1189,7 +1189,7 @@ impl App {
         }
         self.cancel
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        self.push(ChatLine::Info("  (interrupted)".into()));
+        self.push(ChatLine::Info("  ↻ Interrupted".into()));
     }
 
     fn push_status(&mut self, tool_use_id: String, name: String, detail: String) {
@@ -1360,14 +1360,23 @@ fn render(frame: &mut Frame, app: &mut App) {
             ("○", Color::DarkGray)
         };
         hline1.push(Span::styled(
-            format!("  review {}", dot),
+            format!("  reviewer {}", dot),
             Style::default().fg(color).add_modifier(Modifier::DIM),
         ));
     }
 
     // Line 2: dir · cost/tokens
     let mut hline2: Vec<Span<'static>> = vec![Span::styled(
-        format!("  dir: {}", app.workspace_root.display()),
+        {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let raw = app.workspace_root.display().to_string();
+            let short = if !home.is_empty() && raw.starts_with(&home) {
+                format!("~{}", &raw[home.len()..])
+            } else {
+                raw
+            };
+            format!("  {}", short)
+        },
         dim,
     )];
     if app.session_total_cost_usd > 0.0 {
@@ -1464,7 +1473,7 @@ fn render(frame: &mut Frame, app: &mut App) {
         for entry in &app.status_log {
             let (icon, style, elapsed_str) = if entry.done {
                 let ms = entry.elapsed_ms.unwrap_or(0);
-                let t = format!("  {}ms", ms);
+                let t = format!(" {}ms", ms);
                 if entry.is_error {
                     (
                         "✗",
@@ -1478,9 +1487,9 @@ fn render(frame: &mut Frame, app: &mut App) {
                 let elapsed = entry.start.elapsed();
                 let secs = elapsed.as_secs_f64();
                 let t = if secs < 1.0 {
-                    format!("  {:.0}ms", elapsed.as_millis())
+                    format!(" {:.0}ms", elapsed.as_millis())
                 } else {
-                    format!("  {:.1}s", secs)
+                    format!(" {:.1}s", secs)
                 };
                 let running_color = tool_color(&entry.name, false, false);
                 (
@@ -1515,9 +1524,9 @@ fn render(frame: &mut Frame, app: &mut App) {
                 first.clone()
             };
             let label = if n == 1 {
-                "  ⟳ 1 queued  ".to_string()
+                "  ↻ 1 queued  ".to_string()
             } else {
-                format!("  ⟳ {} queued  ", n)
+                format!("  ↻ {} queued  ", n)
             };
             Line::from(vec![
                 Span::styled(
@@ -1629,7 +1638,7 @@ fn render(frame: &mut Frame, app: &mut App) {
             ])
         } else if app.input.is_empty() {
             let elapsed_s = app.turn_start.map(|t| t.elapsed().as_secs()).unwrap_or(0);
-            let elapsed_hint = if elapsed_s >= 3 {
+            let elapsed_hint = if elapsed_s >= 1 {
                 format!("  {}s", elapsed_s)
             } else {
                 String::new()
@@ -1674,7 +1683,7 @@ fn render(frame: &mut Frame, app: &mut App) {
     } else {
         let idle_title = Line::from(vec![Span::styled(
             if is_multiline {
-                " Shift+Enter=newline  Enter=send  Ctrl+Enter=interrupt "
+                " Shift+Enter=newline  (Enter=send  Ctrl+Enter=interrupt  /help=commands) "
             } else {
                 " Ask anything  (Enter=send  Shift+Enter=newline  /help=commands) "
             },
@@ -1720,19 +1729,11 @@ fn render(frame: &mut Frame, app: &mut App) {
         Span::styled("Shift+select", Style::default().fg(Color::DarkGray)),
         Span::styled(" copy text  ", hint_dim),
     ];
-    if app.session_total_cost_usd > 0.0 {
-        hint_spans.push(Span::styled(
-            format!("  ${:.4} spent", app.session_total_cost_usd),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
-        ));
-    }
     // Scroll position indicator when not following.
     if app.max_scroll > 0 && !app.following {
         let pct = (app.scroll * 100 / app.max_scroll).min(100);
         hint_spans.push(Span::styled(
-            format!("  [{}%]", pct),
+            format!("  ↑ {}%", pct),
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
@@ -1745,7 +1746,7 @@ fn render(frame: &mut Frame, app: &mut App) {
     // ── "↓ new messages" scroll indicator ──
     if !app.following && app.max_scroll > app.scroll {
         let unread_hint = Span::styled(
-            "  ↓ new  (PgDn) ",
+            "  ↓ new messages  PgDn ",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -1893,6 +1894,12 @@ fn render(frame: &mut Frame, app: &mut App) {
                     "  {:<8}  {:<5}  {:<6}  {:<11}  {}",
                     "id", "turns", "cost", "date", "preview"
                 ),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )]),
+            Line::from(vec![Span::styled(
+                "  ────────  ─────  ──────  ───────────  ────────────────────".to_string(),
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM),
@@ -2230,7 +2237,7 @@ fn render(frame: &mut Frame, app: &mut App) {
             frame.render_widget(Clear, popup_rect);
             frame.render_widget(
                 Paragraph::new(content).block(modal_block(
-                    &format!(" Deny {} — add reason for agent ", perm.tool_name),
+                    " Explain why you are denying this ",
                     Color::Red,
                 )),
                 popup_rect,
@@ -2311,7 +2318,7 @@ fn render(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block(
-                &format!(" Allow {}? ", perm.tool_name),
+                &format!(" Allow {}? ", tool_display_name(&perm.tool_name)),
                 Color::Yellow,
             )),
             popup_rect,
@@ -2649,7 +2656,7 @@ fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(" Plan text (Ctrl+S / Esc = save · Ctrl+C = discard) ")
+        .title(" Plan text (Ctrl+S = save · Esc / Ctrl+C = discard) ")
         .borders(Borders::ALL)
         .border_style(
             Style::default()
@@ -3049,7 +3056,7 @@ fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
             accent,
         )),
         Line::from(Span::styled(
-            "    Enter  send   Ctrl+/  stop agent   Ctrl+Enter  interrupt+send".to_string(),
+            "    Enter=send  ·  Ctrl+/=stop  ·  Ctrl+Enter=interrupt+send".to_string(),
             muted,
         )),
         Line::raw(""),
@@ -3506,7 +3513,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
         "/clear" => {
             app.messages.clear();
             app.messages.push(ChatLine::WelcomeBrand);
-            app.push(ChatLine::Info("  conversation cleared".into()));
+            app.push(ChatLine::Info("  Conversation cleared".into()));
         }
         "/help" => {
             app.push(ChatLine::Info("".into()));
@@ -3776,17 +3783,15 @@ fn execute_slash(app: &mut App, cmd: &str) {
             if app.busy {
                 app.stop_only();
             } else {
-                app.push(ChatLine::Info("  no active run to stop".into()));
+                app.push(ChatLine::Info("  ✗ No active run to stop".into()));
             }
         }
         "/copy" => match app.last_assistant_text() {
             Some(text) => match copy_to_clipboard_osc52(text) {
-                Ok(()) => app.push(ChatLine::Info(
-                    "  copied last assistant message via OSC 52".into(),
-                )),
-                Err(e) => app.push(ChatLine::Info(format!("  copy failed: {}", e))),
+                Ok(()) => app.push(ChatLine::Info("  ✓ Copied to clipboard".into())),
+                Err(e) => app.push(ChatLine::Info(format!("  ✗ Copy failed: {}", e))),
             },
-            None => app.push(ChatLine::Info("  nothing to copy yet".into())),
+            None => app.push(ChatLine::Info("  ✗ Nothing to copy yet".into())),
         },
         "/quit" => {
             app.quit = true;
@@ -3811,7 +3816,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                         }
                         ChatLine::Assistant(text) => {
                             if text.to_lowercase().contains(&q_lower) {
-                                hits.push((turn, "clido", truncate_chars(text, 80)));
+                                hits.push((turn, "assistant", truncate_chars(text, 80)));
                             }
                         }
                         _ => {}
@@ -3909,7 +3914,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                                 ));
                                 for e in &entries {
                                     app.push(ChatLine::Info(format!(
-                                        "    · {}",
+                                        "  · {}",
                                         truncate_chars(&e.content, 90)
                                     )));
                                 }
@@ -3946,7 +3951,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                                 )));
                                 for e in entries.iter().take(15) {
                                     app.push(ChatLine::Info(format!(
-                                        "    · {}",
+                                        "  · {}",
                                         truncate_chars(&e.content, 100)
                                     )));
                                 }
@@ -3970,7 +3975,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
         "/cost" => {
             if app.session_total_cost_usd == 0.0 {
                 app.push(ChatLine::Info(
-                    "  Session cost: $0.00 (no API calls yet)".into(),
+                    "  Session cost: $0.0000 (no API calls yet)".into(),
                 ));
             } else {
                 app.push(ChatLine::Info(format!(
@@ -4003,7 +4008,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 ));
             } else {
                 app.push(ChatLine::Info(format!(
-                    "  Tasks ({} item{}):",
+                    "  Tasks ({} item{})  ▶ = in progress  ✓ = done  ✗ = blocked  ! = high priority:",
                     todos.len(),
                     if todos.len() == 1 { "" } else { "s" }
                 )));
@@ -4100,7 +4105,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                         app.plan_text_editor = Some(PlanTextEditor::from_raw(&raw));
                     } else {
                         app.push(ChatLine::Info(
-                            "  no plan yet — use /plan <task> to create one".into(),
+                            "  ✗ No plan yet — use /plan <task> to create one".into(),
                         ));
                     }
                 }
@@ -4135,7 +4140,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                             }
                         }
                     } else {
-                        app.push(ChatLine::Info("  no active plan to save".into()));
+                        app.push(ChatLine::Info("  ✗ No active plan to save".into()));
                     }
                 }
                 "list" => match clido_planner::list_plans(&app.workspace_root) {
@@ -4157,10 +4162,17 @@ fn execute_slash(app: &mut App, cmd: &str) {
                                 "—".to_string()
                             };
                             app.push(ChatLine::Info(format!(
-                                "  · {}  [{}]  {}",
+                                "  {}  [{} done]  {}",
+                                {
+                                    let g = &s.goal;
+                                    if g.chars().count() > 58 {
+                                        format!("{}…", g.chars().take(57).collect::<String>())
+                                    } else {
+                                        g.clone()
+                                    }
+                                },
                                 done_frac,
-                                s.id,
-                                truncate_chars(&s.goal, 60)
+                                s.id
                             )));
                         }
                         app.push(ChatLine::Info(
@@ -4176,7 +4188,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                     if let Some(plan) = app.last_plan_snapshot.clone() {
                         if plan.tasks.is_empty() {
                             app.push(ChatLine::Info(
-                                "  usage: /plan <task>  — have the agent plan before executing"
+                                "  Usage: /plan <task>  — have the agent plan before executing"
                                     .into(),
                             ));
                             return;
@@ -4185,9 +4197,9 @@ fn execute_slash(app: &mut App, cmd: &str) {
                         let count = plan.tasks.len();
                         for (i, t) in plan.tasks.iter().enumerate() {
                             let prefix = if i + 1 == count {
-                                "        └─"
+                                "  └─"
                             } else {
-                                "        ├─"
+                                "  ├─"
                             };
                             app.push(ChatLine::Info(format!("{} {}", prefix, t.description)));
                         }
@@ -4198,16 +4210,16 @@ fn execute_slash(app: &mut App, cmd: &str) {
                                 let count = tasks.len();
                                 for (i, t) in tasks.iter().enumerate() {
                                     let prefix = if i + 1 == count {
-                                        "        └─"
+                                        "  └─"
                                     } else {
-                                        "        ├─"
+                                        "  ├─"
                                     };
                                     app.push(ChatLine::Info(format!("{} {}", prefix, t)));
                                 }
                             }
                             _ => {
                                 app.push(ChatLine::Info(
-                                    "  usage: /plan <task>  — have the agent plan before executing"
+                                    "  Usage: /plan <task>  — have the agent plan before executing"
                                         .into(),
                                 ));
                             }
@@ -4232,7 +4244,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
         _ if cmd == "/branch" || cmd.starts_with("/branch ") => {
             let name = cmd.trim_start_matches("/branch").trim().to_string();
             if name.is_empty() {
-                app.push(ChatLine::Info("  usage: /branch <name>".into()));
+                app.push(ChatLine::Info("  Usage: /branch <name>".into()));
                 app.push(ChatLine::Info(
                     "  creates a new branch and switches to it".into(),
                 ));
@@ -4467,7 +4479,9 @@ Once built, the agent can search by concept rather than just filename.".into(),
                         worker.provider, worker.model
                     )));
                 } else {
-                    app.push(ChatLine::Info("  worker    not configured".into()));
+                    app.push(ChatLine::Info(
+                        "  worker    not set  (uses main agent)".into(),
+                    ));
                 }
                 if let Some(reviewer) = &loaded.agents.reviewer {
                     app.push(ChatLine::Info(format!(
@@ -4475,7 +4489,7 @@ Once built, the agent can search by concept rather than just filename.".into(),
                         reviewer.provider, reviewer.model
                     )));
                 } else {
-                    app.push(ChatLine::Info("  reviewer  not configured".into()));
+                    app.push(ChatLine::Info("  reviewer  not set  (disabled)".into()));
                 }
                 app.push(ChatLine::Info("  Run /init to reconfigure.".into()));
             }
@@ -4627,7 +4641,7 @@ Once built, the agent can search by concept rather than just filename.".into(),
                             active, p.provider, p.model, key_status
                         )));
                         if let Some(ref url) = p.base_url {
-                            app.push(ChatLine::Info(format!("  base_url: {}", url)));
+                            app.push(ChatLine::Info(format!("  Custom endpoint: {}", url)));
                         }
                     }
 
@@ -4675,9 +4689,9 @@ Once built, the agent can search by concept rather than just filename.".into(),
                         }
                     }
 
-                    // Agent behaviour.
+                    // Agent behavior.
                     app.push(ChatLine::Info("".into()));
-                    app.push(ChatLine::Section("Agent Behaviour".into()));
+                    app.push(ChatLine::Section("Agent Behavior".into()));
                     let a = &loaded.agent;
                     app.push(ChatLine::Info(format!(
                         "  max-turns           {}",
@@ -4692,7 +4706,7 @@ Once built, the agent can search by concept rather than just filename.".into(),
                         app.push(ChatLine::Info("  max-budget-usd      unlimited".into()));
                     }
                     if let Some(tools) = a.max_concurrent_tools {
-                        app.push(ChatLine::Info(format!("  max-concurrent-tools {}", tools)));
+                        app.push(ChatLine::Info(format!("  max-concurrent-tools  {}", tools)));
                     }
                     if let Some(out_tok) = a.max_output_tokens {
                         app.push(ChatLine::Info(format!("  max-output-tokens   {}", out_tok)));
@@ -4899,7 +4913,7 @@ fn build_lines(app: &App) -> Vec<Line<'static>> {
             ChatLine::Thinking(text) => {
                 for part in text.lines() {
                     out.push(Line::from(vec![
-                        Span::raw("      "),
+                        Span::raw("    "),
                         Span::styled(
                             part.to_string(),
                             Style::default()
@@ -5287,7 +5301,7 @@ fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     in_code_block = false;
                     flush!();
                     out.push(Line::from(vec![Span::styled(
-                        "└────────────────".to_string(),
+                        "└────────────────────────────────────────".to_string(),
                         Style::default().fg(Color::DarkGray),
                     )]));
                     out.push(Line::raw(""));
@@ -5393,7 +5407,7 @@ fn render_markdown(text: &str) -> Vec<Line<'static>> {
             Event::Rule => {
                 flush!();
                 out.push(Line::from(vec![Span::styled(
-                    "─".repeat(60),
+                    "─".repeat(72),
                     Style::default().fg(Color::DarkGray),
                 )]));
                 out.push(Line::raw(""));
@@ -5556,7 +5570,10 @@ fn handle_plan_text_editor_key(app: &mut App, event: crossterm::event::KeyEvent)
     };
 
     match (event.modifiers, event.code) {
-        (_, Esc) => save_and_close(app),
+        (_, Esc) => {
+            // Discard changes — close without saving.
+            app.plan_text_editor = None;
+        }
         (Km::CONTROL, Char('s')) => save_and_close(app),
         (Km::CONTROL, Char('c')) => {
             app.plan_text_editor = None;
@@ -5879,7 +5896,7 @@ fn handle_plan_editor_key(app: &mut App, event: crossterm::event::KeyEvent) {
             // Abort plan — close editor without executing.
             app.plan_editor = None;
             app.plan_task_editing = None;
-            app.push(ChatLine::Info("  plan aborted.".into()));
+            app.push(ChatLine::Info("  ↻ Plan aborted".into()));
             app.busy = false;
         }
         _ => {}
@@ -5910,14 +5927,12 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         match app.last_assistant_text() {
             Some(text) => {
                 if let Err(e) = copy_to_clipboard_osc52(text) {
-                    app.push(ChatLine::Info(format!("  copy failed: {}", e)));
+                    app.push(ChatLine::Info(format!("  ✗ Copy failed: {}", e)));
                 } else {
-                    app.push(ChatLine::Info(
-                        "  copied last assistant message via OSC 52".into(),
-                    ));
+                    app.push(ChatLine::Info("  ✓ Copied to clipboard".into()));
                 }
             }
-            None => app.push(ChatLine::Info("  nothing to copy yet".into())),
+            None => app.push(ChatLine::Info("  ✗ Nothing to copy yet".into())),
         }
         return;
     }
@@ -6304,7 +6319,7 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     }
                     let id = picker.sessions[picker.selected].session_id.clone();
                     if app.current_session_id.as_deref() == Some(&id) {
-                        app.push(ChatLine::Info("  already in this session".into()));
+                        app.push(ChatLine::Info("  Already in this session".into()));
                     } else {
                         let _ = app.resume_tx.send(id);
                     }
@@ -7968,7 +7983,7 @@ async fn event_loop(
                             app.model = prev.clone();
                             let _ = app.model_switch_tx.send(prev.clone());
                             app.push(ChatLine::Info(format!(
-                                "  [reverted] model back to {}",
+                                "  ↻ Model restored to {}",
                                 prev
                             )));
                         }
@@ -8030,7 +8045,7 @@ async fn event_loop(
                             // Explicit /resume or startup resume: clear and replay.
                             app.messages.clear();
                             app.messages.push(ChatLine::WelcomeBrand);
-                            app.messages.push(ChatLine::Info("  — resumed session —".into()));
+                            app.messages.push(ChatLine::Info("  ↺ Session resumed".into()));
                             for (role, text) in messages {
                                 if role == "user" {
                                     app.push(ChatLine::User(text));

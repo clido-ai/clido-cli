@@ -492,4 +492,81 @@ mod tests {
         let tool = WebSearchTool::new();
         assert!(!tool.description().is_empty());
     }
+
+    // ── T03: Error handling and edge cases ─────────────────────────────────
+
+    #[test]
+    fn parse_ddg_results_empty_json_returns_empty() {
+        let json = serde_json::json!({});
+        let results = parse_ddg_results(&json, 5);
+        assert!(results.is_empty(), "expected empty results for empty json");
+    }
+
+    #[test]
+    fn parse_ddg_results_nested_topic_groups_are_skipped() {
+        // Topics with a "Topics" sub-array are category groups — they should be skipped
+        let json = serde_json::json!({
+            "AbstractText": "",
+            "AbstractURL": "",
+            "RelatedTopics": [
+                {
+                    "Topics": [
+                        { "Text": "Nested topic", "FirstURL": "https://example.com/nested" }
+                    ]
+                }
+            ]
+        });
+        let results = parse_ddg_results(&json, 5);
+        // Groups are intentionally skipped; result should be empty
+        assert!(
+            results.is_empty(),
+            "nested topic groups should be skipped, got {} results",
+            results.len()
+        );
+    }
+
+    #[test]
+    fn parse_ddg_results_missing_url_excluded() {
+        let json = serde_json::json!({
+            "AbstractText": "",
+            "AbstractURL": "",
+            "RelatedTopics": [
+                { "Text": "No URL topic" }
+            ]
+        });
+        let results = parse_ddg_results(&json, 5);
+        // Topics without FirstURL should be excluded
+        assert!(results.is_empty(), "topic without URL should be excluded");
+    }
+
+    #[tokio::test]
+    async fn search_whitespace_tabs_newlines_returns_error() {
+        // Verify that tab and newline whitespace is treated as empty
+        let tool = WebSearchTool::new();
+        let out = tool
+            .execute(serde_json::json!({ "query": "   \t\n   " }))
+            .await;
+        assert!(out.is_error);
+        assert!(out.content.contains("query"), "error: {}", out.content);
+    }
+
+    #[test]
+    fn format_results_multiple_entries_all_present() {
+        let results = vec![
+            SearchResult {
+                title: "Alpha".to_string(),
+                url: "https://alpha.com".to_string(),
+                snippet: "Alpha snippet".to_string(),
+            },
+            SearchResult {
+                title: "Beta".to_string(),
+                url: "https://beta.com".to_string(),
+                snippet: "Beta snippet".to_string(),
+            },
+        ];
+        let out = format_results(&results);
+        assert!(out.contains("Alpha"), "missing Alpha: {out}");
+        assert!(out.contains("Beta"), "missing Beta: {out}");
+        assert!(out.contains("https://alpha.com"), "missing url: {out}");
+    }
 }

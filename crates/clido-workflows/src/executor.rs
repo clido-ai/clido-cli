@@ -10,6 +10,14 @@ use crate::template::render;
 use crate::types::{OnErrorPolicy, StepDef, WorkflowDef};
 use clido_core::{ClidoError, Result};
 
+/// Return `s` if non-empty, otherwise a generic fallback.
+fn non_empty_error(s: Option<&str>) -> String {
+    match s {
+        Some(e) if !e.trim().is_empty() => e.to_string(),
+        _ => "Step failed (no error message provided)".to_string(),
+    }
+}
+
 /// Request for a single step run (implemented by CLI).
 #[derive(Debug, Clone)]
 pub struct StepRunRequest {
@@ -78,9 +86,9 @@ pub async fn run(
             if result.error.is_some() {
                 match step.on_error {
                     OnErrorPolicy::Fail => {
-                        return Err(ClidoError::Workflow(
-                            result.error.unwrap_or_else(|| "Step failed".to_string()),
-                        ));
+                        return Err(ClidoError::Workflow(non_empty_error(
+                            result.error.as_deref(),
+                        )));
                     }
                     OnErrorPolicy::Continue => {
                         success = false;
@@ -125,9 +133,9 @@ pub async fn run(
                 if run_res.error.is_some() {
                     success = false;
                     if step.on_error == OnErrorPolicy::Fail {
-                        return Err(ClidoError::Workflow(
-                            run_res.error.unwrap_or_else(|| "Step failed".to_string()),
-                        ));
+                        return Err(ClidoError::Workflow(non_empty_error(
+                            run_res.error.as_deref(),
+                        )));
                     }
                 }
             }

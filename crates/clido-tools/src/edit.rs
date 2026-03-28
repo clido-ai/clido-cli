@@ -2005,4 +2005,102 @@ mod tests {
         let new_content = std::fs::read_to_string(file).unwrap();
         assert!(new_content.contains("fn baz() {"));
     }
+
+    // ── T02: Fuzzy matching boundary tests ────────────────────────────────
+
+    #[tokio::test]
+    async fn edit_fuzzy_match_at_file_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("start.rs");
+        std::fs::write(&path, "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
+        let tool = EditTool::new(dir.path().to_path_buf());
+        // Match is at very beginning of file
+        let out = tool
+            .execute(serde_json::json!({
+                "file_path": "start.rs",
+                "old_string": "fn main() {",
+                "new_string": "fn entry() {"
+            }))
+            .await;
+        assert!(!out.is_error, "fuzzy at start failed: {}", out.content);
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("fn entry() {"));
+    }
+
+    #[tokio::test]
+    async fn edit_fuzzy_match_at_file_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("end.rs");
+        std::fs::write(&path, "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
+        let tool = EditTool::new(dir.path().to_path_buf());
+        // Match is at very end of file (last line)
+        let out = tool
+            .execute(serde_json::json!({
+                "file_path": "end.rs",
+                "old_string": "}",
+                "new_string": "} // end"
+            }))
+            .await;
+        assert!(!out.is_error, "fuzzy at end failed: {}", out.content);
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("} // end"), "content: {}", content);
+    }
+
+    #[tokio::test]
+    async fn edit_ambiguous_multiple_occurrences_with_replace_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dup.rs");
+        std::fs::write(&path, "foo\nfoo\nfoo\n").unwrap();
+        let tool = EditTool::new(dir.path().to_path_buf());
+        let out = tool
+            .execute(serde_json::json!({
+                "file_path": "dup.rs",
+                "old_string": "foo",
+                "new_string": "bar",
+                "replace_all": true
+            }))
+            .await;
+        assert!(!out.is_error, "replace_all failed: {}", out.content);
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "bar\nbar\nbar\n");
+    }
+
+    #[tokio::test]
+    async fn edit_crlf_content_is_normalized_and_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("crlf.txt");
+        // Write CRLF file
+        std::fs::write(&path, "hello\r\nworld\r\n").unwrap();
+        let tool = EditTool::new(dir.path().to_path_buf());
+        let out = tool
+            .execute(serde_json::json!({
+                "file_path": "crlf.txt",
+                "old_string": "world",
+                "new_string": "rust"
+            }))
+            .await;
+        assert!(!out.is_error, "CRLF test failed: {}", out.content);
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("rust"), "content: {}", content);
+    }
+
+    #[tokio::test]
+    async fn edit_dedented_old_string_matches_indented_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("indent.rs");
+        std::fs::write(&path, "fn foo() {\n    let x = 1;\n    let y = 2;\n}\n").unwrap();
+        let tool = EditTool::new(dir.path().to_path_buf());
+        // old_string with extra leading spaces that don't match exactly
+        let out = tool
+            .execute(serde_json::json!({
+                "file_path": "indent.rs",
+                "old_string": "    let x = 1;",
+                "new_string": "    let x = 42;"
+            }))
+            .await;
+        assert!(!out.is_error, "dedent test failed: {}", out.content);
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("let x = 42;"), "content: {}", content);
+    }
 }

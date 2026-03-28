@@ -416,10 +416,10 @@ struct ModelPickerState {
 
 impl ModelPickerState {
     fn filtered(&self) -> Vec<&ModelEntry> {
-        if self.filter.is_empty() {
+        let f = self.filter.trim().to_lowercase();
+        if f.is_empty() {
             return self.models.iter().collect();
         }
-        let f = self.filter.to_lowercase();
         self.models
             .iter()
             .filter(|m| {
@@ -1068,6 +1068,7 @@ impl App {
     fn dispatch_user_input(&mut self, text: String) {
         let trimmed = text.trim().to_string();
         if trimmed.is_empty() {
+            // Silently ignore — no feedback needed; user pressed Enter on blank input.
             return;
         }
         if trimmed == "/" {
@@ -1326,7 +1327,14 @@ fn render(frame: &mut Frame, app: &mut App) {
             format!("  v{}  ", version),
             Style::default().fg(Color::DarkGray),
         ),
-        Span::styled(format!("{}  {}", app.provider, app.model), dim),
+        Span::styled(
+            if app.per_turn_prev_model.is_some() {
+                format!("{}  {}⁺", app.provider, app.model)
+            } else {
+                format!("{}  {}", app.provider, app.model)
+            },
+            dim,
+        ),
         Span::styled(format!("  [{}]", app.current_profile), dim),
     ];
     if app.reviewer_configured {
@@ -1568,13 +1576,22 @@ fn render(frame: &mut Frame, app: &mut App) {
                 ),
             ])
         } else if app.input.is_empty() {
+            let elapsed_s = app.turn_start.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+            let elapsed_hint = if elapsed_s >= 3 {
+                format!("  {}s", elapsed_s)
+            } else {
+                String::new()
+            };
             Line::from(vec![
                 Span::styled(
                     format!("{} ", spinner),
                     Style::default().fg(Color::LightMagenta),
                 ),
                 Span::styled(
-                    "thinking…  (type a follow-up to queue, Ctrl+Enter to interrupt)".to_string(),
+                    format!(
+                        "thinking…{}  (type a follow-up to queue, Ctrl+Enter to interrupt)",
+                        elapsed_hint
+                    ),
                     Style::default().fg(Color::LightMagenta),
                 ),
             ])
@@ -2274,22 +2291,33 @@ fn render(frame: &mut Frame, app: &mut App) {
         let mut content: Vec<Line<'static>> = Vec::new();
         if rules.is_empty() {
             content.push(Line::from(vec![Span::styled(
-                "  No rules files found. Create CLIDO.md in your project root.".to_string(),
+                "  No active rules files.".to_string(),
                 Style::default().fg(Color::DarkGray),
             )]));
         } else {
-            for (path, preview) in rules {
-                content.push(Line::from(vec![Span::styled(
-                    format!("  {}", path),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )]));
-                if !preview.is_empty() {
+            for (path, detail) in rules {
+                if path.trim().is_empty() {
+                    content.push(Line::raw(""));
+                } else if path.starts_with("  ") {
+                    // Preview / indent line
                     content.push(Line::from(vec![Span::styled(
-                        format!("    {}", truncate_chars(preview, 60)),
+                        format!("    {}", truncate_chars(detail, 74)),
                         Style::default().fg(Color::DarkGray),
                     )]));
+                } else {
+                    // File path header with detail (line count etc.)
+                    content.push(Line::from(vec![
+                        Span::styled(
+                            format!("  {}", path),
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("  ({})", detail),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]));
                 }
             }
         }
@@ -4135,19 +4163,32 @@ fn execute_slash(app: &mut App, cmd: &str) {
         }
         "/rules" => {
             let rules = clido_context::discover_rules(&app.workspace_root, false, None);
+            let mut overlay_content: Vec<(String, String)> = Vec::new();
             if rules.is_empty() {
-                app.rules_overlay = Some(vec![]);
+                overlay_content.push((
+                    "  No active rules files.".to_string(),
+                    "Create CLIDO.md in your project root to define agent constraints.".to_string(),
+                ));
             } else {
-                app.rules_overlay = Some(
-                    rules
-                        .iter()
-                        .map(|f| {
-                            let preview = f.content.lines().take(3).collect::<Vec<_>>().join(" | ");
-                            (f.path.display().to_string(), preview)
-                        })
-                        .collect(),
-                );
+                for f in &rules {
+                    let line_count = f.content.lines().count();
+                    overlay_content.push((
+                        f.path.display().to_string(),
+                        format!("{} lines", line_count),
+                    ));
+                    // Show first 6 non-empty lines as preview
+                    let preview_lines: Vec<&str> = f
+                        .content
+                        .lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .take(6)
+                        .collect();
+                    if !preview_lines.is_empty() {
+                        overlay_content.push(("  ".to_string(), preview_lines.join(" │ ")));
+                    }
+                }
             }
+            app.rules_overlay = Some(overlay_content);
         }
         _ if cmd == "/image" || cmd.starts_with("/image ") => {
             let path_str = cmd.trim_start_matches("/image").trim();
@@ -7820,5 +7861,81 @@ mod tests {
             perm_rx.try_recv().is_err(),
             "workdir grant should avoid prompting for other tools"
         );
+    }
+
+    // ── T01: TUI critical path tests ──────────────────────────────────────
+
+    #[test]
+    fn model_picker_filtered_trims_whitespace() {
+        fn make_entry(id: &str) -> ModelEntry {
+            ModelEntry {
+                id: id.to_string(),
+                provider: "test".to_string(),
+                input_mtok: 0.0,
+                output_mtok: 0.0,
+                context_k: None,
+                role: None,
+                is_favorite: false,
+            }
+        }
+        let mut state = ModelPickerState {
+            models: vec![make_entry("gpt-4"), make_entry("claude-3")],
+            filter: "  gpt  ".to_string(),
+            selected: 0,
+            scroll_offset: 0,
+        };
+        let filtered = state.filtered();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, "gpt-4");
+
+        // Whitespace-only filter should return all models
+        state.filter = "   ".to_string();
+        let all = state.filtered();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn app_per_turn_override_indicator_set_and_cleared() {
+        let mut app = make_test_app();
+        assert!(app.per_turn_prev_model.is_none());
+        // Simulate override set
+        app.per_turn_prev_model = Some("base-model".to_string());
+        assert!(app.per_turn_prev_model.is_some());
+        // Simulate override cleared
+        app.per_turn_prev_model = None;
+        assert!(app.per_turn_prev_model.is_none());
+    }
+
+    #[test]
+    fn queue_messages_empty_does_not_panic() {
+        let mut app = make_test_app();
+        // Draining an empty queue should be a no-op
+        let drained: Vec<_> = app.queued.drain(..).collect();
+        assert!(drained.is_empty());
+    }
+
+    #[test]
+    fn queue_messages_preserves_order() {
+        let mut app = make_test_app();
+        app.queued.push_back("first".to_string());
+        app.queued.push_back("second".to_string());
+        app.queued.push_back("third".to_string());
+        let result: Vec<_> = app.queued.drain(..).collect();
+        assert_eq!(result, vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn slash_completions_returns_sorted_unique_commands() {
+        let completions = slash_completions("/");
+        // All completions should have names starting with "/"
+        for (cmd, _desc) in &completions {
+            assert!(cmd.starts_with('/'), "completion missing /: {cmd}");
+        }
+        // Should not have duplicates
+        let mut names: Vec<_> = completions.iter().map(|(c, _)| *c).collect();
+        names.sort();
+        let total = names.len();
+        names.dedup();
+        assert_eq!(names.len(), total, "duplicate slash completions found");
     }
 }

@@ -1,14 +1,18 @@
-//! Auto Prompt Enhancement — transforms simple user prompts into structured,
-//! high-quality prompts before they reach the agent.
+//! Auto Prompt Enhancement — appends active project rules to user prompts for
+//! coding tasks.
 //!
-//! # How it works
+//! # What it does
 //!
-//! 1. `enhance_prompt()` receives the raw user message and an `EnhancementCtx`.
-//! 2. When mode is `Auto`, it:
-//!    - Detects whether the prompt is already detailed (passes through if so).
-//!    - Appends active project rules as explicit constraints.
-//!    - Adds a quality expectation suffix for very short prompts.
-//! 3. Mode `Off` returns the original message unchanged.
+//! When mode is `Auto`, `enhance_prompt()` appends active project rules (style
+//! preferences, architecture patterns, etc.) to prompts that look like coding
+//! tasks.  Informational requests ("show me X", "what is Y", questions) are
+//! always passed through unchanged.
+//!
+//! No quality-instruction suffix is added to user messages — generic boilerplate
+//! like "provide a production-ready solution" belongs in the system prompt, not
+//! in user turns, because models may echo it back to the user.
+//!
+//! Mode `Off` returns the original message unchanged.
 //!
 //! No extra LLM call is made — transformation is pure Rust and runs instantly.
 //!
@@ -200,50 +204,120 @@ pub fn enhance_prompt(raw: &str, ctx: &EnhancementCtx<'_>) -> (String, bool) {
     }
 
     let trimmed = raw.trim();
-    let word_count = trimmed.split_whitespace().count();
     let active_rules = ctx.rules.active_rules();
 
-    // Detect already-structured prompts (long, multi-line, or starts with
-    // instruction keywords).  If no rules apply, pass through unchanged.
-    let looks_detailed = word_count > 40
-        || trimmed.contains('\n')
-        || trimmed.to_lowercase().starts_with("please ")
-        || trimmed.starts_with("You are")
-        || trimmed.starts_with("Act as");
-
-    if looks_detailed && active_rules.is_empty() {
+    // No rules to apply → nothing to do.
+    if active_rules.is_empty() {
         return (raw.to_string(), false);
     }
 
-    let mut parts: Vec<String> = Vec::new();
-
-    // Core task — always preserved exactly as written.
-    parts.push(trimmed.to_string());
-
-    // Quality suffix for very short prompts (≤ 12 words, no question mark).
-    if word_count <= 12 && !trimmed.contains('?') && !trimmed.contains('\n') {
-        parts.push(
-            "Please provide a complete, production-ready solution with appropriate error \
-             handling. Add or update tests if the change touches testable logic."
-                .to_string(),
-        );
+    // Only apply rules to prompts that look like coding/modification tasks.
+    // Informational, read, and question prompts are always passed through
+    // unchanged to avoid injecting irrelevant constraints.
+    if !looks_like_coding_task(trimmed) {
+        return (raw.to_string(), false);
     }
 
-    // Apply active rules as explicit constraints.
-    if !active_rules.is_empty() {
-        let rule_lines: Vec<String> = active_rules
-            .iter()
-            .map(|r| format!("- {}", r.text))
-            .collect();
-        parts.push(format!(
-            "Additional requirements:\n{}",
-            rule_lines.join("\n")
-        ));
-    }
-
-    let enhanced = parts.join("\n\n");
+    // Append active project rules as explicit constraints.
+    let rule_lines: Vec<String> = active_rules
+        .iter()
+        .map(|r| format!("- {}", r.text))
+        .collect();
+    let enhanced = format!(
+        "{}\n\nAdditional requirements:\n{}",
+        trimmed,
+        rule_lines.join("\n")
+    );
     let was_modified = enhanced != raw;
     (enhanced, was_modified)
+}
+
+/// Returns true when the prompt looks like a coding or modification task rather
+/// than an informational / read / question request.  Used to gate rule injection
+/// so that prompts like "show me config.toml" are never altered.
+fn looks_like_coding_task(prompt: &str) -> bool {
+    let lower = prompt.to_lowercase();
+
+    // Questions are informational.
+    if lower.contains('?') {
+        return false;
+    }
+
+    // Common read/info prefixes — pass through unchanged.
+    let read_prefixes = [
+        "show ",
+        "show\n",
+        "what ",
+        "how ",
+        "why ",
+        "where ",
+        "when ",
+        "list ",
+        "find ",
+        "display ",
+        "print ",
+        "read ",
+        "open ",
+        "view ",
+        "explain ",
+        "describe ",
+        "tell ",
+        "can you show",
+        "can you tell",
+        "cat ",
+        "ls ",
+        "grep ",
+    ];
+    for prefix in &read_prefixes {
+        if lower.starts_with(prefix) {
+            return false;
+        }
+    }
+
+    // Coding action keywords — enhance these.
+    let coding_keywords = [
+        "implement",
+        "create",
+        "add ",
+        "add\n",
+        "fix ",
+        "fix\n",
+        "build",
+        "write ",
+        "write\n",
+        "refactor",
+        "update ",
+        "update\n",
+        "change ",
+        "change\n",
+        "modify",
+        "generate",
+        "make ",
+        "make\n",
+        "delete ",
+        "remove ",
+        "rename ",
+        "move ",
+        "migrate",
+        "convert",
+        "optimize",
+        "improve",
+        "extend",
+        "replace",
+        "rewrite",
+    ];
+    for kw in &coding_keywords {
+        if lower.contains(kw) {
+            return true;
+        }
+    }
+
+    // Long multi-line prompts are likely detailed coding instructions.
+    if prompt.contains('\n') && prompt.split_whitespace().count() > 20 {
+        return true;
+    }
+
+    false
 }
 
 // ── Persistence ───────────────────────────────────────────────────────────────
@@ -479,12 +553,27 @@ mod tests {
     }
 
     #[test]
-    fn short_prompt_gets_quality_suffix() {
+    fn short_coding_prompt_with_rules_gets_enhanced() {
+        let mut rules = empty_rules();
+        rules.upsert(RuleEntry::new_manual(
+            "no-unwrap",
+            "Avoid .unwrap() in all new code",
+        ));
+        let (out, modified) = enhance_prompt("fix the login bug", &ctx_auto(&rules));
+        assert!(modified, "coding prompt with rules should be modified");
+        assert!(out.contains("fix the login bug"), "original text preserved");
+        assert!(out.contains("Additional requirements:"), "rules appended");
+        // No quality boilerplate — that belongs in system prompt
+        assert!(!out.contains("production-ready"));
+    }
+
+    #[test]
+    fn short_coding_prompt_no_rules_passes_through() {
+        // Without rules there is nothing to inject.
         let rules = empty_rules();
         let (out, modified) = enhance_prompt("fix the login bug", &ctx_auto(&rules));
-        assert!(modified, "short prompt should be modified");
-        assert!(out.contains("fix the login bug"), "original text preserved");
-        assert!(out.contains("production-ready"), "quality suffix added");
+        assert!(!modified, "no rules → no modification");
+        assert_eq!(out, "fix the login bug");
     }
 
     #[test]
@@ -542,8 +631,7 @@ mod tests {
             source: "inferred".to_string(),
             observation_count: 1,
         });
-        let (_, modified) = enhance_prompt("fix the bug", &ctx_auto(&rules));
-        // Still modified for quality suffix, but rule text should NOT appear.
+        // Inactive rule (confidence < 0.5) must never appear in output.
         let (out, _) = enhance_prompt("fix the bug", &ctx_auto(&rules));
         assert!(!out.contains("Some low confidence rule"));
     }
@@ -558,14 +646,22 @@ mod tests {
     }
 
     #[test]
-    fn question_prompt_no_quality_suffix() {
-        let rules = empty_rules();
-        let (out, _) = enhance_prompt("what does this function do?", &ctx_auto(&rules));
-        // Questions should NOT get the "production-ready solution" suffix.
-        assert!(
-            !out.contains("production-ready"),
-            "questions should not get code suffix"
-        );
+    fn question_prompt_not_enhanced() {
+        let mut rules = empty_rules();
+        rules.upsert(RuleEntry::new_manual("test-rule", "Always write tests"));
+        let (out, modified) = enhance_prompt("what does this function do?", &ctx_auto(&rules));
+        // Questions are informational — rules should not be injected.
+        assert!(!modified, "questions should not be modified");
+        assert_eq!(out, "what does this function do?");
+    }
+
+    #[test]
+    fn read_prompt_not_enhanced() {
+        let mut rules = empty_rules();
+        rules.upsert(RuleEntry::new_manual("test-rule", "Always write tests"));
+        let (out, modified) = enhance_prompt("show me /tmp/config.toml", &ctx_auto(&rules));
+        assert!(!modified, "read prompts should not be modified");
+        assert_eq!(out, "show me /tmp/config.toml");
     }
 
     #[test]

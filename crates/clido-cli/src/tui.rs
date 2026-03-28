@@ -4681,216 +4681,407 @@ fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
 }
 
 /// Render markdown text into a series of tui `Line`s with appropriate styling.
+///
+/// Supports: headings, bold/italic/strikethrough, inline code, fenced code blocks,
+/// ordered/unordered lists, blockquotes, tables (with box-drawing borders),
+/// horizontal rules, task-list checkboxes, and hard/soft breaks.
 fn render_markdown(text: &str) -> Vec<Line<'static>> {
-    use pulldown_cmark::{Event, Tag};
+    use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Tag};
 
-    let mut out = Vec::new();
-    let parser = Parser::new(text);
+    let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let parser = Parser::new_ext(text, opts);
 
-    // Stack to keep track of list indentation levels
-    let mut list_stack: Vec<usize> = Vec::new();
-    // Whether we're currently inside a list item (so text may start with a redundant marker)
-    let mut in_list_item = false;
-    // Current line buffer being built
-    let mut current_line_spans: Vec<Span<'static>> = Vec::new();
-    // Whether we're in a code block (and its indent)
+    let mut out: Vec<Line<'static>> = Vec::new();
+    // Spans accumulating for the current output line.
+    let mut cur_spans: Vec<Span<'static>> = Vec::new();
+
+    // ── Inline style stack ────────────────────────────────────────────────
+    // Each entry is the *combined* Style at that nesting depth.
+    // On Start(Strong/Emphasis/…) we push a new style; on End we pop.
+    // Text events use the top-of-stack style — no more empty-span tricks.
+    let mut style_stack: Vec<Style> = vec![Style::default()];
+
+    // ── Block state ───────────────────────────────────────────────────────
     let mut in_code_block = false;
+
+    // ── List state ────────────────────────────────────────────────────────
+    let mut list_depth: u32 = 0;
+
+    // ── Blockquote depth ─────────────────────────────────────────────────
+    let mut bq_depth: u32 = 0;
+
+    // ── Table state ───────────────────────────────────────────────────────
+    let mut in_table_head = false;
+    let mut in_table_cell = false;
+    let mut table_alignments: Vec<pulldown_cmark::Alignment> = Vec::new();
+    let mut table_header: Option<Vec<String>> = None;
+    let mut table_body: Vec<Vec<String>> = Vec::new();
+    let mut current_row: Vec<String> = Vec::new();
+    let mut current_cell = String::new();
+
+    // flush current_spans as a new output Line (macro so it can access locals).
+    macro_rules! flush {
+        () => {
+            if !cur_spans.is_empty() {
+                out.push(Line::from(std::mem::take(&mut cur_spans)));
+            }
+        };
+    }
 
     for event in parser {
         match event {
-            Event::Start(tag) => {
-                match tag {
-                    Tag::Emphasis => {
-                        current_line_spans.push(Span::styled(
-                            String::new(),
-                            Style::default().add_modifier(Modifier::ITALIC),
-                        ));
-                    }
-                    Tag::Strong => {
-                        current_line_spans.push(Span::styled(
-                            String::new(),
-                            Style::default().add_modifier(Modifier::BOLD),
-                        ));
-                    }
-                    Tag::CodeBlock(_) => {
-                        in_code_block = true;
-                        // Code block starts on its own line
-                        if !current_line_spans.is_empty() {
-                            out.push(Line::from(current_line_spans));
-                            current_line_spans = Vec::new();
-                        }
-                    }
-                    Tag::List(_) => {
-                        let indent = list_stack.last().copied().unwrap_or(0);
-                        list_stack.push(indent + 2);
-                    }
-                    Tag::Item => {
-                        if !current_line_spans.is_empty() {
-                            out.push(Line::from(current_line_spans));
-                            current_line_spans = Vec::new();
-                        }
-                        let indent = list_stack.last().copied().unwrap_or(0);
-                        let bullet = "- ";
-                        current_line_spans.push(Span::raw(" ".repeat(indent)));
-                        current_line_spans.push(Span::styled(
-                            bullet.to_string(),
-                            Style::default()
-                                .fg(Color::Yellow)
-                                .add_modifier(Modifier::BOLD),
-                        ));
-                        in_list_item = true;
-                    }
-                    Tag::Paragraph => {}
-                    Tag::Heading(..) => {
-                        current_line_spans.push(Span::styled(
-                            String::new(),
-                            Style::default()
-                                .add_modifier(Modifier::BOLD)
-                                .fg(Color::Cyan),
-                        ));
-                    }
-                    Tag::Link(..) => {
-                        current_line_spans.push(Span::styled(
-                            String::new(),
-                            Style::default()
-                                .fg(TUI_SOFT_ACCENT)
-                                .add_modifier(Modifier::UNDERLINED),
-                        ));
-                    }
-                    // Note: Inline code is Event::Code, not a tag pair
-                    _ => {}
+            // ── Start tags ────────────────────────────────────────────────
+            Event::Start(tag) => match tag {
+                Tag::Strong => {
+                    let s = style_stack
+                        .last()
+                        .copied()
+                        .unwrap_or_default()
+                        .add_modifier(Modifier::BOLD);
+                    style_stack.push(s);
                 }
-            }
-            Event::End(tag) => match tag {
-                Tag::Emphasis | Tag::Strong | Tag::Link(..) => {
-                    if !current_line_spans.is_empty() {
-                        current_line_spans.pop();
-                    }
+                Tag::Emphasis => {
+                    let s = style_stack
+                        .last()
+                        .copied()
+                        .unwrap_or_default()
+                        .add_modifier(Modifier::ITALIC);
+                    style_stack.push(s);
                 }
-                Tag::CodeBlock(_) => {
-                    in_code_block = false;
-                    if !current_line_spans.is_empty() {
-                        out.push(Line::from(current_line_spans));
-                        current_line_spans = Vec::new();
-                    }
+                Tag::Strikethrough => {
+                    let s = style_stack
+                        .last()
+                        .copied()
+                        .unwrap_or_default()
+                        .add_modifier(Modifier::CROSSED_OUT);
+                    style_stack.push(s);
+                }
+                Tag::Link(..) => {
+                    let s = style_stack
+                        .last()
+                        .copied()
+                        .unwrap_or_default()
+                        .fg(TUI_SOFT_ACCENT)
+                        .add_modifier(Modifier::UNDERLINED);
+                    style_stack.push(s);
+                }
+                Tag::Heading(level, ..) => {
+                    flush!();
+                    let prefix = match level {
+                        HeadingLevel::H1 => "█ ",
+                        HeadingLevel::H2 => "▌ ",
+                        HeadingLevel::H3 => "▸ ",
+                        _ => "  ",
+                    };
+                    cur_spans.push(Span::styled(
+                        prefix.to_string(),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    style_stack.push(
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    );
+                }
+                Tag::CodeBlock(kind) => {
+                    in_code_block = true;
+                    flush!();
+                    let lang = match kind {
+                        CodeBlockKind::Fenced(l) if !l.is_empty() => l.to_string(),
+                        _ => String::new(),
+                    };
+                    let label = if lang.is_empty() {
+                        "code".to_string()
+                    } else {
+                        lang
+                    };
+                    out.push(Line::from(vec![Span::styled(
+                        format!("┌─ {} ", label),
+                        Style::default().fg(Color::DarkGray),
+                    )]));
                 }
                 Tag::List(_) => {
-                    list_stack.pop();
+                    list_depth += 1;
                 }
                 Tag::Item => {
-                    if !current_line_spans.is_empty() {
-                        out.push(Line::from(current_line_spans));
-                        current_line_spans = Vec::new();
-                    }
-                    in_list_item = false;
+                    flush!();
+                    let indent = "  ".repeat(list_depth.saturating_sub(1) as usize);
+                    cur_spans.push(Span::styled(
+                        format!("{}• ", indent),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ));
                 }
-                Tag::Paragraph => {
-                    if !current_line_spans.is_empty() {
-                        out.push(Line::from(current_line_spans));
-                        current_line_spans = Vec::new();
-                    }
-                    out.push(Line::raw(""));
+                Tag::Paragraph => {}
+                Tag::BlockQuote => {
+                    bq_depth += 1;
                 }
-                Tag::Heading(..) => {
-                    if !current_line_spans.is_empty() {
-                        out.push(Line::from(current_line_spans));
-                        current_line_spans = Vec::new();
-                    }
-                    out.push(Line::raw(""));
+                Tag::Table(aligns) => {
+                    table_alignments = aligns;
+                    table_header = None;
+                    table_body.clear();
+                    flush!();
+                }
+                Tag::TableHead => {
+                    in_table_head = true;
+                }
+                Tag::TableRow => {
+                    current_row.clear();
+                }
+                Tag::TableCell => {
+                    in_table_cell = true;
+                    current_cell.clear();
                 }
                 _ => {}
             },
-            Event::Text(text) => {
-                if in_code_block {
-                    let lines = text.split('\n');
-                    for (i, line) in lines.enumerate() {
-                        if i > 0 && !current_line_spans.is_empty() {
-                            out.push(Line::from(current_line_spans));
-                            current_line_spans = Vec::new();
+
+            // ── End tags ──────────────────────────────────────────────────
+            Event::End(tag) => match tag {
+                Tag::Strong | Tag::Emphasis | Tag::Strikethrough | Tag::Link(..) => {
+                    style_stack.pop();
+                }
+                Tag::Heading(..) => {
+                    style_stack.pop();
+                    flush!();
+                    out.push(Line::raw(""));
+                }
+                Tag::CodeBlock(_) => {
+                    in_code_block = false;
+                    flush!();
+                    out.push(Line::from(vec![Span::styled(
+                        "└────────────────".to_string(),
+                        Style::default().fg(Color::DarkGray),
+                    )]));
+                    out.push(Line::raw(""));
+                }
+                Tag::List(_) => {
+                    list_depth = list_depth.saturating_sub(1);
+                    if list_depth == 0 {
+                        out.push(Line::raw(""));
+                    }
+                }
+                Tag::Item => {
+                    flush!();
+                }
+                Tag::Paragraph => {
+                    flush!();
+                    out.push(Line::raw(""));
+                }
+                Tag::BlockQuote => {
+                    flush!();
+                    bq_depth = bq_depth.saturating_sub(1);
+                    if bq_depth == 0 {
+                        out.push(Line::raw(""));
+                    }
+                }
+                Tag::TableCell => {
+                    in_table_cell = false;
+                    current_row.push(std::mem::take(&mut current_cell));
+                }
+                Tag::TableRow => {
+                    if !in_table_head {
+                        table_body.push(std::mem::take(&mut current_row));
+                    }
+                }
+                Tag::TableHead => {
+                    in_table_head = false;
+                    table_header = Some(std::mem::take(&mut current_row));
+                }
+                Tag::Table(_) => {
+                    render_table_to_lines(
+                        table_header.take(),
+                        std::mem::take(&mut table_body),
+                        &table_alignments,
+                        &mut out,
+                    );
+                }
+                _ => {}
+            },
+
+            // ── Leaf events ───────────────────────────────────────────────
+            Event::Text(t) => {
+                if in_table_cell {
+                    current_cell.push_str(&t);
+                } else if in_code_block {
+                    // Code text arrives as one blob; split on newlines.
+                    for (i, line) in t.split('\n').enumerate() {
+                        if i > 0 {
+                            flush!();
                         }
                         if !line.is_empty() {
-                            current_line_spans.push(Span::styled(
-                                line.to_string(),
+                            cur_spans.push(Span::styled(
+                                format!("  {}", line),
                                 Style::default()
                                     .fg(Color::White)
                                     .add_modifier(Modifier::DIM),
                             ));
-                            out.push(Line::from(current_line_spans));
-                            current_line_spans = Vec::new();
                         }
                     }
                 } else {
-                    // If we're inside a list item, strip leading list markers that the model may have included
-                    let mut content = text.to_string();
-                    if in_list_item {
-                        // Strip leading "- ", "* ", "+ ", or "1. " etc.
-                        let trimmed = content.trim_start();
-                        if trimmed.starts_with('-')
-                            || trimmed.starts_with('*')
-                            || trimmed.starts_with('+')
-                        {
-                            // Find first non-marker char after optional whitespace and numbers/dots
-                            let mut chars = trimmed.chars();
-                            // Skip the bullet char
-                            chars.next();
-                            // Skip following whitespace
-                            let rest: String = chars.collect();
-                            content = rest.trim_start().to_string();
-                        }
+                    // Emit blockquote gutter at the start of each line.
+                    if bq_depth > 0 && cur_spans.is_empty() {
+                        cur_spans.push(Span::styled(
+                            "▌ ".repeat(bq_depth as usize),
+                            Style::default().fg(Color::DarkGray),
+                        ));
                     }
-
-                    if current_line_spans.is_empty() {
-                        current_line_spans.push(Span::raw(content));
-                    } else {
-                        let last = current_line_spans.pop().unwrap();
-                        let combined = format!("{}{}", last.content, content);
-                        current_line_spans.push(Span::styled(combined, last.style));
-                    }
+                    let style = style_stack.last().copied().unwrap_or_default();
+                    cur_spans.push(Span::styled(t.to_string(), style));
                 }
             }
-            Event::Code(text) => {
-                let span = Span::styled(
-                    text.to_string(),
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::DIM),
-                );
-                if current_line_spans.is_empty() {
-                    current_line_spans.push(span);
+            Event::Code(t) => {
+                // Inline code — always use yellow dim style, never inherit parent style.
+                if in_table_cell {
+                    current_cell.push_str(&t);
                 } else {
-                    let last = current_line_spans.pop().unwrap();
-                    let combined = format!("{}{}", last.content, text);
-                    current_line_spans.push(Span::styled(combined, last.style));
+                    cur_spans.push(Span::styled(
+                        t.to_string(),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::DIM),
+                    ));
                 }
             }
-            Event::Html(_) => {}
             Event::SoftBreak => {
-                if current_line_spans.is_empty() {
-                    current_line_spans.push(Span::raw(" "));
-                } else {
-                    let last = current_line_spans.pop().unwrap();
-                    let combined = format!("{} ", last.content);
-                    current_line_spans.push(Span::styled(combined, last.style));
+                if !in_table_cell && !in_code_block {
+                    cur_spans.push(Span::raw(" "));
                 }
             }
             Event::HardBreak => {
-                if !current_line_spans.is_empty() {
-                    out.push(Line::from(current_line_spans));
-                    current_line_spans = Vec::new();
+                if !in_table_cell {
+                    flush!();
                 }
+            }
+            Event::Rule => {
+                flush!();
+                out.push(Line::from(vec![Span::styled(
+                    "─".repeat(60),
+                    Style::default().fg(Color::DarkGray),
+                )]));
                 out.push(Line::raw(""));
             }
-            Event::FootnoteReference(_) => {}
-            Event::Rule => {}
-            Event::TaskListMarker(_) => {}
+            Event::TaskListMarker(checked) => {
+                let marker = if checked { "☑ " } else { "☐ " };
+                cur_spans.push(Span::styled(
+                    marker.to_string(),
+                    Style::default().fg(Color::Cyan),
+                ));
+            }
+            Event::Html(_) | Event::FootnoteReference(_) => {}
         }
     }
 
-    if !current_line_spans.is_empty() {
-        out.push(Line::from(current_line_spans));
+    flush!();
+    out
+}
+
+/// Render a collected markdown table into box-drawing `Line`s.
+///
+/// ```text
+/// ┌──────────┬──────────┬──────────┐
+/// │  Header1 │  Header2 │  Header3 │
+/// ├──────────┼──────────┼──────────┤
+/// │  Cell A  │  Cell B  │  Cell C  │
+/// └──────────┴──────────┴──────────┘
+/// ```
+fn render_table_to_lines(
+    header: Option<Vec<String>>,
+    rows: Vec<Vec<String>>,
+    alignments: &[pulldown_cmark::Alignment],
+    out: &mut Vec<Line<'static>>,
+) {
+    use pulldown_cmark::Alignment as Align;
+
+    let ncols = alignments
+        .len()
+        .max(header.as_ref().map_or(0, |h| h.len()))
+        .max(rows.iter().map(|r| r.len()).max().unwrap_or(0));
+
+    if ncols == 0 {
+        return;
     }
 
-    out
+    // Compute per-column content widths (padding added separately).
+    let mut col_widths = vec![1usize; ncols];
+    if let Some(ref h) = header {
+        for (i, cell) in h.iter().enumerate().take(ncols) {
+            col_widths[i] = col_widths[i].max(cell.len());
+        }
+    }
+    for row in &rows {
+        for (i, cell) in row.iter().enumerate().take(ncols) {
+            col_widths[i] = col_widths[i].max(cell.len());
+        }
+    }
+
+    let align_cell = |content: &str, width: usize, align: &Align| -> String {
+        match align {
+            Align::Right => format!("{:>width$}", content),
+            Align::Center => {
+                let pad = width.saturating_sub(content.len());
+                let left = pad / 2;
+                format!("{}{}{}", " ".repeat(left), content, " ".repeat(pad - left))
+            }
+            _ => format!("{:<width$}", content),
+        }
+    };
+
+    let gray = Style::default().fg(Color::DarkGray);
+    let hdr_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    // ┌──┬──┬──┐
+    let top: String = col_widths
+        .iter()
+        .map(|w| "─".repeat(w + 2))
+        .collect::<Vec<_>>()
+        .join("┬");
+    out.push(Line::from(vec![Span::styled(format!("┌{}┐", top), gray)]));
+
+    // Header row (cyan bold)
+    if let Some(ref h) = header {
+        let mut spans = vec![Span::styled("│".to_string(), gray)];
+        for (i, &w) in col_widths.iter().enumerate().take(ncols) {
+            let content = h.get(i).map(|s| s.as_str()).unwrap_or("");
+            let cell = align_cell(content, w, alignments.get(i).unwrap_or(&Align::None));
+            spans.push(Span::styled(format!(" {} ", cell), hdr_style));
+            spans.push(Span::styled("│".to_string(), gray));
+        }
+        out.push(Line::from(spans));
+
+        // ├──┼──┼──┤
+        let sep: String = col_widths
+            .iter()
+            .map(|w| "─".repeat(w + 2))
+            .collect::<Vec<_>>()
+            .join("┼");
+        out.push(Line::from(vec![Span::styled(format!("├{}┤", sep), gray)]));
+    }
+
+    // Body rows
+    for row in &rows {
+        let mut spans = vec![Span::styled("│".to_string(), gray)];
+        for (i, &w) in col_widths.iter().enumerate().take(ncols) {
+            let content = row.get(i).map(|s| s.as_str()).unwrap_or("");
+            let cell = align_cell(content, w, alignments.get(i).unwrap_or(&Align::None));
+            spans.push(Span::raw(format!(" {} ", cell)));
+            spans.push(Span::styled("│".to_string(), gray));
+        }
+        out.push(Line::from(spans));
+    }
+
+    // └──┴──┴──┘
+    let bot: String = col_widths
+        .iter()
+        .map(|w| "─".repeat(w + 2))
+        .collect::<Vec<_>>()
+        .join("┴");
+    out.push(Line::from(vec![Span::styled(format!("└{}┘", bot), gray)]));
+    out.push(Line::raw(""));
 }
 
 // ── Scroll helpers ────────────────────────────────────────────────────────────

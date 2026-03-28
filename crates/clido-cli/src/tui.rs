@@ -58,6 +58,11 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("/sessions", "list & resume recent sessions"),
             ("/session", "show current session ID"),
             (
+                "/search",
+                "search conversation history. Usage: /search <query>",
+            ),
+            ("/export", "save this conversation to a markdown file"),
+            (
                 "/init",
                 "re-run setup wizard — reconfigure provider, model, API key, roles",
             ),
@@ -102,32 +107,26 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "/role",
-                "switch to model assigned to a role. Usage: /role <name>",
+                "pick a role or switch with /role <name>  (opens picker if no name given)",
             ),
-            ("/fav", "toggle favorite on current model"),
-            (
-                "/reviewer",
-                "toggle reviewer sub-agent on/off. Usage: /reviewer [on|off]",
-            ),
+            ("/fav", "mark or unmark current model as a favorite"),
+            ("/reviewer", "show or toggle reviewer  (/reviewer on | off)"),
         ],
     ),
     (
         "Context",
         &[
-            ("/cost", "show cumulative session cost (TUI session)"),
+            ("/cost", "show total cost for this session"),
+            ("/tokens", "show token usage for this session"),
             (
-                "/tokens",
-                "show cumulative input/output tokens (TUI session)",
+                "/compact",
+                "compress context window now (summarises history)",
             ),
-            ("/compact", "compact context window now (summarise history)"),
             (
                 "/memory",
-                "search saved memories (FTS). Usage: /memory <query>",
+                "search saved memories. Usage: /memory <query>  (no query = list recent)",
             ),
-            (
-                "/todo",
-                "show the agent's current todo list (from TodoWrite tool)",
-            ),
+            ("/todo", "show the agent's current task list"),
         ],
     ),
     (
@@ -163,7 +162,7 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("/rules", "show active project rules files (CLIDO.md)"),
             (
                 "/settings",
-                "open settings editor (roles, default model) — changes saved to config.toml",
+                "open settings — manage roles and default model",
             ),
             (
                 "/image",
@@ -174,11 +173,11 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "show or set working directory. Usage: /workdir [path]",
             ),
             ("/stop", "interrupt current run without sending a message"),
+            ("/copy", "copy the last assistant reply to clipboard"),
             (
-                "/copy",
-                "copy last assistant message to clipboard (OSC 52 sequence)",
+                "/index",
+                "show codebase index stats  (rebuild: clido index build)",
             ),
-            ("/index", "show repo index stats (or run clido index build)"),
         ],
     ),
 ];
@@ -3622,10 +3621,12 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 roles.sort_by(|a, b| a.0.cmp(&b.0));
                 if roles.is_empty() {
                     app.push(ChatLine::Info(
-                        "  no roles configured — add a [roles] section to config.toml".into(),
+                        "  No roles configured — run /settings to add roles, or /init to set up"
+                            .into(),
                     ));
                     app.push(ChatLine::Info(
-                        "  example:  fast = \"claude-haiku-4-5-20251001\"".into(),
+                        "  Roles let you quickly switch between models  (e.g. fast, smart, review)"
+                            .into(),
                     ));
                 } else {
                     app.role_picker = Some(RolePickerState {
@@ -3777,12 +3778,143 @@ fn execute_slash(app: &mut App, cmd: &str) {
         "/quit" => {
             app.quit = true;
         }
+        _ if cmd == "/search" || cmd.starts_with("/search ") => {
+            let query = cmd.trim_start_matches("/search").trim();
+            if query.is_empty() {
+                app.push(ChatLine::Info(
+                    "  Usage: /search <query>  — search this conversation".into(),
+                ));
+            } else {
+                let q_lower = query.to_lowercase();
+                let mut hits: Vec<(usize, &str, String)> = Vec::new(); // (turn_index, role, snippet)
+                let mut turn = 0usize;
+                for line in &app.messages {
+                    match line {
+                        ChatLine::User(text) => {
+                            turn += 1;
+                            if text.to_lowercase().contains(&q_lower) {
+                                hits.push((turn, "you", truncate_chars(text, 80)));
+                            }
+                        }
+                        ChatLine::Assistant(text) => {
+                            if text.to_lowercase().contains(&q_lower) {
+                                hits.push((turn, "clido", truncate_chars(text, 80)));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if hits.is_empty() {
+                    app.push(ChatLine::Info(format!(
+                        "  No results for \"{}\" in this conversation",
+                        query
+                    )));
+                } else {
+                    app.push(ChatLine::Info(format!(
+                        "  {} result{} for \"{}\":",
+                        hits.len(),
+                        if hits.len() == 1 { "" } else { "s" },
+                        query
+                    )));
+                    for (turn_idx, role, snippet) in &hits {
+                        app.push(ChatLine::Info(format!(
+                            "  [turn {}] {}  {}",
+                            turn_idx, role, snippet
+                        )));
+                    }
+                }
+            }
+        }
+        "/export" => {
+            // Export conversation as a markdown file.
+            let mut md = String::new();
+            md.push_str("# Conversation Export\n\n");
+            let mut turn = 0usize;
+            for line in &app.messages {
+                match line {
+                    ChatLine::User(text) => {
+                        turn += 1;
+                        md.push_str(&format!("## Turn {} — You\n\n{}\n\n", turn, text));
+                    }
+                    ChatLine::Assistant(text) => {
+                        md.push_str(&format!("## Turn {} — Assistant\n\n{}\n\n", turn, text));
+                    }
+                    _ => {}
+                }
+            }
+            if turn == 0 {
+                app.push(ChatLine::Info(
+                    "  Nothing to export — start a conversation first".into(),
+                ));
+            } else {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let secs = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                // YYYYMMDD-HHMMSS from unix timestamp (UTC).
+                let mins = secs / 60;
+                let hours = mins / 60;
+                let days = hours / 24;
+                let s = secs % 60;
+                let m = mins % 60;
+                let h = hours % 24;
+                // Approximate calendar date (good enough for a filename).
+                let d = days % 31 + 1;
+                let mo = (days / 31) % 12 + 1;
+                let yr = 1970 + days / 365;
+                let filename = format!(
+                    "conversation-{:04}{:02}{:02}-{:02}{:02}{:02}.md",
+                    yr, mo, d, h, m, s
+                );
+                let path = app.workspace_root.join(&filename);
+                match std::fs::write(&path, &md) {
+                    Ok(()) => app.push(ChatLine::Info(format!(
+                        "  ✓ Exported {} turns → {}",
+                        turn,
+                        path.display()
+                    ))),
+                    Err(e) => app.push(ChatLine::Info(format!("  ✗ Export failed: {}", e))),
+                }
+            }
+        }
         _ if cmd == "/memory" || cmd.starts_with("/memory ") => {
             let query = cmd.trim_start_matches("/memory").trim();
             if query.is_empty() {
-                app.push(ChatLine::Info(
-                    "  Usage: /memory <query>  |  or run `clido memory list` in a terminal".into(),
-                ));
+                // No query → show recent memories and total count.
+                match tui_memory_store_path() {
+                    Ok(path) => match MemoryStore::open(&path) {
+                        Ok(store) => match store.list(5) {
+                            Ok(entries) if entries.is_empty() => {
+                                app.push(ChatLine::Info(
+                                    "  No memories saved yet — the agent stores facts automatically while working".into(),
+                                ));
+                            }
+                            Ok(entries) => {
+                                app.push(ChatLine::Info(
+                                    "  Recent memories (use /memory <query> to search):".into(),
+                                ));
+                                for e in &entries {
+                                    app.push(ChatLine::Info(format!(
+                                        "    · {}",
+                                        truncate_chars(&e.content, 90)
+                                    )));
+                                }
+                            }
+                            Err(_) => {
+                                app.push(ChatLine::Info(
+                                    "  Usage: /memory <query>  — search saved memories".into(),
+                                ));
+                            }
+                        },
+                        Err(_) => {
+                            app.push(ChatLine::Info(
+                                "  No memory store found — memories are saved automatically as you work".into(),
+                            ));
+                        }
+                    },
+                    Err(e) => app.push(ChatLine::Info(format!("  ✗ Memory error: {}", e))),
+                }
             } else {
                 match tui_memory_store_path() {
                     Ok(path) => match MemoryStore::open(&path) {
@@ -3995,19 +4127,32 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 }
                 "list" => match clido_planner::list_plans(&app.workspace_root) {
                     Ok(summaries) if summaries.is_empty() => {
-                        app.push(ChatLine::Info("  no saved plans found".into()));
+                        app.push(ChatLine::Info(
+                            "  No saved plans — use /plan <task> to create and /plan save to save"
+                                .into(),
+                        ));
                     }
                     Ok(summaries) => {
-                        app.push(ChatLine::Info("  saved plans:".into()));
+                        app.push(ChatLine::Info(format!(
+                            "  Saved plans ({}):",
+                            summaries.len()
+                        )));
                         for s in &summaries {
+                            let done_frac = if s.task_count > 0 {
+                                format!("{}/{}", s.done, s.task_count)
+                            } else {
+                                "—".to_string()
+                            };
                             app.push(ChatLine::Info(format!(
-                                "    {}  ({} tasks, {} done)  {}",
+                                "  · {}  [{}]  {}",
+                                done_frac,
                                 s.id,
-                                s.task_count,
-                                s.done,
-                                truncate_chars(&s.goal, 50)
+                                truncate_chars(&s.goal, 60)
                             )));
                         }
+                        app.push(ChatLine::Info(
+                            "  Use /rollback <id> to restore a plan checkpoint".into(),
+                        ));
                     }
                     Err(e) => {
                         app.pending_error = Some(format!("list plans: {}", e));
@@ -4215,7 +4360,8 @@ fn execute_slash(app: &mut App, cmd: &str) {
             let db_path = app.workspace_root.join(".clido").join("index.db");
             if !db_path.exists() {
                 app.push(ChatLine::Info(
-                    "  Index not built — run `clido index build` to enable semantic search.".into(),
+                    "  Index not built — run `clido index build` in a terminal to enable code search.  \
+Once built, the agent can search by concept rather than just filename.".into(),
                 ));
             } else {
                 match RepoIndex::open(&db_path) {
@@ -8258,5 +8404,53 @@ mod tests {
         let total = names.len();
         names.dedup();
         assert_eq!(names.len(), total, "duplicate slash completions found");
+    }
+
+    #[test]
+    fn search_and_export_are_known_commands() {
+        assert!(
+            is_known_slash_cmd("/search"),
+            "/search must be a known command"
+        );
+        assert!(
+            is_known_slash_cmd("/export"),
+            "/export must be a known command"
+        );
+        assert!(
+            is_known_slash_cmd("/search hello world"),
+            "/search with args must be known"
+        );
+    }
+
+    #[test]
+    fn search_and_export_appear_in_completions() {
+        let cmds: Vec<_> = slash_completions("/s").iter().map(|(c, _)| *c).collect();
+        assert!(
+            cmds.contains(&"/search"),
+            "/search must appear in /s completions"
+        );
+        let all: Vec<_> = slash_completions("/export")
+            .iter()
+            .map(|(c, _)| *c)
+            .collect();
+        assert!(
+            all.contains(&"/export"),
+            "/export must appear in completions"
+        );
+    }
+
+    #[test]
+    fn search_and_export_have_non_empty_descriptions() {
+        let all = slash_commands();
+        let search_desc = all.iter().find(|(c, _)| *c == "/search").map(|(_, d)| d);
+        let export_desc = all.iter().find(|(c, _)| *c == "/export").map(|(_, d)| d);
+        assert!(
+            search_desc.is_some_and(|d| !d.is_empty()),
+            "/search needs a description"
+        );
+        assert!(
+            export_desc.is_some_and(|d| !d.is_empty()),
+            "/export needs a description"
+        );
     }
 }

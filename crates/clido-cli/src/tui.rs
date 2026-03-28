@@ -202,7 +202,7 @@ const SLASH_COMMAND_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "show or set working directory. Usage: /workdir [path]",
             ),
             ("/stop", "interrupt current run without sending a message"),
-            ("/copy", "copy the last assistant reply to clipboard"),
+            ("/copy", "copy to clipboard. Usage: /copy (last reply) | /copy <n> (last n exchanges) | /copy all"),
             (
                 "/index",
                 "show codebase index stats  (rebuild: clido index build)",
@@ -4172,10 +4172,16 @@ fn execute_slash(app: &mut App, cmd: &str) {
             ));
             app.push(ChatLine::Info("Ctrl+Enter         interrupt & send".into()));
             app.push(ChatLine::Info(
-                "↑↓ / PgUp/PgDn    scroll conversation".into(),
+                "↑↓ (empty input)   scroll conversation".into(),
             ));
             app.push(ChatLine::Info(
-                "↑↓ (with input)   history navigation".into(),
+                "↑↓ (multiline)     move cursor between lines".into(),
+            ));
+            app.push(ChatLine::Info(
+                "↑↓ (with text)     history navigation".into(),
+            ));
+            app.push(ChatLine::Info(
+                "PgUp/PgDn          scroll conversation".into(),
             ));
             app.push(ChatLine::Info("Ctrl+U             clear input".into()));
             app.push(ChatLine::Info(
@@ -4434,13 +4440,70 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 app.push(ChatLine::Info("  ✗ No active run to stop".into()));
             }
         }
-        "/copy" => match app.last_assistant_text() {
-            Some(text) => match copy_to_clipboard_osc52(text) {
-                Ok(()) => app.push(ChatLine::Info("  ✓ Copied to clipboard".into())),
-                Err(e) => app.push(ChatLine::Info(format!("  ✗ Copy failed: {}", e))),
-            },
-            None => app.push(ChatLine::Info("  ✗ Nothing to copy yet".into())),
-        },
+        _ if cmd == "/copy" || cmd.starts_with("/copy ") => {
+            let arg = cmd.trim_start_matches("/copy").trim();
+            // Collect assistant and user chat lines as plain text
+            let chat_lines: Vec<(bool, &str)> = app
+                .messages
+                .iter()
+                .filter_map(|m| match m {
+                    ChatLine::Assistant(t) => Some((false, t.as_str())),
+                    ChatLine::User(t) => Some((true, t.as_str())),
+                    _ => None,
+                })
+                .collect();
+            if chat_lines.is_empty() {
+                app.push(ChatLine::Info("  ✗ Nothing to copy yet".into()));
+            } else if arg.is_empty() {
+                // Default: copy last assistant reply
+                match app.last_assistant_text().map(|s| s.to_string()) {
+                    Some(text) => match copy_to_clipboard(&text) {
+                        Ok(()) => {
+                            app.push(ChatLine::Info("  ✓ Last reply copied to clipboard".into()))
+                        }
+                        Err(e) => app.push(ChatLine::Info(format!("  ✗ Copy failed: {}", e))),
+                    },
+                    None => app.push(ChatLine::Info("  ✗ No assistant reply yet".into())),
+                }
+            } else {
+                // /copy all  or  /copy <n>  — build a transcript
+                let take_n: Option<usize> = if arg == "all" {
+                    None
+                } else {
+                    arg.parse::<usize>().ok().map(|n| n * 2) // n exchanges = n user + n assistant
+                };
+                let slice: Vec<_> = match take_n {
+                    None => chat_lines.iter().collect(),
+                    Some(n) => chat_lines
+                        .iter()
+                        .rev()
+                        .take(n)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect(),
+                };
+                let mut buf = String::new();
+                for (is_user, text) in &slice {
+                    if *is_user {
+                        buf.push_str("You: ");
+                    } else {
+                        buf.push_str("Assistant: ");
+                    }
+                    buf.push_str(text);
+                    buf.push_str("\n\n");
+                }
+                let count = slice.len();
+                match copy_to_clipboard(buf.trim()) {
+                    Ok(()) => app.push(ChatLine::Info(format!(
+                        "  ✓ Copied {} message{} to clipboard",
+                        count,
+                        if count == 1 { "" } else { "s" }
+                    ))),
+                    Err(e) => app.push(ChatLine::Info(format!("  ✗ Copy failed: {}", e))),
+                }
+            }
+        }
         "/quit" => {
             app.quit = true;
         }
@@ -7833,6 +7896,14 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         (_, End) => app.cursor = app.input.chars().count(),
         // ── Up: scroll chat (empty input) or history navigation (with input) ──
         (_, Up) if app.pending_perm.is_none() && slash_completions(&app.input).is_empty() => {
+            // In a multiline input, Up moves the cursor to the line above
+            // when we're not already on the first line.
+            if app.input.contains('\n') && app.history_idx.is_none() {
+                if let Some(new_cursor) = move_cursor_line_up(&app.input, app.cursor) {
+                    app.cursor = new_cursor;
+                    return;
+                }
+            }
             if app.input.is_empty() && app.history_idx.is_none() {
                 // Scroll chat up.
                 scroll_up(app, 2);
@@ -7857,6 +7928,14 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         }
         // ── Down: scroll chat (empty input, not in history) or history nav ───
         (_, Down) if app.pending_perm.is_none() && slash_completions(&app.input).is_empty() => {
+            // In a multiline input, Down moves the cursor to the line below
+            // when we're not already on the last line.
+            if app.input.contains('\n') && app.history_idx.is_none() {
+                if let Some(new_cursor) = move_cursor_line_down(&app.input, app.cursor) {
+                    app.cursor = new_cursor;
+                    return;
+                }
+            }
             if app.input.is_empty() && app.history_idx.is_none() {
                 scroll_down(app, 2);
             } else {
@@ -7933,6 +8012,74 @@ fn char_byte_pos(s: &str, char_idx: usize) -> usize {
         .unwrap_or(s.len())
 }
 
+/// Move cursor up one visual line within a multiline input.
+/// Returns `Some(new_cursor)` when the cursor is not on the first line,
+/// `None` when it is (caller should fall through to history navigation).
+fn move_cursor_line_up(input: &str, cursor: usize) -> Option<usize> {
+    if !input.contains('\n') {
+        return None;
+    }
+    let chars: Vec<char> = input.chars().collect();
+    // Find the start of the current line and the column position.
+    let mut line_start = 0usize;
+    for (i, &ch) in chars[..cursor].iter().enumerate() {
+        if ch == '\n' {
+            line_start = i + 1;
+        }
+    }
+    if line_start == 0 {
+        return None; // Already on first line.
+    }
+    let col = cursor - line_start;
+    // Find the start of the previous line.
+    let prev_newline = line_start - 1; // index of the '\n' before current line
+    let prev_line_start = chars[..prev_newline]
+        .iter()
+        .enumerate()
+        .rfind(|(_, &c)| c == '\n')
+        .map(|(i, _)| i + 1)
+        .unwrap_or(0);
+    let prev_line_len = prev_newline - prev_line_start;
+    Some(prev_line_start + col.min(prev_line_len))
+}
+
+/// Move cursor down one visual line within a multiline input.
+/// Returns `Some(new_cursor)` when the cursor is not on the last line,
+/// `None` when it is (caller should fall through to history/scroll).
+fn move_cursor_line_down(input: &str, cursor: usize) -> Option<usize> {
+    if !input.contains('\n') {
+        return None;
+    }
+    let chars: Vec<char> = input.chars().collect();
+    let total = chars.len();
+    // Find start of current line.
+    let mut line_start = 0usize;
+    for (i, &ch) in chars[..cursor].iter().enumerate() {
+        if ch == '\n' {
+            line_start = i + 1;
+        }
+    }
+    let col = cursor - line_start;
+    // Find the next newline at or after cursor.
+    let next_newline = chars[cursor..]
+        .iter()
+        .position(|&c| c == '\n')
+        .map(|p| cursor + p);
+    match next_newline {
+        None => None, // Already on last line.
+        Some(nl) => {
+            let next_line_start = nl + 1;
+            let next_line_end = chars[next_line_start..]
+                .iter()
+                .position(|&c| c == '\n')
+                .map(|p| next_line_start + p)
+                .unwrap_or(total);
+            let next_line_len = next_line_end - next_line_start;
+            Some(next_line_start + col.min(next_line_len))
+        }
+    }
+}
+
 fn tui_memory_store_path() -> Result<std::path::PathBuf, String> {
     if let Some(dirs) = directories::ProjectDirs::from("", "", "clido") {
         let data = dirs.data_dir().to_path_buf();
@@ -7974,17 +8121,69 @@ fn resolve_workdir_arg(arg: &str) -> Result<std::path::PathBuf, String> {
     Ok(canonical)
 }
 
-fn copy_to_clipboard_osc52(text: &str) -> Result<(), String> {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
+/// Copy text to the system clipboard.
+/// Tries native clipboard tools first (pbcopy on macOS, wl-copy on Wayland,
+/// xclip/xsel on X11), then falls back to OSC 52 escape sequence.
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
     if text.is_empty() {
         return Err("nothing to copy".into());
     }
-    let encoded = STANDARD.encode(text.as_bytes());
-    print!("\x1b]52;c;{}\x07", encoded);
-    std::io::stdout()
-        .flush()
-        .map_err(|e| format!("clipboard write failed: {}", e))?;
+
+    // macOS
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            if child.wait().map(|s| s.success()).unwrap_or(false) {
+                return Ok(());
+            }
+        }
+    }
+
+    // Linux — try wl-copy (Wayland) then xclip then xsel
+    #[cfg(target_os = "linux")]
+    {
+        for (cmd, args) in &[
+            ("wl-copy", vec![]),
+            ("xclip", vec!["-selection", "clipboard"]),
+            ("xsel", vec!["--clipboard", "--input"]),
+        ] {
+            if let Ok(mut child) = Command::new(cmd)
+                .args(args.as_slice())
+                .stdin(Stdio::piped())
+                .spawn()
+            {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                if child.wait().map(|s| s.success()).unwrap_or(false) {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    // Fallback: OSC 52 escape sequence (works in terminals that support it,
+    // e.g. iTerm2, kitty, Alacritty with the feature enabled).
+    {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let encoded = STANDARD.encode(text.as_bytes());
+        print!("\x1b]52;c;{}\x07", encoded);
+        std::io::stdout()
+            .flush()
+            .map_err(|e| format!("clipboard write failed: {}", e))?;
+    }
     Ok(())
+}
+
+#[allow(dead_code)]
+fn copy_to_clipboard_osc52(text: &str) -> Result<(), String> {
+    copy_to_clipboard(text)
 }
 
 // ── Agent background task ─────────────────────────────────────────────────────
@@ -10168,5 +10367,79 @@ mod tests {
         assert_eq!(char_byte_pos_tui(u, 0), 0);
         assert_eq!(char_byte_pos_tui(u, 1), 1); // 'h' is 1 byte
         assert_eq!(char_byte_pos_tui(u, 2), 3); // 'é' is 2 bytes
+    }
+
+    // ── Multiline cursor navigation tests ────────────────────────────────────
+
+    #[test]
+    fn move_up_single_line_returns_none() {
+        // No newline — can't move up.
+        assert_eq!(move_cursor_line_up("hello world", 5), None);
+    }
+
+    #[test]
+    fn move_down_single_line_returns_none() {
+        assert_eq!(move_cursor_line_down("hello world", 5), None);
+    }
+
+    #[test]
+    fn move_up_on_first_line_returns_none() {
+        // Cursor on line 0 — can't go further up.
+        let s = "line0\nline1\nline2";
+        assert_eq!(move_cursor_line_up(s, 3), None); // col 3 of "line0"
+    }
+
+    #[test]
+    fn move_down_on_last_line_returns_none() {
+        let s = "line0\nline1\nline2";
+        // "line2" starts at index 12; cursor at 14 (col 2)
+        assert_eq!(move_cursor_line_down(s, 14), None);
+    }
+
+    #[test]
+    fn move_up_from_second_line() {
+        // "abc\nde\nfghi"
+        //  0123 456 7890
+        // line0="abc" (0-2), line1="de" (4-5), line2="fghi" (7-10)
+        let s = "abc\nde\nfghi";
+        // Cursor at index 5 = col 1 of "de"
+        // Moving up → col 1 of "abc" = index 1
+        assert_eq!(move_cursor_line_up(s, 5), Some(1));
+    }
+
+    #[test]
+    fn move_up_clamps_to_shorter_prev_line() {
+        // "ab\ndefgh"  — line0 is shorter
+        // Cursor at index 7 = col 5 of "defgh" (which is "h")
+        // prev line "ab" has len 2, so should clamp to col 2 (end of "ab") = index 2
+        let s = "ab\ndefgh";
+        assert_eq!(move_cursor_line_up(s, 7), Some(2));
+    }
+
+    #[test]
+    fn move_down_from_first_line() {
+        // "abc\nde\nfghi"
+        let s = "abc\nde\nfghi";
+        // Cursor at index 1 (col 1 of "abc") → col 1 of "de" = index 5
+        assert_eq!(move_cursor_line_down(s, 1), Some(5));
+    }
+
+    #[test]
+    fn move_down_clamps_to_shorter_next_line() {
+        // "defgh\nab"  — next line is shorter
+        // Cursor at col 4 of "defgh" = index 4
+        // next line "ab" has len 2, clamp to 2 = index 8
+        let s = "defgh\nab";
+        assert_eq!(move_cursor_line_down(s, 4), Some(8));
+    }
+
+    #[test]
+    fn move_up_down_roundtrip() {
+        // Moving down then up should return to original position (when lines are equal length)
+        let s = "hello\nworld\nfinal";
+        let start = 2; // col 2 of "hello"
+        let down = move_cursor_line_down(s, start).unwrap();
+        let back = move_cursor_line_up(s, down).unwrap();
+        assert_eq!(back, start);
     }
 }

@@ -74,6 +74,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn default_api_key_env_kimi() {
+        assert_eq!(default_api_key_env("kimi"), "MOONSHOT_API_KEY");
+    }
+
+    #[test]
+    fn default_api_key_env_kimi_code() {
+        assert_eq!(default_api_key_env("kimi-code"), "KIMI_CODE_API_KEY");
+    }
+
+    #[test]
+    fn make_provider_kimi() {
+        let profile = ProfileEntry {
+            provider: "kimi".to_string(),
+            model: "moonshot-v1-32k".to_string(),
+            api_key: Some("sk-kimi-test".to_string()),
+            api_key_env: None,
+            base_url: None,
+            worker: None,
+            reviewer: None,
+        };
+        assert!(make_provider("default", &profile, None, None).is_ok());
+    }
+
+    #[test]
+    fn make_provider_kimi_code() {
+        let profile = ProfileEntry {
+            provider: "kimi-code".to_string(),
+            model: "kimi-for-coding".to_string(),
+            api_key: Some("sk-kimi-code-test".to_string()),
+            api_key_env: None,
+            base_url: None,
+            worker: None,
+            reviewer: None,
+        };
+        assert!(make_provider("default", &profile, None, None).is_ok());
+    }
+
+    #[test]
     fn default_api_key_env_openrouter() {
         assert_eq!(default_api_key_env("openrouter"), "OPENROUTER_API_KEY");
     }

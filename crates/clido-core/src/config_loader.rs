@@ -1412,4 +1412,77 @@ api_key = "sk-openai-worker"
             s
         );
     }
+
+    // ── validate_provider exhaustive ─────────────────────────────────────────
+
+    #[test]
+    fn validate_provider_accepts_all_known_providers() {
+        for p in &[
+            "anthropic",
+            "openrouter",
+            "openai",
+            "mistral",
+            "minimax",
+            "kimi",
+            "kimi-code",
+            "local",
+            "alibabacloud",
+        ] {
+            assert!(
+                LoadedConfig::validate_provider(p).is_ok(),
+                "expected Ok for '{}'",
+                p
+            );
+        }
+    }
+
+    #[test]
+    fn validate_provider_rejects_kimi_with_space() {
+        assert!(LoadedConfig::validate_provider("kimi code").is_err());
+        assert!(LoadedConfig::validate_provider("KIMI").is_err());
+        assert!(LoadedConfig::validate_provider("moonshot").is_err());
+    }
+
+    // ── upsert_profile_in_config ─────────────────────────────────────────────
+
+    #[test]
+    fn upsert_profile_creates_new_profile() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg = temp.path().join("config.toml");
+        let entry = crate::ProfileEntry {
+            provider: "kimi".to_string(),
+            model: "moonshot-v1-32k".to_string(),
+            api_key: Some("sk-test".to_string()),
+            api_key_env: None,
+            base_url: None,
+            worker: None,
+            reviewer: None,
+        };
+        upsert_profile_in_config(&cfg, "kimi-profile", &entry).unwrap();
+        let content = std::fs::read_to_string(&cfg).unwrap();
+        assert!(content.contains("kimi-profile"));
+        assert!(content.contains("moonshot-v1-32k"));
+    }
+
+    #[test]
+    fn upsert_profile_sets_default_profile_when_absent() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg = temp.path().join("config.toml");
+        let entry = crate::ProfileEntry {
+            provider: "kimi-code".to_string(),
+            model: "kimi-for-coding".to_string(),
+            api_key: Some("sk-kimi-code".to_string()),
+            api_key_env: None,
+            base_url: None,
+            worker: None,
+            reviewer: None,
+        };
+        upsert_profile_in_config(&cfg, "coding", &entry).unwrap();
+        let content = std::fs::read_to_string(&cfg).unwrap();
+        assert!(
+            content.contains("default_profile"),
+            "should set default_profile: {}",
+            content
+        );
+    }
 }

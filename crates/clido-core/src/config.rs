@@ -305,6 +305,148 @@ impl RolesConfig {
 mod tests {
     use super::*;
 
+    // ── PermissionRule / glob coverage ──────────────────────────────────────
+
+    #[test]
+    fn permission_rule_matches_exact() {
+        let rule = PermissionRule {
+            pattern: "src/main.rs".to_string(),
+            action: RuleAction::Allow,
+            reason: None,
+        };
+        assert!(rule.matches("src/main.rs"));
+        assert!(!rule.matches("src/lib.rs"));
+    }
+
+    #[test]
+    fn permission_rule_matches_star_wildcard() {
+        let rule = PermissionRule {
+            pattern: "src/*.rs".to_string(),
+            action: RuleAction::Deny,
+            reason: Some("no rust edits".to_string()),
+        };
+        assert!(rule.matches("src/main.rs"));
+        assert!(rule.matches("src/lib.rs"));
+        assert!(!rule.matches("src/sub/lib.rs"));
+    }
+
+    #[test]
+    fn permission_rule_matches_double_star() {
+        let rule = PermissionRule {
+            pattern: "src/**".to_string(),
+            action: RuleAction::Ask,
+            reason: None,
+        };
+        assert!(rule.matches("src/main.rs"));
+        assert!(rule.matches("src/sub/deep/file.rs"));
+        assert!(!rule.matches("tests/foo.rs"));
+    }
+
+    #[test]
+    fn evaluate_rules_returns_first_match() {
+        let rules = vec![
+            PermissionRule {
+                pattern: "src/**".to_string(),
+                action: RuleAction::Allow,
+                reason: None,
+            },
+            PermissionRule {
+                pattern: "**".to_string(),
+                action: RuleAction::Deny,
+                reason: Some("deny all".to_string()),
+            },
+        ];
+        let result = evaluate_rules(&rules, "src/foo.rs");
+        assert!(matches!(result, Some((RuleAction::Allow, None))));
+        let result2 = evaluate_rules(&rules, "other/bar.rs");
+        assert!(matches!(result2, Some((RuleAction::Deny, Some(_)))));
+    }
+
+    #[test]
+    fn evaluate_rules_returns_none_when_no_match() {
+        let rules = vec![PermissionRule {
+            pattern: "src/*.rs".to_string(),
+            action: RuleAction::Allow,
+            reason: None,
+        }];
+        assert!(evaluate_rules(&rules, "tests/foo.rs").is_none());
+    }
+
+    #[test]
+    fn evaluate_rules_empty_list_returns_none() {
+        assert!(evaluate_rules(&[], "anything").is_none());
+    }
+
+    // ── ProviderType serde ───────────────────────────────────────────────────
+
+    #[test]
+    fn provider_type_serialization() {
+        assert_eq!(
+            serde_json::to_string(&ProviderType::Anthropic).unwrap(),
+            "\"anthropic\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ProviderType::OpenAI).unwrap(),
+            "\"openai\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ProviderType::Kimi).unwrap(),
+            "\"kimi\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ProviderType::KimiCode).unwrap(),
+            "\"kimi-code\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ProviderType::Local).unwrap(),
+            "\"local\""
+        );
+    }
+
+    #[test]
+    fn provider_type_deserialization() {
+        let v: ProviderType = serde_json::from_str("\"kimi\"").unwrap();
+        assert_eq!(v, ProviderType::Kimi);
+        let v2: ProviderType = serde_json::from_str("\"kimi-code\"").unwrap();
+        assert_eq!(v2, ProviderType::KimiCode);
+        let v3: ProviderType = serde_json::from_str("\"anthropic\"").unwrap();
+        assert_eq!(v3, ProviderType::Anthropic);
+    }
+
+    // ── RolesConfig::resolve ─────────────────────────────────────────────────
+
+    #[test]
+    fn roles_config_resolve_builtins() {
+        let roles = RolesConfig {
+            fast: Some("gpt-4o-mini".to_string()),
+            reasoning: Some("o3".to_string()),
+            critic: Some("claude-opus-4".to_string()),
+            planner: Some("gemini-pro".to_string()),
+            extra: Default::default(),
+        };
+        assert_eq!(roles.resolve("fast"), Some("gpt-4o-mini"));
+        assert_eq!(roles.resolve("reasoning"), Some("o3"));
+        assert_eq!(roles.resolve("smart"), Some("o3")); // alias
+        assert_eq!(roles.resolve("critic"), Some("claude-opus-4"));
+        assert_eq!(roles.resolve("planner"), Some("gemini-pro"));
+    }
+
+    #[test]
+    fn roles_config_resolve_extra_and_missing() {
+        let mut extra = std::collections::HashMap::new();
+        extra.insert("custom".to_string(), "my-model".to_string());
+        let roles = RolesConfig {
+            fast: None,
+            reasoning: None,
+            critic: None,
+            planner: None,
+            extra,
+        };
+        assert_eq!(roles.resolve("custom"), Some("my-model"));
+        assert!(roles.resolve("fast").is_none());
+        assert!(roles.resolve("nonexistent").is_none());
+    }
+
     #[test]
     fn agent_config_from_json() {
         let json = r#"{

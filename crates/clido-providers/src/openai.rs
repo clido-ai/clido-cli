@@ -476,6 +476,18 @@ fn messages_to_openai(messages: &[Message]) -> Result<(Option<String>, Vec<serde
                     })
                     .collect();
                 let text_content = text_parts.join("");
+                let thinking_parts: Vec<&str> = m
+                    .content
+                    .iter()
+                    .filter_map(|b| {
+                        if let ContentBlock::Thinking { thinking } = b {
+                            Some(thinking.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let reasoning_content = thinking_parts.join("");
                 let tool_calls: Vec<serde_json::Value> = m
                     .content
                     .iter()
@@ -500,16 +512,24 @@ fn messages_to_openai(messages: &[Message]) -> Result<(Option<String>, Vec<serde
                     } else {
                         serde_json::Value::String(text_content)
                     };
-                    openai_messages.push(serde_json::json!({
+                    let mut msg = serde_json::json!({
                         "role": "assistant",
                         "content": content_val,
                         "tool_calls": tool_calls
-                    }));
+                    });
+                    if !reasoning_content.is_empty() {
+                        msg["reasoning_content"] = serde_json::Value::String(reasoning_content);
+                    }
+                    openai_messages.push(msg);
                 } else {
-                    openai_messages.push(serde_json::json!({
+                    let mut msg = serde_json::json!({
                         "role": "assistant",
                         "content": text_content
-                    }));
+                    });
+                    if !reasoning_content.is_empty() {
+                        msg["reasoning_content"] = serde_json::Value::String(reasoning_content);
+                    }
+                    openai_messages.push(msg);
                 }
             }
         }
@@ -1182,6 +1202,39 @@ mod tests {
         assert_eq!(msgs[0]["role"], "assistant");
         assert_eq!(msgs[0]["content"], "thinking...");
         assert!(msgs[0]["tool_calls"].is_array());
+    }
+
+    #[test]
+    fn messages_to_openai_assistant_reasoning_content_preserved() {
+        let messages = vec![Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "let me think...".to_string(),
+                },
+                ContentBlock::ToolUse {
+                    id: "call_1".to_string(),
+                    name: "Read".to_string(),
+                    input: serde_json::json!({"path": "/tmp/x"}),
+                },
+            ],
+        }];
+        let (_, msgs) = messages_to_openai(&messages).unwrap();
+        assert_eq!(msgs[0]["role"], "assistant");
+        assert_eq!(msgs[0]["reasoning_content"], "let me think...");
+        assert!(msgs[0]["tool_calls"].is_array());
+    }
+
+    #[test]
+    fn messages_to_openai_assistant_no_reasoning_no_field() {
+        let messages = vec![Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::Text {
+                text: "hello".to_string(),
+            }],
+        }];
+        let (_, msgs) = messages_to_openai(&messages).unwrap();
+        assert!(msgs[0]["reasoning_content"].is_null());
     }
 
     // ── parse_openai_response edge cases ──────────────────────────────────

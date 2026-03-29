@@ -168,8 +168,8 @@ fn init_openrouter_writes_config() {
         content
     );
     assert!(
-        content.contains("api_key"),
-        "config must contain api_key field; config: {}",
+        !content.contains("api_key ="),
+        "config must not contain api_key field (goes to credentials file); config: {}",
         content
     );
     let _ = std::fs::remove_file(&config_path);
@@ -217,8 +217,8 @@ fn init_stores_api_key_directly_in_config() {
         )
     });
     assert!(
-        content.contains("api_key = \"sk-test-direct-key\""),
-        "config must contain api_key with entered value; config: {}",
+        !content.contains("api_key ="),
+        "config must not contain api_key (goes to credentials file); config: {}",
         content
     );
     assert!(

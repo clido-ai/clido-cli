@@ -23,5 +23,9 @@ exclude-files = [
     # run_tui_setup, run_interactive_setup_blocking, write_setup_config) — requires a
     # real terminal / TTY; the pure-logic helpers are already tested via #[cfg(test)].
     "crates/clido-cli/src/setup.rs",
+    # profiles.rs dispatches CLI subcommands that invoke interactive setup — requires TTY.
+    "crates/clido-cli/src/profiles.rs",
+    # registry.rs is pure static data declarations with no executable logic to test.
+    "crates/clido-providers/src/registry.rs",
 ]
 fail-under = 70.0

@@ -35,74 +35,10 @@ const PROFILE_NAME_PREFIX: &str = "  Profile name: ";
 
 // ── Provider metadata ─────────────────────────────────────────────────────────
 
-/// (display name, internal provider ID, description)
-const PROVIDERS: [(&str, &str, &str); 17] = [
-    (
-        "OpenRouter",
-        "openrouter",
-        "access any model — openrouter.ai",
-    ),
-    (
-        "Anthropic",
-        "anthropic",
-        "Claude models — console.anthropic.com",
-    ),
-    ("OpenAI", "openai", "GPT & o-series — platform.openai.com"),
-    ("Mistral", "mistral", "Mistral models — console.mistral.ai"),
-    (
-        "MiniMax",
-        "minimax",
-        "MiniMax-M2.7 coding model — minimax.io",
-    ),
-    ("Kimi", "kimi", "Moonshot AI models — platform.moonshot.ai"),
-    ("Kimi Code", "kimi-code", "coding model — api.kimi.com"),
-    (
-        "Alibaba Cloud",
-        "alibabacloud",
-        "Qwen models — dashscope.aliyuncs.com",
-    ),
-    ("DeepSeek", "deepseek", "DeepSeek models — api.deepseek.com"),
-    ("Groq", "groq", "Fast inference — groq.com"),
-    ("Cerebras", "cerebras", "Fast inference — cerebras.ai"),
-    ("Together AI", "togetherai", "Open models — together.xyz"),
-    (
-        "Fireworks AI",
-        "fireworks",
-        "Fast open models — fireworks.ai",
-    ),
-    ("xAI (Grok)", "xai", "Grok models — x.ai"),
-    ("Perplexity", "perplexity", "Sonar models — perplexity.ai"),
-    (
-        "Google Gemini",
-        "gemini",
-        "Gemini models — gemini.google.com",
-    ),
-    (
-        "Local / Ollama",
-        "local",
-        "no key needed, runs on your machine",
-    ),
-];
+use clido_providers::registry::PROVIDER_REGISTRY;
 
-const PROVIDER_KEY_ENV: [&str; 17] = [
-    "OPENROUTER_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "MISTRAL_API_KEY",
-    "MINIMAX_API_KEY",
-    "MOONSHOT_API_KEY",
-    "KIMI_CODE_API_KEY",
-    "DASHSCOPE_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "GROQ_API_KEY",
-    "CEREBRAS_API_KEY",
-    "TOGETHER_API_KEY",
-    "FIREWORKS_API_KEY",
-    "XAI_API_KEY",
-    "PERPLEXITY_API_KEY",
-    "GEMINI_API_KEY",
-    "", // local: no key
-];
+/// Result of a completed setup: (config_path, toml_content, credentials).
+type SetupResult = (PathBuf, String, Vec<(String, String)>);
 
 fn char_byte_pos(s: &str, char_idx: usize) -> usize {
     if char_idx == 0 {
@@ -352,9 +288,9 @@ impl SetupState {
     }
 
     fn new_with_prefill(pre_fill: SetupPreFill) -> Self {
-        let provider_idx = PROVIDERS
+        let provider_idx = PROVIDER_REGISTRY
             .iter()
-            .position(|(_, id, _)| *id == pre_fill.provider.as_str())
+            .position(|def| def.id == pre_fill.provider.as_str())
             .unwrap_or(0);
         let current_credential = if pre_fill.api_key.is_empty() {
             None
@@ -433,7 +369,7 @@ impl SetupState {
     }
 
     fn saved_keys_for_current_provider(&self) -> Vec<&SavedApiKeyOffer> {
-        let pid = PROVIDERS[self.provider].1;
+        let pid = PROVIDER_REGISTRY[self.provider].id;
         self.saved_api_keys
             .iter()
             .filter(|o| o.provider_id == pid)
@@ -441,11 +377,11 @@ impl SetupState {
     }
 
     fn is_local(&self) -> bool {
-        self.provider == PROVIDERS.len() - 1
+        PROVIDER_REGISTRY[self.provider].is_local
     }
 
     fn key_env(&self) -> &'static str {
-        PROVIDER_KEY_ENV[self.provider]
+        PROVIDER_REGISTRY[self.provider].api_key_env
     }
 
     fn model_list_mode(&self) -> bool {
@@ -679,7 +615,7 @@ fn draw_profile_name(f: &mut Frame, area: Rect, s: &SetupState) {
 
 fn draw_provider(f: &mut Frame, area: Rect, s: &SetupState) {
     let mut lines = vec![Line::raw("")];
-    for (i, (name, _, desc)) in PROVIDERS.iter().enumerate() {
+    for (i, def) in PROVIDER_REGISTRY.iter().enumerate() {
         lines.push(if i == s.provider_cursor {
             let mut spans = vec![
                 Span::styled(
@@ -689,12 +625,15 @@ fn draw_provider(f: &mut Frame, area: Rect, s: &SetupState) {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("{:<16}", name),
+                    format!("{:<16}", def.name),
                     Style::default()
                         .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("  {}", desc), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("  {}", def.description),
+                    Style::default().fg(Color::DarkGray),
+                ),
             ];
             if s.current_credential.is_some() && i == s.provider_cursor {
                 spans.push(Span::styled(
@@ -709,11 +648,11 @@ fn draw_provider(f: &mut Frame, area: Rect, s: &SetupState) {
             Line::from(vec![
                 Span::raw("   "),
                 Span::styled(
-                    format!("{:<16}", name),
+                    format!("{:<16}", def.name),
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::styled(
-                    format!("  {}", desc),
+                    format!("  {}", def.description),
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
@@ -730,7 +669,7 @@ fn draw_provider(f: &mut Frame, area: Rect, s: &SetupState) {
 }
 
 fn draw_credential(f: &mut Frame, area: Rect, s: &SetupState) {
-    let (pname, _, _) = PROVIDERS[s.provider];
+    let pname = PROVIDER_REGISTRY[s.provider].name;
     let offers = s.saved_keys_for_current_provider();
 
     if s.is_local() {
@@ -895,7 +834,7 @@ fn draw_fetching(f: &mut Frame, area: Rect) {
 }
 
 fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
-    let (pname, _, _) = PROVIDERS[s.provider];
+    let pname = PROVIDER_REGISTRY[s.provider].name;
 
     if s.model_list_mode() {
         // Layout: provider info | search box | scrollable model list
@@ -1223,7 +1162,7 @@ fn draw_subagent_provider(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer
         s.worker_provider
     };
     let mut lines = vec![Line::raw("")];
-    for (i, (name, _, desc)) in PROVIDERS.iter().enumerate() {
+    for (i, def) in PROVIDER_REGISTRY.iter().enumerate() {
         lines.push(if i == cursor {
             Line::from(vec![
                 Span::styled(
@@ -1233,22 +1172,25 @@ fn draw_subagent_provider(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("{:<16}", name),
+                    format!("{:<16}", def.name),
                     Style::default()
                         .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("  {}", desc), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("  {}", def.description),
+                    Style::default().fg(Color::DarkGray),
+                ),
             ])
         } else {
             Line::from(vec![
                 Span::raw("   "),
                 Span::styled(
-                    format!("{:<16}", name),
+                    format!("{:<16}", def.name),
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::styled(
-                    format!("  {}", desc),
+                    format!("  {}", def.description),
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
@@ -1282,7 +1224,7 @@ fn draw_subagent_credential(f: &mut Frame, area: Rect, s: &SetupState, is_review
     } else {
         s.worker_provider
     };
-    let (pname, _, _) = PROVIDERS[prov_idx];
+    let pname = PROVIDER_REGISTRY[prov_idx].name;
     f.render_widget(
         Paragraph::new(vec![
             Line::raw(""),
@@ -1299,7 +1241,7 @@ fn draw_subagent_credential(f: &mut Frame, area: Rect, s: &SetupState, is_review
         info_area,
     );
 
-    let key_env = PROVIDER_KEY_ENV[prov_idx];
+    let key_env = PROVIDER_REGISTRY[prov_idx].api_key_env;
     let title = if key_env.is_empty() {
         " Base URL ".to_string()
     } else {
@@ -1349,7 +1291,7 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
     } else {
         s.worker_provider
     };
-    let (pname, _, _) = PROVIDERS[prov_idx];
+    let pname = PROVIDER_REGISTRY[prov_idx].name;
     let list_mode = if is_reviewer {
         s.reviewer_model_list_mode()
     } else {
@@ -1548,7 +1490,7 @@ fn setup_event_loop(
         // After rendering "FetchingModels", do the blocking fetch.
         if s.needs_fetch {
             s.needs_fetch = false;
-            let provider_id = PROVIDERS[s.provider].1;
+            let provider_id = PROVIDER_REGISTRY[s.provider].id;
             let (api_key, base_url): (&str, Option<&str>) = if s.is_local() {
                 ("", Some(s.credential.as_str()))
             } else {
@@ -1560,7 +1502,6 @@ fn setup_event_loop(
                 api_key,
                 base_url,
             ));
-            s.custom_model = s.fetched_models.is_empty();
             s.model_cursor = 0;
             s.model_scroll = 0;
             // If reinit, pre-select the current model in the list.
@@ -1584,8 +1525,8 @@ fn setup_event_loop(
         // Fetch worker models.
         if s.worker_needs_fetch {
             s.worker_needs_fetch = false;
-            let provider_id = PROVIDERS[s.worker_provider].1;
-            let is_local_worker = s.worker_provider == PROVIDERS.len() - 1;
+            let provider_id = PROVIDER_REGISTRY[s.worker_provider].id;
+            let is_local_worker = PROVIDER_REGISTRY[s.worker_provider].is_local;
             let (api_key, base_url): (&str, Option<&str>) = if is_local_worker {
                 ("", Some(s.worker_credential.as_str()))
             } else {
@@ -1609,8 +1550,8 @@ fn setup_event_loop(
         // Fetch reviewer models.
         if s.reviewer_needs_fetch {
             s.reviewer_needs_fetch = false;
-            let provider_id = PROVIDERS[s.reviewer_provider].1;
-            let is_local_reviewer = s.reviewer_provider == PROVIDERS.len() - 1;
+            let provider_id = PROVIDER_REGISTRY[s.reviewer_provider].id;
+            let is_local_reviewer = PROVIDER_REGISTRY[s.reviewer_provider].is_local;
             let (api_key, base_url): (&str, Option<&str>) = if is_local_reviewer {
                 ("", Some(s.reviewer_credential.as_str()))
             } else {
@@ -1709,7 +1650,7 @@ fn setup_event_loop(
                         }
                     }
                     KeyCode::Down => {
-                        if s.provider_cursor < PROVIDERS.len() - 1 {
+                        if s.provider_cursor < PROVIDER_REGISTRY.len() - 1 {
                             s.provider_cursor += 1;
                         }
                     }
@@ -1973,7 +1914,7 @@ fn setup_event_loop(
                         }
                     }
                     KeyCode::Down => {
-                        if s.worker_provider < PROVIDERS.len() - 1 {
+                        if s.worker_provider < PROVIDER_REGISTRY.len() - 1 {
                             s.worker_provider += 1;
                         }
                     }
@@ -2002,7 +1943,7 @@ fn setup_event_loop(
                 SetupStep::WorkerCredential => match key.code {
                     KeyCode::Enter => {
                         if s.input.is_empty() {
-                            if PROVIDERS[s.worker_provider].1 == "local" {
+                            if PROVIDER_REGISTRY[s.worker_provider].is_local {
                                 s.worker_credential = "http://localhost:11434".to_string();
                             } else {
                                 s.error = Some("API key required. Press Esc to skip.".into());
@@ -2191,7 +2132,7 @@ fn setup_event_loop(
                         }
                     }
                     KeyCode::Down => {
-                        if s.reviewer_provider < PROVIDERS.len() - 1 {
+                        if s.reviewer_provider < PROVIDER_REGISTRY.len() - 1 {
                             s.reviewer_provider += 1;
                         }
                     }
@@ -2218,7 +2159,7 @@ fn setup_event_loop(
                 SetupStep::ReviewerCredential => match key.code {
                     KeyCode::Enter => {
                         if s.input.is_empty() {
-                            if PROVIDERS[s.reviewer_provider].1 == "local" {
+                            if PROVIDER_REGISTRY[s.reviewer_provider].is_local {
                                 s.reviewer_credential = "http://localhost:11434".to_string();
                             } else {
                                 s.error = Some("API key required. Press Esc to skip.".into());
@@ -2683,7 +2624,7 @@ fn build_toml(s: &SetupState) -> String {
 /// - `profile_name = None` → full config (first-run / /init).
 /// - `profile_name = Some(name)` → only the `[profile.<name>]` block (profile wizard).
 fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
-    let (_, provider, _) = PROVIDERS[s.provider];
+    let provider = PROVIDER_REGISTRY[s.provider].id;
 
     if let Some(pname) = profile_name {
         // ── Profile mode: generate only [profile.<name>] and sub-agent blocks ──
@@ -2694,8 +2635,6 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
                 s.credential.as_str()
             };
             format!("base_url = \"{}\"\n", base_url)
-        } else if !s.credential.is_empty() {
-            format!("# api_key is stored in plain text — keep this file private (chmod 600).\napi_key = \"{}\"\n", s.credential)
         } else {
             String::new()
         };
@@ -2716,8 +2655,8 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
             )
         };
         if s.configure_worker && !s.worker_model.is_empty() {
-            let (_, worker_prov, _) = PROVIDERS[s.worker_provider];
-            let is_local_worker = s.worker_provider == PROVIDERS.len() - 1;
+            let worker_prov = PROVIDER_REGISTRY[s.worker_provider].id;
+            let is_local_worker = PROVIDER_REGISTRY[s.worker_provider].is_local;
             let worker_key_line = if is_local_worker {
                 let base_url = if s.worker_credential.is_empty() {
                     "http://localhost:11434"
@@ -2725,8 +2664,6 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
                     s.worker_credential.as_str()
                 };
                 format!("base_url = \"{}\"\n", base_url)
-            } else if !s.worker_credential.is_empty() {
-                format!("api_key = \"{}\"\n", s.worker_credential)
             } else {
                 String::new()
             };
@@ -2736,8 +2673,8 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
             ));
         }
         if s.configure_reviewer && !s.reviewer_model.is_empty() {
-            let (_, reviewer_prov, _) = PROVIDERS[s.reviewer_provider];
-            let is_local_reviewer = s.reviewer_provider == PROVIDERS.len() - 1;
+            let reviewer_prov = PROVIDER_REGISTRY[s.reviewer_provider].id;
+            let is_local_reviewer = PROVIDER_REGISTRY[s.reviewer_provider].is_local;
             let reviewer_key_line = if is_local_reviewer {
                 let base_url = if s.reviewer_credential.is_empty() {
                     "http://localhost:11434"
@@ -2745,8 +2682,6 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
                     s.reviewer_credential.as_str()
                 };
                 format!("base_url = \"{}\"\n", base_url)
-            } else if !s.reviewer_credential.is_empty() {
-                format!("api_key = \"{}\"\n", s.reviewer_credential)
             } else {
                 String::new()
             };
@@ -2781,8 +2716,8 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
         )
     } else {
         format!(
-            "default_profile = \"default\"\n\n[profile.default]\nprovider = \"{}\"\nmodel = \"{}\"\n# api_key is stored in plain text — keep this file private (chmod 600).\napi_key = \"{}\"\n{}",
-            provider, s.model, s.credential, roles_toml
+            "default_profile = \"default\"\n\n[profile.default]\nprovider = \"{}\"\nmodel = \"{}\"\n# API keys are stored in the credentials file (same directory as this file).\n{}",
+            provider, s.model, roles_toml
         )
     };
 
@@ -2794,8 +2729,6 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
             s.credential.as_str()
         };
         format!("base_url = \"{}\"\n", base_url)
-    } else if !s.credential.is_empty() {
-        format!("api_key = \"{}\"\n", s.credential)
     } else {
         String::new()
     };
@@ -2806,8 +2739,8 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
     );
 
     if s.configure_worker && !s.worker_model.is_empty() {
-        let (_, worker_prov, _) = PROVIDERS[s.worker_provider];
-        let is_local_worker = s.worker_provider == PROVIDERS.len() - 1;
+        let worker_prov = PROVIDER_REGISTRY[s.worker_provider].id;
+        let is_local_worker = PROVIDER_REGISTRY[s.worker_provider].is_local;
         let worker_key_line = if is_local_worker {
             let base_url = if s.worker_credential.is_empty() {
                 "http://localhost:11434"
@@ -2815,8 +2748,6 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
                 s.worker_credential.as_str()
             };
             format!("base_url = \"{}\"\n", base_url)
-        } else if !s.worker_credential.is_empty() {
-            format!("api_key = \"{}\"\n", s.worker_credential)
         } else {
             String::new()
         };
@@ -2827,8 +2758,8 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
     }
 
     if s.configure_reviewer && !s.reviewer_model.is_empty() {
-        let (_, reviewer_prov, _) = PROVIDERS[s.reviewer_provider];
-        let is_local_reviewer = s.reviewer_provider == PROVIDERS.len() - 1;
+        let reviewer_prov = PROVIDER_REGISTRY[s.reviewer_provider].id;
+        let is_local_reviewer = PROVIDER_REGISTRY[s.reviewer_provider].is_local;
         let reviewer_key_line = if is_local_reviewer {
             let base_url = if s.reviewer_credential.is_empty() {
                 "http://localhost:11434"
@@ -2836,8 +2767,6 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
                 s.reviewer_credential.as_str()
             };
             format!("base_url = \"{}\"\n", base_url)
-        } else if !s.reviewer_credential.is_empty() {
-            format!("api_key = \"{}\"\n", s.reviewer_credential)
         } else {
             String::new()
         };
@@ -2848,6 +2777,76 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
     }
 
     format!("{}{}", profile_toml, agents_toml)
+}
+
+// ── Credentials file helpers ──────────────────────────────────────────────────
+
+/// Path to the credentials file alongside the given config file.
+fn credentials_path(config_path: &std::path::Path) -> std::path::PathBuf {
+    config_path
+        .parent()
+        .unwrap_or(config_path)
+        .join("credentials")
+}
+
+/// Write API keys to `path` in TOML `[keys]` format with chmod 600.
+/// Entries with empty keys are skipped. Duplicate provider IDs: last wins.
+fn write_credentials_file(
+    path: &std::path::Path,
+    entries: &[(String, String)],
+) -> std::io::Result<()> {
+    let mut seen = std::collections::HashSet::new();
+    let mut content = String::from(
+        "# This file contains sensitive API keys. Keep it private (chmod 600).\n\
+         # Do not share or commit this file.\n\
+         \n\
+         [keys]\n",
+    );
+    for (provider_id, key) in entries {
+        if key.is_empty() || !seen.insert(provider_id.clone()) {
+            continue;
+        }
+        content.push_str(&format!("{} = \"{}\"\n", provider_id, key));
+    }
+    std::fs::write(path, content)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        let _ = std::fs::set_permissions(path, perms);
+    }
+    Ok(())
+}
+
+/// Collect all non-empty, non-local API key credentials from a setup state.
+/// Returns `(provider_id, key)` pairs for main, worker, and reviewer agents.
+fn collect_credentials_from_state(s: &SetupState) -> Vec<(String, String)> {
+    let mut creds: Vec<(String, String)> = Vec::new();
+    if !s.is_local() && !s.credential.is_empty() {
+        creds.push((
+            PROVIDER_REGISTRY[s.provider].id.to_string(),
+            s.credential.clone(),
+        ));
+    }
+    if s.configure_worker && !s.worker_model.is_empty() {
+        let is_local_worker = PROVIDER_REGISTRY[s.worker_provider].is_local;
+        if !is_local_worker && !s.worker_credential.is_empty() {
+            creds.push((
+                PROVIDER_REGISTRY[s.worker_provider].id.to_string(),
+                s.worker_credential.clone(),
+            ));
+        }
+    }
+    if s.configure_reviewer && !s.reviewer_model.is_empty() {
+        let is_local_reviewer = PROVIDER_REGISTRY[s.reviewer_provider].is_local;
+        if !is_local_reviewer && !s.reviewer_credential.is_empty() {
+            creds.push((
+                PROVIDER_REGISTRY[s.reviewer_provider].id.to_string(),
+                s.reviewer_credential.clone(),
+            ));
+        }
+    }
+    creds
 }
 
 // ── TUI entry point ───────────────────────────────────────────────────────────
@@ -2878,7 +2877,7 @@ async fn run_tui_setup(pre_fill: Option<SetupPreFill>) -> Result<SetupOutcome, a
 /// Non-TTY setup: plain stdin/stdout prompts (CI, pipes).
 pub fn run_interactive_setup_blocking(
     _init_subline: Option<&str>,
-) -> Result<(PathBuf, String), anyhow::Error> {
+) -> Result<SetupResult, anyhow::Error> {
     let config_path = if let Ok(p) = env::var("CLIDO_CONFIG") {
         PathBuf::from(p)
     } else {
@@ -2893,24 +2892,24 @@ pub fn run_interactive_setup_blocking(
 
     // Step 1: Provider
     eprintln!("  Provider:");
-    for (i, (name, _, desc)) in PROVIDERS.iter().enumerate() {
-        eprintln!("    {}) {:<16}  {}", i + 1, name, desc);
+    for (i, def) in PROVIDER_REGISTRY.iter().enumerate() {
+        eprintln!("    {}) {:<16}  {}", i + 1, def.name, def.description);
     }
-    eprintln!("  Enter 1–{}: ", PROVIDERS.len());
+    eprintln!("  Enter 1–{}: ", PROVIDER_REGISTRY.len());
     line.clear();
     stdin
         .read_line(&mut line)
         .map_err(|e| anyhow::anyhow!("stdin: {}", e))?;
     let pidx: usize = line.trim().parse::<usize>().unwrap_or(0);
-    if pidx < 1 || pidx > PROVIDERS.len() {
+    if pidx < 1 || pidx > PROVIDER_REGISTRY.len() {
         return Err(anyhow::anyhow!(
             "Invalid choice. Run 'clido init' again and enter 1–{}.",
-            PROVIDERS.len()
+            PROVIDER_REGISTRY.len()
         ));
     }
     let pidx = pidx - 1;
-    let (_, provider, _) = PROVIDERS[pidx];
-    let is_local = pidx == PROVIDERS.len() - 1;
+    let provider = PROVIDER_REGISTRY[pidx].id;
+    let is_local = PROVIDER_REGISTRY[pidx].is_local;
 
     // Step 2: Credential (API key or base URL)
     let credential = if is_local {
@@ -2926,7 +2925,7 @@ pub fn run_interactive_setup_blocking(
             url.to_string()
         }
     } else {
-        let key_env = PROVIDER_KEY_ENV[pidx];
+        let key_env = PROVIDER_REGISTRY[pidx].api_key_env;
         eprintln!("  {} (paste and press Enter):", key_env);
         line.clear();
         stdin
@@ -2995,6 +2994,11 @@ pub fn run_interactive_setup_blocking(
         }
     };
 
+    let credentials: Vec<(String, String)> = if is_local {
+        vec![]
+    } else {
+        vec![(provider.to_string(), credential.clone())]
+    };
     let toml = if is_local {
         format!(
             "default_profile = \"default\"\n\n[profile.default]\nprovider = \"local\"\nmodel = \"{}\"\nbase_url = \"{}\"\n",
@@ -3002,12 +3006,12 @@ pub fn run_interactive_setup_blocking(
         )
     } else {
         format!(
-            "default_profile = \"default\"\n\n[profile.default]\nprovider = \"{}\"\nmodel = \"{}\"\n# api_key is stored in plain text — keep this file private (chmod 600).\napi_key = \"{}\"\n",
-            provider, model, credential
+            "default_profile = \"default\"\n\n[profile.default]\nprovider = \"{}\"\nmodel = \"{}\"\n# API keys are stored in the credentials file (same directory as this file).\n",
+            provider, model
         )
     };
 
-    Ok((config_path, toml))
+    Ok((config_path, toml, credentials))
 }
 
 // ── Anonymize helper ──────────────────────────────────────────────────────────
@@ -3219,7 +3223,7 @@ pub async fn run_edit_profile(
 
 /// Build a `ProfileEntry` from the wizard state.
 fn state_to_profile_entry(s: &SetupState) -> clido_core::ProfileEntry {
-    let (_, provider, _) = PROVIDERS[s.provider];
+    let provider = PROVIDER_REGISTRY[s.provider].id;
     let (api_key, base_url) = if s.is_local() {
         let url = if s.credential.is_empty() {
             Some("http://localhost:11434".to_string())
@@ -3232,8 +3236,8 @@ fn state_to_profile_entry(s: &SetupState) -> clido_core::ProfileEntry {
     };
 
     let worker = if s.configure_worker && !s.worker_model.is_empty() {
-        let (_, worker_prov, _) = PROVIDERS[s.worker_provider];
-        let is_local_worker = s.worker_provider == PROVIDERS.len() - 1;
+        let worker_prov = PROVIDER_REGISTRY[s.worker_provider].id;
+        let is_local_worker = PROVIDER_REGISTRY[s.worker_provider].is_local;
         let (w_key, w_url) = if is_local_worker {
             let url = if s.worker_credential.is_empty() {
                 Some("http://localhost:11434".to_string())
@@ -3260,8 +3264,8 @@ fn state_to_profile_entry(s: &SetupState) -> clido_core::ProfileEntry {
     };
 
     let reviewer = if s.configure_reviewer && !s.reviewer_model.is_empty() {
-        let (_, reviewer_prov, _) = PROVIDERS[s.reviewer_provider];
-        let is_local_reviewer = s.reviewer_provider == PROVIDERS.len() - 1;
+        let reviewer_prov = PROVIDER_REGISTRY[s.reviewer_provider].id;
+        let is_local_reviewer = PROVIDER_REGISTRY[s.reviewer_provider].is_local;
         let (r_key, r_url) = if is_local_reviewer {
             let url = if s.reviewer_credential.is_empty() {
                 Some("http://localhost:11434".to_string())
@@ -3331,11 +3335,14 @@ async fn write_setup_config(
     use_stdout: bool,
     pre_fill: Option<SetupPreFill>,
 ) -> Result<(), anyhow::Error> {
-    let (config_path, toml) = if setup_use_rich_ui() {
+    let (config_path, toml, credentials) = if setup_use_rich_ui() {
         match run_tui_setup(pre_fill).await? {
             SetupOutcome::Cancelled => return Ok(()),
             SetupOutcome::Finished(state) => {
-                (setup_default_config_path()?, build_full_config_toml(&state))
+                let path = setup_default_config_path()?;
+                let credentials = collect_credentials_from_state(&state);
+                let toml = build_full_config_toml(&state);
+                (path, toml, credentials)
             }
         }
     } else {
@@ -3354,6 +3361,12 @@ async fn write_setup_config(
         use std::os::unix::fs::PermissionsExt;
         let perms = std::fs::Permissions::from_mode(0o600);
         let _ = std::fs::set_permissions(&config_path, perms);
+    }
+
+    // Write credentials file alongside config
+    if !credentials.is_empty() {
+        let creds_path = credentials_path(&config_path);
+        let _ = write_credentials_file(&creds_path, &credentials);
     }
 
     let msg = format!(
@@ -3457,7 +3470,10 @@ mod tests {
         let toml = build_toml(&s);
         assert!(toml.contains("provider = \"anthropic\""));
         assert!(toml.contains("model = \"claude-sonnet-4-5\""));
-        assert!(toml.contains("api_key = \"sk-ant-api03-secret\""));
+        assert!(
+            !toml.contains("api_key ="),
+            "api_key must not appear in config.toml"
+        );
     }
 
     #[test]
@@ -3468,7 +3484,10 @@ mod tests {
         s.credential = "sk-or-test-key".to_string();
         let toml = build_toml(&s);
         assert!(toml.contains("provider = \"openrouter\""));
-        assert!(toml.contains("api_key = \"sk-or-test-key\""));
+        assert!(
+            !toml.contains("api_key ="),
+            "api_key must not appear in config.toml"
+        );
     }
 
     #[test]
@@ -3480,7 +3499,10 @@ mod tests {
         let toml = build_toml(&s);
         assert!(toml.contains("provider = \"openai\""));
         assert!(toml.contains("model = \"gpt-4o\""));
-        assert!(toml.contains("api_key = \"sk-openai-test\""));
+        assert!(
+            !toml.contains("api_key ="),
+            "api_key must not appear in config.toml"
+        );
     }
 
     #[test]
@@ -3503,7 +3525,10 @@ mod tests {
         let toml = build_toml(&s);
         assert!(toml.contains("provider = \"minimax\""));
         assert!(toml.contains("model = \"MiniMax-M2.7\""));
-        assert!(toml.contains("api_key = \"sk-minimax-test\""));
+        assert!(
+            !toml.contains("api_key ="),
+            "api_key must not appear in config.toml"
+        );
     }
 
     #[test]
@@ -3539,13 +3564,13 @@ mod tests {
     }
 
     #[test]
-    fn providers_array_consistency() {
-        assert_eq!(PROVIDERS.len(), PROVIDER_KEY_ENV.len());
-        // Last provider is local (no key needed)
-        assert_eq!(PROVIDER_KEY_ENV[PROVIDERS.len() - 1], "");
-        // All named providers have non-empty IDs
-        for (_, id, _) in &PROVIDERS {
-            assert!(!id.is_empty());
+    fn provider_registry_consistency() {
+        use clido_providers::registry::PROVIDER_REGISTRY;
+        assert_eq!(PROVIDER_REGISTRY.len(), 17);
+        assert!(PROVIDER_REGISTRY.last().unwrap().is_local);
+        assert_eq!(PROVIDER_REGISTRY.last().unwrap().api_key_env, "");
+        for def in PROVIDER_REGISTRY {
+            assert!(!def.id.is_empty());
         }
     }
 
@@ -3564,9 +3589,8 @@ mod tests {
             "agents.main section missing"
         );
         assert!(
-            toml.contains("api_key = \"sk-ant-secret-key\""),
-            "agents.main should store api_key directly, got:\n{}",
-            toml
+            !toml.contains("api_key ="),
+            "api_key must not appear in config.toml (goes to credentials file)"
         );
         assert!(
             !toml.contains("api_key_env"),
@@ -3598,8 +3622,8 @@ mod tests {
             "worker model missing"
         );
         assert!(
-            toml.contains("api_key = \"sk-openai-worker-key\""),
-            "worker should store api_key directly"
+            !toml.contains("api_key ="),
+            "api_key must not appear in config.toml"
         );
         assert!(
             !toml.contains("api_key_env"),
@@ -3631,8 +3655,8 @@ mod tests {
             "reviewer model missing"
         );
         assert!(
-            toml.contains("api_key = \"sk-ant-reviewer-key\""),
-            "reviewer should store api_key directly"
+            !toml.contains("api_key ="),
+            "api_key must not appear in config.toml"
         );
         assert!(
             !toml.contains("api_key_env"),
@@ -3697,5 +3721,48 @@ mod tests {
             !toml.contains("[agents.reviewer]"),
             "reviewer section should not appear when not configured"
         );
+    }
+
+    #[test]
+    fn collect_credentials_includes_main_key() {
+        let mut s = SetupState::new();
+        s.provider = 1; // Anthropic
+        s.model = "claude-sonnet-4-5".to_string();
+        s.credential = "sk-ant-api03-secret".to_string();
+        let creds = collect_credentials_from_state(&s);
+        assert!(
+            creds
+                .iter()
+                .any(|(id, key)| id == "anthropic" && key == "sk-ant-api03-secret"),
+            "credentials should include main agent key"
+        );
+    }
+
+    #[test]
+    fn collect_credentials_local_provider_excluded() {
+        let mut s = SetupState::new();
+        s.provider = 16; // Local
+        s.model = "llama3.2".to_string();
+        s.credential = "http://localhost:11434".to_string();
+        let creds = collect_credentials_from_state(&s);
+        assert!(
+            creds.is_empty(),
+            "local provider should not produce credentials"
+        );
+    }
+
+    #[test]
+    fn write_credentials_file_creates_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials");
+        let entries = vec![
+            ("anthropic".to_string(), "sk-ant-test".to_string()),
+            ("openai".to_string(), "sk-openai-test".to_string()),
+        ];
+        write_credentials_file(&path, &entries).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("[keys]"));
+        assert!(content.contains("anthropic = \"sk-ant-test\""));
+        assert!(content.contains("openai = \"sk-openai-test\""));
     }
 }

@@ -12040,4 +12040,164 @@ mod tests {
             "multiline input should be recorded in input_history"
         );
     }
+
+    // ── Snapshot-style render tests (TestBackend) ──────────────────────────────
+
+    use crate::overlay::ReadOnlyOverlay;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn test_terminal() -> Terminal<TestBackend> {
+        let backend = TestBackend::new(120, 40);
+        Terminal::new(backend).unwrap()
+    }
+
+    /// Helper: collect the entire terminal buffer into a single string for
+    /// substring assertions.
+    fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
+        let buf = terminal.backend().buffer();
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf.cell((x, y)).map_or(" ", |c| c.symbol()));
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn render_main_chat_empty_no_panic() {
+        let mut app = make_test_app();
+        let mut terminal = test_terminal();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let text = buffer_text(&terminal);
+        // Header always contains the brand
+        assert!(text.contains("cli"), "header should contain 'cli'");
+    }
+
+    #[test]
+    fn render_error_overlay_shows_message() {
+        let mut app = make_test_app();
+        app.overlay_stack.push(OverlayKind::Error(ErrorOverlay::new(
+            "something went wrong",
+        )));
+        let mut terminal = test_terminal();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("something went wrong"),
+            "error overlay should show the error message, got:\n{}",
+            text
+        );
+    }
+
+    #[test]
+    fn render_readonly_overlay_shows_content() {
+        let mut app = make_test_app();
+        app.overlay_stack
+            .push(OverlayKind::ReadOnly(ReadOnlyOverlay::new(
+                "Test Info",
+                vec![
+                    ("Section A".into(), "Alpha content here".into()),
+                    ("Section B".into(), "Beta content here".into()),
+                ],
+            )));
+        let mut terminal = test_terminal();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("Alpha content"),
+            "readonly overlay should display content, got:\n{}",
+            text
+        );
+    }
+
+    #[test]
+    fn render_model_picker_shows_header() {
+        let mut app = make_test_app();
+        app.model_picker = Some(ModelPickerState {
+            models: vec![
+                ModelEntry {
+                    id: "gpt-4o".into(),
+                    provider: "openai".into(),
+                    input_mtok: 2.5,
+                    output_mtok: 10.0,
+                    context_k: Some(128),
+                    role: None,
+                    is_favorite: false,
+                },
+                ModelEntry {
+                    id: "claude-sonnet".into(),
+                    provider: "anthropic".into(),
+                    input_mtok: 3.0,
+                    output_mtok: 15.0,
+                    context_k: Some(200),
+                    role: None,
+                    is_favorite: true,
+                },
+            ],
+            filter: String::new(),
+            selected: 0,
+            scroll_offset: 0,
+        });
+        let mut terminal = test_terminal();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("Filter"),
+            "model picker should display filter prompt, got:\n{}",
+            text
+        );
+    }
+
+    #[test]
+    fn render_session_picker_shows_sessions() {
+        let mut app = make_test_app();
+        app.session_picker = Some(SessionPickerState {
+            sessions: vec![clido_storage::SessionSummary {
+                session_id: "abc123".into(),
+                project_path: "/home/user/proj".into(),
+                start_time: "2025-01-01T00:00:00Z".into(),
+                num_turns: 5,
+                total_cost_usd: 0.42,
+                preview: "hello world".into(),
+            }],
+            selected: 0,
+            scroll_offset: 0,
+            filter: String::new(),
+        });
+        let mut terminal = test_terminal();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("abc123"),
+            "session picker should display session id, got:\n{}",
+            text
+        );
+    }
+
+    #[test]
+    fn render_profile_overlay_overview_no_panic() {
+        let mut app = make_test_app();
+        app.profile_overlay = Some(ProfileOverlayState::for_create(
+            std::env::temp_dir().join("test-config.toml"),
+        ));
+        // Switch to overview mode so we hit render_profile_overview path
+        if let Some(ref mut st) = app.profile_overlay {
+            st.name = "test-profile".into();
+            st.provider = "openrouter".into();
+            st.model = "gpt-4o".into();
+            st.mode = ProfileOverlayMode::Overview;
+        }
+        let mut terminal = test_terminal();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let text = buffer_text(&terminal);
+        // Profile overlay should show the provider or model somewhere
+        assert!(
+            text.contains("openrouter") || text.contains("gpt-4o") || text.contains("test-profile"),
+            "profile overlay should display profile info, got:\n{}",
+            text
+        );
+    }
 }

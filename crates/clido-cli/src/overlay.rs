@@ -557,4 +557,197 @@ mod tests {
         stack.clear();
         assert!(stack.is_empty());
     }
+
+    // ── OverlayStack: depth & pop ────────────────────────────────────────────
+
+    #[test]
+    fn stack_push_multiple_verify_depth() {
+        let mut stack = OverlayStack::new();
+        stack.push(OverlayKind::Error(ErrorOverlay::new("a")));
+        stack.push(OverlayKind::Error(ErrorOverlay::new("b")));
+        stack.push(OverlayKind::ReadOnly(ReadOnlyOverlay::new("c", vec![])));
+        assert_eq!(stack.len(), 3);
+        assert!(!stack.is_empty());
+    }
+
+    #[test]
+    fn stack_pop_returns_correct_overlay() {
+        let mut stack = OverlayStack::new();
+        stack.push(OverlayKind::Error(ErrorOverlay::new("bottom")));
+        stack.push(OverlayKind::ReadOnly(ReadOnlyOverlay::new("top", vec![])));
+
+        let popped = stack.pop().expect("should pop an overlay");
+        assert_eq!(popped.title(), "top");
+        assert_eq!(stack.len(), 1);
+        assert_eq!(stack.top().unwrap().title(), "Error");
+    }
+
+    #[test]
+    fn stack_handle_key_dispatches_to_top_overlay() {
+        let mut stack = OverlayStack::new();
+        // Bottom: ReadOnly with 5 lines, visible_rows = 2
+        let mut ro = ReadOnlyOverlay::new(
+            "Bottom",
+            (0..5).map(|i| (format!("h{i}"), format!("b{i}"))).collect(),
+        );
+        ro.visible_rows = 2;
+        stack.push(OverlayKind::ReadOnly(ro));
+
+        // Top: Error overlay
+        stack.push(OverlayKind::Error(ErrorOverlay::new("Top")));
+
+        // Down key on Error → Consumed (Error consumes all non-dismiss keys)
+        let result = stack.handle_key(key(KeyCode::Down));
+        assert!(matches!(result, OverlayKeyResult::Consumed));
+
+        // The ReadOnly underneath should NOT have scrolled
+        if let OverlayKind::ReadOnly(ro) = &stack.stack[0] {
+            assert_eq!(ro.scroll_offset, 0);
+        } else {
+            panic!("expected ReadOnly at bottom");
+        }
+    }
+
+    #[test]
+    fn stack_handle_key_esc_pops_error_overlay() {
+        let mut stack = OverlayStack::new();
+        stack.push(OverlayKind::Error(ErrorOverlay::new("will dismiss")));
+        assert_eq!(stack.len(), 1);
+
+        let result = stack.handle_key(key(KeyCode::Esc));
+        assert!(matches!(result, OverlayKeyResult::Consumed));
+        assert!(stack.is_empty());
+    }
+
+    #[test]
+    fn stack_top_reflects_topmost_overlay() {
+        let mut stack = OverlayStack::new();
+        stack.push(OverlayKind::Error(ErrorOverlay::with_title("First", "msg")));
+        stack.push(OverlayKind::ReadOnly(ReadOnlyOverlay::new(
+            "Second",
+            vec![],
+        )));
+        stack.push(OverlayKind::Error(ErrorOverlay::with_title("Third", "msg")));
+
+        assert_eq!(stack.top().unwrap().title(), "Third");
+        // iter() paints bottom-to-top; last item is the top overlay
+        let titles: Vec<&str> = stack.iter().map(|o| o.title()).collect();
+        assert_eq!(titles, vec!["First", "Second", "Third"]);
+    }
+
+    #[test]
+    fn stack_empty_iter_is_empty() {
+        let stack = OverlayStack::new();
+        assert!(stack.is_empty());
+        assert_eq!(stack.iter().count(), 0);
+    }
+
+    // ── ErrorOverlay ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn error_overlay_with_title_stores_fields() {
+        let overlay = ErrorOverlay::with_title("Oops", "something broke");
+        assert_eq!(overlay.title, "Oops");
+        assert_eq!(overlay.message, "something broke");
+    }
+
+    #[test]
+    fn error_overlay_new_defaults_title_to_error() {
+        let overlay = ErrorOverlay::new("details");
+        assert_eq!(overlay.title, "Error");
+        assert_eq!(overlay.message, "details");
+    }
+
+    #[test]
+    fn error_overlay_dismisses_on_space() {
+        let mut overlay = ErrorOverlay::new("test");
+        assert!(matches!(
+            overlay.handle_key(key(KeyCode::Char(' '))),
+            OverlayAction::Dismiss
+        ));
+    }
+
+    #[test]
+    fn error_overlay_consumes_arrow_keys() {
+        let mut overlay = ErrorOverlay::new("test");
+        assert!(matches!(
+            overlay.handle_key(key(KeyCode::Up)),
+            OverlayAction::Consumed
+        ));
+        assert!(matches!(
+            overlay.handle_key(key(KeyCode::Down)),
+            OverlayAction::Consumed
+        ));
+    }
+
+    // ── ReadOnlyOverlay ──────────────────────────────────────────────────────
+
+    #[test]
+    fn readonly_overlay_scroll_stays_in_bounds() {
+        let mut overlay = ReadOnlyOverlay::new(
+            "Rules",
+            (0..10)
+                .map(|i| (format!("h{i}"), format!("b{i}")))
+                .collect(),
+        );
+        overlay.visible_rows = 4;
+
+        // Scroll up at top does nothing
+        overlay.handle_key(key(KeyCode::Up));
+        assert_eq!(overlay.scroll_offset, 0);
+
+        // Scroll down to max (10 - 4 = 6)
+        for _ in 0..20 {
+            overlay.handle_key(key(KeyCode::Down));
+        }
+        assert_eq!(overlay.scroll_offset, 6);
+
+        // k/j vim keys also work
+        overlay.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(overlay.scroll_offset, 5);
+        overlay.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(overlay.scroll_offset, 6);
+    }
+
+    #[test]
+    fn readonly_overlay_page_up_down() {
+        let mut overlay = ReadOnlyOverlay::new(
+            "Help",
+            (0..30)
+                .map(|i| (format!("h{i}"), format!("b{i}")))
+                .collect(),
+        );
+        overlay.visible_rows = 5;
+        // max scroll = 30 - 5 = 25
+
+        overlay.handle_key(key(KeyCode::PageDown));
+        assert_eq!(overlay.scroll_offset, 5);
+
+        overlay.handle_key(key(KeyCode::PageDown));
+        assert_eq!(overlay.scroll_offset, 10);
+
+        overlay.handle_key(key(KeyCode::PageUp));
+        assert_eq!(overlay.scroll_offset, 5);
+
+        // PageUp past top clamps to 0
+        overlay.handle_key(key(KeyCode::PageUp));
+        assert_eq!(overlay.scroll_offset, 0);
+        overlay.handle_key(key(KeyCode::PageUp));
+        assert_eq!(overlay.scroll_offset, 0);
+    }
+
+    #[test]
+    fn readonly_overlay_esc_and_enter_dismiss() {
+        let mut overlay = ReadOnlyOverlay::new("T", vec![]);
+        assert!(matches!(
+            overlay.handle_key(key(KeyCode::Esc)),
+            OverlayAction::Dismiss
+        ));
+
+        let mut overlay2 = ReadOnlyOverlay::new("T", vec![]);
+        assert!(matches!(
+            overlay2.handle_key(key(KeyCode::Enter)),
+            OverlayAction::Dismiss
+        ));
+    }
 }

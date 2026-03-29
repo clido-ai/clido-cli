@@ -621,4 +621,44 @@ mod tests {
         // Should have command rows
         assert!(rows.iter().any(|(_, n, _)| *n == "/plan"));
     }
+
+    #[test]
+    fn completions_exact_match_help() {
+        let matches = completions("/help");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].name, "/help");
+    }
+
+    #[test]
+    fn completions_prefix_h_returns_all_h_commands() {
+        let matches = completions("/h");
+        assert!(!matches.is_empty());
+        for cmd in &matches {
+            assert!(
+                cmd.name.starts_with("/h"),
+                "Expected /h prefix, got {}",
+                cmd.name
+            );
+        }
+        // /help should be among results
+        assert!(matches.iter().any(|c| c.name == "/help"));
+    }
+
+    #[test]
+    fn completions_no_match_returns_empty() {
+        assert!(completions("/xyz").is_empty());
+    }
+
+    #[test]
+    fn completions_empty_input_returns_empty() {
+        assert!(completions("").is_empty());
+    }
+
+    #[test]
+    fn completions_model_matches_model_and_models() {
+        let matches = completions("/model");
+        let names: Vec<&str> = matches.iter().map(|c| c.name).collect();
+        assert!(names.contains(&"/model"), "should contain /model");
+        assert!(names.contains(&"/models"), "should contain /models");
+    }
 }

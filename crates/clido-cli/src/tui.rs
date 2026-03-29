@@ -332,6 +332,8 @@ enum AgentEvent {
         cost: f64,
         limit: f64,
     },
+    /// Emitted when models are fetched live from the provider API.
+    ModelsLoaded(Vec<String>),
 }
 
 // ── Plan editor state ─────────────────────────────────────────────────────────
@@ -485,6 +487,23 @@ impl ModelPickerState {
             self.selected = self.selected.min(n - 1);
             self.scroll_offset = self.scroll_offset.min(self.selected);
         }
+    }
+
+    /// Replace the full model list (e.g. after a live API fetch) and re-clamp selection.
+    fn refresh_models(&mut self, ids: Vec<String>) {
+        self.models = ids
+            .into_iter()
+            .map(|id| ModelEntry {
+                id,
+                provider: String::new(),
+                input_mtok: 0.0,
+                output_mtok: 0.0,
+                context_k: None,
+                role: None,
+                is_favorite: false,
+            })
+            .collect();
+        self.clamp();
     }
 }
 
@@ -1425,6 +1444,14 @@ struct App {
     prompt_rules: PromptRules,
     /// When Some, holds an enhanced preview that /prompt-preview is waiting to display.
     prompt_preview_text: Option<String>,
+    /// Resolved API key for the active profile — used for live model fetching.
+    api_key: String,
+    /// Optional custom base URL for the active profile's provider.
+    base_url: Option<String>,
+    /// Channel to send AgentEvents from background tasks (e.g. model fetch) to the TUI loop.
+    fetch_tx: mpsc::UnboundedSender<AgentEvent>,
+    /// True while a model-list fetch is in progress (shows spinner in model picker).
+    models_loading: bool,
     /// Render cache: maps (content_hash, render_width) to pre-built Line<'static> slices.
     /// Avoids re-parsing markdown on every 80ms render tick when messages haven't changed.
     /// Invalidated (cleared) on terminal resize since width affects line-wrapping.
@@ -1456,6 +1483,9 @@ impl App {
         reviewer_enabled: Arc<AtomicBool>,
         reviewer_configured: bool,
         todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
+        api_key: String,
+        base_url: Option<String>,
+        fetch_tx: mpsc::UnboundedSender<AgentEvent>,
     ) -> Self {
         let mut app = Self {
             messages: Vec::new(),
@@ -1538,6 +1568,10 @@ impl App {
             prompt_mode: PromptMode::Auto,
             prompt_rules: PromptRules::default(),
             prompt_preview_text: None,
+            api_key,
+            base_url,
+            fetch_tx,
+            models_loading: false,
             render_cache: std::collections::HashMap::new(),
             render_cache_msg_count: 0,
         };
@@ -2595,7 +2629,7 @@ fn render(frame: &mut Frame, app: &mut App) {
     if let Some(ref picker) = app.model_picker {
         const VISIBLE: usize = 14;
         let filtered = picker.filtered();
-        let n_rows = filtered.len().min(VISIBLE) as u16;
+        let n_rows = filtered.len().clamp(1, VISIBLE) as u16;
         let popup_h = (n_rows + 5).min(area.height.saturating_sub(4)).max(6);
         let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
 
@@ -2616,57 +2650,75 @@ fn render(frame: &mut Frame, app: &mut App) {
             Line::raw(""),
         ];
 
-        let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
-        for (di, m) in filtered[picker.scroll_offset..end].iter().enumerate() {
-            let selected = picker.scroll_offset + di == picker.selected;
-            let bg = if selected {
-                TUI_SELECTION_BG
+        if filtered.is_empty() {
+            let msg = if app.models_loading {
+                "  ⟳ Fetching models from provider API…"
             } else {
-                Color::Reset
+                "  No models found. Check your API key and network connection."
             };
-            let fg = if selected { Color::White } else { Color::Gray };
-            let fav = if m.is_favorite { "★" } else { "  " };
-            let ctx = m
-                .context_k
-                .map(|k| format!("{:>4}k", k))
-                .unwrap_or_else(|| "    ?".into());
-            let role = m.role.as_deref().unwrap_or("");
-            let id_display: String = m.id.chars().take(32).collect();
-            let prov_display: String = m.provider.chars().take(12).collect();
             content.push(Line::from(vec![Span::styled(
-                format!(
-                    "  {} {:<32}  {:<12}  {:>8.2}  {:>8.2}  {}  {}",
-                    fav, id_display, prov_display, m.input_mtok, m.output_mtok, ctx, role
-                ),
-                Style::default().fg(fg).bg(bg),
-            )]));
-        }
-
-        let above = picker.scroll_offset;
-        let below = filtered
-            .len()
-            .saturating_sub(picker.scroll_offset + VISIBLE);
-        if above > 0 || below > 0 {
-            let mut parts = Vec::new();
-            if above > 0 {
-                parts.push(format!("↑↑ {} more", above));
-            }
-            if below > 0 {
-                parts.push(format!("↓↓ {} more", below));
-            }
-            content.push(Line::from(vec![Span::styled(
-                format!("  {}", parts.join("  ")),
+                msg.to_string(),
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM),
             )]));
+        } else {
+            let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
+            for (di, m) in filtered[picker.scroll_offset..end].iter().enumerate() {
+                let selected = picker.scroll_offset + di == picker.selected;
+                let bg = if selected {
+                    TUI_SELECTION_BG
+                } else {
+                    Color::Reset
+                };
+                let fg = if selected { Color::White } else { Color::Gray };
+                let fav = if m.is_favorite { "★" } else { "  " };
+                let ctx = m
+                    .context_k
+                    .map(|k| format!("{:>4}k", k))
+                    .unwrap_or_else(|| "    ?".into());
+                let role = m.role.as_deref().unwrap_or("");
+                let id_display: String = m.id.chars().take(32).collect();
+                let prov_display: String = m.provider.chars().take(12).collect();
+                content.push(Line::from(vec![Span::styled(
+                    format!(
+                        "  {} {:<32}  {:<12}  {:>8.2}  {:>8.2}  {}  {}",
+                        fav, id_display, prov_display, m.input_mtok, m.output_mtok, ctx, role
+                    ),
+                    Style::default().fg(fg).bg(bg),
+                )]));
+            }
+
+            let above = picker.scroll_offset;
+            let below = filtered
+                .len()
+                .saturating_sub(picker.scroll_offset + VISIBLE);
+            if above > 0 || below > 0 {
+                let mut parts = Vec::new();
+                if above > 0 {
+                    parts.push(format!("↑↑ {} more", above));
+                }
+                if below > 0 {
+                    parts.push(format!("↓↓ {} more", below));
+                }
+                content.push(Line::from(vec![Span::styled(
+                    format!("  {}", parts.join("  ")),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
+                )]));
+            }
         }
 
         let total = filtered.len();
-        let title = format!(
-            " Models — {} found  (↑↓  Enter=use for session  Ctrl+S=save as default  f=fav  Esc=close  type to filter) ",
-            total
-        );
+        let title = if app.models_loading && total == 0 {
+            " Models — fetching…  (Esc=close) ".to_string()
+        } else {
+            format!(
+                " Models — {} found  (↑↓  Enter=use for session  Ctrl+S=save as default  f=fav  Esc=close  type to filter) ",
+                total
+            )
+        };
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block(&title, Color::Magenta)),
@@ -4769,19 +4821,22 @@ fn execute_slash(app: &mut App, cmd: &str) {
             if arg.is_empty() {
                 // No name given → open the interactive model picker (same as /models).
                 let models = app.known_models.clone();
-                if models.is_empty() {
-                    app.push(ChatLine::Info(
-                        "  no models in pricing table — run `clido update-pricing` to populate"
-                            .into(),
-                    ));
-                } else {
-                    app.model_picker = Some(ModelPickerState {
-                        models,
-                        filter: String::new(),
-                        selected: 0,
-                        scroll_offset: 0,
-                    });
+                // Trigger a fresh API fetch if we have no models yet and aren't already loading.
+                if models.is_empty() && !app.models_loading && !app.api_key.is_empty() {
+                    spawn_model_fetch(
+                        app.provider.clone(),
+                        app.api_key.clone(),
+                        app.base_url.clone(),
+                        app.fetch_tx.clone(),
+                    );
+                    app.models_loading = true;
                 }
+                app.model_picker = Some(ModelPickerState {
+                    models,
+                    filter: String::new(),
+                    selected: 0,
+                    scroll_offset: 0,
+                });
             } else {
                 let new_model = arg.to_string();
                 app.model = new_model.clone();
@@ -4793,18 +4848,22 @@ fn execute_slash(app: &mut App, cmd: &str) {
         }
         "/models" => {
             let models = app.known_models.clone();
-            if models.is_empty() {
-                app.push(ChatLine::Info(
-                    "  no models in pricing table — run `clido update-pricing` to populate".into(),
-                ));
-            } else {
-                app.model_picker = Some(ModelPickerState {
-                    models,
-                    filter: String::new(),
-                    selected: 0,
-                    scroll_offset: 0,
-                });
+            // Trigger a fresh API fetch if we have no models yet and aren't already loading.
+            if models.is_empty() && !app.models_loading && !app.api_key.is_empty() {
+                spawn_model_fetch(
+                    app.provider.clone(),
+                    app.api_key.clone(),
+                    app.base_url.clone(),
+                    app.fetch_tx.clone(),
+                );
+                app.models_loading = true;
             }
+            app.model_picker = Some(ModelPickerState {
+                models,
+                filter: String::new(),
+                selected: 0,
+                scroll_offset: 0,
+            });
         }
         _ if cmd == "/role" || cmd.starts_with("/role ") => {
             let role = cmd.trim_start_matches("/role").trim();
@@ -7502,9 +7561,26 @@ fn handle_profile_overlay_key(app: &mut App, event: crossterm::event::KeyEvent) 
                         }
                         ProfileCreateStep::ApiKey => {
                             // API key may be empty for local providers
-                            st.api_key = value;
+                            st.api_key = value.clone();
                             st.input.clear();
                             st.input_cursor = 0;
+                            // Trigger a live model fetch for this provider + key so the model
+                            // picker is populated when the user reaches the model selection step.
+                            let provider_for_fetch = st.provider.clone();
+                            let base_url_for_fetch = if st.base_url.is_empty() {
+                                None
+                            } else {
+                                Some(st.base_url.clone())
+                            };
+                            if !value.is_empty() {
+                                spawn_model_fetch(
+                                    provider_for_fetch,
+                                    value,
+                                    base_url_for_fetch,
+                                    app.fetch_tx.clone(),
+                                );
+                                app.models_loading = true;
+                            }
                             st.mode = ProfileOverlayMode::Creating {
                                 step: ProfileCreateStep::Model,
                             };
@@ -9639,6 +9715,8 @@ struct AgentRuntimeHandles {
     compact_now_tx: mpsc::UnboundedSender<()>,
     event_rx: mpsc::UnboundedReceiver<AgentEvent>,
     perm_rx: mpsc::UnboundedReceiver<PermRequest>,
+    /// Clone of the event_tx channel — lets code outside the agent task send events to the TUI.
+    fetch_tx: mpsc::UnboundedSender<AgentEvent>,
     /// Shared todo list written by the agent's TodoWrite tool — readable by the TUI.
     todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
     /// JoinHandle for the agent background task — aborted on TUI exit to prevent zombies.
@@ -9676,7 +9754,7 @@ fn start_agent_runtime(
         model_switch_rx,
         workdir_rx,
         compact_now_rx,
-        event_tx,
+        event_tx.clone(),
         perm_tx,
         cancel,
         image_state,
@@ -9692,9 +9770,31 @@ fn start_agent_runtime(
         compact_now_tx,
         event_rx,
         perm_rx,
+        fetch_tx: event_tx,
         todo_store,
         agent_handle,
     }
+}
+
+/// Spawn a background task to fetch the model list from the provider API.
+/// Results arrive via `AgentEvent::ModelsLoaded` on the given channel.
+fn spawn_model_fetch(
+    provider: String,
+    api_key: String,
+    base_url: Option<String>,
+    tx: mpsc::UnboundedSender<AgentEvent>,
+) {
+    tokio::spawn(async move {
+        let base_url_ref = base_url.as_deref();
+        let entries =
+            clido_providers::fetch_provider_models(&provider, &api_key, base_url_ref).await;
+        let ids: Vec<String> = entries
+            .into_iter()
+            .filter(|m| m.available)
+            .map(|m| m.id)
+            .collect();
+        let _ = tx.send(AgentEvent::ModelsLoaded(ids));
+    });
 }
 
 async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
@@ -9724,7 +9824,7 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     let model_prefs = prefs_res.unwrap_or_else(|_| clido_core::ModelPrefs::default());
 
     // Derive provider + model from the loaded config (mirrors read_provider_model logic).
-    let (provider, model) = {
+    let (provider, model, api_key, base_url) = {
         let profile_name = cli.profile.as_deref().unwrap_or_else(|| {
             loaded_config
                 .as_ref()
@@ -9741,9 +9841,20 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
                     .provider
                     .clone()
                     .unwrap_or_else(|| profile.provider.clone());
-                (provider, model)
+                // Resolve the API key: direct value takes priority over env var.
+                let key = profile
+                    .api_key
+                    .clone()
+                    .or_else(|| {
+                        profile
+                            .api_key_env
+                            .as_deref()
+                            .and_then(|e| std::env::var(e).ok())
+                    })
+                    .unwrap_or_default();
+                (provider, model, key, profile.base_url.clone())
             }
-            None => ("?".to_string(), "?".to_string()),
+            None => ("?".to_string(), "?".to_string(), String::new(), None),
         }
     };
 
@@ -9833,7 +9944,7 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         runtime.workdir_tx.clone(),
         runtime.compact_now_tx.clone(),
         cancel,
-        provider,
+        provider.clone(),
         model,
         workspace_root.clone(),
         notify_enabled,
@@ -9846,7 +9957,21 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         reviewer_enabled,
         reviewer_configured,
         runtime.todo_store.clone(),
+        api_key.clone(),
+        base_url.clone(),
+        runtime.fetch_tx.clone(),
     );
+    // Kick off a live model-list fetch from the provider API immediately at startup.
+    // Results arrive as AgentEvent::ModelsLoaded and update app.known_models.
+    if !api_key.is_empty() {
+        spawn_model_fetch(
+            provider.clone(),
+            api_key.clone(),
+            base_url.clone(),
+            runtime.fetch_tx.clone(),
+        );
+        app.models_loading = true;
+    }
     let mut recovery_attempts: u8 = 0;
     let result = loop {
         match event_loop(
@@ -10341,6 +10466,35 @@ async fn event_loop(
                             percent, cost, limit
                         )));
                     }
+                    Some(AgentEvent::ModelsLoaded(ids)) => {
+                        app.models_loading = false;
+                        if !ids.is_empty() {
+                            // Merge API-fetched model IDs with existing pricing data.
+                            // Keep existing entries (which may have cost metadata) for known IDs,
+                            // and add stub entries for newly-discovered ones.
+                            let existing: std::collections::HashSet<String> =
+                                app.known_models.iter().map(|m| m.id.clone()).collect();
+                            for id in &ids {
+                                if !existing.contains(id) {
+                                    app.known_models.push(ModelEntry {
+                                        id: id.clone(),
+                                        provider: app.provider.clone(),
+                                        input_mtok: 0.0,
+                                        output_mtok: 0.0,
+                                        context_k: None,
+                                        role: None,
+                                        is_favorite: false,
+                                    });
+                                }
+                            }
+                            // If model picker is open, refresh its list to show the new models.
+                            if let Some(picker) = &mut app.model_picker {
+                                let all: Vec<String> =
+                                    app.known_models.iter().map(|m| m.id.clone()).collect();
+                                picker.refresh_models(all);
+                            }
+                        }
+                    }
                     None => {
                         return Ok(EventLoopExit::Recover(
                             "agent event channel closed unexpectedly".to_string(),
@@ -10385,6 +10539,7 @@ mod tests {
         let (model_switch_tx, _model_switch_rx) = mpsc::unbounded_channel();
         let (workdir_tx, _workdir_rx) = mpsc::unbounded_channel();
         let (compact_now_tx, _compact_now_rx) = mpsc::unbounded_channel();
+        let (fetch_tx, _fetch_rx) = mpsc::unbounded_channel();
         App::new(
             prompt_tx,
             resume_tx,
@@ -10405,6 +10560,9 @@ mod tests {
             Arc::new(AtomicBool::new(false)),
             false,
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            String::new(),
+            None,
+            fetch_tx,
         )
     }
 

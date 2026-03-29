@@ -24,6 +24,7 @@ use ratatui::{
 };
 
 use crate::errors::CliError;
+use crate::text_input::TextInput;
 use crate::ui::{setup_use_color, setup_use_rich_ui, SETUP_BANNER_ASCII};
 
 use clido_providers::ModelEntry;
@@ -39,42 +40,6 @@ use clido_providers::registry::PROVIDER_REGISTRY;
 
 /// Result of a completed setup: (config_path, toml_content, credentials).
 type SetupResult = (PathBuf, String, Vec<(String, String)>);
-
-fn char_byte_pos(s: &str, char_idx: usize) -> usize {
-    if char_idx == 0 {
-        return 0;
-    }
-    s.char_indices()
-        .nth(char_idx)
-        .map(|(i, _)| i)
-        .unwrap_or_else(|| s.len())
-}
-
-fn insert_char_at_cursor(s: &mut String, cursor: &mut usize, c: char) {
-    let idx = char_byte_pos(s, *cursor);
-    s.insert(idx, c);
-    *cursor += 1;
-}
-
-fn delete_before_cursor(s: &mut String, cursor: &mut usize) {
-    if *cursor == 0 {
-        return;
-    }
-    let end = char_byte_pos(s, *cursor);
-    let start = char_byte_pos(s, *cursor - 1);
-    s.drain(start..end);
-    *cursor -= 1;
-}
-
-fn delete_at_cursor(s: &mut String, cursor: &mut usize) {
-    let len = s.chars().count();
-    if *cursor >= len {
-        return;
-    }
-    let start = char_byte_pos(s, *cursor);
-    let end = char_byte_pos(s, *cursor + 1);
-    s.drain(start..end);
-}
 
 /// Build reuse offers from profiles with plaintext `api_key` (deduped by key value).
 fn build_saved_key_catalog(
@@ -175,7 +140,7 @@ struct SetupState {
     provider: usize,
     credential: String,
     model: String,
-    input: String,
+    text_input: TextInput,
     fetched_models: Vec<ModelEntry>,
     // ── Roles step ────────────────────────────────────────────
     roles: Vec<(String, String)>, // (role_name, model_id)
@@ -212,8 +177,6 @@ struct SetupState {
     current_model: String,
     /// True when wizard began with the "new profile name" step (`/profile new`).
     started_with_profile_name: bool,
-    /// Character cursor into `input` for line editing (Unicode scalar index).
-    input_cursor: usize,
     /// Saved keys from config (profile create); filter by provider in credential step.
     saved_api_keys: Vec<SavedApiKeyOffer>,
     /// When true, credential step shows ↑↓ picker for `saved_api_keys` (non-local).
@@ -249,7 +212,7 @@ impl SetupState {
             provider: 0,
             credential: String::new(),
             model: String::new(),
-            input: String::new(),
+            text_input: TextInput::new(),
             fetched_models: Vec::new(),
             roles: Vec::new(),
             role_cursor: 0,
@@ -280,7 +243,6 @@ impl SetupState {
             current_credential: None,
             current_model: String::new(),
             started_with_profile_name: false,
-            input_cursor: 0,
             saved_api_keys: Vec::new(),
             credential_pick_active: false,
             credential_pick_index: 0,
@@ -314,7 +276,7 @@ impl SetupState {
             provider: provider_idx,
             credential: String::new(),
             model: pre_fill.model.clone(),
-            input: String::new(),
+            text_input: TextInput::new(),
             fetched_models: Vec::new(),
             roles: pre_fill.roles,
             role_cursor: 0,
@@ -345,7 +307,6 @@ impl SetupState {
             current_credential,
             current_model: pre_fill.model,
             started_with_profile_name: pre_fill.is_new_profile,
-            input_cursor: 0,
             saved_api_keys: pre_fill.saved_api_keys.clone(),
             credential_pick_active: false,
             credential_pick_index: 0,
@@ -353,8 +314,7 @@ impl SetupState {
     }
 
     fn clear_typed_input(&mut self) {
-        self.input.clear();
-        self.input_cursor = 0;
+        self.text_input.clear();
     }
 
     fn init_credential_step(&mut self) {
@@ -596,13 +556,13 @@ fn draw_profile_name(f: &mut Frame, area: Rect, s: &SetupState) {
     let [_pad, input_area] =
         Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(inner);
     let prefix_w = PROFILE_NAME_PREFIX.chars().count() as u16;
-    let cc = s.input_cursor.min(s.input.chars().count()) as u16;
+    let cc = s.text_input.cursor.min(s.text_input.text.chars().count()) as u16;
     let cursor_col = input_area.x + prefix_w + cc;
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(PROFILE_NAME_PREFIX, Style::default().fg(Color::DarkGray)),
             Span::styled(
-                s.input.clone(),
+                s.text_input.text.clone(),
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
@@ -694,7 +654,14 @@ fn draw_credential(f: &mut Frame, area: Rect, s: &SetupState) {
             ]),
             info_area,
         );
-        draw_text_input(f, input_area, " Base URL ", &s.input, s.input_cursor, false);
+        draw_text_input(
+            f,
+            input_area,
+            " Base URL ",
+            &s.text_input.text,
+            s.text_input.cursor,
+            false,
+        );
         return;
     }
 
@@ -785,8 +752,8 @@ fn draw_credential(f: &mut Frame, area: Rect, s: &SetupState) {
     );
 
     let title = format!(" {} ", s.key_env());
-    let masked: String = s.input.chars().map(|_| '•').collect();
-    let display = if s.input.is_empty() {
+    let masked: String = s.text_input.text.chars().map(|_| '•').collect();
+    let display = if s.text_input.text.is_empty() {
         let placeholder = if let Some(ref k) = s.current_credential {
             let masked_key: String = k
                 .chars()
@@ -814,8 +781,8 @@ fn draw_credential(f: &mut Frame, area: Rect, s: &SetupState) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(SETUP_INPUT_ACCENT));
     f.render_widget(Paragraph::new(display).block(block), input_area);
-    if !s.input.is_empty() {
-        let cc = s.input_cursor.min(s.input.chars().count()) as u16;
+    if !s.text_input.text.is_empty() {
+        let cc = s.text_input.cursor.min(s.text_input.text.chars().count()) as u16;
         f.set_cursor_position((input_area.x + 2 + cc, input_area.y + 1));
     }
 }
@@ -1024,7 +991,14 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
         } else {
             " Model ID "
         };
-        draw_text_input(f, list_area, title, &s.input, s.input_cursor, false);
+        draw_text_input(
+            f,
+            list_area,
+            title,
+            &s.text_input.text,
+            s.text_input.cursor,
+            false,
+        );
     }
 }
 
@@ -1247,8 +1221,8 @@ fn draw_subagent_credential(f: &mut Frame, area: Rect, s: &SetupState, is_review
     } else {
         format!(" {} ", key_env)
     };
-    let masked: String = s.input.chars().map(|_| '•').collect();
-    let display = if s.input.is_empty() {
+    let masked: String = s.text_input.text.chars().map(|_| '•').collect();
+    let display = if s.text_input.text.is_empty() {
         Line::from(vec![Span::styled(
             " paste key here",
             Style::default()
@@ -1266,8 +1240,8 @@ fn draw_subagent_credential(f: &mut Frame, area: Rect, s: &SetupState, is_review
         .borders(Borders::ALL)
         .border_style(Style::default().fg(SETUP_INPUT_ACCENT));
     f.render_widget(Paragraph::new(display).block(block), input_area);
-    if !s.input.is_empty() {
-        let cc = s.input_cursor.min(s.input.chars().count()) as u16;
+    if !s.text_input.text.is_empty() {
+        let cc = s.text_input.cursor.min(s.text_input.text.chars().count()) as u16;
         f.set_cursor_position((input_area.x + 2 + cc, input_area.y + 1));
     }
 }
@@ -1469,7 +1443,14 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
             ])),
             info_area,
         );
-        draw_text_input(f, list_area, " Model ID ", &s.input, s.input_cursor, false);
+        draw_text_input(
+            f,
+            list_area,
+            " Model ID ",
+            &s.text_input.text,
+            s.text_input.cursor,
+            false,
+        );
     }
 }
 
@@ -1593,7 +1574,7 @@ fn setup_event_loop(
                         return Ok(SetupOutcome::Cancelled);
                     }
                     KeyCode::Enter => {
-                        let name = s.input.trim().to_string();
+                        let name = s.text_input.text.trim().to_string();
                         if name.is_empty() {
                             s.error =
                                 Some("Profile name required — type a name and press Enter".into());
@@ -1606,29 +1587,25 @@ fn setup_event_loop(
                         }
                     }
                     KeyCode::Backspace => {
-                        delete_before_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_back();
                     }
                     KeyCode::Delete => {
-                        delete_at_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_forward();
                     }
                     KeyCode::Left => {
-                        if s.input_cursor > 0 {
-                            s.input_cursor -= 1;
-                        }
+                        s.text_input.cursor_left();
                     }
                     KeyCode::Right => {
-                        if s.input_cursor < s.input.chars().count() {
-                            s.input_cursor += 1;
-                        }
+                        s.text_input.cursor_right();
                     }
                     KeyCode::Home => {
-                        s.input_cursor = 0;
+                        s.text_input.home();
                     }
                     KeyCode::End => {
-                        s.input_cursor = s.input.chars().count();
+                        s.text_input.end();
                     }
                     KeyCode::Char(c) => {
-                        insert_char_at_cursor(&mut s.input, &mut s.input_cursor, c);
+                        s.text_input.insert_char(c);
                     }
                     _ => {}
                 },
@@ -1638,8 +1615,7 @@ fn setup_event_loop(
                     KeyCode::Esc => {
                         if s.started_with_profile_name {
                             s.step = SetupStep::ProfileName;
-                            s.input.clone_from(&s.profile_name);
-                            s.input_cursor = s.input.chars().count();
+                            s.text_input.set_text(s.profile_name.clone());
                         } else {
                             return Ok(SetupOutcome::Cancelled);
                         }
@@ -1683,7 +1659,7 @@ fn setup_event_loop(
                             s.needs_fetch = true;
                             continue;
                         }
-                        if !s.is_local() && s.input.is_empty() {
+                        if !s.is_local() && s.text_input.text.is_empty() {
                             if let Some(k) = s.current_credential.clone() {
                                 s.credential = k;
                                 s.clear_typed_input();
@@ -1695,7 +1671,7 @@ fn setup_event_loop(
                                 );
                             }
                         } else {
-                            s.credential = s.input.clone();
+                            s.credential = s.text_input.text.clone();
                             s.clear_typed_input();
                             s.step = SetupStep::FetchingModels;
                             s.needs_fetch = true;
@@ -1717,29 +1693,25 @@ fn setup_event_loop(
                         s.clear_typed_input();
                     }
                     KeyCode::Backspace if !s.credential_pick_active => {
-                        delete_before_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_back();
                     }
                     KeyCode::Delete if !s.credential_pick_active => {
-                        delete_at_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_forward();
                     }
                     KeyCode::Left if !s.credential_pick_active => {
-                        if s.input_cursor > 0 {
-                            s.input_cursor -= 1;
-                        }
+                        s.text_input.cursor_left();
                     }
                     KeyCode::Right if !s.credential_pick_active => {
-                        if s.input_cursor < s.input.chars().count() {
-                            s.input_cursor += 1;
-                        }
+                        s.text_input.cursor_right();
                     }
                     KeyCode::Home if !s.credential_pick_active => {
-                        s.input_cursor = 0;
+                        s.text_input.home();
                     }
                     KeyCode::End if !s.credential_pick_active => {
-                        s.input_cursor = s.input.chars().count();
+                        s.text_input.end();
                     }
                     KeyCode::Char(c) if !s.credential_pick_active => {
-                        insert_char_at_cursor(&mut s.input, &mut s.input_cursor, c);
+                        s.text_input.insert_char(c);
                     }
                     _ => {}
                 },
@@ -1800,8 +1772,7 @@ fn setup_event_loop(
                                 s.model_scroll = 0;
                             } else {
                                 s.step = SetupStep::Credential;
-                                s.input = s.credential.clone();
-                                s.input_cursor = s.input.chars().count();
+                                s.text_input.set_text(s.credential.clone());
                                 s.credential_pick_active = false;
                             }
                         }
@@ -1817,15 +1788,15 @@ fn setup_event_loop(
                 // ── Model text input (custom or fetch failed) ─────────────
                 SetupStep::Model => match key.code {
                     KeyCode::Enter => {
-                        if s.input.is_empty() {
+                        if s.text_input.text.is_empty() {
                             s.error = Some("Model ID required — type a model name".into());
                         } else {
-                            s.model = s.input.clone();
+                            s.model = s.text_input.text.clone();
                             s.step = SetupStep::SubAgentIntro;
                         }
                     }
                     KeyCode::Backspace => {
-                        delete_before_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_back();
                     }
                     KeyCode::Esc => {
                         if !s.fetched_models.is_empty() {
@@ -1835,32 +1806,27 @@ fn setup_event_loop(
                         } else {
                             // Back to credential
                             s.step = SetupStep::Credential;
-                            s.input = s.credential.clone();
-                            s.input_cursor = s.input.chars().count();
+                            s.text_input.set_text(s.credential.clone());
                             s.credential_pick_active = false;
                         }
                     }
                     KeyCode::Char(c) => {
-                        insert_char_at_cursor(&mut s.input, &mut s.input_cursor, c);
+                        s.text_input.insert_char(c);
                     }
                     KeyCode::Delete => {
-                        delete_at_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_forward();
                     }
                     KeyCode::Left => {
-                        if s.input_cursor > 0 {
-                            s.input_cursor -= 1;
-                        }
+                        s.text_input.cursor_left();
                     }
                     KeyCode::Right => {
-                        if s.input_cursor < s.input.chars().count() {
-                            s.input_cursor += 1;
-                        }
+                        s.text_input.cursor_right();
                     }
                     KeyCode::Home => {
-                        s.input_cursor = 0;
+                        s.text_input.home();
                     }
                     KeyCode::End => {
-                        s.input_cursor = s.input.chars().count();
+                        s.text_input.end();
                     }
                     _ => {}
                 },
@@ -1942,7 +1908,7 @@ fn setup_event_loop(
                 // ── Worker credential ─────────────────────────────────────
                 SetupStep::WorkerCredential => match key.code {
                     KeyCode::Enter => {
-                        if s.input.is_empty() {
+                        if s.text_input.text.is_empty() {
                             if PROVIDER_REGISTRY[s.worker_provider].is_local {
                                 s.worker_credential = "http://localhost:11434".to_string();
                             } else {
@@ -1950,33 +1916,29 @@ fn setup_event_loop(
                                 continue;
                             }
                         } else {
-                            s.worker_credential = s.input.clone();
+                            s.worker_credential = s.text_input.text.clone();
                         }
                         s.worker_needs_fetch = true;
                         s.clear_typed_input();
                         s.step = SetupStep::FetchingWorkerModels;
                     }
                     KeyCode::Backspace => {
-                        delete_before_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_back();
                     }
                     KeyCode::Delete => {
-                        delete_at_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_forward();
                     }
                     KeyCode::Left => {
-                        if s.input_cursor > 0 {
-                            s.input_cursor -= 1;
-                        }
+                        s.text_input.cursor_left();
                     }
                     KeyCode::Right => {
-                        if s.input_cursor < s.input.chars().count() {
-                            s.input_cursor += 1;
-                        }
+                        s.text_input.cursor_right();
                     }
                     KeyCode::Home => {
-                        s.input_cursor = 0;
+                        s.text_input.home();
                     }
                     KeyCode::End => {
-                        s.input_cursor = s.input.chars().count();
+                        s.text_input.end();
                     }
                     KeyCode::Esc => {
                         s.configure_worker = false;
@@ -1986,7 +1948,7 @@ fn setup_event_loop(
                         s.role_edit_field = RoleEditField::None;
                     }
                     KeyCode::Char(c) => {
-                        insert_char_at_cursor(&mut s.input, &mut s.input_cursor, c);
+                        s.text_input.insert_char(c);
                     }
                     _ => {}
                 },
@@ -2073,10 +2035,10 @@ fn setup_event_loop(
                 // ── Worker model text input ───────────────────────────────
                 SetupStep::WorkerModel => match key.code {
                     KeyCode::Enter => {
-                        if s.input.is_empty() {
+                        if s.text_input.text.is_empty() {
                             s.error = Some("Model ID required — type a model name".into());
                         } else {
-                            s.worker_model = s.input.clone();
+                            s.worker_model = s.text_input.text.clone();
                             s.clear_typed_input();
                             if s.configure_reviewer {
                                 s.reviewer_provider = s.provider;
@@ -2089,26 +2051,22 @@ fn setup_event_loop(
                         }
                     }
                     KeyCode::Backspace => {
-                        delete_before_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_back();
                     }
                     KeyCode::Delete => {
-                        delete_at_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_forward();
                     }
                     KeyCode::Left => {
-                        if s.input_cursor > 0 {
-                            s.input_cursor -= 1;
-                        }
+                        s.text_input.cursor_left();
                     }
                     KeyCode::Right => {
-                        if s.input_cursor < s.input.chars().count() {
-                            s.input_cursor += 1;
-                        }
+                        s.text_input.cursor_right();
                     }
                     KeyCode::Home => {
-                        s.input_cursor = 0;
+                        s.text_input.home();
                     }
                     KeyCode::End => {
-                        s.input_cursor = s.input.chars().count();
+                        s.text_input.end();
                     }
                     KeyCode::Esc => {
                         if !s.worker_fetched_models.is_empty() {
@@ -2119,7 +2077,7 @@ fn setup_event_loop(
                         }
                     }
                     KeyCode::Char(c) => {
-                        insert_char_at_cursor(&mut s.input, &mut s.input_cursor, c);
+                        s.text_input.insert_char(c);
                     }
                     _ => {}
                 },
@@ -2158,7 +2116,7 @@ fn setup_event_loop(
                 // ── Reviewer credential ───────────────────────────────────
                 SetupStep::ReviewerCredential => match key.code {
                     KeyCode::Enter => {
-                        if s.input.is_empty() {
+                        if s.text_input.text.is_empty() {
                             if PROVIDER_REGISTRY[s.reviewer_provider].is_local {
                                 s.reviewer_credential = "http://localhost:11434".to_string();
                             } else {
@@ -2166,33 +2124,29 @@ fn setup_event_loop(
                                 continue;
                             }
                         } else {
-                            s.reviewer_credential = s.input.clone();
+                            s.reviewer_credential = s.text_input.text.clone();
                         }
                         s.reviewer_needs_fetch = true;
                         s.clear_typed_input();
                         s.step = SetupStep::FetchingReviewerModels;
                     }
                     KeyCode::Backspace => {
-                        delete_before_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_back();
                     }
                     KeyCode::Delete => {
-                        delete_at_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_forward();
                     }
                     KeyCode::Left => {
-                        if s.input_cursor > 0 {
-                            s.input_cursor -= 1;
-                        }
+                        s.text_input.cursor_left();
                     }
                     KeyCode::Right => {
-                        if s.input_cursor < s.input.chars().count() {
-                            s.input_cursor += 1;
-                        }
+                        s.text_input.cursor_right();
                     }
                     KeyCode::Home => {
-                        s.input_cursor = 0;
+                        s.text_input.home();
                     }
                     KeyCode::End => {
-                        s.input_cursor = s.input.chars().count();
+                        s.text_input.end();
                     }
                     KeyCode::Esc => {
                         s.configure_reviewer = false;
@@ -2201,7 +2155,7 @@ fn setup_event_loop(
                         s.role_edit_field = RoleEditField::None;
                     }
                     KeyCode::Char(c) => {
-                        insert_char_at_cursor(&mut s.input, &mut s.input_cursor, c);
+                        s.text_input.insert_char(c);
                     }
                     _ => {}
                 },
@@ -2283,10 +2237,10 @@ fn setup_event_loop(
                 // ── Reviewer model text input ─────────────────────────────
                 SetupStep::ReviewerModel => match key.code {
                     KeyCode::Enter => {
-                        if s.input.is_empty() {
+                        if s.text_input.text.is_empty() {
                             s.error = Some("Model ID required — type a model name".into());
                         } else {
-                            s.reviewer_model = s.input.clone();
+                            s.reviewer_model = s.text_input.text.clone();
                             s.clear_typed_input();
                             s.step = SetupStep::Roles;
                             s.role_cursor = 0;
@@ -2294,26 +2248,22 @@ fn setup_event_loop(
                         }
                     }
                     KeyCode::Backspace => {
-                        delete_before_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_back();
                     }
                     KeyCode::Delete => {
-                        delete_at_cursor(&mut s.input, &mut s.input_cursor);
+                        s.text_input.delete_forward();
                     }
                     KeyCode::Left => {
-                        if s.input_cursor > 0 {
-                            s.input_cursor -= 1;
-                        }
+                        s.text_input.cursor_left();
                     }
                     KeyCode::Right => {
-                        if s.input_cursor < s.input.chars().count() {
-                            s.input_cursor += 1;
-                        }
+                        s.text_input.cursor_right();
                     }
                     KeyCode::Home => {
-                        s.input_cursor = 0;
+                        s.text_input.home();
                     }
                     KeyCode::End => {
-                        s.input_cursor = s.input.chars().count();
+                        s.text_input.end();
                     }
                     KeyCode::Esc => {
                         if !s.reviewer_fetched_models.is_empty() {
@@ -2324,7 +2274,7 @@ fn setup_event_loop(
                         }
                     }
                     KeyCode::Char(c) => {
-                        insert_char_at_cursor(&mut s.input, &mut s.input_cursor, c);
+                        s.text_input.insert_char(c);
                     }
                     _ => {}
                 },
@@ -3400,19 +3350,20 @@ mod tests {
     }
 
     #[test]
-    fn insert_and_delete_at_cursor_utf8() {
-        let mut s = "aéb".to_string();
-        let mut c = 1;
-        insert_char_at_cursor(&mut s, &mut c, 'x');
-        assert_eq!(s, "axéb");
-        assert_eq!(c, 2);
-        delete_before_cursor(&mut s, &mut c);
-        assert_eq!(s, "aéb");
-        assert_eq!(c, 1);
-        let mut c = 2;
-        delete_at_cursor(&mut s, &mut c);
-        assert_eq!(s, "aé");
-        assert_eq!(c, 2);
+    fn text_input_insert_and_delete_utf8() {
+        let mut ti = TextInput::new();
+        ti.set_text("aéb");
+        ti.cursor = 1; // after 'a'
+        ti.insert_char('x');
+        assert_eq!(ti.text, "axéb");
+        assert_eq!(ti.cursor, 2);
+        ti.delete_back();
+        assert_eq!(ti.text, "aéb");
+        assert_eq!(ti.cursor, 1);
+        ti.cursor = 2; // after 'é'
+        ti.delete_forward();
+        assert_eq!(ti.text, "aé");
+        assert_eq!(ti.cursor, 2);
     }
 
     #[test]
@@ -3539,7 +3490,7 @@ mod tests {
         assert_eq!(s.model_cursor, 0);
         assert!(!s.custom_model);
         assert!(s.model.is_empty());
-        assert!(s.input.is_empty());
+        assert!(s.text_input.text.is_empty());
         assert!(s.error.is_none());
         assert!(s.fetched_models.is_empty());
     }

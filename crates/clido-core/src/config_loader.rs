@@ -30,6 +30,11 @@ pub struct ProfileEntry {
     pub api_key_env: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    /// HTTP User-Agent override for API requests. Defaults to `"clido/<version>"`.
+    /// Some providers (e.g. Kimi Code) restrict access by User-Agent — set this to
+    /// a compatible client string such as `"RooCode/3.0.0"` to gain access.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
     /// Per-profile worker sub-agent slot. Overrides global [agents.worker].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<crate::config::AgentSlotConfig>,
@@ -1018,6 +1023,7 @@ max-turns = 100
             api_key: Some("sk-ant-test".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
         };
         let serialized = toml::to_string(&slot).unwrap();
         let deserialized: AgentSlotConfig = toml::from_str(&serialized).unwrap();
@@ -1074,6 +1080,7 @@ api_key = "sk-openai-worker"
                 api_key: Some("sk-ant".to_string()),
                 api_key_env: None,
                 base_url: None,
+                user_agent: None,
                 worker: None,
                 reviewer: None,
             },
@@ -1103,6 +1110,7 @@ api_key = "sk-openai-worker"
             api_key: None,
             api_key_env: None,
             base_url: None,
+            user_agent: None,
         }
     }
 
@@ -1193,6 +1201,7 @@ api_key = "sk-openai-worker"
             api_key: None,
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker,
             reviewer,
         }
@@ -1336,6 +1345,7 @@ api_key = "sk-openai-worker"
             api_key: Some("sk-new".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -1363,6 +1373,7 @@ api_key = "sk-openai-worker"
             api_key: Some("new-key".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -1382,12 +1393,14 @@ api_key = "sk-openai-worker"
             api_key: Some("sk-ant".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: Some(crate::config::AgentSlotConfig {
                 provider: "openai".to_string(),
                 model: "gpt-4o-mini".to_string(),
                 api_key: Some("sk-openai".to_string()),
                 api_key_env: None,
                 base_url: None,
+                user_agent: None,
             }),
             reviewer: None,
         };
@@ -1407,6 +1420,7 @@ api_key = "sk-openai-worker"
             api_key: Some("k".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -1479,6 +1493,7 @@ api_key = "sk-openai-worker"
             api_key: Some("sk-test".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -1498,6 +1513,7 @@ api_key = "sk-openai-worker"
             api_key: Some("sk-kimi-code".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };

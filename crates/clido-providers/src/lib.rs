@@ -5,10 +5,12 @@ use std::sync::Arc;
 pub mod anthropic;
 pub mod openai;
 pub mod provider;
+pub mod registry;
 
 pub use anthropic::AnthropicProvider;
 pub use openai::OpenAICompatProvider;
 pub use provider::{ModelEntry, ModelProvider, StreamEvent};
+pub use registry::{ProviderDef, PROVIDER_REGISTRY};
 
 use clido_core::{ClidoError, Result};
 
@@ -38,49 +40,46 @@ pub fn build_provider(
     model: String,
     base_url: Option<&str>,
 ) -> Result<Arc<dyn ModelProvider>> {
+    build_provider_with_ua(provider_name, api_key, model, base_url, None)
+}
+
+/// Like [`build_provider`] but allows overriding the HTTP `User-Agent` header.
+/// When `user_agent` is `None`, the default `"clido/<version>"` is used.
+pub fn build_provider_with_ua(
+    provider_name: &str,
+    api_key: String,
+    model: String,
+    base_url: Option<&str>,
+    user_agent: Option<String>,
+) -> Result<Arc<dyn ModelProvider>> {
     let model = resolve_model_alias(&model).to_string();
-    match provider_name {
-        "anthropic" => Ok(Arc::new(AnthropicProvider::new(api_key, model))),
-        "openrouter" => Ok(Arc::new(OpenAICompatProvider::new_openrouter(
-            api_key, model,
-        ))),
-        "openai" => Ok(Arc::new(OpenAICompatProvider::new_openai(api_key, model))),
-        "mistral" => Ok(Arc::new(OpenAICompatProvider::new_mistral(api_key, model))),
-        "minimax" => Ok(Arc::new(OpenAICompatProvider::new_minimax(api_key, model))),
-        "kimi" => Ok(Arc::new(OpenAICompatProvider::new_kimi(api_key, model))),
-        "kimi-code" => Ok(Arc::new(OpenAICompatProvider::new_kimi_code(api_key, model))),
-        "deepseek" => Ok(Arc::new(OpenAICompatProvider::new_deepseek(api_key, model))),
-        "groq" => Ok(Arc::new(OpenAICompatProvider::new_groq(api_key, model))),
-        "cerebras" => Ok(Arc::new(OpenAICompatProvider::new_cerebras(api_key, model))),
-        "togetherai" => Ok(Arc::new(OpenAICompatProvider::new_togetherai(api_key, model))),
-        "fireworks" => Ok(Arc::new(OpenAICompatProvider::new_fireworks(api_key, model))),
-        "xai" => Ok(Arc::new(OpenAICompatProvider::new_xai(api_key, model))),
-        "perplexity" => Ok(Arc::new(OpenAICompatProvider::new_perplexity(api_key, model))),
-        "gemini" => Ok(Arc::new(OpenAICompatProvider::new_gemini(api_key, model))),
-        "local" => {
-            let url = base_url.unwrap_or("http://localhost:11434").to_string();
-            Ok(Arc::new(OpenAICompatProvider::new(
-                api_key,
-                model,
-                url,
-                Vec::new(),
-            )))
+    if let Some(def) = PROVIDER_REGISTRY.iter().find(|d| d.id == provider_name) {
+        if def.is_anthropic {
+            return Ok(Arc::new(AnthropicProvider::new_with_user_agent(
+                api_key, model, user_agent,
+            )));
         }
-        "alibabacloud" => {
-            let url = base_url
-                .unwrap_or("https://dashscope.aliyuncs.com/compatible-mode/v1")
-                .to_string();
-            Ok(Arc::new(OpenAICompatProvider::new(
-                api_key,
-                model,
-                url,
-                Vec::new(),
-            )))
-        }
-        p => Err(ClidoError::Config(format!(
-            "Provider '{}' is not supported. Available: anthropic, openrouter, openai, mistral, minimax, kimi, kimi-code, deepseek, groq, cerebras, togetherai, fireworks, xai, perplexity, gemini, local, alibabacloud.",
-            p
-        ))),
+        // Local and alibabacloud support a runtime base_url override.
+        let url = if def.is_local || def.id == "alibabacloud" {
+            base_url.unwrap_or(def.base_url).to_string()
+        } else {
+            def.base_url.to_string()
+        };
+        let headers: Vec<(String, String)> = def
+            .extra_headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        Ok(Arc::new(OpenAICompatProvider::new_with_user_agent(
+            api_key, model, url, headers, user_agent,
+        )))
+    } else {
+        let valid: Vec<&str> = PROVIDER_REGISTRY.iter().map(|d| d.id).collect();
+        Err(ClidoError::Config(format!(
+            "Provider '{}' is not supported. Valid: {}.",
+            provider_name,
+            valid.join(", ")
+        )))
     }
 }
 

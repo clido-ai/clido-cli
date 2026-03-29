@@ -3253,6 +3253,7 @@ fn state_to_profile_entry(s: &SetupState) -> clido_core::ProfileEntry {
             api_key: w_key,
             api_key_env: None,
             base_url: w_url,
+            user_agent: None,
         })
     } else {
         None
@@ -3280,6 +3281,7 @@ fn state_to_profile_entry(s: &SetupState) -> clido_core::ProfileEntry {
             api_key: r_key,
             api_key_env: None,
             base_url: r_url,
+            user_agent: None,
         })
     } else {
         None
@@ -3291,6 +3293,7 @@ fn state_to_profile_entry(s: &SetupState) -> clido_core::ProfileEntry {
         api_key,
         api_key_env: None,
         base_url,
+        user_agent: None,
         worker,
         reviewer,
     }

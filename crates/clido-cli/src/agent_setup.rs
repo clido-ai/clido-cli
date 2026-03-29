@@ -258,11 +258,12 @@ fn build_provider_from_slot(
                 .and_then(|e| std::env::var(e).ok())
         })
         .unwrap_or_default();
-    clido_providers::build_provider(
+    clido_providers::build_provider_with_ua(
         &slot.provider,
         api_key,
         slot.model.clone(),
         slot.base_url.as_deref(),
+        slot.user_agent.clone(),
     )
     .map_err(|e| e.to_string())
 }

@@ -267,6 +267,11 @@ pub struct AgentSlotConfig {
     pub api_key_env: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    /// HTTP User-Agent override for API requests. Defaults to `"clido/<version>"`.
+    /// Some providers restrict access by User-Agent — set this to a compatible client
+    /// string such as `"RooCode/3.0.0"` to gain access.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
 }
 
 /// Tiered agents config: main (required for use), worker + reviewer (optional, fall back to main).

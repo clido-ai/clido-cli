@@ -935,6 +935,7 @@ impl ProfileOverlayState {
                 api_key: None,
                 api_key_env: None,
                 base_url: None,
+                user_agent: None,
             })
         } else {
             None
@@ -946,6 +947,7 @@ impl ProfileOverlayState {
                 api_key: None,
                 api_key_env: None,
                 base_url: None,
+                user_agent: None,
             })
         } else {
             None
@@ -956,6 +958,7 @@ impl ProfileOverlayState {
             api_key: api_key_opt,
             api_key_env: None,
             base_url,
+            user_agent: None,
             worker,
             reviewer,
         };
@@ -11233,6 +11236,7 @@ mod tests {
             api_key: Some("sk-test-1234".into()),
             api_key_env: None,
             base_url: Some("https://custom.api.example.com".into()),
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -11272,6 +11276,7 @@ mod tests {
             api_key: None,
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -11307,6 +11312,7 @@ mod tests {
             api_key: None,
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -11344,6 +11350,7 @@ mod tests {
             api_key: None,
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -11370,6 +11377,7 @@ mod tests {
             api_key: Some("sk-ant-api03-verylongkeyvalue".into()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };

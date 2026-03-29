@@ -275,6 +275,7 @@ mod tests {
             api_key: api_key.map(|s| s.to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         }

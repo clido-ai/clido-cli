@@ -3,7 +3,8 @@
 use async_trait::async_trait;
 use clido_agent::{AskUser, PermGrant, PermRequest};
 use clido_core::ProfileEntry;
-use clido_providers::{build_provider, ModelProvider};
+use clido_providers::{build_provider, ModelProvider, PROVIDER_REGISTRY};
+use std::collections::HashMap;
 use std::env;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -55,25 +56,44 @@ impl AskUser for StdinAskUser {
 
 /// Return the conventional API key env var for a given provider name.
 pub fn default_api_key_env(provider: &str) -> &'static str {
-    match provider {
-        "anthropic" => "ANTHROPIC_API_KEY",
-        "openrouter" => "OPENROUTER_API_KEY",
-        "openai" => "OPENAI_API_KEY",
-        "mistral" => "MISTRAL_API_KEY",
-        "minimax" => "MINIMAX_API_KEY",
-        "kimi" => "MOONSHOT_API_KEY",
-        "kimi-code" => "KIMI_CODE_API_KEY",
-        "alibabacloud" => "DASHSCOPE_API_KEY",
-        "deepseek" => "DEEPSEEK_API_KEY",
-        "groq" => "GROQ_API_KEY",
-        "cerebras" => "CEREBRAS_API_KEY",
-        "togetherai" => "TOGETHER_API_KEY",
-        "fireworks" => "FIREWORKS_API_KEY",
-        "xai" => "XAI_API_KEY",
-        "perplexity" => "PERPLEXITY_API_KEY",
-        "gemini" => "GEMINI_API_KEY",
-        _ => "",
+    PROVIDER_REGISTRY
+        .iter()
+        .find(|d| d.id == provider)
+        .map(|d| d.api_key_env)
+        .unwrap_or("")
+}
+
+/// Derive the clido config directory from `CLIDO_CONFIG` env var or the
+/// platform default. Returns `None` if the directory cannot be determined.
+fn default_config_dir() -> Option<std::path::PathBuf> {
+    if let Ok(p_str) = env::var("CLIDO_CONFIG") {
+        std::path::Path::new(&p_str)
+            .parent()
+            .map(|p| p.to_path_buf())
+    } else {
+        directories::ProjectDirs::from("", "", "clido").map(|d| d.config_dir().to_path_buf())
     }
+}
+
+/// Load API keys from `<config_dir>/credentials` (TOML `[keys]` section).
+/// Returns an empty map if the file does not exist or cannot be parsed.
+pub fn load_credentials(config_dir: &std::path::Path) -> HashMap<String, String> {
+    let creds_path = config_dir.join("credentials");
+    if !creds_path.exists() {
+        return HashMap::new();
+    }
+    let content = std::fs::read_to_string(&creds_path).unwrap_or_default();
+    let table: toml::Value =
+        toml::from_str(&content).unwrap_or(toml::Value::Table(Default::default()));
+    let mut map = HashMap::new();
+    if let Some(keys) = table.get("keys").and_then(|v| v.as_table()) {
+        for (k, v) in keys {
+            if let Some(s) = v.as_str() {
+                map.insert(k.clone(), s.to_string());
+            }
+        }
+    }
+    map
 }
 
 /// Build a provider from profile, resolving the API key from the environment.
@@ -99,6 +119,7 @@ mod tests {
             api_key: Some("sk-kimi-test".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -113,6 +134,7 @@ mod tests {
             api_key: Some("sk-kimi-code-test".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -166,6 +188,7 @@ mod tests {
             api_key: Some("sk-ant-test".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -181,6 +204,7 @@ mod tests {
             api_key: None,
             api_key_env: None,
             base_url: Some("http://localhost:11434".to_string()),
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -198,6 +222,7 @@ mod tests {
             api_key: None,
             api_key_env: Some("CLIDO_TEST_NONEXISTENT_KEY_XYZ".to_string()),
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -217,6 +242,7 @@ mod tests {
             api_key: Some("sk-or-test".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -232,6 +258,7 @@ mod tests {
             api_key: Some("key".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -248,6 +275,7 @@ mod tests {
             api_key: Some("sk-minimax-test".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -263,6 +291,7 @@ mod tests {
             api_key: Some("sk-alibaba-test".to_string()),
             api_key_env: None,
             base_url: None,
+            user_agent: None,
             worker: None,
             reviewer: None,
         };
@@ -278,22 +307,50 @@ pub fn make_provider(
     model_override: Option<&str>,
 ) -> Result<Arc<dyn ModelProvider>, String> {
     let provider_name = provider_override.unwrap_or(profile.provider.as_str());
-    let api_key = if provider_name == "local" {
+
+    let is_local = PROVIDER_REGISTRY
+        .iter()
+        .find(|d| d.id == provider_name)
+        .map(|d| d.is_local)
+        .unwrap_or(provider_name == "local");
+
+    let api_key = if is_local {
         // Local/Ollama doesn't require an API key.
         profile.api_key.clone().unwrap_or_default()
-    } else if let Some(key) = &profile.api_key {
-        key.clone()
     } else {
-        let api_key_env = profile
+        // Resolution order:
+        // 1. Env var (explicit api_key_env or provider's conventional var)
+        // 2. Credentials file (~/.config/clido/credentials)
+        // 3. Literal api_key in config.toml (backward compat)
+        let env_var = profile
             .api_key_env
             .as_deref()
             .unwrap_or_else(|| default_api_key_env(provider_name));
-        env::var(api_key_env).map_err(|_| {
-            format!(
-                "No API key configured for profile '{}'. Run 'clido init' to set up your provider, or 'clido doctor' to diagnose.",
-                profile_name
-            )
-        })?
+        let from_env = if !env_var.is_empty() {
+            env::var(env_var).ok().filter(|v| !v.is_empty())
+        } else {
+            None
+        };
+
+        if let Some(key) = from_env {
+            key
+        } else {
+            let from_creds = default_config_dir()
+                .map(|dir| load_credentials(&dir))
+                .and_then(|creds| creds.get(provider_name).cloned())
+                .filter(|v| !v.is_empty());
+
+            if let Some(key) = from_creds {
+                key
+            } else if let Some(key) = &profile.api_key {
+                key.clone()
+            } else {
+                return Err(format!(
+                    "No API key configured for profile '{}'. Run 'clido init' to set up your provider, or 'clido doctor' to diagnose.",
+                    profile_name
+                ));
+            }
+        }
     };
     let model = model_override.unwrap_or(&profile.model).to_string();
     build_provider(provider_name, api_key, model, profile.base_url.as_deref())

@@ -21,10 +21,18 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     pub fn new(api_key: String, model: String) -> Self {
+        Self::new_with_user_agent(api_key, model, None)
+    }
+
+    /// Like [`new`] but with an explicit User-Agent override.
+    /// When `user_agent` is `None`, defaults to `"clido/<version>"`.
+    pub fn new_with_user_agent(api_key: String, model: String, user_agent: Option<String>) -> Self {
+        let ua = user_agent.unwrap_or_else(|| format!("clido/{}", env!("CARGO_PKG_VERSION")));
         let client = reqwest::Client::builder()
             // Total request timeout (connect + send + body read).
             .timeout(Duration::from_secs(120))
             .connect_timeout(Duration::from_secs(15))
+            .user_agent(ua)
             .build()
             .expect("failed to build reqwest::Client — TLS backend unavailable");
         Self {

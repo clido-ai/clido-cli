@@ -521,6 +521,7 @@ enum ProfileOverlayMode {
 /// Steps for the in-TUI new profile wizard.
 #[derive(Debug, Clone, PartialEq)]
 enum ProfileCreateStep {
+    #[allow(dead_code)]
     Name,
     Provider,
     ApiKey,
@@ -650,7 +651,7 @@ impl ProfileOverlayState {
             reviewer_model: String::new(),
             cursor: 0,
             mode: ProfileOverlayMode::Creating {
-                step: ProfileCreateStep::Name,
+                step: ProfileCreateStep::Provider,
             },
             input: String::new(),
             input_cursor: 0,
@@ -3875,7 +3876,7 @@ fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            "    /help   /model   /settings   /workdir".to_string(),
+            "    /help   /model   /role   /workdir".to_string(),
             accent,
         )),
         Line::from(Span::styled(
@@ -4183,18 +4184,12 @@ fn render_profile_create(
     );
 
     let (step_num, step_total, step_label, current_value, placeholder) = match step {
-        ProfileCreateStep::Name => (1, 4, "Profile name", &st.name, "e.g. work, personal, fast"),
-        ProfileCreateStep::Provider => (
-            2,
-            4,
-            "Provider",
-            &st.provider,
-            "e.g. anthropic, openai, ollama",
-        ),
-        ProfileCreateStep::ApiKey => (3, 4, "API key", &st.api_key, "paste your key here"),
+        ProfileCreateStep::Name => (1, 3, "Provider", &st.provider, "select a provider"),
+        ProfileCreateStep::Provider => (1, 3, "Provider", &st.provider, "select a provider"),
+        ProfileCreateStep::ApiKey => (2, 3, "API key", &st.api_key, "paste your key here"),
         ProfileCreateStep::Model => (
-            4,
-            4,
+            3,
+            3,
             "Default model",
             &st.model,
             "e.g. claude-opus-4-5, gpt-4o",
@@ -5103,8 +5098,8 @@ fn execute_slash(app: &mut App, cmd: &str) {
         }
         _ if cmd == "/role" || cmd.starts_with("/role ") => {
             let role = cmd.trim_start_matches("/role").trim();
-            if role.is_empty() {
-                // No name given → open interactive role picker.
+            if role.is_empty() || role == "list" {
+                // No name given or "/role list" → open interactive role picker.
                 let mut roles: Vec<(String, String)> = app
                     .config_roles
                     .iter()
@@ -5113,8 +5108,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 roles.sort_by(|a, b| a.0.cmp(&b.0));
                 if roles.is_empty() {
                     app.push(ChatLine::Info(
-                        "  No roles configured — run /settings to add roles, or /init to set up"
-                            .into(),
+                        "  No roles configured — use /role add <name> <model> to create one".into(),
                     ));
                     app.push(ChatLine::Info(
                         "  Roles let you quickly switch between models  (e.g. fast, smart, review)"
@@ -5127,6 +5121,68 @@ fn execute_slash(app: &mut App, cmd: &str) {
                         scroll_offset: 0,
                         filter: String::new(),
                     });
+                }
+            } else if role.starts_with("add ") {
+                let args = role.trim_start_matches("add ").trim();
+                let parts: Vec<&str> = args.splitn(2, ' ').collect();
+                if parts.len() < 2 || parts[1].trim().is_empty() {
+                    app.push(ChatLine::Info(
+                        "  usage: /role add <name> <model_id>".into(),
+                    ));
+                } else {
+                    let name = parts[0].trim().to_string();
+                    let model = parts[1].trim().to_string();
+                    app.config_roles.insert(name.clone(), model.clone());
+                    let config_path = clido_core::global_config_path()
+                        .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
+                    let roles_vec: Vec<(String, String)> = app
+                        .config_roles
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    match save_roles_to_config(&config_path, &roles_vec) {
+                        Ok(()) => {
+                            let (pricing, _) = clido_core::load_pricing();
+                            app.known_models =
+                                build_model_list(&pricing, &app.config_roles, &app.model_prefs);
+                            app.push(ChatLine::Info(format!(
+                                "  role '{name}' → {model}  (saved)"
+                            )));
+                        }
+                        Err(e) => {
+                            app.config_roles.remove(&name);
+                            app.push(ChatLine::Info(format!("  ✗ failed to save role: {e}")));
+                        }
+                    }
+                }
+            } else if role.starts_with("delete ") || role.starts_with("remove ") {
+                let name = role
+                    .trim_start_matches("delete ")
+                    .trim_start_matches("remove ")
+                    .trim();
+                if name.is_empty() {
+                    app.push(ChatLine::Info("  usage: /role delete <name>".into()));
+                } else if app.config_roles.remove(name).is_some() {
+                    let config_path = clido_core::global_config_path()
+                        .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
+                    let roles_vec: Vec<(String, String)> = app
+                        .config_roles
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    match save_roles_to_config(&config_path, &roles_vec) {
+                        Ok(()) => {
+                            let (pricing, _) = clido_core::load_pricing();
+                            app.known_models =
+                                build_model_list(&pricing, &app.config_roles, &app.model_prefs);
+                            app.push(ChatLine::Info(format!("  role '{name}' deleted")));
+                        }
+                        Err(e) => {
+                            app.push(ChatLine::Info(format!("  ✗ failed to save: {e}")));
+                        }
+                    }
+                } else {
+                    app.push(ChatLine::Info(format!("  role '{name}' not found")));
                 }
             } else {
                 // Resolve: prefs override config.
@@ -5148,7 +5204,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                     }
                     None => {
                         app.push(ChatLine::Info(format!(
-                            "  role '{}' not found — use /role to list all configured roles",
+                            "  role '{}' not found — use /role to list, /role add <name> <model> to create",
                             role
                         )));
                     }
@@ -7764,22 +7820,8 @@ fn handle_profile_overlay_key(app: &mut App, event: crossterm::event::KeyEvent) 
                     let value = st.input.trim().to_string();
                     match step {
                         ProfileCreateStep::Name => {
-                            if value.is_empty() {
-                                st.status = Some("  ✗ Profile name cannot be empty".into());
-                                return;
-                            }
-                            // Check for duplicate name
-                            let dup = clido_core::load_config(&app.workspace_root)
-                                .ok()
-                                .map(|c| c.profiles.contains_key(&value))
-                                .unwrap_or(false);
-                            if dup {
-                                st.status = Some(format!("  ✗ Profile '{}' already exists", value));
-                                return;
-                            }
-                            st.name = value;
-                            st.input.clear();
-                            st.input_cursor = 0;
+                            // Name step is skipped — auto-generated from provider.
+                            // If somehow reached, advance to Provider.
                             st.provider_picker = ProviderPickerState::new();
                             st.provider_picker.clamp();
                             st.mode = ProfileOverlayMode::Creating {
@@ -7789,6 +7831,25 @@ fn handle_profile_overlay_key(app: &mut App, event: crossterm::event::KeyEvent) 
                         ProfileCreateStep::Provider => {
                             if let Some(id) = st.provider_picker.selected_id() {
                                 st.provider = id.to_string();
+                                // Auto-generate profile name from provider.
+                                let existing = clido_core::load_config(&app.workspace_root)
+                                    .ok()
+                                    .map(|c| c.profiles.keys().cloned().collect::<Vec<_>>())
+                                    .unwrap_or_default();
+                                let base = id.to_string();
+                                if !existing.contains(&base) {
+                                    st.name = base;
+                                } else {
+                                    let mut n = 2u32;
+                                    loop {
+                                        let candidate = format!("{base}-{n}");
+                                        if !existing.contains(&candidate) {
+                                            st.name = candidate;
+                                            break;
+                                        }
+                                        n += 1;
+                                    }
+                                }
                                 let needs_key = st.provider_picker.selected_requires_key();
                                 let models = app.known_models.clone();
                                 let mut picker = ModelPickerState {
@@ -7801,7 +7862,6 @@ fn handle_profile_overlay_key(app: &mut App, event: crossterm::event::KeyEvent) 
                                 st.profile_model_picker = Some(picker);
                                 st.input.clear();
                                 st.input_cursor = 0;
-                                // Skip API key step for local providers (ollama, lmstudio, etc.)
                                 let next_step = if needs_key {
                                     ProfileCreateStep::ApiKey
                                 } else {
@@ -10381,6 +10441,102 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         .await?
         {
             EventLoopExit::Quit => break Ok(()),
+            EventLoopExit::ProfileSwitch(profile_name) => {
+                // Switch active profile on disk.
+                if let Some(config_path) = clido_core::global_config_path() {
+                    let _ = clido_core::switch_active_profile(&config_path, &profile_name);
+                }
+
+                // Reload config from disk.
+                let wr = workspace_root.clone();
+                let fresh_config: Option<clido_core::LoadedConfig> =
+                    tokio::task::spawn_blocking(move || clido_core::load_config(&wr).ok())
+                        .await
+                        .ok()
+                        .flatten();
+
+                // Extract new profile settings.
+                let (new_provider, new_model, new_api_key, new_base_url) = {
+                    let pname = profile_name.as_str();
+                    match fresh_config
+                        .as_ref()
+                        .and_then(|c| c.get_profile(pname).ok())
+                    {
+                        Some(profile) => {
+                            let key = profile
+                                .api_key
+                                .clone()
+                                .or_else(|| {
+                                    profile
+                                        .api_key_env
+                                        .as_deref()
+                                        .and_then(|e| std::env::var(e).ok())
+                                })
+                                .unwrap_or_default();
+                            (
+                                profile.provider.clone(),
+                                profile.model.clone(),
+                                key,
+                                profile.base_url.clone(),
+                            )
+                        }
+                        None => ("?".to_string(), "?".to_string(), String::new(), None),
+                    }
+                };
+
+                // Abort old agent runtime.
+                runtime.agent_handle.abort();
+
+                // Start fresh agent runtime with updated config.
+                let mut switch_cli = cli.clone();
+                switch_cli.profile = Some(profile_name.clone());
+                if let Some(sid) = app.current_session_id.as_deref() {
+                    switch_cli.resume = Some(sid.to_string());
+                }
+
+                runtime = start_agent_runtime(
+                    switch_cli,
+                    workspace_root.clone(),
+                    fresh_config.clone().or_else(|| loaded_config.clone()),
+                    pricing_table.clone(),
+                    app.cancel.clone(),
+                    app.image_state.clone(),
+                    app.reviewer_enabled.clone(),
+                );
+
+                // Update app state in-place.
+                app.provider = new_provider.clone();
+                app.model = new_model.clone();
+                app.api_key = new_api_key.clone();
+                app.base_url = new_base_url.clone();
+                app.current_profile = profile_name.clone();
+                app.prompt_tx = runtime.prompt_tx.clone();
+                app.resume_tx = runtime.resume_tx.clone();
+                app.model_switch_tx = runtime.model_switch_tx.clone();
+                app.workdir_tx = runtime.workdir_tx.clone();
+                app.compact_now_tx = runtime.compact_now_tx.clone();
+                app.quit = false;
+                app.busy = false;
+                app.status_log.clear();
+                app.cancel.store(false, Ordering::Relaxed);
+
+                // Kick off model list fetch for new provider.
+                if !new_api_key.is_empty() {
+                    spawn_model_fetch(
+                        new_provider,
+                        new_api_key,
+                        new_base_url,
+                        runtime.fetch_tx.clone(),
+                    );
+                    app.models_loading = true;
+                }
+
+                app.push(ChatLine::Info(format!(
+                    "  switched to profile '{profile_name}'"
+                )));
+                recovery_attempts = 0;
+                continue;
+            }
             EventLoopExit::Recover(reason) => {
                 recovery_attempts = recovery_attempts.saturating_add(1);
                 if recovery_attempts > 3 {
@@ -10516,6 +10672,8 @@ async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
 enum EventLoopExit {
     Quit,
     Recover(String),
+    /// Switch to a different profile without restarting the TUI.
+    ProfileSwitch(String),
 }
 
 async fn event_loop(
@@ -10967,6 +11125,10 @@ async fn event_loop(
         }
 
         if app.quit {
+            // Check if this is a profile switch rather than a real quit.
+            if let Some(profile_name) = app.wants_profile_switch.take() {
+                return Ok(EventLoopExit::ProfileSwitch(profile_name));
+            }
             return Ok(EventLoopExit::Quit);
         }
     }
@@ -11696,7 +11858,7 @@ mod tests {
         assert_eq!(
             ov.mode,
             ProfileOverlayMode::Creating {
-                step: ProfileCreateStep::Name
+                step: ProfileCreateStep::Provider
             }
         );
         assert!(ov.name.is_empty());

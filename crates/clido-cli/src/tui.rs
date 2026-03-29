@@ -46,6 +46,7 @@ use clido_index::RepoIndex;
 use clido_memory::MemoryStore;
 use clido_planner::{Complexity, Plan, PlanEditor, TaskStatus};
 
+use crate::list_picker::{ListPicker, PickerItem};
 use crate::overlay::{AppAction, ErrorOverlay, OverlayKeyResult, OverlayKind, OverlayStack};
 use crate::text_input::TextInput;
 
@@ -249,85 +250,53 @@ impl TaskEditState {
     }
 }
 
+// ── PickerItem implementations ────────────────────────────────────────────────
+
+impl PickerItem for clido_storage::SessionSummary {
+    fn filter_text(&self) -> String {
+        self.session_id.clone()
+    }
+    fn filter_text_secondary(&self) -> Option<String> {
+        Some(self.preview.clone())
+    }
+}
+
+impl PickerItem for (String, clido_core::ProfileEntry) {
+    fn filter_text(&self) -> String {
+        self.0.clone()
+    }
+    fn filter_text_secondary(&self) -> Option<String> {
+        Some(format!("{} {}", self.1.provider, self.1.model))
+    }
+}
+
+impl PickerItem for (String, String) {
+    fn filter_text(&self) -> String {
+        self.0.clone()
+    }
+    fn filter_text_secondary(&self) -> Option<String> {
+        Some(self.1.clone())
+    }
+}
+
 // ── Session picker popup state ────────────────────────────────────────────────
 
 struct SessionPickerState {
-    sessions: Vec<clido_storage::SessionSummary>,
-    selected: usize,
-    scroll_offset: usize,
-    filter: String,
-}
-
-impl SessionPickerState {
-    fn filtered(&self) -> Vec<(usize, &clido_storage::SessionSummary)> {
-        let f = self.filter.trim().to_lowercase();
-        if f.is_empty() {
-            return self.sessions.iter().enumerate().collect();
-        }
-        self.sessions
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| {
-                s.session_id.to_lowercase().contains(&f) || s.preview.to_lowercase().contains(&f)
-            })
-            .collect()
-    }
+    picker: ListPicker<clido_storage::SessionSummary>,
 }
 
 // ── Profile picker popup state ─────────────────────────────────────────────────
 
 struct ProfilePickerState {
-    /// All profiles, sorted by name: (profile_name, entry).
-    profiles: Vec<(String, clido_core::ProfileEntry)>,
-    selected: usize,
-    scroll_offset: usize,
+    picker: ListPicker<(String, clido_core::ProfileEntry)>,
     /// Currently active profile name (shown with ▶ marker).
     active: String,
-    filter: String,
-}
-
-impl ProfilePickerState {
-    fn filtered(&self) -> Vec<(usize, &(String, clido_core::ProfileEntry))> {
-        let f = self.filter.trim().to_lowercase();
-        if f.is_empty() {
-            return self.profiles.iter().enumerate().collect();
-        }
-        self.profiles
-            .iter()
-            .enumerate()
-            .filter(|(_, (name, entry))| {
-                name.to_lowercase().contains(&f)
-                    || entry.provider.to_lowercase().contains(&f)
-                    || entry.model.to_lowercase().contains(&f)
-            })
-            .collect()
-    }
 }
 
 // ── Role picker popup state ────────────────────────────────────────────────────
 
 struct RolePickerState {
-    /// All configured roles, sorted by name: (role_name, model_id).
-    roles: Vec<(String, String)>,
-    selected: usize,
-    scroll_offset: usize,
-    filter: String,
-}
-
-impl RolePickerState {
-    fn filtered(&self) -> Vec<(usize, &(String, String))> {
-        let f = self.filter.trim().to_lowercase();
-        if f.is_empty() {
-            return self.roles.iter().enumerate().collect();
-        }
-        self.roles
-            .iter()
-            .enumerate()
-            .filter(|(_, (name, model))| {
-                name.to_lowercase().contains(&f) || model.to_lowercase().contains(&f)
-            })
-            .collect()
-    }
+    picker: ListPicker<(String, String)>,
 }
 
 // ── Model picker popup state ──────────────────────────────────────────────────
@@ -2487,7 +2456,8 @@ fn render(frame: &mut Frame, app: &mut App) {
     // ── Session picker ───────────────────────────────────────────────────────
     if let Some(ref picker) = app.session_picker {
         const VISIBLE: usize = 12;
-        let filtered = picker.filtered();
+        let filtered: Vec<(usize, &clido_storage::SessionSummary)> =
+            picker.picker.filtered_items().collect();
         let n_rows = filtered.len().min(VISIBLE) as u16;
         // border(2) + header(1) + blank(1) + filter(1) + rows = n_rows + 5
         let popup_h =
@@ -2502,10 +2472,13 @@ fn render(frame: &mut Frame, app: &mut App) {
 
         let mut content: Vec<Line<'static>> = Vec::new();
         // Filter line
-        if !picker.filter.is_empty() {
+        if !picker.picker.filter.text.is_empty() {
             content.push(Line::from(vec![
                 Span::styled("  🔍 ", Style::default().fg(Color::DarkGray)),
-                Span::styled(picker.filter.clone(), Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    picker.picker.filter.text.clone(),
+                    Style::default().fg(Color::Yellow),
+                ),
             ]));
         }
         content.push(Line::from(vec![Span::styled(
@@ -2524,9 +2497,12 @@ fn render(frame: &mut Frame, app: &mut App) {
                 .add_modifier(Modifier::DIM),
         )]));
 
-        let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
-        for (di, (_orig_idx, s)) in filtered[picker.scroll_offset..end].iter().enumerate() {
-            let selected = picker.scroll_offset + di == picker.selected;
+        let end = (picker.picker.scroll_offset + VISIBLE).min(filtered.len());
+        for (di, (_orig_idx, s)) in filtered[picker.picker.scroll_offset..end]
+            .iter()
+            .enumerate()
+        {
+            let selected = picker.picker.scroll_offset + di == picker.picker.selected;
             let bg = if selected {
                 TUI_SELECTION_BG
             } else {
@@ -2547,10 +2523,10 @@ fn render(frame: &mut Frame, app: &mut App) {
         }
 
         // Add scroll indicators if there are more sessions above or below visible range.
-        let above = picker.scroll_offset;
+        let above = picker.picker.scroll_offset;
         let below = filtered
             .len()
-            .saturating_sub(picker.scroll_offset + VISIBLE);
+            .saturating_sub(picker.picker.scroll_offset + VISIBLE);
         if above > 0 || below > 0 {
             let mut scroll_parts = Vec::new();
             if above > 0 {
@@ -2735,17 +2711,21 @@ fn render(frame: &mut Frame, app: &mut App) {
     // ── Profile picker popup ──────────────────────────────────────────────────
     if let Some(ref picker) = app.profile_picker {
         const VISIBLE: usize = 12;
-        let filtered = picker.filtered();
+        let filtered: Vec<(usize, &(String, clido_core::ProfileEntry))> =
+            picker.picker.filtered_items().collect();
         let n_rows = filtered.len().clamp(1, VISIBLE) as u16;
         let popup_h = (n_rows + 5).min(area.height.saturating_sub(4)).max(5);
         let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
         let inner_w = popup_rect.width.saturating_sub(4) as usize;
 
         let mut content: Vec<Line<'static>> = Vec::new();
-        if !picker.filter.is_empty() {
+        if !picker.picker.filter.text.is_empty() {
             content.push(Line::from(vec![
                 Span::styled("  🔍 ", Style::default().fg(Color::DarkGray)),
-                Span::styled(picker.filter.clone(), Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    picker.picker.filter.text.clone(),
+                    Style::default().fg(Color::Yellow),
+                ),
             ]));
         }
         content.push(Line::from(Span::styled(
@@ -2758,7 +2738,7 @@ fn render(frame: &mut Frame, app: &mut App) {
 
         if filtered.is_empty() {
             content.push(Line::from(Span::styled(
-                if picker.filter.is_empty() {
+                if picker.picker.filter.text.is_empty() {
                     "  no profiles — press n to create one"
                 } else {
                     "  no matches"
@@ -2767,11 +2747,12 @@ fn render(frame: &mut Frame, app: &mut App) {
             )));
         }
 
-        let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
-        for (di, (_orig_idx, (name, entry))) in
-            filtered[picker.scroll_offset..end].iter().enumerate()
+        let end = (picker.picker.scroll_offset + VISIBLE).min(filtered.len());
+        for (di, (_orig_idx, (name, entry))) in filtered[picker.picker.scroll_offset..end]
+            .iter()
+            .enumerate()
         {
-            let selected = picker.scroll_offset + di == picker.selected;
+            let selected = picker.picker.scroll_offset + di == picker.picker.selected;
             let is_active = name == &picker.active;
             let bg = if selected {
                 TUI_SELECTION_BG
@@ -2791,10 +2772,10 @@ fn render(frame: &mut Frame, app: &mut App) {
             )));
         }
 
-        let above = picker.scroll_offset;
+        let above = picker.picker.scroll_offset;
         let below = filtered
             .len()
-            .saturating_sub(picker.scroll_offset + VISIBLE);
+            .saturating_sub(picker.picker.scroll_offset + VISIBLE);
         if above > 0 || below > 0 {
             let mut parts = Vec::new();
             if above > 0 {
@@ -2823,17 +2804,20 @@ fn render(frame: &mut Frame, app: &mut App) {
     // ── Role picker popup ─────────────────────────────────────────────────────
     if let Some(ref picker) = app.role_picker {
         const VISIBLE: usize = 10;
-        let filtered = picker.filtered();
+        let filtered: Vec<(usize, &(String, String))> = picker.picker.filtered_items().collect();
         let n_rows = filtered.len().min(VISIBLE) as u16;
         let popup_h = (n_rows + 5).min(area.height.saturating_sub(4)).max(5);
         let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
         let inner_w = popup_rect.width.saturating_sub(4) as usize;
 
         let mut content: Vec<Line<'static>> = Vec::new();
-        if !picker.filter.is_empty() {
+        if !picker.picker.filter.text.is_empty() {
             content.push(Line::from(vec![
                 Span::styled("  🔍 ", Style::default().fg(Color::DarkGray)),
-                Span::styled(picker.filter.clone(), Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    picker.picker.filter.text.clone(),
+                    Style::default().fg(Color::Yellow),
+                ),
             ]));
         }
         content.push(Line::from(Span::styled(
@@ -2844,11 +2828,12 @@ fn render(frame: &mut Frame, app: &mut App) {
         )));
         content.push(Line::raw(""));
 
-        let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
-        for (di, (_orig_idx, (role, model))) in
-            filtered[picker.scroll_offset..end].iter().enumerate()
+        let end = (picker.picker.scroll_offset + VISIBLE).min(filtered.len());
+        for (di, (_orig_idx, (role, model))) in filtered[picker.picker.scroll_offset..end]
+            .iter()
+            .enumerate()
         {
-            let selected = picker.scroll_offset + di == picker.selected;
+            let selected = picker.picker.scroll_offset + di == picker.picker.selected;
             let bg = if selected {
                 TUI_SELECTION_BG
             } else {
@@ -2863,10 +2848,10 @@ fn render(frame: &mut Frame, app: &mut App) {
             )));
         }
 
-        let above = picker.scroll_offset;
+        let above = picker.picker.scroll_offset;
         let below = filtered
             .len()
-            .saturating_sub(picker.scroll_offset + VISIBLE);
+            .saturating_sub(picker.picker.scroll_offset + VISIBLE);
         if above > 0 || below > 0 {
             let mut parts = Vec::new();
             if above > 0 {
@@ -4927,10 +4912,7 @@ fn cmd_role(app: &mut App, cmd: &str) {
             ));
         } else {
             app.role_picker = Some(RolePickerState {
-                roles,
-                selected: 0,
-                scroll_offset: 0,
-                filter: String::new(),
+                picker: ListPicker::new(roles, 10),
             });
         }
     } else if role.starts_with("add ") {
@@ -5086,12 +5068,9 @@ fn cmd_sessions(app: &mut App) {
                 .iter()
                 .position(|s| app.current_session_id.as_deref() == Some(&s.session_id))
                 .unwrap_or(0);
-            app.session_picker = Some(SessionPickerState {
-                sessions,
-                selected,
-                scroll_offset: 0,
-                filter: String::new(),
-            });
+            let mut picker = ListPicker::new(sessions, 12);
+            picker.selected = selected;
+            app.session_picker = Some(SessionPickerState { picker });
         }
     }
 }
@@ -5977,13 +5956,9 @@ fn cmd_profile(app: &mut App) {
                 loaded.profiles.into_iter().collect();
             profiles.sort_by(|a, b| a.0.cmp(&b.0));
             let selected = profiles.iter().position(|(n, _)| n == &active).unwrap_or(0);
-            app.profile_picker = Some(ProfilePickerState {
-                profiles,
-                selected,
-                scroll_offset: 0,
-                active,
-                filter: String::new(),
-            });
+            let mut picker = ListPicker::new(profiles, 12);
+            picker.selected = selected;
+            app.profile_picker = Some(ProfilePickerState { picker, active });
         }
     }
 }
@@ -8501,43 +8476,18 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
 
     // ── Session picker (modal) ────────────────────────────────────────────────
     if app.session_picker.is_some() {
-        const VISIBLE: usize = 12;
         match event.code {
-            Up => {
-                if let Some(picker) = &mut app.session_picker {
-                    if picker.selected > 0 {
-                        picker.selected -= 1;
-                        if picker.selected < picker.scroll_offset {
-                            picker.scroll_offset = picker.selected;
-                        }
-                    }
-                }
-            }
-            Down => {
-                if let Some(picker) = &mut app.session_picker {
-                    let n = picker.filtered().len();
-                    if picker.selected + 1 < n {
-                        picker.selected += 1;
-                        if picker.selected >= picker.scroll_offset + VISIBLE {
-                            picker.scroll_offset = picker.selected - VISIBLE + 1;
-                        }
-                    }
-                }
-            }
             Enter => {
                 if let Some(picker) = app.session_picker.take() {
-                    let filtered = picker.filtered();
-                    if filtered.is_empty() {
-                        return;
-                    }
-                    let (orig_idx, _) = filtered[picker.selected];
-                    app.text_input.text.clear();
-                    app.text_input.cursor = 0;
-                    let id = picker.sessions[orig_idx].session_id.clone();
-                    if app.current_session_id.as_deref() == Some(&id) {
-                        app.push(ChatLine::Info("  Already in this session".into()));
-                    } else {
-                        let _ = app.resume_tx.send(id);
+                    if let Some(s) = picker.picker.selected_item() {
+                        app.text_input.text.clear();
+                        app.text_input.cursor = 0;
+                        let id = s.session_id.clone();
+                        if app.current_session_id.as_deref() == Some(&id) {
+                            app.push(ChatLine::Info("  Already in this session".into()));
+                        } else {
+                            let _ = app.resume_tx.send(id);
+                        }
                     }
                 }
             }
@@ -8546,92 +8496,51 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.text_input.text.clear();
                 app.text_input.cursor = 0;
             }
-            Backspace => {
-                if let Some(picker) = &mut app.session_picker {
-                    picker.filter.pop();
-                    picker.selected = 0;
-                    picker.scroll_offset = 0;
-                }
-            }
             Char('d') | Char('D') => {
-                // Delete selected session
                 if let Some(picker) = &mut app.session_picker {
-                    let filtered = picker.filtered();
-                    if let Some(&(orig_idx, _)) = filtered.get(picker.selected) {
-                        let sid = picker.sessions[orig_idx].session_id.clone();
+                    if let Some(orig_idx) = picker.picker.selected_original_index() {
+                        let sid = picker.picker.items()[orig_idx].session_id.clone();
                         if app.current_session_id.as_deref() == Some(&sid) {
                             app.push(ChatLine::Info("  Cannot delete the active session".into()));
                         } else if clido_storage::delete_session(&app.workspace_root, &sid).is_ok() {
-                            picker.sessions.remove(orig_idx);
-                            let n = picker.filtered().len();
-                            if picker.selected >= n && n > 0 {
-                                picker.selected = n - 1;
-                            }
-                            if picker.sessions.is_empty() {
+                            picker.picker.items_mut().remove(orig_idx);
+                            picker.picker.apply_filter();
+                            if picker.picker.items().is_empty() {
                                 app.session_picker = None;
                             }
                         }
                     }
                 }
             }
-            Char(c) => {
+            _ => {
                 if let Some(picker) = &mut app.session_picker {
-                    picker.filter.push(c);
-                    picker.selected = 0;
-                    picker.scroll_offset = 0;
+                    picker.picker.handle_key(event);
                 }
             }
-            _ => {}
         }
         return;
     }
 
     // ── Profile picker (modal) ────────────────────────────────────────────────
     if app.profile_picker.is_some() {
-        const VISIBLE: usize = 12;
         match event.code {
-            Up => {
-                if let Some(picker) = &mut app.profile_picker {
-                    if picker.selected > 0 {
-                        picker.selected -= 1;
-                        if picker.selected < picker.scroll_offset {
-                            picker.scroll_offset = picker.selected;
-                        }
-                    }
-                }
-            }
-            Down => {
-                if let Some(picker) = &mut app.profile_picker {
-                    let n = picker.filtered().len();
-                    if picker.selected + 1 < n {
-                        picker.selected += 1;
-                        if picker.selected >= picker.scroll_offset + VISIBLE {
-                            picker.scroll_offset = picker.selected - VISIBLE + 1;
-                        }
-                    }
-                }
-            }
             Enter => {
                 if let Some(picker) = app.profile_picker.take() {
-                    let filtered = picker.filtered();
-                    if filtered.is_empty() {
-                        return;
-                    }
-                    let (orig_idx, _) = filtered[picker.selected];
-                    let (name, _) = &picker.profiles[orig_idx];
-                    if name == &picker.active {
-                        app.push(ChatLine::Info(format!(
-                            "  profile '{}' is already active.",
-                            name
-                        )));
-                    } else {
-                        app.push(ChatLine::Info(format!(
-                            "  switching to profile '{}'…",
-                            name
-                        )));
-                        app.restart_resume_session = app.current_session_id.clone();
-                        app.wants_profile_switch = Some(name.clone());
-                        app.quit = true;
+                    if let Some((name, _)) = picker.picker.selected_item() {
+                        if name == &picker.active {
+                            app.push(ChatLine::Info(format!(
+                                "  profile '{}' is already active.",
+                                name
+                            )));
+                        } else {
+                            app.push(ChatLine::Info(format!(
+                                "  switching to profile '{}'…",
+                                name
+                            )));
+                            app.restart_resume_session = app.current_session_id.clone();
+                            app.wants_profile_switch = Some(name.clone());
+                            app.quit = true;
+                        }
                     }
                 }
             }
@@ -8646,101 +8555,55 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             KeyCode::Char('e') => {
                 if let Some(picker) = app.profile_picker.take() {
-                    let filtered = picker.filtered();
-                    if let Some(&(orig_idx, _)) = filtered.get(picker.selected) {
-                        let (name, entry) = &picker.profiles[orig_idx];
+                    if let Some((name, entry)) = picker.picker.selected_item() {
+                        let name = name.clone();
+                        let entry_clone = entry.clone();
                         let config_path = clido_core::global_config_path()
                             .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
                         app.profile_overlay = Some(ProfileOverlayState::for_edit(
-                            name.clone(),
-                            entry,
+                            name,
+                            &entry_clone,
                             config_path,
                         ));
                     }
                 }
             }
-            Backspace => {
+            _ => {
                 if let Some(picker) = &mut app.profile_picker {
-                    picker.filter.pop();
-                    picker.selected = 0;
-                    picker.scroll_offset = 0;
+                    picker.picker.handle_key(event);
                 }
             }
-            Char(c) if c != 'n' && c != 'e' => {
-                if let Some(picker) = &mut app.profile_picker {
-                    picker.filter.push(c);
-                    picker.selected = 0;
-                    picker.scroll_offset = 0;
-                }
-            }
-            _ => {}
         }
         return;
     }
 
     // ── Role picker (modal) ───────────────────────────────────────────────────
     if app.role_picker.is_some() {
-        const VISIBLE: usize = 10;
         match event.code {
-            Up => {
-                if let Some(picker) = &mut app.role_picker {
-                    if picker.selected > 0 {
-                        picker.selected -= 1;
-                        if picker.selected < picker.scroll_offset {
-                            picker.scroll_offset = picker.selected;
-                        }
-                    }
-                }
-            }
-            Down => {
-                if let Some(picker) = &mut app.role_picker {
-                    let n = picker.filtered().len();
-                    if picker.selected + 1 < n {
-                        picker.selected += 1;
-                        if picker.selected >= picker.scroll_offset + VISIBLE {
-                            picker.scroll_offset = picker.selected - VISIBLE + 1;
-                        }
-                    }
-                }
-            }
             Enter => {
                 if let Some(picker) = app.role_picker.take() {
-                    let filtered = picker.filtered();
-                    if filtered.is_empty() {
-                        return;
+                    if let Some((role_name, model_id)) = picker.picker.selected_item() {
+                        let model_id = model_id.clone();
+                        let role_name = role_name.clone();
+                        app.model = model_id.clone();
+                        let _ = app.model_switch_tx.send(model_id.clone());
+                        app.model_prefs.push_recent(&model_id);
+                        app.model_prefs.save();
+                        app.push(ChatLine::Info(format!(
+                            "  ✓ Model: {} (alias: {})",
+                            model_id, role_name
+                        )));
                     }
-                    let (orig_idx, _) = filtered[picker.selected];
-                    let (role_name, model_id) = &picker.roles[orig_idx];
-                    let model_id = model_id.clone();
-                    let role_name = role_name.clone();
-                    app.model = model_id.clone();
-                    let _ = app.model_switch_tx.send(model_id.clone());
-                    app.model_prefs.push_recent(&model_id);
-                    app.model_prefs.save();
-                    app.push(ChatLine::Info(format!(
-                        "  ✓ Model: {} (alias: {})",
-                        model_id, role_name
-                    )));
                 }
             }
             Esc => {
                 app.role_picker = None;
             }
-            Backspace => {
+            _ => {
                 if let Some(picker) = &mut app.role_picker {
-                    picker.filter.pop();
-                    picker.selected = 0;
-                    picker.scroll_offset = 0;
+                    picker.picker.handle_key(event);
                 }
             }
-            Char(c) => {
-                if let Some(picker) = &mut app.role_picker {
-                    picker.filter.push(c);
-                    picker.selected = 0;
-                    picker.scroll_offset = 0;
-                }
-            }
-            _ => {}
         }
         return;
     }
@@ -8863,13 +8726,9 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     loaded.profiles.into_iter().collect();
                 profiles.sort_by(|a, b| a.0.cmp(&b.0));
                 let selected = profiles.iter().position(|(n, _)| n == &active).unwrap_or(0);
-                app.profile_picker = Some(ProfilePickerState {
-                    profiles,
-                    selected,
-                    scroll_offset: 0,
-                    active,
-                    filter: String::new(),
-                });
+                let mut picker = ListPicker::new(profiles, 12);
+                picker.selected = selected;
+                app.profile_picker = Some(ProfilePickerState { picker, active });
             }
             return;
         }
@@ -12155,17 +12014,17 @@ mod tests {
     fn render_session_picker_shows_sessions() {
         let mut app = make_test_app();
         app.session_picker = Some(SessionPickerState {
-            sessions: vec![clido_storage::SessionSummary {
-                session_id: "abc123".into(),
-                project_path: "/home/user/proj".into(),
-                start_time: "2025-01-01T00:00:00Z".into(),
-                num_turns: 5,
-                total_cost_usd: 0.42,
-                preview: "hello world".into(),
-            }],
-            selected: 0,
-            scroll_offset: 0,
-            filter: String::new(),
+            picker: ListPicker::new(
+                vec![clido_storage::SessionSummary {
+                    session_id: "abc123".into(),
+                    project_path: "/home/user/proj".into(),
+                    start_time: "2025-01-01T00:00:00Z".into(),
+                    num_turns: 5,
+                    total_cost_usd: 0.42,
+                    preview: "hello world".into(),
+                }],
+                12,
+            ),
         });
         let mut terminal = test_terminal();
         terminal.draw(|f| render(f, &mut app)).unwrap();

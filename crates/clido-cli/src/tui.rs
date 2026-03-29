@@ -12059,4 +12059,216 @@ mod tests {
             text
         );
     }
+
+    // ── E2E flow tests ─────────────────────────────────────────────────────────
+
+    use crossterm::event::{KeyEvent, KeyModifiers as Km};
+
+    fn sim_key(app: &mut App, code: KeyCode) {
+        handle_key(app, KeyEvent::new(code, Km::NONE));
+    }
+
+    fn sim_char(app: &mut App, c: char) {
+        sim_key(app, KeyCode::Char(c));
+    }
+
+    #[test]
+    fn e2e_slash_command_opens_model_picker() {
+        let mut app = make_test_app();
+        execute_slash(&mut app, "/model");
+        assert!(
+            app.model_picker.is_some(),
+            "'/model' should open model picker"
+        );
+    }
+
+    #[test]
+    fn e2e_slash_command_opens_session_picker() {
+        let mut app = make_test_app();
+        execute_slash(&mut app, "/sessions");
+        // sessions may be empty in temp dir — picker should still open or info shown
+        let has_picker = app.session_picker.is_some();
+        let has_info = app.messages.iter().any(|l| matches!(l, ChatLine::Info(_)));
+        assert!(
+            has_picker || has_info,
+            "'/sessions' should open picker or show info"
+        );
+    }
+
+    #[test]
+    fn e2e_role_add_and_list() {
+        let mut app = make_test_app();
+        // Add a role
+        execute_slash(&mut app, "/role add fast gpt-4o-mini");
+        let has_confirm = app.messages.iter().any(|l| match l {
+            ChatLine::Info(s) => s.contains("fast"),
+            _ => false,
+        });
+        assert!(has_confirm, "role add should confirm with role name");
+    }
+
+    #[test]
+    fn e2e_model_picker_navigate_and_escape() {
+        let mut app = make_test_app();
+        app.model_picker = Some(ModelPickerState {
+            models: vec![
+                ModelEntry {
+                    id: "gpt-4o".into(),
+                    provider: "openai".into(),
+                    input_mtok: 2.5,
+                    output_mtok: 10.0,
+                    context_k: Some(128),
+                    role: None,
+                    is_favorite: false,
+                },
+                ModelEntry {
+                    id: "claude-sonnet".into(),
+                    provider: "anthropic".into(),
+                    input_mtok: 3.0,
+                    output_mtok: 15.0,
+                    context_k: Some(200),
+                    role: None,
+                    is_favorite: false,
+                },
+            ],
+            filter: String::new(),
+            selected: 0,
+            scroll_offset: 0,
+        });
+        sim_key(&mut app, KeyCode::Down);
+        assert_eq!(app.model_picker.as_ref().unwrap().selected, 1);
+        sim_key(&mut app, KeyCode::Esc);
+        assert!(app.model_picker.is_none(), "Esc should close model picker");
+    }
+
+    #[test]
+    fn e2e_session_picker_navigate_and_escape() {
+        let mut app = make_test_app();
+        app.session_picker = Some(SessionPickerState {
+            picker: ListPicker::new(
+                vec![
+                    clido_storage::SessionSummary {
+                        session_id: "aaa".into(),
+                        project_path: "/tmp".into(),
+                        start_time: "2025-01-01T00:00:00Z".into(),
+                        num_turns: 1,
+                        total_cost_usd: 0.0,
+                        preview: "first".into(),
+                    },
+                    clido_storage::SessionSummary {
+                        session_id: "bbb".into(),
+                        project_path: "/tmp".into(),
+                        start_time: "2025-01-02T00:00:00Z".into(),
+                        num_turns: 2,
+                        total_cost_usd: 0.1,
+                        preview: "second".into(),
+                    },
+                ],
+                12,
+            ),
+        });
+        sim_key(&mut app, KeyCode::Down);
+        assert_eq!(app.session_picker.as_ref().unwrap().picker.selected, 1);
+        // Filter by typing
+        sim_char(&mut app, 'b');
+        let filtered_count = app.session_picker.as_ref().unwrap().picker.filtered_count();
+        assert_eq!(filtered_count, 1, "filter 'b' should match only 'bbb'");
+        sim_key(&mut app, KeyCode::Esc);
+        assert!(
+            app.session_picker.is_none(),
+            "Esc should close session picker"
+        );
+    }
+
+    #[test]
+    fn e2e_error_overlay_dismiss() {
+        let mut app = make_test_app();
+        app.overlay_stack
+            .push(OverlayKind::Error(ErrorOverlay::new("test error")));
+        assert!(!app.overlay_stack.is_empty());
+        sim_key(&mut app, KeyCode::Enter);
+        assert!(
+            app.overlay_stack.is_empty(),
+            "Enter should dismiss error overlay"
+        );
+    }
+
+    #[test]
+    fn e2e_unknown_slash_command_is_silent() {
+        let mut app = make_test_app();
+        let before = app.messages.len();
+        execute_slash(&mut app, "/nonexistent_command_xyz");
+        // Unknown commands are silently ignored (fall through _ => {})
+        assert_eq!(
+            app.messages.len(),
+            before,
+            "unknown command should not add messages"
+        );
+    }
+
+    #[test]
+    fn e2e_help_command_shows_info() {
+        let mut app = make_test_app();
+        execute_slash(&mut app, "/help");
+        let has_help = app.messages.iter().any(|l| match l {
+            ChatLine::Section(s) => s.contains("Navigation"),
+            _ => false,
+        });
+        assert!(has_help, "/help should show navigation section");
+    }
+
+    #[test]
+    fn e2e_clear_command_clears_chat() {
+        let mut app = make_test_app();
+        app.push(ChatLine::Info("some message".into()));
+        let before = app.messages.len();
+        assert!(before > 0);
+        execute_slash(&mut app, "/clear");
+        // /clear resets to WelcomeBrand + info message
+        let has_clear_msg = app.messages.iter().any(|l| match l {
+            ChatLine::Info(s) => s.contains("cleared"),
+            _ => false,
+        });
+        assert!(has_clear_msg, "/clear should show cleared message");
+    }
+
+    #[test]
+    fn e2e_model_picker_filter_narrows_results() {
+        let mut app = make_test_app();
+        app.model_picker = Some(ModelPickerState {
+            models: vec![
+                ModelEntry {
+                    id: "gpt-4o".into(),
+                    provider: "openai".into(),
+                    input_mtok: 0.0,
+                    output_mtok: 0.0,
+                    context_k: None,
+                    role: None,
+                    is_favorite: false,
+                },
+                ModelEntry {
+                    id: "claude-sonnet".into(),
+                    provider: "anthropic".into(),
+                    input_mtok: 0.0,
+                    output_mtok: 0.0,
+                    context_k: None,
+                    role: None,
+                    is_favorite: false,
+                },
+            ],
+            filter: String::new(),
+            selected: 0,
+            scroll_offset: 0,
+        });
+        for c in "claude".chars() {
+            sim_char(&mut app, c);
+        }
+        let picker = app.model_picker.as_ref().unwrap();
+        let filtered = picker.filtered();
+        assert_eq!(filtered.len(), 1, "filter 'claude' should match one model");
+        assert!(
+            filtered[0].id.contains("claude"),
+            "filtered model should be claude"
+        );
+    }
 }

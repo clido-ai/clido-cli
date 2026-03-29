@@ -44,6 +44,14 @@ pub static COMMANDS: &[SlashCommand] = &[
         requires_idle: false,
     },
     SlashCommand {
+        name: "/keys",
+        section: "Session",
+        description: "show keyboard shortcuts (overlay)",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
+    SlashCommand {
         name: "/quit",
         section: "Session",
         description: "exit clido",

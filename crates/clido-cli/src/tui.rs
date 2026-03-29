@@ -254,6 +254,23 @@ struct SessionPickerState {
     sessions: Vec<clido_storage::SessionSummary>,
     selected: usize,
     scroll_offset: usize,
+    filter: String,
+}
+
+impl SessionPickerState {
+    fn filtered(&self) -> Vec<(usize, &clido_storage::SessionSummary)> {
+        let f = self.filter.trim().to_lowercase();
+        if f.is_empty() {
+            return self.sessions.iter().enumerate().collect();
+        }
+        self.sessions
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                s.session_id.to_lowercase().contains(&f) || s.preview.to_lowercase().contains(&f)
+            })
+            .collect()
+    }
 }
 
 // ── Profile picker popup state ─────────────────────────────────────────────────
@@ -265,6 +282,25 @@ struct ProfilePickerState {
     scroll_offset: usize,
     /// Currently active profile name (shown with ▶ marker).
     active: String,
+    filter: String,
+}
+
+impl ProfilePickerState {
+    fn filtered(&self) -> Vec<(usize, &(String, clido_core::ProfileEntry))> {
+        let f = self.filter.trim().to_lowercase();
+        if f.is_empty() {
+            return self.profiles.iter().enumerate().collect();
+        }
+        self.profiles
+            .iter()
+            .enumerate()
+            .filter(|(_, (name, entry))| {
+                name.to_lowercase().contains(&f)
+                    || entry.provider.to_lowercase().contains(&f)
+                    || entry.model.to_lowercase().contains(&f)
+            })
+            .collect()
+    }
 }
 
 // ── Role picker popup state ────────────────────────────────────────────────────
@@ -274,6 +310,23 @@ struct RolePickerState {
     roles: Vec<(String, String)>,
     selected: usize,
     scroll_offset: usize,
+    filter: String,
+}
+
+impl RolePickerState {
+    fn filtered(&self) -> Vec<(usize, &(String, String))> {
+        let f = self.filter.trim().to_lowercase();
+        if f.is_empty() {
+            return self.roles.iter().enumerate().collect();
+        }
+        self.roles
+            .iter()
+            .enumerate()
+            .filter(|(_, (name, model))| {
+                name.to_lowercase().contains(&f) || model.to_lowercase().contains(&f)
+            })
+            .collect()
+    }
 }
 
 // ── Model picker popup state ──────────────────────────────────────────────────
@@ -1145,6 +1198,68 @@ struct PendingPerm {
     reply: oneshot::Sender<PermGrant>,
 }
 
+/// Structured error info for the error popup.
+struct ErrorInfo {
+    title: String,
+    detail: String,
+    recovery: Option<String>,
+    #[allow(dead_code)]
+    is_transient: bool,
+}
+
+impl ErrorInfo {
+    fn from_message(msg: impl Into<String>) -> Self {
+        let detail = msg.into();
+        // Map known API error patterns to structured info
+        if detail.contains("401")
+            || detail.contains("Unauthorized")
+            || detail.contains("Invalid API key")
+        {
+            Self {
+                title: "Authentication Error".into(),
+                detail: detail.clone(),
+                recovery: Some("Check your API key in /profile edit".into()),
+                is_transient: false,
+            }
+        } else if detail.contains("429")
+            || detail.contains("Rate limit")
+            || detail.contains("rate_limit")
+        {
+            Self {
+                title: "Rate Limited".into(),
+                detail: detail.clone(),
+                recovery: Some("Wait a moment, then try again".into()),
+                is_transient: true,
+            }
+        } else if detail.contains("500")
+            || detail.contains("502")
+            || detail.contains("503")
+            || detail.contains("Server error")
+        {
+            Self {
+                title: "Server Error".into(),
+                detail: detail.clone(),
+                recovery: Some("Try again — the provider may be experiencing issues".into()),
+                is_transient: true,
+            }
+        } else if detail.contains("Could not save") {
+            Self {
+                title: "Save Error".into(),
+                detail: detail.clone(),
+                recovery: Some("Check file permissions".into()),
+                is_transient: false,
+            }
+        } else {
+            Self {
+                title: "Error".into(),
+                detail,
+                recovery: None,
+                is_transient: false,
+            }
+        }
+    }
+}
+
 struct App {
     messages: Vec<ChatLine>,
     /// Live activity log shown in the status strip (last 2 entries).
@@ -1162,7 +1277,7 @@ struct App {
     spinner_tick: usize,
     pending_perm: Option<PendingPerm>,
     /// Error modal: shown as overlay, dismissed with Enter/Esc/Space.
-    pending_error: Option<String>,
+    pending_error: Option<ErrorInfo>,
     /// Unified overlay stack (new system — ErrorOverlay, ReadOnlyOverlay, etc.)
     overlay_stack: OverlayStack,
     prompt_tx: mpsc::UnboundedSender<String>,
@@ -2216,7 +2331,34 @@ fn render(frame: &mut Frame, app: &mut App) {
         let hint_dim = Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::DIM);
-        let mut hint_spans = vec![
+        // Mode indicator: show active overlay/picker name
+        let mode_label = if !app.overlay_stack.is_empty() {
+            app.overlay_stack.top().map(|o| o.title().to_string())
+        } else if app.profile_overlay.is_some() {
+            Some("Profile".into())
+        } else if app.settings.is_some() {
+            Some("Settings".into())
+        } else if app.model_picker.is_some() {
+            Some("Models".into())
+        } else if app.session_picker.is_some() {
+            Some("Sessions".into())
+        } else if app.profile_picker.is_some() {
+            Some("Profiles".into())
+        } else if app.role_picker.is_some() {
+            Some("Roles".into())
+        } else {
+            None
+        };
+        let mut hint_spans: Vec<Span<'static>> = Vec::new();
+        if let Some(label) = mode_label {
+            hint_spans.push(Span::styled(
+                format!("  [{}]  ", label),
+                Style::default()
+                    .fg(TUI_SOFT_ACCENT)
+                    .add_modifier(Modifier::DIM),
+            ));
+        }
+        hint_spans.extend([
             Span::styled("  Enter", Style::default().fg(Color::DarkGray)),
             Span::styled(" send  ", hint_dim),
             Span::styled("Shift+Enter", Style::default().fg(Color::DarkGray)),
@@ -2239,7 +2381,7 @@ fn render(frame: &mut Frame, app: &mut App) {
             Span::styled(" refresh  ", hint_dim),
             Span::styled("Shift+select", Style::default().fg(Color::DarkGray)),
             Span::styled(" copy text  ", hint_dim),
-        ];
+        ]);
         // Scroll position indicator when not following.
         if app.max_scroll > 0 && !app.following {
             let pct = (app.scroll * 100 / app.max_scroll).min(100);
@@ -2374,13 +2516,11 @@ fn render(frame: &mut Frame, app: &mut App) {
             .iter()
             .filter(|r| matches!(r, CompletionRow::Cmd { .. }))
             .count();
-        let title = format!(
-            " {} commands  (↑↓ navigate  Tab/Enter select  Esc close) ",
-            n_cmds
-        );
+        let title = format!(" {} commands ", n_cmds);
+        let hint = " ↑↓ navigate · Tab/Enter select · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content).block(modal_block(&title, TUI_SOFT_ACCENT)),
+            Paragraph::new(content).block(modal_block_with_hint(&title, hint, TUI_SOFT_ACCENT)),
             popup_rect,
         );
     }
@@ -2388,42 +2528,45 @@ fn render(frame: &mut Frame, app: &mut App) {
     // ── Session picker ───────────────────────────────────────────────────────
     if let Some(ref picker) = app.session_picker {
         const VISIBLE: usize = 12;
-        let n_rows = picker.sessions.len().min(VISIBLE) as u16;
-        // border(2) + header(1) + blank(1) + rows = n_rows + 4
+        let filtered = picker.filtered();
+        let n_rows = filtered.len().min(VISIBLE) as u16;
+        // border(2) + header(1) + blank(1) + filter(1) + rows = n_rows + 5
         let popup_h =
-            (n_rows + 4).min(input_area.y.saturating_sub(hint_area.y) + hint_area.y + input_area.y);
+            (n_rows + 5).min(input_area.y.saturating_sub(hint_area.y) + hint_area.y + input_area.y);
         let popup_h = popup_h.min(area.height.saturating_sub(4));
-        let popup_h = (n_rows + 4).min(popup_h.max(6));
+        let popup_h = (n_rows + 5).min(popup_h.max(6));
         let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
 
         let inner_w = popup_rect.width.saturating_sub(4) as usize;
         // fixed cols: marker(2) id(8) sep(2) msg(3) sep(2) cost(6) sep(2) date(11) sep(2) = 38
         let preview_w = inner_w.saturating_sub(38).max(8);
 
-        let mut content: Vec<Line<'static>> = vec![
-            Line::from(vec![Span::styled(
-                format!(
-                    "  {:<8}  {:<5}  {:<6}  {:<11}  {}",
-                    "id", "turns", "cost", "date", "preview"
-                ),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
-            )]),
-            Line::from(vec![Span::styled(
-                "  ────────  ─────  ──────  ───────────  ────────────────────".to_string(),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
-            )]),
-            Line::raw(""),
-        ];
+        let mut content: Vec<Line<'static>> = Vec::new();
+        // Filter line
+        if !picker.filter.is_empty() {
+            content.push(Line::from(vec![
+                Span::styled("  🔍 ", Style::default().fg(Color::DarkGray)),
+                Span::styled(picker.filter.clone(), Style::default().fg(Color::Yellow)),
+            ]));
+        }
+        content.push(Line::from(vec![Span::styled(
+            format!(
+                "  {:<8}  {:<5}  {:<6}  {:<11}  {}",
+                "id", "turns", "cost", "date", "preview"
+            ),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        )]));
+        content.push(Line::from(vec![Span::styled(
+            "  ────────  ─────  ──────  ───────────  ────────────────────".to_string(),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        )]));
 
-        let end = (picker.scroll_offset + VISIBLE).min(picker.sessions.len());
-        for (di, s) in picker.sessions[picker.scroll_offset..end]
-            .iter()
-            .enumerate()
-        {
+        let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
+        for (di, (_orig_idx, s)) in filtered[picker.scroll_offset..end].iter().enumerate() {
             let selected = picker.scroll_offset + di == picker.selected;
             let bg = if selected {
                 TUI_SELECTION_BG
@@ -2450,8 +2593,7 @@ fn render(frame: &mut Frame, app: &mut App) {
 
         // Add scroll indicators if there are more sessions above or below visible range.
         let above = picker.scroll_offset;
-        let below = picker
-            .sessions
+        let below = filtered
             .len()
             .saturating_sub(picker.scroll_offset + VISIBLE);
         if above > 0 || below > 0 {
@@ -2470,14 +2612,12 @@ fn render(frame: &mut Frame, app: &mut App) {
             )]));
         }
 
-        let total = picker.sessions.len();
-        let picker_title = format!(
-            " Sessions — {} total  (↑↓  Enter=resume  Esc=close) ",
-            total
-        );
+        let total = filtered.len();
+        let picker_title = format!(" Sessions — {} total ", total);
+        let hint = " ↑↓ navigate · Enter resume · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content).block(modal_block(&picker_title, Color::Cyan)),
+            Paragraph::new(content).block(modal_block_with_hint(&picker_title, hint, Color::Cyan)),
             popup_rect,
         );
     }
@@ -2569,16 +2709,14 @@ fn render(frame: &mut Frame, app: &mut App) {
 
         let total = filtered.len();
         let title = if app.models_loading && total == 0 {
-            " Models — fetching…  (Esc=close) ".to_string()
+            " Models — fetching… ".to_string()
         } else {
-            format!(
-                " Models — {} found  (↑↓  Enter=use for session  Ctrl+S=save as default  f=fav  Esc=close  type to filter) ",
-                total
-            )
+            format!(" Models — {} found ", total)
         };
+        let hint = " ↑↓ navigate · Enter select · Ctrl+S save default · f fav · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content).block(modal_block(&title, Color::Magenta)),
+            Paragraph::new(content).block(modal_block_with_hint(&title, hint, Color::Magenta)),
             popup_rect,
         );
     }
@@ -2586,32 +2724,41 @@ fn render(frame: &mut Frame, app: &mut App) {
     // ── Profile picker popup ──────────────────────────────────────────────────
     if let Some(ref picker) = app.profile_picker {
         const VISIBLE: usize = 12;
-        let n_rows = picker.profiles.len().clamp(1, VISIBLE) as u16;
-        let popup_h = (n_rows + 4).min(area.height.saturating_sub(4)).max(5);
+        let filtered = picker.filtered();
+        let n_rows = filtered.len().clamp(1, VISIBLE) as u16;
+        let popup_h = (n_rows + 5).min(area.height.saturating_sub(4)).max(5);
         let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
         let inner_w = popup_rect.width.saturating_sub(4) as usize;
 
-        let mut content: Vec<Line<'static>> = vec![
-            Line::from(Span::styled(
-                format!("  {:<20}  {}", "profile", "provider / model"),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
-            )),
-            Line::raw(""),
-        ];
+        let mut content: Vec<Line<'static>> = Vec::new();
+        if !picker.filter.is_empty() {
+            content.push(Line::from(vec![
+                Span::styled("  🔍 ", Style::default().fg(Color::DarkGray)),
+                Span::styled(picker.filter.clone(), Style::default().fg(Color::Yellow)),
+            ]));
+        }
+        content.push(Line::from(Span::styled(
+            format!("  {:<20}  {}", "profile", "provider / model"),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        )));
+        content.push(Line::raw(""));
 
-        if picker.profiles.is_empty() {
+        if filtered.is_empty() {
             content.push(Line::from(Span::styled(
-                "  no profiles — press n to create one",
+                if picker.filter.is_empty() {
+                    "  no profiles — press n to create one"
+                } else {
+                    "  no matches"
+                },
                 Style::default().fg(Color::DarkGray),
             )));
         }
 
-        let end = (picker.scroll_offset + VISIBLE).min(picker.profiles.len());
-        for (di, (name, entry)) in picker.profiles[picker.scroll_offset..end]
-            .iter()
-            .enumerate()
+        let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
+        for (di, (_orig_idx, (name, entry))) in
+            filtered[picker.scroll_offset..end].iter().enumerate()
         {
             let selected = picker.scroll_offset + di == picker.selected;
             let is_active = name == &picker.active;
@@ -2634,8 +2781,7 @@ fn render(frame: &mut Frame, app: &mut App) {
         }
 
         let above = picker.scroll_offset;
-        let below = picker
-            .profiles
+        let below = filtered
             .len()
             .saturating_sub(picker.scroll_offset + VISIBLE);
         if above > 0 || below > 0 {
@@ -2654,13 +2800,11 @@ fn render(frame: &mut Frame, app: &mut App) {
             )));
         }
 
-        let title = format!(
-            " Profiles — {}  (↑↓ navigate  Enter=switch  n=new  e=edit  Esc=close) ",
-            picker.active
-        );
+        let title = format!(" Profiles — {} ", picker.active);
+        let hint = " ↑↓ navigate · Enter switch · n new · e edit · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content).block(modal_block(&title, Color::Cyan)),
+            Paragraph::new(content).block(modal_block_with_hint(&title, hint, Color::Cyan)),
             popup_rect,
         );
     }
@@ -2668,23 +2812,31 @@ fn render(frame: &mut Frame, app: &mut App) {
     // ── Role picker popup ─────────────────────────────────────────────────────
     if let Some(ref picker) = app.role_picker {
         const VISIBLE: usize = 10;
-        let n_rows = picker.roles.len().min(VISIBLE) as u16;
-        let popup_h = (n_rows + 4).min(area.height.saturating_sub(4)).max(5);
+        let filtered = picker.filtered();
+        let n_rows = filtered.len().min(VISIBLE) as u16;
+        let popup_h = (n_rows + 5).min(area.height.saturating_sub(4)).max(5);
         let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
         let inner_w = popup_rect.width.saturating_sub(4) as usize;
 
-        let mut content: Vec<Line<'static>> = vec![
-            Line::from(Span::styled(
-                format!("  {:<16}  {}", "role", "model"),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
-            )),
-            Line::raw(""),
-        ];
+        let mut content: Vec<Line<'static>> = Vec::new();
+        if !picker.filter.is_empty() {
+            content.push(Line::from(vec![
+                Span::styled("  🔍 ", Style::default().fg(Color::DarkGray)),
+                Span::styled(picker.filter.clone(), Style::default().fg(Color::Yellow)),
+            ]));
+        }
+        content.push(Line::from(Span::styled(
+            format!("  {:<16}  {}", "role", "model"),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        )));
+        content.push(Line::raw(""));
 
-        let end = (picker.scroll_offset + VISIBLE).min(picker.roles.len());
-        for (di, (role, model)) in picker.roles[picker.scroll_offset..end].iter().enumerate() {
+        let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
+        for (di, (_orig_idx, (role, model))) in
+            filtered[picker.scroll_offset..end].iter().enumerate()
+        {
             let selected = picker.scroll_offset + di == picker.selected;
             let bg = if selected {
                 TUI_SELECTION_BG
@@ -2701,8 +2853,7 @@ fn render(frame: &mut Frame, app: &mut App) {
         }
 
         let above = picker.scroll_offset;
-        let below = picker
-            .roles
+        let below = filtered
             .len()
             .saturating_sub(picker.scroll_offset + VISIBLE);
         if above > 0 || below > 0 {
@@ -2721,13 +2872,11 @@ fn render(frame: &mut Frame, app: &mut App) {
             )));
         }
 
-        let title = format!(
-            " Roles — {}  (↑↓ navigate  Enter=switch model  Esc=close) ",
-            picker.roles.len()
-        );
+        let title = format!(" Roles — {} ", filtered.len());
+        let hint = " ↑↓ navigate · Enter switch model · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content).block(modal_block(&title, Color::Yellow)),
+            Paragraph::new(content).block(modal_block_with_hint(&title, hint, Color::Yellow)),
             popup_rect,
         );
     }
@@ -2861,11 +3010,21 @@ fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // ── Error modal ──────────────────────────────────────────────────────────
-    if let Some(ref err_msg) = app.pending_error {
+    if let Some(ref err_info) = app.pending_error {
         let inner_w = input_area.width.saturating_sub(4) as usize;
-        let wrapped = word_wrap(err_msg, inner_w);
-        // blank + "[ OK ]" = +2; borders = +2
-        let popup_h = ((wrapped.len() as u16) + 4).min(area.height.saturating_sub(4));
+        let wrapped = word_wrap(&err_info.detail, inner_w);
+        let recovery_lines = err_info
+            .recovery
+            .as_ref()
+            .map(|r| word_wrap(r, inner_w))
+            .unwrap_or_default();
+        // blank + recovery + "[ OK ]" = variable; borders = +2
+        let extra = if recovery_lines.is_empty() {
+            0
+        } else {
+            recovery_lines.len() + 1
+        };
+        let popup_h = ((wrapped.len() + extra + 4) as u16).min(area.height.saturating_sub(4));
         let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
 
         let mut content: Vec<Line<'static>> = wrapped
@@ -2877,6 +3036,15 @@ fn render(frame: &mut Frame, app: &mut App) {
                 )])
             })
             .collect();
+        if !recovery_lines.is_empty() {
+            content.push(Line::raw(""));
+            for l in recovery_lines {
+                content.push(Line::from(vec![Span::styled(
+                    format!("  → {}", l),
+                    Style::default().fg(Color::Cyan),
+                )]));
+            }
+        }
         content.push(Line::raw(""));
         content.push(Line::from(vec![Span::styled(
             "  [ OK ]  (Enter / Esc / Space)",
@@ -2885,9 +3053,10 @@ fn render(frame: &mut Frame, app: &mut App) {
                 .add_modifier(Modifier::BOLD),
         )]));
 
+        let title = format!(" {} ", err_info.title);
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content).block(modal_block(" Error ", Color::Red)),
+            Paragraph::new(content).block(modal_block(&title, Color::Red)),
             popup_rect,
         );
     }
@@ -2979,20 +3148,24 @@ fn render(frame: &mut Frame, app: &mut App) {
                         Style::default().fg(Color::DarkGray),
                     )]));
                 } else {
-                    for (id, text) in &r.lines {
-                        if id.trim().is_empty() {
+                    for (heading, text) in &r.lines {
+                        if heading.trim().is_empty() && text.trim().is_empty() {
                             content.push(Line::raw(""));
                         } else {
-                            content.push(Line::from(vec![Span::styled(
-                                format!("  {}", id),
-                                Style::default()
-                                    .fg(Color::Cyan)
-                                    .add_modifier(Modifier::BOLD),
-                            )]));
-                            content.push(Line::from(vec![Span::styled(
-                                format!("    {}", truncate_chars(text, 74)),
-                                Style::default().fg(Color::Gray),
-                            )]));
+                            if !heading.is_empty() {
+                                content.push(Line::from(vec![Span::styled(
+                                    format!("  {}", heading),
+                                    Style::default()
+                                        .fg(Color::Cyan)
+                                        .add_modifier(Modifier::BOLD),
+                                )]));
+                            }
+                            for line in text.lines() {
+                                content.push(Line::from(vec![Span::styled(
+                                    format!("    {}", line),
+                                    Style::default().fg(Color::Gray),
+                                )]));
+                            }
                             content.push(Line::raw(""));
                         }
                     }
@@ -3006,11 +3179,18 @@ fn render(frame: &mut Frame, app: &mut App) {
                 )]));
                 let popup_h = ((content.len() as u16) + 2).min(area.height.saturating_sub(4));
                 let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
+                let scroll_offset = r.scroll_offset as u16;
                 frame.render_widget(Clear, popup_rect);
+                let hint_text = if content.len() as u16 > popup_h.saturating_sub(2) {
+                    format!(" {} — ↑↓ scroll · Esc close ", r.title)
+                } else {
+                    format!(" {} — Esc close ", r.title)
+                };
                 frame.render_widget(
                     Paragraph::new(content)
-                        .block(modal_block(&format!(" {} ", r.title), Color::Cyan))
-                        .wrap(Wrap { trim: false }),
+                        .block(modal_block(&hint_text, Color::Cyan))
+                        .wrap(Wrap { trim: false })
+                        .scroll((scroll_offset, 0)),
                     popup_rect,
                 );
             }
@@ -4329,6 +4509,20 @@ fn modal_block(title: &str, border_color: Color) -> Block<'static> {
         .border_style(Style::default().fg(border_color))
 }
 
+fn modal_block_with_hint(title: &str, hint: &str, border_color: Color) -> Block<'static> {
+    Block::default()
+        .title(title.to_string())
+        .title_alignment(Alignment::Left)
+        .title_bottom(Line::from(Span::styled(
+            hint.to_string(),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        )))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+}
+
 /// Two-column row (e.g. for slash completions): cmd | description, with highlight on selection.
 fn modal_row_two_col(
     left: String,
@@ -4740,6 +4934,9 @@ fn execute_slash(app: &mut App, cmd: &str) {
             app.push(ChatLine::Info(
                 "PgUp/PgDn          scroll conversation".into(),
             ));
+            app.push(ChatLine::Info(
+                "Ctrl+Home/End      jump to top/bottom".into(),
+            ));
             app.push(ChatLine::Info("Ctrl+U             clear input".into()));
             app.push(ChatLine::Info(
                 "Ctrl+W             delete word backward".into(),
@@ -4773,6 +4970,63 @@ fn execute_slash(app: &mut App, cmd: &str) {
                 "                   e.g. @claude-opus-4-6 refactor this".into(),
             ));
             app.push(ChatLine::Info("".into()));
+        }
+        "/keys" => {
+            use crate::overlay::{OverlayKind, ReadOnlyOverlay};
+            let lines: Vec<(String, String)> = vec![
+                (
+                    "Navigation".into(),
+                    "Enter              send message\n\
+                    Shift+Enter        insert newline (multiline)\n\
+                    Ctrl+Enter         interrupt & send\n\
+                    ↑↓ (empty input)   scroll conversation\n\
+                    ↑↓ (with text)     history navigation\n\
+                    PgUp/PgDn          scroll 10 lines\n\
+                    Ctrl+Home/End      jump to top/bottom\n\
+                    Home/End           cursor start/end of line\n\
+                    Alt+←/→            jump by word\n\
+                    Ctrl+U             clear input\n\
+                    Ctrl+W             delete word backward"
+                        .into(),
+                ),
+                (
+                    "Agent Controls".into(),
+                    "Ctrl+C             quit\n\
+                    Ctrl+/             interrupt current run\n\
+                    Ctrl+Y             copy last assistant message\n\
+                    Ctrl+L             refresh screen\n\
+                    Queue              type while agent runs, auto-sends on finish"
+                        .into(),
+                ),
+                (
+                    "Pickers".into(),
+                    "↑↓                 navigate items\n\
+                    Enter              select / confirm\n\
+                    Esc                close / cancel\n\
+                    Type               filter items (model, provider pickers)\n\
+                    Backspace          remove filter char\n\
+                    f                  toggle favorite (model picker)\n\
+                    Ctrl+S             save as default (model picker)\n\
+                    n                  new (profile picker)\n\
+                    e                  edit (profile picker)"
+                        .into(),
+                ),
+                (
+                    "Plan Editor".into(),
+                    "Ctrl+S             save plan\n\
+                    Esc                discard changes"
+                        .into(),
+                ),
+                (
+                    "Per-turn Override".into(),
+                    "@model-name <msg>  use a different model for one turn".into(),
+                ),
+            ];
+            app.overlay_stack
+                .push(OverlayKind::ReadOnly(ReadOnlyOverlay::new(
+                    "Keyboard Shortcuts",
+                    lines,
+                )));
         }
         "/fast" => {
             let new_model = app
@@ -4871,6 +5125,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                         roles,
                         selected: 0,
                         scroll_offset: 0,
+                        filter: String::new(),
                     });
                 }
             } else {
@@ -4969,6 +5224,7 @@ fn execute_slash(app: &mut App, cmd: &str) {
                         sessions,
                         selected,
                         scroll_offset: 0,
+                        filter: String::new(),
                     });
                 }
             }
@@ -5438,7 +5694,10 @@ fn execute_slash(app: &mut App, cmd: &str) {
                                 path.display()
                             ))),
                             Err(e) => {
-                                app.pending_error = Some(format!("Could not save plan: {}", e))
+                                app.pending_error = Some(ErrorInfo::from_message(format!(
+                                    "Could not save plan: {}",
+                                    e
+                                )))
                             }
                         }
                     } else if let Some(ref plan) = app.last_plan_snapshot {
@@ -5448,7 +5707,10 @@ fn execute_slash(app: &mut App, cmd: &str) {
                                 path.display()
                             ))),
                             Err(e) => {
-                                app.pending_error = Some(format!("Could not save plan: {}", e))
+                                app.pending_error = Some(ErrorInfo::from_message(format!(
+                                    "Could not save plan: {}",
+                                    e
+                                )))
                             }
                         }
                     } else {
@@ -5492,7 +5754,8 @@ fn execute_slash(app: &mut App, cmd: &str) {
                         ));
                     }
                     Err(e) => {
-                        app.pending_error = Some(format!("list plans: {}", e));
+                        app.pending_error =
+                            Some(ErrorInfo::from_message(format!("list plans: {}", e)));
                     }
                 },
                 "" => {
@@ -5861,6 +6124,7 @@ Once built, the agent can search by concept rather than just filename.".into(),
                         selected,
                         scroll_offset: 0,
                         active,
+                        filter: String::new(),
                     });
                 }
             }
@@ -7425,7 +7689,10 @@ fn handle_plan_editor_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         )));
                     }
                     Err(e) => {
-                        app.pending_error = Some(format!("Could not save plan: {}", e));
+                        app.pending_error = Some(ErrorInfo::from_message(format!(
+                            "Could not save plan: {}",
+                            e
+                        )));
                     }
                 }
             }
@@ -8465,7 +8732,8 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Down => {
                 if let Some(picker) = &mut app.session_picker {
-                    if picker.selected + 1 < picker.sessions.len() {
+                    let n = picker.filtered().len();
+                    if picker.selected + 1 < n {
                         picker.selected += 1;
                         if picker.selected >= picker.scroll_offset + VISIBLE {
                             picker.scroll_offset = picker.selected - VISIBLE + 1;
@@ -8475,12 +8743,14 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Enter => {
                 if let Some(picker) = app.session_picker.take() {
-                    if picker.sessions.is_empty() {
+                    let filtered = picker.filtered();
+                    if filtered.is_empty() {
                         return;
                     }
+                    let (orig_idx, _) = filtered[picker.selected];
                     app.input.clear();
                     app.cursor = 0;
-                    let id = picker.sessions[picker.selected].session_id.clone();
+                    let id = picker.sessions[orig_idx].session_id.clone();
                     if app.current_session_id.as_deref() == Some(&id) {
                         app.push(ChatLine::Info("  Already in this session".into()));
                     } else {
@@ -8492,6 +8762,20 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.session_picker = None;
                 app.input.clear();
                 app.cursor = 0;
+            }
+            Backspace => {
+                if let Some(picker) = &mut app.session_picker {
+                    picker.filter.pop();
+                    picker.selected = 0;
+                    picker.scroll_offset = 0;
+                }
+            }
+            Char(c) => {
+                if let Some(picker) = &mut app.session_picker {
+                    picker.filter.push(c);
+                    picker.selected = 0;
+                    picker.scroll_offset = 0;
+                }
             }
             _ => {}
         }
@@ -8514,7 +8798,8 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Down => {
                 if let Some(picker) = &mut app.profile_picker {
-                    if picker.selected + 1 < picker.profiles.len() {
+                    let n = picker.filtered().len();
+                    if picker.selected + 1 < n {
                         picker.selected += 1;
                         if picker.selected >= picker.scroll_offset + VISIBLE {
                             picker.scroll_offset = picker.selected - VISIBLE + 1;
@@ -8524,10 +8809,12 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Enter => {
                 if let Some(picker) = app.profile_picker.take() {
-                    if picker.profiles.is_empty() {
+                    let filtered = picker.filtered();
+                    if filtered.is_empty() {
                         return;
                     }
-                    let (name, _) = &picker.profiles[picker.selected];
+                    let (orig_idx, _) = filtered[picker.selected];
+                    let (name, _) = &picker.profiles[orig_idx];
                     if name == &picker.active {
                         app.push(ChatLine::Info(format!(
                             "  profile '{}' is already active.",
@@ -8555,7 +8842,9 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             KeyCode::Char('e') => {
                 if let Some(picker) = app.profile_picker.take() {
-                    if let Some((name, entry)) = picker.profiles.get(picker.selected) {
+                    let filtered = picker.filtered();
+                    if let Some(&(orig_idx, _)) = filtered.get(picker.selected) {
+                        let (name, entry) = &picker.profiles[orig_idx];
                         let config_path = clido_core::global_config_path()
                             .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
                         app.profile_overlay = Some(ProfileOverlayState::for_edit(
@@ -8564,6 +8853,20 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                             config_path,
                         ));
                     }
+                }
+            }
+            Backspace => {
+                if let Some(picker) = &mut app.profile_picker {
+                    picker.filter.pop();
+                    picker.selected = 0;
+                    picker.scroll_offset = 0;
+                }
+            }
+            Char(c) if c != 'n' && c != 'e' => {
+                if let Some(picker) = &mut app.profile_picker {
+                    picker.filter.push(c);
+                    picker.selected = 0;
+                    picker.scroll_offset = 0;
                 }
             }
             _ => {}
@@ -8587,7 +8890,8 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Down => {
                 if let Some(picker) = &mut app.role_picker {
-                    if picker.selected + 1 < picker.roles.len() {
+                    let n = picker.filtered().len();
+                    if picker.selected + 1 < n {
                         picker.selected += 1;
                         if picker.selected >= picker.scroll_offset + VISIBLE {
                             picker.scroll_offset = picker.selected - VISIBLE + 1;
@@ -8597,10 +8901,12 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Enter => {
                 if let Some(picker) = app.role_picker.take() {
-                    if picker.roles.is_empty() {
+                    let filtered = picker.filtered();
+                    if filtered.is_empty() {
                         return;
                     }
-                    let (role_name, model_id) = &picker.roles[picker.selected];
+                    let (orig_idx, _) = filtered[picker.selected];
+                    let (role_name, model_id) = &picker.roles[orig_idx];
                     let model_id = model_id.clone();
                     let role_name = role_name.clone();
                     app.model = model_id.clone();
@@ -8615,6 +8921,20 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Esc => {
                 app.role_picker = None;
+            }
+            Backspace => {
+                if let Some(picker) = &mut app.role_picker {
+                    picker.filter.pop();
+                    picker.selected = 0;
+                    picker.scroll_offset = 0;
+                }
+            }
+            Char(c) => {
+                if let Some(picker) = &mut app.role_picker {
+                    picker.filter.push(c);
+                    picker.selected = 0;
+                    picker.scroll_offset = 0;
+                }
             }
             _ => {}
         }
@@ -8841,6 +9161,14 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             if app.cursor < app.input.chars().count() {
                 app.cursor += 1;
             }
+        }
+        // ── Jump to top / bottom of chat ─────────────────────────────────────
+        (Km::CONTROL, Home) => {
+            app.scroll = 0;
+            app.following = false;
+        }
+        (Km::CONTROL, End) => {
+            app.following = true;
         }
         (_, Home) => app.cursor = 0,
         (_, End) => app.cursor = app.input.chars().count(),
@@ -10471,7 +10799,7 @@ async fn event_loop(
                             app.model = prev.clone();
                             let _ = app.model_switch_tx.send(prev);
                         }
-                        app.pending_error = Some(msg);
+                        app.pending_error = Some(ErrorInfo::from_message(msg));
                         app.on_agent_done();
                     }
                     Some(AgentEvent::ResumedSession { messages }) => {

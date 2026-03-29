@@ -12,14 +12,15 @@
 #   <anything>      — pass directly to clido (e.g. doctor, sessions list, run "fix bug")
 #
 # Config selection (in priority order):
-#   1. CLIDO_CONFIG=/path/to/config.toml  — explicit config file path
+#   1. CLIDO_CONFIG=/path/to/config.toml  — explicit config file path (overrides all)
 #   2. CLIDO_TEST_DIR=/path/to/dir        — uses <dir>/config.toml as config
-#   3. (nothing)                          — uses your real ~/.config/clido/config.toml
+#   3. (nothing)                          — defaults to ~/.config/clido-test-env/config.toml
+#                                           (NEVER touches ~/.config/clido/config.toml)
 #
 # Examples:
-#   ./scripts/run-in-test-env.sh tui                          # real config
-#   CLIDO_TEST_DIR=/tmp/mytest ./scripts/run-in-test-env.sh tui  # test config
-#   CLIDO_CONFIG=/tmp/mytest/config.toml ./scripts/run-in-test-env.sh tui
+#   ./scripts/run-in-test-env.sh tui                                    # real config
+#   CLIDO_TEST_DIR=~/.config/clido-test-env ./scripts/run-in-test-env.sh tui  # test config
+#   CLIDO_CONFIG=~/.config/clido-test-env/config.toml ./scripts/run-in-test-env.sh tui
 #
 # Override workdir:   CLIDO_WORKDIR=/your/project  ./scripts/run-in-test-env.sh tui
 
@@ -30,16 +31,13 @@ cd "$REPO_ROOT"
 # Workdir for clido: honour CLIDO_WORKDIR env var, otherwise default to REPO_ROOT.
 export CLIDO_WORKDIR="${CLIDO_WORKDIR:-$REPO_ROOT}"
 
-TEST_DIR="${CLIDO_TEST_DIR:-/tmp/clido-test-env}"
+TEST_DIR="${CLIDO_TEST_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/clido-test-env}"
 
-# Resolve which config to use:
-#   - CLIDO_CONFIG set explicitly → use as-is
-#   - CLIDO_TEST_DIR set          → use TEST_DIR/config.toml
-#   - neither                     → leave unset (clido uses ~/.config/clido/config.toml)
-if [ -z "${CLIDO_CONFIG:-}" ] && [ -n "${CLIDO_TEST_DIR:-}" ]; then
+# Always use the test config unless CLIDO_CONFIG is explicitly set.
+# This keeps the script isolated from ~/.config/clido/config.toml by default.
+if [ -z "${CLIDO_CONFIG:-}" ]; then
   export CLIDO_CONFIG="$TEST_DIR/config.toml"
 fi
-# If CLIDO_CONFIG is already set in the environment it is automatically inherited.
 
 run_verify() {
   echo "=== Build ==="

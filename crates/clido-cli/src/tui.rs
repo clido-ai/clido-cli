@@ -10190,7 +10190,23 @@ async fn event_loop(
                         // Normalise line endings to \n but preserve newlines so users can
                         // paste multiline markdown without it collapsing into a single line.
                         text = text.replace("\r\n", "\n").replace('\r', "\n");
-                        if !text.is_empty() {
+                        if text.is_empty() {
+                            // nothing to do
+                        } else if let Some(ref mut ov) = app.profile_overlay {
+                            // Route paste into the active profile overlay text input.
+                            // Provider/model picker steps don't accept free-text paste.
+                            let accepts_text = matches!(
+                                &ov.mode,
+                                ProfileOverlayMode::Creating {
+                                    step: ProfileCreateStep::Name | ProfileCreateStep::ApiKey,
+                                } | ProfileOverlayMode::EditField(_)
+                            );
+                            if accepts_text {
+                                let b = char_byte_pos_tui(&ov.input, ov.input_cursor);
+                                ov.input.insert_str(b, &text);
+                                ov.input_cursor += text.chars().count();
+                            }
+                        } else {
                             let byte_pos = char_byte_pos(&app.input, app.cursor);
                             app.input.insert_str(byte_pos, &text);
                             app.cursor += text.chars().count();

@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use clido_agent::{AskUser, PermGrant, PermRequest};
 use clido_core::ProfileEntry;
-use clido_providers::{build_provider, ModelProvider, PROVIDER_REGISTRY};
+use clido_providers::{build_provider_with_ua, ModelProvider, PROVIDER_REGISTRY};
 use std::collections::HashMap;
 use std::env;
 use std::io::{self, Write};
@@ -353,6 +353,12 @@ pub fn make_provider(
         }
     };
     let model = model_override.unwrap_or(&profile.model).to_string();
-    build_provider(provider_name, api_key, model, profile.base_url.as_deref())
-        .map_err(|e| e.to_string())
+    build_provider_with_ua(
+        provider_name,
+        api_key,
+        model,
+        profile.base_url.as_deref(),
+        profile.user_agent.clone(),
+    )
+    .map_err(|e| e.to_string())
 }

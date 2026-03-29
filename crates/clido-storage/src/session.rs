@@ -325,6 +325,15 @@ pub fn prune_old_sessions(project_path: &Path, max_age_days: u64) -> anyhow::Res
     Ok(removed)
 }
 
+/// Delete a single session file by its ID.
+pub fn delete_session(project_path: &Path, session_id: &str) -> anyhow::Result<()> {
+    let path = paths::session_file_path(project_path, session_id)?;
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    }
+    Ok(())
+}
+
 /// List sessions for a project (newest first). Reads session dir and parses first line for meta.
 pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>> {
     let dir = paths::session_dir_for_project(project_path)?;

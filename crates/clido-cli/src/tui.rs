@@ -47,6 +47,7 @@ use clido_memory::MemoryStore;
 use clido_planner::{Complexity, Plan, PlanEditor, TaskStatus};
 
 use crate::overlay::{AppAction, ErrorOverlay, OverlayKeyResult, OverlayKind, OverlayStack};
+use crate::text_input::TextInput;
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -877,65 +878,7 @@ impl ProfileOverlayState {
     }
 }
 
-// ── Settings editor popup ──────────────────────────────────────────────────────
-
-/// Which field is being edited in the settings/roles editor.
-#[derive(Debug, Clone, PartialEq)]
-enum SettingsEditField {
-    None,
-    DefaultModel,     // editing the default model string
-    RoleName(usize),  // editing role name at index (usize::MAX = new)
-    RoleModel(usize), // editing model id at index
-}
-
-struct SettingsState {
-    /// Current roles (name, model_id) — loaded from config on open.
-    roles: Vec<(String, String)>,
-    cursor: usize,
-    edit_field: SettingsEditField,
-    input: String,
-    /// Path to the config file that will be updated on save.
-    config_path: std::path::PathBuf,
-    /// Status message after save.
-    status: Option<String>,
-    /// Default model from config (editable).
-    default_model: String,
-    /// Active config profile name (used when saving default model).
-    profile: String,
-}
-
-impl SettingsState {
-    fn new(
-        config_path: std::path::PathBuf,
-        roles: std::collections::HashMap<String, String>,
-        default_model: String,
-        profile: String,
-    ) -> Self {
-        let mut sorted: Vec<(String, String)> = roles.into_iter().collect();
-        sorted.sort_by(|a, b| a.0.cmp(&b.0));
-        Self {
-            roles: sorted,
-            cursor: 0,
-            edit_field: SettingsEditField::None,
-            input: String::new(),
-            config_path,
-            status: None,
-            default_model,
-            profile,
-        }
-    }
-
-    /// Write roles and default model back to the config file.
-    fn save(&mut self) {
-        let r1 = save_roles_to_config(&self.config_path, &self.roles);
-        let r2 =
-            save_default_model_to_config(&self.config_path, &self.default_model, &self.profile);
-        match (r1, r2) {
-            (Ok(()), Ok(())) => self.status = Some("  ✓  saved to config.toml".into()),
-            (Err(e), _) | (_, Err(e)) => self.status = Some(format!("  ✗  {}", e)),
-        }
-    }
-}
+// ── Config file helpers (used by /role commands) ──────────────────────────────
 
 /// Read config file, update `[roles]` section, write back.
 fn save_roles_to_config(path: &std::path::Path, roles: &[(String, String)]) -> Result<(), String> {
@@ -1260,12 +1203,20 @@ impl ErrorInfo {
     }
 }
 
+// ── Toast notifications ────────────────────────────────────────────────────────
+
+/// Non-blocking notification that auto-dismisses after a timeout.
+struct Toast {
+    message: String,
+    style: Color,
+    expires: std::time::Instant,
+}
+
 struct App {
     messages: Vec<ChatLine>,
     /// Live activity log shown in the status strip (last 2 entries).
     status_log: std::collections::VecDeque<StatusEntry>,
-    input: String,
-    cursor: usize,
+    text_input: TextInput,
     /// Current scroll offset (logical lines from top). Updated by handle_key; clamped in render.
     scroll: u32,
     /// Max scroll as computed during the last render — used by handle_key to scroll up correctly.
@@ -1297,8 +1248,6 @@ struct App {
     profile_picker: Option<ProfilePickerState>,
     /// Role picker popup state (Some = popup visible).
     role_picker: Option<RolePickerState>,
-    /// Settings editor popup (Some = visible).
-    settings: Option<SettingsState>,
     /// In-TUI profile overview/editor overlay (Some = visible).
     profile_overlay: Option<ProfileOverlayState>,
     /// All known models (built at startup from pricing table + profiles).
@@ -1336,14 +1285,7 @@ struct App {
     current_session_id: Option<String>,
     /// Project root used for listing sessions.
     workspace_root: std::path::PathBuf,
-    /// Previously submitted prompts (oldest first), for Up/Down history navigation.
-    input_history: Vec<String>,
-    /// Index into input_history while navigating (None = current draft).
-    history_idx: Option<usize>,
-    /// Saved draft while navigating history, so Down restores it.
-    history_draft: String,
-    /// Horizontal scroll offset for the input field (in chars), so long inputs stay visible.
-    input_scroll: usize,
+
     /// Last completed agent invocation's token totals (for context % in header).
     session_input_tokens: u64,
     session_output_tokens: u64,
@@ -1430,6 +1372,8 @@ struct App {
     /// Hash of the messages Vec at the time the cache was last populated.
     /// Used to detect when messages change and stale entries should be evicted.
     render_cache_msg_count: usize,
+    /// Non-blocking toast notifications (auto-dismiss).
+    toasts: Vec<Toast>,
 }
 
 impl App {
@@ -1461,8 +1405,7 @@ impl App {
         let mut app = Self {
             messages: Vec::new(),
             status_log: std::collections::VecDeque::new(),
-            input: String::new(),
-            cursor: 0,
+            text_input: TextInput::new(),
             scroll: 0,
             max_scroll: 0,
             following: true,
@@ -1481,7 +1424,6 @@ impl App {
             model_picker: None,
             profile_picker: None,
             role_picker: None,
-            settings: None,
             profile_overlay: None,
             known_models,
             model_prefs,
@@ -1502,10 +1444,7 @@ impl App {
             current_profile,
             current_session_id: None,
             workspace_root,
-            input_history: Vec::new(),
-            history_idx: None,
-            history_draft: String::new(),
-            input_scroll: 0,
+
             session_input_tokens: 0,
             session_output_tokens: 0,
             session_cost_usd: 0.0,
@@ -1546,6 +1485,7 @@ impl App {
             models_loading: false,
             render_cache: std::collections::HashMap::new(),
             render_cache_msg_count: 0,
+            toasts: Vec::new(),
         };
         app.prompt_mode = load_prompt_mode(&app.workspace_root);
         app.prompt_rules = load_rules(&app.workspace_root);
@@ -1558,18 +1498,38 @@ impl App {
         // scroll position is computed at render time when following=true
     }
 
+    /// Show a non-blocking toast that auto-dismisses after `duration`.
+    fn push_toast(
+        &mut self,
+        message: impl Into<String>,
+        style: Color,
+        duration: std::time::Duration,
+    ) {
+        self.toasts.push(Toast {
+            message: message.into(),
+            style,
+            expires: std::time::Instant::now() + duration,
+        });
+    }
+
+    /// Remove expired toasts.
+    fn expire_toasts(&mut self) {
+        let now = std::time::Instant::now();
+        self.toasts.retain(|t| t.expires > now);
+    }
+
     /// Send immediately (not busy). Moves input → chat + agent.
     /// If input starts with `@model-name prompt`, applies a per-turn model override.
     /// Send `prompt` to the agent without showing anything in the chat.
     fn send_silent(&mut self, prompt: String) {
         let _ = self.prompt_tx.send(prompt);
-        self.input.clear();
-        self.cursor = 0;
+        self.text_input.text.clear();
+        self.text_input.cursor = 0;
         self.busy = true;
         self.following = true;
         self.turn_start = Some(std::time::Instant::now());
-        self.history_idx = None;
-        self.history_draft.clear();
+        self.text_input.history_idx = None;
+        self.text_input.history_draft.clear();
     }
 
     fn send_now(&mut self, text: String) {
@@ -1591,19 +1551,19 @@ impl App {
                 per_turn_model
             )));
             self.push(ChatLine::User(actual_prompt.clone()));
-            if self.input_history.last().map(|s| s.as_str()) != Some(text.as_str()) {
-                self.input_history.push(text);
-                if self.input_history.len() > 1000 {
-                    self.input_history.remove(0);
+            if self.text_input.history.last().map(|s| s.as_str()) != Some(text.as_str()) {
+                self.text_input.history.push(text);
+                if self.text_input.history.len() > 1000 {
+                    self.text_input.history.remove(0);
                 }
             }
             self.prompt_tx.send(actual_prompt)
         } else {
             self.push(ChatLine::User(text.clone()));
-            if self.input_history.last().map(|s| s.as_str()) != Some(text.as_str()) {
-                self.input_history.push(text.clone());
-                if self.input_history.len() > 1000 {
-                    self.input_history.remove(0);
+            if self.text_input.history.last().map(|s| s.as_str()) != Some(text.as_str()) {
+                self.text_input.history.push(text.clone());
+                if self.text_input.history.len() > 1000 {
+                    self.text_input.history.remove(0);
                 }
             }
             self.prompt_tx.send(text)
@@ -1617,13 +1577,13 @@ impl App {
             return;
         }
 
-        self.input.clear();
-        self.cursor = 0;
+        self.text_input.text.clear();
+        self.text_input.cursor = 0;
         self.busy = true;
         self.following = true;
         self.turn_start = Some(std::time::Instant::now());
-        self.history_idx = None;
-        self.history_draft.clear();
+        self.text_input.history_idx = None;
+        self.text_input.history_draft.clear();
     }
 
     /// Execute a slash command or send chat to the agent (single user line).
@@ -1711,7 +1671,7 @@ impl App {
         if self.pending_perm.is_some() {
             return;
         }
-        let text = self.input.trim().to_string();
+        let text = self.text_input.text.trim().to_string();
         if text.is_empty() {
             if !self.empty_input_hint_shown && !self.busy {
                 self.empty_input_hint_shown = true;
@@ -1725,15 +1685,15 @@ impl App {
             self.push(ChatLine::Info(
                 "  Type a message or command — bare '/' alone is not sent".into(),
             ));
-            self.input.clear();
-            self.cursor = 0;
+            self.text_input.text.clear();
+            self.text_input.cursor = 0;
             return;
         }
         if self.busy {
             // Enqueue for after the current run finishes (FIFO).
             self.queued.push_back(text);
-            self.input.clear();
-            self.cursor = 0;
+            self.text_input.text.clear();
+            self.text_input.cursor = 0;
         } else {
             self.dispatch_user_input(text);
         }
@@ -1744,7 +1704,7 @@ impl App {
         if self.pending_perm.is_some() {
             return;
         }
-        let text = self.input.trim().to_string();
+        let text = self.text_input.text.trim().to_string();
         if text.is_empty() {
             return;
         }
@@ -1754,8 +1714,8 @@ impl App {
                 .store(true, std::sync::atomic::Ordering::Relaxed);
             // Prioritize this prompt ahead of already queued inputs.
             self.queued.push_front(text);
-            self.input.clear();
-            self.cursor = 0;
+            self.text_input.text.clear();
+            self.text_input.cursor = 0;
             self.push(ChatLine::Info("  ↻ Interrupted — sending next".into()));
         } else {
             self.dispatch_user_input(text);
@@ -2026,7 +1986,7 @@ fn render(frame: &mut Frame, app: &mut App) {
     // Layout: header | chat | status (2) | queue (1) | hint (1) | input (dynamic)
     // Input grows with content: 1 line of text = 3 rows (2 borders + 1), capped at 12.
     // When very narrow (< 40), collapse optional rows to avoid layout panics.
-    let input_line_count = app.input.matches('\n').count() + 1;
+    let input_line_count = app.text_input.text.matches('\n').count() + 1;
     let input_h = (input_line_count as u16 + 2).min(12);
     let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
     let [header_area, chat_area, status_area, queue_area, hint_area, input_area] =
@@ -2190,31 +2150,31 @@ fn render(frame: &mut Frame, app: &mut App) {
     // Compute cursor position.  For multiline input, derive (row, col) from the
     // char offset; for single-line input use horizontal scroll as before.
     let input_visible_w = (input_area.width as usize).saturating_sub(4).max(1);
-    let byte_at_cursor = char_byte_pos(&app.input, app.cursor);
-    let before_cursor = &app.input[..byte_at_cursor];
-    let is_multiline = app.input.contains('\n');
+    let byte_at_cursor = char_byte_pos(&app.text_input.text, app.text_input.cursor);
+    let before_cursor = &app.text_input.text[..byte_at_cursor];
+    let is_multiline = app.text_input.text.contains('\n');
     let (cursor_row, cursor_col): (u16, u16) = if is_multiline {
         let row = before_cursor.matches('\n').count() as u16;
         let col = before_cursor
             .rfind('\n')
-            .map(|p| app.input[p + 1..byte_at_cursor].chars().count())
+            .map(|p| app.text_input.text[p + 1..byte_at_cursor].chars().count())
             .unwrap_or_else(|| before_cursor.chars().count()) as u16;
         (row, col.min(input_visible_w as u16))
     } else {
         // Single-line: maintain horizontal scroll window.
-        if app.cursor < app.input_scroll {
-            app.input_scroll = app.cursor;
-        } else if app.cursor >= app.input_scroll + input_visible_w {
-            app.input_scroll = app.cursor - input_visible_w + 1;
+        if app.text_input.cursor < app.text_input.scroll {
+            app.text_input.scroll = app.text_input.cursor;
+        } else if app.text_input.cursor >= app.text_input.scroll + input_visible_w {
+            app.text_input.scroll = app.text_input.cursor - input_visible_w + 1;
         }
-        (0, (app.cursor - app.input_scroll) as u16)
+        (0, (app.text_input.cursor - app.text_input.scroll) as u16)
     };
 
     // Build the paragraph text.  Multiline: one ratatui Line per input line.
     // Single-line: horizontally-scrolled window as before.
     let max_visible_content_rows = input_h.saturating_sub(2) as usize; // minus top+bottom border
     let input_para_lines: Vec<Line<'static>> = if is_multiline {
-        let all_lines: Vec<&str> = app.input.split('\n').collect();
+        let all_lines: Vec<&str> = app.text_input.text.split('\n').collect();
         // Vertical scroll: keep the cursor line visible.
         let v_scroll = if cursor_row as usize >= max_visible_content_rows {
             cursor_row as usize - max_visible_content_rows + 1
@@ -2229,9 +2189,10 @@ fn render(frame: &mut Frame, app: &mut App) {
             .collect()
     } else {
         let visible: String = app
-            .input
+            .text_input
+            .text
             .chars()
-            .skip(app.input_scroll)
+            .skip(app.text_input.scroll)
             .take(input_visible_w)
             .collect();
         vec![Line::raw(format!(" {}", visible))]
@@ -2261,7 +2222,7 @@ fn render(frame: &mut Frame, app: &mut App) {
                     Style::default().fg(Color::LightMagenta),
                 ),
             ])
-        } else if app.input.is_empty() {
+        } else if app.text_input.text.is_empty() {
             let elapsed_s = app.turn_start.map(|t| t.elapsed().as_secs()).unwrap_or(0);
             let elapsed_hint = if elapsed_s >= 1 {
                 format!(" {}s", elapsed_s)
@@ -2336,8 +2297,6 @@ fn render(frame: &mut Frame, app: &mut App) {
             app.overlay_stack.top().map(|o| o.title().to_string())
         } else if app.profile_overlay.is_some() {
             Some("Profile".into())
-        } else if app.settings.is_some() {
-            Some("Settings".into())
         } else if app.model_picker.is_some() {
             Some("Models".into())
         } else if app.session_picker.is_some() {
@@ -2428,7 +2387,7 @@ fn render(frame: &mut Frame, app: &mut App) {
     //   modal_row_two_col(...)              → two-column selectable row
 
     // ── Slash command popup ──
-    let rows = slash_completion_rows(&app.input);
+    let rows = slash_completion_rows(&app.text_input.text);
     if !rows.is_empty() && app.pending_perm.is_none() && app.session_picker.is_none() {
         const VISIBLE: usize = 12;
 
@@ -2552,7 +2511,7 @@ fn render(frame: &mut Frame, app: &mut App) {
         content.push(Line::from(vec![Span::styled(
             format!(
                 "  {:<8}  {:<5}  {:<6}  {:<11}  {}",
-                "id", "turns", "cost", "date", "preview"
+                "id", "turns", "cost", "when", "preview"
             ),
             Style::default()
                 .fg(Color::DarkGray)
@@ -2575,11 +2534,7 @@ fn render(frame: &mut Frame, app: &mut App) {
             };
             let fg = if selected { Color::White } else { Color::Gray };
             let id_short = &s.session_id[..s.session_id.len().min(8)];
-            let date_str = if s.start_time.len() >= 16 {
-                format!("{} {}", &s.start_time[5..10], &s.start_time[11..16])
-            } else {
-                s.start_time.clone()
-            };
+            let date_str = relative_time(&s.start_time);
             let preview_str: String = s.preview.chars().take(preview_w).collect();
             let marker = if selected { "▶ " } else { "  " };
             content.push(Line::from(vec![Span::styled(
@@ -2614,7 +2569,7 @@ fn render(frame: &mut Frame, app: &mut App) {
 
         let total = filtered.len();
         let picker_title = format!(" Sessions — {} total ", total);
-        let hint = " ↑↓ navigate · Enter resume · type to filter · Esc close ";
+        let hint = " ↑↓ navigate · Enter resume · d delete · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block_with_hint(&picker_title, hint, Color::Cyan)),
@@ -2660,8 +2615,63 @@ fn render(frame: &mut Frame, app: &mut App) {
                     .add_modifier(Modifier::DIM),
             )]));
         } else {
+            // Count favorites and recent models for section headers.
+            let n_fav = filtered.iter().filter(|m| m.is_favorite).count();
+            let recent_set: std::collections::HashSet<&str> =
+                app.model_prefs.recent.iter().map(|s| s.as_str()).collect();
+            let n_recent = filtered
+                .iter()
+                .filter(|m| !m.is_favorite && recent_set.contains(m.id.as_str()))
+                .count();
+            let show_headers = picker.filter.is_empty() && (n_fav > 0 || n_recent > 0);
+
             let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
+            let mut global_idx = picker.scroll_offset;
+            // Track which section header we've emitted.
+            let mut header_shown_fav = false;
+            let mut header_shown_recent = false;
+            let mut header_shown_all = false;
+
             for (di, m) in filtered[picker.scroll_offset..end].iter().enumerate() {
+                // Insert section headers when entering a new group.
+                if show_headers && !header_shown_fav && m.is_favorite {
+                    header_shown_fav = true;
+                    content.push(Line::from(vec![Span::styled(
+                        "  ★ Favorites".to_string(),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )]));
+                }
+                if show_headers
+                    && !header_shown_recent
+                    && !m.is_favorite
+                    && recent_set.contains(m.id.as_str())
+                    && global_idx >= n_fav
+                {
+                    header_shown_recent = true;
+                    content.push(Line::from(vec![Span::styled(
+                        "  ⏱ Recent".to_string(),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )]));
+                }
+                if show_headers
+                    && !header_shown_all
+                    && !m.is_favorite
+                    && !recent_set.contains(m.id.as_str())
+                    && global_idx >= n_fav + n_recent
+                {
+                    header_shown_all = true;
+                    content.push(Line::from(vec![Span::styled(
+                        "  All".to_string(),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::BOLD),
+                    )]));
+                }
+
                 let selected = picker.scroll_offset + di == picker.selected;
                 let bg = if selected {
                     TUI_SELECTION_BG
@@ -2684,6 +2694,7 @@ fn render(frame: &mut Frame, app: &mut App) {
                     ),
                     Style::default().fg(fg).bg(bg),
                 )]));
+                global_idx += 1;
             }
 
             let above = picker.scroll_offset;
@@ -2879,11 +2890,6 @@ fn render(frame: &mut Frame, app: &mut App) {
             Paragraph::new(content).block(modal_block_with_hint(&title, hint, Color::Yellow)),
             popup_rect,
         );
-    }
-
-    // ── Settings editor popup ─────────────────────────────────────────────────
-    if let Some(ref st) = app.settings {
-        render_settings(frame, area, input_area, st);
     }
 
     // ── Profile overview/editor overlay ──────────────────────────────────────
@@ -3233,9 +3239,35 @@ fn render(frame: &mut Frame, app: &mut App) {
             }
         }
     }
-}
 
-// ── Plan editor overlay ───────────────────────────────────────────────────────
+    // ── Toast notifications (top-right, auto-dismiss) ────────────────────────
+    app.expire_toasts();
+    if !app.toasts.is_empty() {
+        let max_w = area.width.saturating_sub(4).min(50) as usize;
+        for (i, toast) in app.toasts.iter().enumerate().take(3) {
+            let msg: String = toast.message.chars().take(max_w).collect();
+            let w = (msg.len() as u16 + 4).min(area.width);
+            let y = area.y + 1 + (i as u16) * 2;
+            if y + 1 >= area.height {
+                break;
+            }
+            let toast_rect = Rect {
+                x: area.width.saturating_sub(w + 1),
+                y,
+                width: w,
+                height: 1,
+            };
+            frame.render_widget(Clear, toast_rect);
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![Span::styled(
+                    format!(" {} ", msg),
+                    Style::default().fg(toast.style).bg(Color::DarkGray),
+                )])),
+                toast_rect,
+            );
+        }
+    }
+}
 
 fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
     let editor = match &app.plan_editor {
@@ -3568,273 +3600,6 @@ fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) {
         ),
     ]));
     frame.render_widget(hint, hint_area);
-}
-
-// ── Settings editor rendering ─────────────────────────────────────────────────
-
-fn render_settings(frame: &mut Frame, area: Rect, input_area: Rect, st: &SettingsState) {
-    // Take up most of the screen.
-    let popup_h = area.height.saturating_sub(6).max(10);
-    let popup_w = area.width.saturating_sub(8).min(90);
-    let popup_rect = popup_above_input(input_area, popup_h, popup_w);
-    frame.render_widget(Clear, popup_rect);
-
-    // Layout: title block wraps everything; inside: content + hint footer.
-    let inner = {
-        let b = popup_rect;
-        Rect {
-            x: b.x + 1,
-            y: b.y + 1,
-            width: b.width.saturating_sub(2),
-            height: b.height.saturating_sub(2),
-        }
-    };
-    let [_list_area, hint_area] =
-        ratatui::layout::Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(inner);
-
-    let name_w = 14usize;
-    let mut lines: Vec<Line<'static>> = Vec::new();
-
-    // ── Default model row ──
-    let dm_selected = st.cursor == 0 && st.edit_field == SettingsEditField::None;
-    let dm_editing = st.edit_field == SettingsEditField::DefaultModel;
-    lines.push(Line::from(vec![Span::styled(
-        "  Default model",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
-    )]));
-    lines.push(Line::from(vec![
-        if dm_selected {
-            Span::styled(
-                " ▶ ",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::raw("   ")
-        },
-        Span::styled(
-            if dm_editing {
-                st.input.clone()
-            } else {
-                st.default_model.clone()
-            },
-            Style::default()
-                .fg(if dm_editing {
-                    Color::Yellow
-                } else if dm_selected {
-                    Color::White
-                } else {
-                    Color::Green
-                })
-                .add_modifier(if dm_editing || dm_selected {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        ),
-        if dm_editing {
-            Span::styled("_", Style::default().fg(Color::Yellow))
-        } else if dm_selected {
-            Span::styled(
-                "  (Enter to edit)",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
-            )
-        } else {
-            Span::raw("")
-        },
-    ]));
-
-    lines.push(Line::raw(""));
-    lines.push(Line::from(vec![Span::styled(
-        format!("  {:<name_w$}  model", "role name"),
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
-    )]));
-    lines.push(Line::raw(""));
-
-    // Role rows — cursor offset by 1 (cursor 0 = default model)
-    for (i, (name, model)) in st.roles.iter().enumerate() {
-        let selected = (i + 1) == st.cursor && st.edit_field == SettingsEditField::None;
-        let editing_name = matches!(&st.edit_field, SettingsEditField::RoleName(idx) if *idx == i);
-        let editing_model =
-            matches!(&st.edit_field, SettingsEditField::RoleModel(idx) if *idx == i);
-
-        let marker = if selected {
-            Span::styled(
-                " ▶ ",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::raw("   ")
-        };
-        let name_span = Span::styled(
-            format!(
-                "{:<width$}",
-                if editing_name {
-                    st.input.as_str()
-                } else {
-                    name.as_str()
-                },
-                width = name_w
-            ),
-            Style::default()
-                .fg(if editing_name {
-                    Color::Yellow
-                } else if selected {
-                    Color::White
-                } else {
-                    Color::Cyan
-                })
-                .add_modifier(if editing_name || selected {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        );
-        let arrow = Span::styled("  →  ", Style::default().fg(Color::DarkGray));
-        let model_span = if editing_model {
-            Span::styled(
-                st.input.clone(),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else if model.is_empty() {
-            Span::styled(
-                "(unset — Enter to set)",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
-            )
-        } else {
-            Span::styled(
-                model.clone(),
-                Style::default().fg(if selected {
-                    Color::White
-                } else {
-                    Color::DarkGray
-                }),
-            )
-        };
-        lines.push(Line::from(vec![marker, name_span, arrow, model_span]));
-    }
-
-    // New-role name input row
-    if matches!(&st.edit_field, SettingsEditField::RoleName(idx) if *idx == usize::MAX) {
-        lines.push(Line::from(vec![
-            Span::raw("   "),
-            Span::styled(
-                format!("{:<width$}", st.input.as_str(), width = name_w),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("  →  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                "type name, Enter to set model",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
-            ),
-        ]));
-    }
-
-    lines.push(Line::raw(""));
-
-    // "Add role" and "Save & close" rows — cursors shifted by 1
-    let add_sel = st.cursor == st.roles.len() + 1 && st.edit_field == SettingsEditField::None;
-    let save_sel = st.cursor == st.roles.len() + 2 && st.edit_field == SettingsEditField::None;
-    lines.push(Line::from(vec![
-        if add_sel {
-            Span::styled(
-                " ▶ ",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::raw("   ")
-        },
-        Span::styled(
-            "+ Add role",
-            Style::default().fg(if add_sel {
-                Color::White
-            } else {
-                Color::DarkGray
-            }),
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        if save_sel {
-            Span::styled(
-                " ▶ ",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::raw("   ")
-        },
-        Span::styled(
-            "Save & close",
-            Style::default()
-                .fg(if save_sel {
-                    Color::Green
-                } else {
-                    Color::DarkGray
-                })
-                .add_modifier(if save_sel {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        ),
-    ]));
-
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title(" Settings  (↑↓ navigate · Enter=edit · n=add · Del=remove · Esc=close) ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        ),
-        popup_rect,
-    );
-
-    // Status / hint line
-    let hint = if let Some(ref msg) = st.status {
-        Line::from(Span::styled(
-            msg.clone(),
-            Style::default().fg(if msg.contains('✓') {
-                Color::Green
-            } else {
-                Color::Red
-            }),
-        ))
-    } else if st.edit_field == SettingsEditField::None {
-        Line::from(Span::styled(
-            "  ↑↓ navigate   Enter edit   n add role   d delete   s save   Esc close",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
-        ))
-    } else {
-        Line::from(Span::styled(
-            "  Enter confirm   Backspace edit   Esc cancel",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
-        ))
-    };
-    frame.render_widget(Paragraph::new(hint), hint_area);
 }
 
 // ── Welcome panel ─────────────────────────────────────────────────────────────
@@ -4497,6 +4262,49 @@ fn popup_above_input(input_area: Rect, h: u16, w: u16) -> Rect {
         y,
         width: w,
         height: h,
+    }
+}
+
+/// Format a timestamp (RFC-3339 or similar) as a relative duration from now.
+fn relative_time(ts: &str) -> String {
+    let parsed = chrono::DateTime::parse_from_rfc3339(ts).or_else(|_| {
+        chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S%.f")
+            .map(|dt: chrono::NaiveDateTime| dt.and_utc().fixed_offset())
+    });
+    let dt = match parsed {
+        Ok(dt) => dt,
+        Err(_) => {
+            // Fallback: show truncated original
+            return if ts.len() >= 16 {
+                format!("{} {}", &ts[5..10], &ts[11..16])
+            } else {
+                ts.to_string()
+            };
+        }
+    };
+    let now = chrono::Utc::now();
+    let delta = now.signed_duration_since(dt);
+    let secs = delta.num_seconds();
+    if secs < 0 {
+        return "just now".to_string();
+    }
+    let mins = secs / 60;
+    let hours = mins / 60;
+    let days = hours / 24;
+    if secs < 60 {
+        "just now".to_string()
+    } else if mins < 60 {
+        format!("{}m ago", mins)
+    } else if hours < 24 {
+        format!("{}h ago", hours)
+    } else if days < 7 {
+        format!("{}d ago", days)
+    } else if days < 30 {
+        format!("{}w ago", days / 7)
+    } else if days < 365 {
+        format!("{}mo ago", days / 30)
+    } else {
+        format!("{}y ago", days / 365)
     }
 }
 
@@ -6250,16 +6058,8 @@ Once built, the agent can search by concept rather than just filename.".into(),
             }
         }
         "/settings" => {
-            let config_path = clido_core::global_config_path()
-                .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
-            let roles = app.config_roles.clone();
-            let profile = app.current_profile.clone();
-            app.settings = Some(SettingsState::new(
-                config_path,
-                roles,
-                app.model.clone(),
-                profile,
-            ));
+            // /settings now redirects to /role list
+            execute_slash(app, "/role list");
         }
         "/config" => {
             // Show a complete, structured overview of all current settings.
@@ -8419,12 +8219,24 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         match app.last_assistant_text() {
             Some(text) => {
                 if let Err(e) = copy_to_clipboard_osc52(text) {
-                    app.push(ChatLine::Info(format!("  ✗ Copy failed: {}", e)));
+                    app.push_toast(
+                        format!("Copy failed: {}", e),
+                        Color::Red,
+                        std::time::Duration::from_secs(3),
+                    );
                 } else {
-                    app.push(ChatLine::Info("  ✓ Copied to clipboard".into()));
+                    app.push_toast(
+                        "Copied to clipboard",
+                        Color::Green,
+                        std::time::Duration::from_secs(2),
+                    );
                 }
             }
-            None => app.push(ChatLine::Info("  ✗ Nothing to copy yet".into())),
+            None => app.push_toast(
+                "Nothing to copy yet",
+                Color::Yellow,
+                std::time::Duration::from_secs(2),
+            ),
         }
         return;
     }
@@ -8438,196 +8250,6 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     // ── Plan editor (full-screen modal — intercepts all keys) ────────────────
     if app.plan_editor.is_some() {
         handle_plan_editor_key(app, event);
-        return;
-    }
-
-    // ── Settings editor (modal) ──────────────────────────────────────────────
-    if app.settings.is_some() {
-        let st = app.settings.as_mut().unwrap();
-        st.status = None;
-        match &st.edit_field {
-            SettingsEditField::None => match event.code {
-                Up => {
-                    if st.cursor > 0 {
-                        st.cursor -= 1;
-                    }
-                }
-                Down => {
-                    // default model + roles + "Add role" + "Save & close"
-                    if st.cursor < st.roles.len() + 2 {
-                        st.cursor += 1;
-                    }
-                }
-                Enter => {
-                    let cursor = st.cursor;
-                    let roles_len = st.roles.len();
-                    if cursor == 0 {
-                        // Edit default model
-                        let current = st.default_model.clone();
-                        st.input = current;
-                        st.edit_field = SettingsEditField::DefaultModel;
-                    } else if cursor <= roles_len {
-                        let idx = cursor - 1;
-                        let model = st.roles[idx].1.clone();
-                        st.input = model;
-                        st.edit_field = SettingsEditField::RoleModel(idx);
-                    } else if cursor == roles_len + 1 {
-                        // "Add role"
-                        st.input.clear();
-                        st.edit_field = SettingsEditField::RoleName(usize::MAX);
-                    } else {
-                        // "Save & close"
-                        st.save();
-                        // Reload config_roles and model in app if save succeeded
-                        if st
-                            .status
-                            .as_deref()
-                            .map(|s| s.contains('✓'))
-                            .unwrap_or(false)
-                        {
-                            let new_roles: std::collections::HashMap<String, String> =
-                                st.roles.iter().cloned().collect();
-                            let new_model = st.default_model.clone();
-                            app.config_roles = new_roles.clone();
-                            let (pricing, _) = clido_core::load_pricing();
-                            app.known_models =
-                                build_model_list(&pricing, &new_roles, &app.model_prefs);
-                            // Switch to new default model for this session too
-                            if !new_model.is_empty() && new_model != app.model {
-                                app.model = new_model.clone();
-                                let _ = app.model_switch_tx.send(new_model);
-                            }
-                            app.settings = None;
-                        }
-                    }
-                }
-                Char('n') => {
-                    let st = app.settings.as_mut().unwrap();
-                    st.input.clear();
-                    st.edit_field = SettingsEditField::RoleName(usize::MAX);
-                }
-                Char('d') => {
-                    let cursor = st.cursor;
-                    // cursor 0 = default model (not deletable), cursor 1..N+1 = roles
-                    if cursor > 0 && cursor <= st.roles.len() {
-                        st.roles.remove(cursor - 1);
-                        if st.cursor > 1 && st.cursor > st.roles.len() {
-                            st.cursor -= 1;
-                        }
-                    } else {
-                        st.status =
-                            Some("  'd' deletes a role — move cursor to a role row first".into());
-                    }
-                }
-                Char('s') => {
-                    let st = app.settings.as_mut().unwrap();
-                    st.save();
-                    if st
-                        .status
-                        .as_deref()
-                        .map(|s| s.contains('✓'))
-                        .unwrap_or(false)
-                    {
-                        let new_roles: std::collections::HashMap<String, String> =
-                            st.roles.iter().cloned().collect();
-                        let new_model = st.default_model.clone();
-                        app.config_roles = new_roles.clone();
-                        let (pricing, _) = clido_core::load_pricing();
-                        app.known_models = build_model_list(&pricing, &new_roles, &app.model_prefs);
-                        if !new_model.is_empty() && new_model != app.model {
-                            app.model = new_model.clone();
-                            let _ = app.model_switch_tx.send(new_model);
-                        }
-                        app.settings = None;
-                    }
-                }
-                Esc => {
-                    app.settings = None;
-                }
-                _ => {}
-            },
-            SettingsEditField::DefaultModel => match event.code {
-                Enter => {
-                    let model = app.settings.as_ref().unwrap().input.trim().to_string();
-                    let st = app.settings.as_mut().unwrap();
-                    st.default_model = model;
-                    st.edit_field = SettingsEditField::None;
-                    st.input.clear();
-                }
-                Backspace => {
-                    app.settings.as_mut().unwrap().input.pop();
-                }
-                Esc => {
-                    let st = app.settings.as_mut().unwrap();
-                    st.edit_field = SettingsEditField::None;
-                    st.input.clear();
-                }
-                Char(c) => {
-                    app.settings.as_mut().unwrap().input.push(c);
-                }
-                _ => {}
-            },
-            SettingsEditField::RoleName(_) => match event.code {
-                Enter => {
-                    let name = app.settings.as_ref().unwrap().input.trim().to_string();
-                    let st = app.settings.as_mut().unwrap();
-                    if !name.is_empty() {
-                        st.roles.push((name, String::new()));
-                        let idx = st.roles.len() - 1;
-                        st.cursor = idx + 1;
-                        st.input.clear();
-                        st.edit_field = SettingsEditField::RoleModel(idx);
-                    } else {
-                        st.edit_field = SettingsEditField::None;
-                    }
-                }
-                Backspace => {
-                    app.settings.as_mut().unwrap().input.pop();
-                }
-                Esc => {
-                    let st = app.settings.as_mut().unwrap();
-                    st.edit_field = SettingsEditField::None;
-                    st.input.clear();
-                }
-                Char(c) => {
-                    app.settings.as_mut().unwrap().input.push(c);
-                }
-                _ => {}
-            },
-            SettingsEditField::RoleModel(idx) => {
-                let idx = *idx;
-                match event.code {
-                    Enter => {
-                        let model = app.settings.as_ref().unwrap().input.trim().to_string();
-                        let st = app.settings.as_mut().unwrap();
-                        if model.is_empty() {
-                            if idx < st.roles.len() {
-                                st.roles.remove(idx);
-                            }
-                        } else if idx < st.roles.len() {
-                            st.roles[idx].1 = model;
-                        }
-                        st.edit_field = SettingsEditField::None;
-                        st.input.clear();
-                    }
-                    Backspace => {
-                        app.settings.as_mut().unwrap().input.pop();
-                    }
-                    Esc => {
-                        let st = app.settings.as_mut().unwrap();
-                        if idx < st.roles.len() && st.roles[idx].1.is_empty() {
-                            st.roles.remove(idx);
-                        }
-                        st.edit_field = SettingsEditField::None;
-                        st.input.clear();
-                    }
-                    Char(c) => {
-                        app.settings.as_mut().unwrap().input.push(c);
-                    }
-                    _ => {}
-                }
-            }
-        }
         return;
     }
 
@@ -8828,8 +8450,8 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         return;
                     }
                     let (orig_idx, _) = filtered[picker.selected];
-                    app.input.clear();
-                    app.cursor = 0;
+                    app.text_input.text.clear();
+                    app.text_input.cursor = 0;
                     let id = picker.sessions[orig_idx].session_id.clone();
                     if app.current_session_id.as_deref() == Some(&id) {
                         app.push(ChatLine::Info("  Already in this session".into()));
@@ -8840,14 +8462,35 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Esc => {
                 app.session_picker = None;
-                app.input.clear();
-                app.cursor = 0;
+                app.text_input.text.clear();
+                app.text_input.cursor = 0;
             }
             Backspace => {
                 if let Some(picker) = &mut app.session_picker {
                     picker.filter.pop();
                     picker.selected = 0;
                     picker.scroll_offset = 0;
+                }
+            }
+            Char('d') | Char('D') => {
+                // Delete selected session
+                if let Some(picker) = &mut app.session_picker {
+                    let filtered = picker.filtered();
+                    if let Some(&(orig_idx, _)) = filtered.get(picker.selected) {
+                        let sid = picker.sessions[orig_idx].session_id.clone();
+                        if app.current_session_id.as_deref() == Some(&sid) {
+                            app.push(ChatLine::Info("  Cannot delete the active session".into()));
+                        } else if clido_storage::delete_session(&app.workspace_root, &sid).is_ok() {
+                            picker.sessions.remove(orig_idx);
+                            let n = picker.filtered().len();
+                            if picker.selected >= n && n > 0 {
+                                picker.selected = n - 1;
+                            }
+                            if picker.sessions.is_empty() {
+                                app.session_picker = None;
+                            }
+                        }
+                    }
                 }
             }
             Char(c) => {
@@ -9109,8 +8752,56 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         return;
     }
 
+    // ── Global shortcuts (no overlay active) ───────────────────────────────
+    match (event.modifiers, event.code) {
+        // Ctrl+M → open model picker
+        (Km::CONTROL, Char('m')) => {
+            let models = app.known_models.clone();
+            if models.is_empty() && !app.models_loading && !app.api_key.is_empty() {
+                spawn_model_fetch(
+                    app.provider.clone(),
+                    app.api_key.clone(),
+                    app.base_url.clone(),
+                    app.fetch_tx.clone(),
+                );
+                app.models_loading = true;
+            }
+            app.model_picker = Some(ModelPickerState {
+                models,
+                filter: String::new(),
+                selected: 0,
+                scroll_offset: 0,
+            });
+            return;
+        }
+        // Ctrl+P → open profile picker
+        (Km::CONTROL, Char('p')) => {
+            if let Ok(loaded) = clido_core::load_config(&app.workspace_root) {
+                let active = loaded.default_profile.clone();
+                let mut profiles: Vec<(String, clido_core::ProfileEntry)> =
+                    loaded.profiles.into_iter().collect();
+                profiles.sort_by(|a, b| a.0.cmp(&b.0));
+                let selected = profiles.iter().position(|(n, _)| n == &active).unwrap_or(0);
+                app.profile_picker = Some(ProfilePickerState {
+                    profiles,
+                    selected,
+                    scroll_offset: 0,
+                    active,
+                    filter: String::new(),
+                });
+            }
+            return;
+        }
+        // Ctrl+K → open /keys overlay
+        (Km::CONTROL, Char('k')) => {
+            execute_slash(app, "/keys");
+            return;
+        }
+        _ => {}
+    }
+
     // ── Slash-command popup navigation ──────────────────────────────────────
-    let completions = slash_completions(&app.input);
+    let completions = slash_completions(&app.text_input.text);
     if !completions.is_empty() {
         // Clamp selection in case completions shrunk.
         if let Some(sel) = app.selected_cmd {
@@ -9138,8 +8829,8 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             (_, Tab) => {
                 let idx = app.selected_cmd.unwrap_or(0);
                 if let Some((cmd, _)) = completions.get(idx) {
-                    app.input = cmd.to_string();
-                    app.cursor = app.input.chars().count();
+                    app.text_input.text = cmd.to_string();
+                    app.text_input.cursor = app.text_input.text.chars().count();
                 }
                 app.selected_cmd = None;
                 return;
@@ -9147,8 +8838,8 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             (_, Enter) => {
                 if let Some(idx) = app.selected_cmd {
                     let cmd = completions[idx].0.to_string();
-                    app.input.clear();
-                    app.cursor = 0;
+                    app.text_input.text.clear();
+                    app.text_input.cursor = 0;
                     app.selected_cmd = None;
                     execute_slash(app, &cmd);
                     return;
@@ -9168,44 +8859,44 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     match (event.modifiers, event.code) {
         // Esc: clear the input field.
         (_, Esc) => {
-            app.input.clear();
-            app.cursor = 0;
+            app.text_input.text.clear();
+            app.text_input.cursor = 0;
             app.selected_cmd = None;
-            app.history_idx = None;
+            app.text_input.history_idx = None;
         }
         // Ctrl+Enter: interrupt current run and send immediately.
         (Km::CONTROL, Enter) => app.force_send(),
         // Shift+Enter: insert a newline without sending (multiline input).
         (Km::SHIFT, Enter) => {
-            let byte_pos = char_byte_pos(&app.input, app.cursor);
-            app.input.insert(byte_pos, '\n');
-            app.cursor += 1;
+            let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor);
+            app.text_input.text.insert(byte_pos, '\n');
+            app.text_input.cursor += 1;
             app.selected_cmd = None;
-            app.history_idx = None;
+            app.text_input.history_idx = None;
         }
         (_, Enter) => app.submit(),
         (_, Backspace) => {
-            if app.cursor > 0 {
-                let byte_pos = char_byte_pos(&app.input, app.cursor - 1);
-                app.input.remove(byte_pos);
-                app.cursor -= 1;
+            if app.text_input.cursor > 0 {
+                let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor - 1);
+                app.text_input.text.remove(byte_pos);
+                app.text_input.cursor -= 1;
                 app.selected_cmd = None;
-                app.history_idx = None;
+                app.text_input.history_idx = None;
             }
         }
         (_, Delete) => {
-            if app.cursor < app.input.chars().count() {
-                let byte_pos = char_byte_pos(&app.input, app.cursor);
-                app.input.remove(byte_pos);
+            if app.text_input.cursor < app.text_input.text.chars().count() {
+                let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor);
+                app.text_input.text.remove(byte_pos);
                 app.selected_cmd = None;
-                app.history_idx = None;
+                app.text_input.history_idx = None;
             }
         }
         // Alt+Left: move cursor to start of previous word.
         (Km::ALT, Left) => {
-            if app.cursor > 0 {
-                let chars: Vec<char> = app.input.chars().collect();
-                let mut new_cursor = app.cursor;
+            if app.text_input.cursor > 0 {
+                let chars: Vec<char> = app.text_input.text.chars().collect();
+                let mut new_cursor = app.text_input.cursor;
                 // Skip spaces
                 while new_cursor > 0 && chars[new_cursor - 1] == ' ' {
                     new_cursor -= 1;
@@ -9214,14 +8905,14 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 while new_cursor > 0 && chars[new_cursor - 1] != ' ' {
                     new_cursor -= 1;
                 }
-                app.cursor = new_cursor;
+                app.text_input.cursor = new_cursor;
             }
         }
         // Alt+Right: move cursor to end of next word.
         (Km::ALT, Right) => {
-            let chars: Vec<char> = app.input.chars().collect();
+            let chars: Vec<char> = app.text_input.text.chars().collect();
             let len = chars.len();
-            let mut new_cursor = app.cursor;
+            let mut new_cursor = app.text_input.cursor;
             // Skip spaces
             while new_cursor < len && chars[new_cursor] == ' ' {
                 new_cursor += 1;
@@ -9230,16 +8921,16 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             while new_cursor < len && chars[new_cursor] != ' ' {
                 new_cursor += 1;
             }
-            app.cursor = new_cursor;
+            app.text_input.cursor = new_cursor;
         }
         (_, Left) => {
-            if app.cursor > 0 {
-                app.cursor -= 1;
+            if app.text_input.cursor > 0 {
+                app.text_input.cursor -= 1;
             }
         }
         (_, Right) => {
-            if app.cursor < app.input.chars().count() {
-                app.cursor += 1;
+            if app.text_input.cursor < app.text_input.text.chars().count() {
+                app.text_input.cursor += 1;
             }
         }
         // ── Jump to top / bottom of chat ─────────────────────────────────────
@@ -9250,55 +8941,63 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         (Km::CONTROL, End) => {
             app.following = true;
         }
-        (_, Home) => app.cursor = 0,
-        (_, End) => app.cursor = app.input.chars().count(),
+        (_, Home) => app.text_input.cursor = 0,
+        (_, End) => app.text_input.cursor = app.text_input.text.chars().count(),
         // ── Up: move cursor up in multiline input, otherwise scroll chat ──────
-        (_, Up) if app.pending_perm.is_none() && slash_completions(&app.input).is_empty() => {
-            if app.input.contains('\n') && app.history_idx.is_none() {
-                if let Some(new_cursor) = move_cursor_line_up(&app.input, app.cursor) {
-                    app.cursor = new_cursor;
+        (_, Up)
+            if app.pending_perm.is_none() && slash_completions(&app.text_input.text).is_empty() =>
+        {
+            if app.text_input.text.contains('\n') && app.text_input.history_idx.is_none() {
+                if let Some(new_cursor) =
+                    move_cursor_line_up(&app.text_input.text, app.text_input.cursor)
+                {
+                    app.text_input.cursor = new_cursor;
                     return;
                 }
             }
             // Empty input with no active history browse: also navigate history.
-            if app.input.is_empty() && !app.input_history.is_empty() {
-                let new_idx = match app.history_idx {
+            if app.text_input.text.is_empty() && !app.text_input.history.is_empty() {
+                let new_idx = match app.text_input.history_idx {
                     None => {
-                        app.history_draft = app.input.clone();
-                        app.input_history.len() - 1
+                        app.text_input.history_draft = app.text_input.text.clone();
+                        app.text_input.history.len() - 1
                     }
                     Some(0) => 0,
                     Some(i) => i - 1,
                 };
-                app.history_idx = Some(new_idx);
-                app.input = app.input_history[new_idx].clone();
-                app.cursor = app.input.chars().count();
+                app.text_input.history_idx = Some(new_idx);
+                app.text_input.text = app.text_input.history[new_idx].clone();
+                app.text_input.cursor = app.text_input.text.chars().count();
                 app.selected_cmd = None;
                 return;
             }
             scroll_up(app, 2);
         }
         // ── Down: move cursor down in multiline input, otherwise scroll chat ──
-        (_, Down) if app.pending_perm.is_none() && slash_completions(&app.input).is_empty() => {
-            if app.input.contains('\n') && app.history_idx.is_none() {
-                if let Some(new_cursor) = move_cursor_line_down(&app.input, app.cursor) {
-                    app.cursor = new_cursor;
+        (_, Down)
+            if app.pending_perm.is_none() && slash_completions(&app.text_input.text).is_empty() =>
+        {
+            if app.text_input.text.contains('\n') && app.text_input.history_idx.is_none() {
+                if let Some(new_cursor) =
+                    move_cursor_line_down(&app.text_input.text, app.text_input.cursor)
+                {
+                    app.text_input.cursor = new_cursor;
                     return;
                 }
             }
             // Empty input while browsing history: navigate forward.
-            if app.input.is_empty() || app.history_idx.is_some() {
-                if let Some(i) = app.history_idx {
-                    if i + 1 >= app.input_history.len() {
-                        app.history_idx = None;
-                        app.input = app.history_draft.clone();
-                        app.cursor = app.input.chars().count();
+            if app.text_input.text.is_empty() || app.text_input.history_idx.is_some() {
+                if let Some(i) = app.text_input.history_idx {
+                    if i + 1 >= app.text_input.history.len() {
+                        app.text_input.history_idx = None;
+                        app.text_input.text = app.text_input.history_draft.clone();
+                        app.text_input.cursor = app.text_input.text.chars().count();
                         app.selected_cmd = None;
                     } else {
                         let new_idx = i + 1;
-                        app.history_idx = Some(new_idx);
-                        app.input = app.input_history[new_idx].clone();
-                        app.cursor = app.input.chars().count();
+                        app.text_input.history_idx = Some(new_idx);
+                        app.text_input.text = app.text_input.history[new_idx].clone();
+                        app.text_input.cursor = app.text_input.text.chars().count();
                         app.selected_cmd = None;
                     }
                     return;
@@ -9314,16 +9013,16 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             scroll_down(app, 10);
         }
         (Km::CONTROL, Char('u')) => {
-            app.input.clear();
-            app.cursor = 0;
+            app.text_input.text.clear();
+            app.text_input.cursor = 0;
             app.selected_cmd = None;
-            app.history_idx = None;
+            app.text_input.history_idx = None;
         }
         // Ctrl+W: delete word backward (to previous word boundary).
         (Km::CONTROL, Char('w')) => {
-            if app.cursor > 0 {
-                let chars: Vec<char> = app.input.chars().collect();
-                let mut new_cursor = app.cursor;
+            if app.text_input.cursor > 0 {
+                let chars: Vec<char> = app.text_input.text.chars().collect();
+                let mut new_cursor = app.text_input.cursor;
                 // Skip trailing spaces
                 while new_cursor > 0 && chars[new_cursor - 1] == ' ' {
                     new_cursor -= 1;
@@ -9332,22 +9031,22 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 while new_cursor > 0 && chars[new_cursor - 1] != ' ' {
                     new_cursor -= 1;
                 }
-                let removed: String = chars[new_cursor..app.cursor].iter().collect();
-                let end_byte = char_byte_pos(&app.input, app.cursor);
+                let removed: String = chars[new_cursor..app.text_input.cursor].iter().collect();
+                let end_byte = char_byte_pos(&app.text_input.text, app.text_input.cursor);
                 let start_byte = end_byte - removed.len();
-                app.input.drain(start_byte..end_byte);
-                app.cursor = new_cursor;
+                app.text_input.text.drain(start_byte..end_byte);
+                app.text_input.cursor = new_cursor;
                 app.selected_cmd = None;
-                app.history_idx = None;
+                app.text_input.history_idx = None;
             }
         }
         (_, Char(c)) => {
-            let byte_pos = char_byte_pos(&app.input, app.cursor);
-            app.input.insert(byte_pos, c);
-            app.cursor += 1;
+            let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor);
+            app.text_input.text.insert(byte_pos, c);
+            app.text_input.cursor += 1;
             app.selected_cmd = None;
             // Any manual edit breaks out of history navigation.
-            app.history_idx = None;
+            app.text_input.history_idx = None;
         }
         _ => {}
     }
@@ -10799,19 +10498,12 @@ async fn event_loop(
                                 ov.input.insert_str(b, &clean);
                                 ov.input_cursor += clean.chars().count();
                             }
-                        } else if let Some(ref mut st) = app.settings {
-                            // Route paste into settings input field.
-                            let accepts = !matches!(st.edit_field, SettingsEditField::None);
-                            if accepts {
-                                let clean = text.lines().next().unwrap_or(&text);
-                                st.input.push_str(clean);
-                            }
                         } else {
-                            let byte_pos = char_byte_pos(&app.input, app.cursor);
-                            app.input.insert_str(byte_pos, &text);
-                            app.cursor += text.chars().count();
+                            let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor);
+                            app.text_input.text.insert_str(byte_pos, &text);
+                            app.text_input.cursor += text.chars().count();
                             app.selected_cmd = None;
-                            app.history_idx = None;
+                            app.text_input.history_idx = None;
                         }
                     }
                     Some(Ok(Event::Mouse(m))) => {
@@ -11490,8 +11182,8 @@ mod tests {
     fn submit_queues_known_slash_when_busy() {
         let mut app = make_test_app();
         app.busy = true;
-        app.input = "/help".to_string();
-        app.cursor = app.input.chars().count();
+        app.text_input.text = "/help".to_string();
+        app.text_input.cursor = app.text_input.text.chars().count();
 
         app.submit();
 
@@ -11504,8 +11196,8 @@ mod tests {
         let mut app = make_test_app();
         app.busy = true;
         app.queued.push_back("older queued item".to_string());
-        app.input = "urgent next prompt".to_string();
-        app.cursor = app.input.chars().count();
+        app.text_input.text = "urgent next prompt".to_string();
+        app.text_input.cursor = app.text_input.text.chars().count();
 
         app.force_send();
 
@@ -12200,8 +11892,8 @@ mod tests {
 
         // Submit three inputs while busy — they should land in queued FIFO.
         for msg in &["first", "second", "third"] {
-            app.input = msg.to_string();
-            app.cursor = app.input.chars().count();
+            app.text_input.text = msg.to_string();
+            app.text_input.cursor = app.text_input.text.chars().count();
             app.submit();
         }
 
@@ -12223,19 +11915,19 @@ mod tests {
             app.send_now(format!("prompt {i}"));
         }
         assert_eq!(
-            app.input_history.len(),
+            app.text_input.history.len(),
             1000,
             "history must be capped at 1000"
         );
         // The very first entry "prompt 0" should have been evicted.
         assert_ne!(
-            app.input_history.first().map(String::as_str),
+            app.text_input.history.first().map(String::as_str),
             Some("prompt 0"),
             "oldest entry should have been evicted"
         );
         // The last entry should be the most recent.
         assert_eq!(
-            app.input_history.last().map(String::as_str),
+            app.text_input.history.last().map(String::as_str),
             Some("prompt 1000"),
             "newest entry should be the last element"
         );
@@ -12263,7 +11955,7 @@ mod tests {
 
         // It should also be recorded in history.
         assert!(
-            app.input_history.contains(&multiline.to_string()),
+            app.text_input.history.contains(&multiline.to_string()),
             "multiline input should be recorded in input_history"
         );
     }

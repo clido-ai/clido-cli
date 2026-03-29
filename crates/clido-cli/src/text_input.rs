@@ -24,9 +24,9 @@ pub struct TextInput {
     /// Previously submitted values (oldest first). Optional — only used for chat input.
     pub history: Vec<String>,
     /// Index into `history` while navigating (None = editing current draft).
-    history_idx: Option<usize>,
+    pub history_idx: Option<usize>,
     /// Saved draft text when user enters history navigation.
-    history_draft: String,
+    pub history_draft: String,
     /// Horizontal scroll offset in characters (for inputs wider than the viewport).
     pub scroll: usize,
 }

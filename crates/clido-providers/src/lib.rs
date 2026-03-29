@@ -44,7 +44,11 @@ pub fn build_provider(
 }
 
 /// Like [`build_provider`] but allows overriding the HTTP `User-Agent` header.
-/// When `user_agent` is `None`, the default `"clido/<version>"` is used.
+///
+/// Resolution order (first non-empty wins):
+///   1. `user_agent` argument — explicit override from profile/slot config
+///   2. `ProviderDef::required_user_agent` — provider-specific default (e.g. Kimi Code)
+///   3. `"clido/<version>"` — global fallback
 pub fn build_provider_with_ua(
     provider_name: &str,
     api_key: String,
@@ -54,12 +58,18 @@ pub fn build_provider_with_ua(
 ) -> Result<Arc<dyn ModelProvider>> {
     let model = resolve_model_alias(&model).to_string();
     if let Some(def) = PROVIDER_REGISTRY.iter().find(|d| d.id == provider_name) {
+        let ua = user_agent
+            .filter(|s| !s.is_empty())
+            .or_else(|| def.required_user_agent.map(|s| s.to_string()))
+            .unwrap_or_else(|| format!("clido/{}", env!("CARGO_PKG_VERSION")));
+
         if def.is_anthropic {
             return Ok(Arc::new(AnthropicProvider::new_with_user_agent(
-                api_key, model, user_agent,
+                api_key,
+                model,
+                Some(ua),
             )));
         }
-        // Local and alibabacloud support a runtime base_url override.
         let url = if def.is_local || def.id == "alibabacloud" {
             base_url.unwrap_or(def.base_url).to_string()
         } else {
@@ -71,7 +81,11 @@ pub fn build_provider_with_ua(
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         Ok(Arc::new(OpenAICompatProvider::new_with_user_agent(
-            api_key, model, url, headers, user_agent,
+            api_key,
+            model,
+            url,
+            headers,
+            Some(ua),
         )))
     } else {
         let valid: Vec<&str> = PROVIDER_REGISTRY.iter().map(|d| d.id).collect();

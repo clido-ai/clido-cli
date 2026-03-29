@@ -3374,7 +3374,7 @@ fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled("Esc", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            " save+close  ",
+            " discard  ",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
@@ -7864,11 +7864,26 @@ fn handle_profile_overlay_key(app: &mut App, event: crossterm::event::KeyEvent) 
                     st.save();
                     // Update live app state if it's the active profile
                     let name = st.name.clone();
-                    let provider = st.provider.clone();
-                    let model = st.model.clone();
+                    let new_provider = st.provider.clone();
+                    let new_model = st.model.clone();
+                    let new_api_key = st.api_key.clone();
                     if app.current_profile == name {
-                        app.provider = provider;
-                        app.model = model;
+                        let provider_changed = app.provider != new_provider;
+                        let key_changed = app.api_key != new_api_key;
+                        app.provider = new_provider;
+                        app.model = new_model.clone();
+                        app.api_key = new_api_key;
+                        if provider_changed || key_changed {
+                            // Provider or key changed — need a full restart
+                            // to rebuild the agent with the new credentials.
+                            app.profile_overlay = None;
+                            app.restart_resume_session = app.current_session_id.clone();
+                            app.wants_profile_switch = Some(name);
+                            app.quit = true;
+                        } else {
+                            // Only model changed — live-switch
+                            let _ = app.model_switch_tx.send(new_model);
+                        }
                     }
                 }
                 _ => {}
@@ -7888,11 +7903,23 @@ fn handle_profile_overlay_key(app: &mut App, event: crossterm::event::KeyEvent) 
                     // Auto-save on field commit
                     st.save();
                     let name = st.name.clone();
-                    let provider = st.provider.clone();
-                    let model = st.model.clone();
+                    let new_provider = st.provider.clone();
+                    let new_model = st.model.clone();
+                    let new_api_key = st.api_key.clone();
                     if app.current_profile == name {
-                        app.provider = provider;
-                        app.model = model;
+                        let provider_changed = app.provider != new_provider;
+                        let key_changed = app.api_key != new_api_key;
+                        app.provider = new_provider;
+                        app.model = new_model.clone();
+                        app.api_key = new_api_key;
+                        if provider_changed || key_changed {
+                            app.profile_overlay = None;
+                            app.restart_resume_session = app.current_session_id.clone();
+                            app.wants_profile_switch = Some(name);
+                            app.quit = true;
+                        } else {
+                            let _ = app.model_switch_tx.send(new_model);
+                        }
                     }
                 }
                 Backspace => {

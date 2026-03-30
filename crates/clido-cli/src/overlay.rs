@@ -72,6 +72,8 @@ pub enum PermissionGrant {
 pub struct ErrorOverlay {
     pub title: String,
     pub message: String,
+    /// Optional recovery hint shown below the message.
+    pub recovery: Option<String>,
 }
 
 impl ErrorOverlay {
@@ -79,6 +81,7 @@ impl ErrorOverlay {
         Self {
             title: "Error".into(),
             message: message.into(),
+            recovery: None,
         }
     }
 
@@ -86,6 +89,54 @@ impl ErrorOverlay {
         Self {
             title: title.into(),
             message: message.into(),
+            recovery: None,
+        }
+    }
+
+    /// Create from an error message, auto-detecting structured info from known
+    /// API error patterns (auth, rate-limit, server errors, save errors).
+    pub fn from_message(msg: impl Into<String>) -> Self {
+        let detail = msg.into();
+        if detail.contains("401")
+            || detail.contains("Unauthorized")
+            || detail.contains("Invalid API key")
+        {
+            Self {
+                title: "Authentication Error".into(),
+                message: detail,
+                recovery: Some("Check your API key in /profile edit".into()),
+            }
+        } else if detail.contains("429")
+            || detail.contains("Rate limit")
+            || detail.contains("rate_limit")
+        {
+            Self {
+                title: "Rate Limited".into(),
+                message: detail,
+                recovery: Some("Wait a moment, then try again".into()),
+            }
+        } else if detail.contains("500")
+            || detail.contains("502")
+            || detail.contains("503")
+            || detail.contains("Server error")
+        {
+            Self {
+                title: "Server Error".into(),
+                message: detail,
+                recovery: Some("Try again — the provider may be experiencing issues".into()),
+            }
+        } else if detail.contains("Could not save") {
+            Self {
+                title: "Save Error".into(),
+                message: detail,
+                recovery: Some("Check file permissions".into()),
+            }
+        } else {
+            Self {
+                title: "Error".into(),
+                message: detail,
+                recovery: None,
+            }
         }
     }
 

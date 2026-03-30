@@ -48,7 +48,9 @@ use clido_memory::MemoryStore;
 use clido_planner::{Complexity, Plan, PlanEditor, TaskStatus};
 
 use crate::list_picker::{ListPicker, PickerItem};
-use crate::overlay::{AppAction, ErrorOverlay, OverlayKeyResult, OverlayKind, OverlayStack};
+use crate::overlay::{
+    AppAction, ErrorOverlay, OverlayKeyResult, OverlayKind, OverlayStack, ReadOnlyOverlay,
+};
 use crate::text_input::TextInput;
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -1116,68 +1118,6 @@ struct PendingPerm {
     reply: oneshot::Sender<PermGrant>,
 }
 
-/// Structured error info for the error popup.
-struct ErrorInfo {
-    title: String,
-    detail: String,
-    recovery: Option<String>,
-    #[allow(dead_code)]
-    is_transient: bool,
-}
-
-impl ErrorInfo {
-    fn from_message(msg: impl Into<String>) -> Self {
-        let detail = msg.into();
-        // Map known API error patterns to structured info
-        if detail.contains("401")
-            || detail.contains("Unauthorized")
-            || detail.contains("Invalid API key")
-        {
-            Self {
-                title: "Authentication Error".into(),
-                detail: detail.clone(),
-                recovery: Some("Check your API key in /profile edit".into()),
-                is_transient: false,
-            }
-        } else if detail.contains("429")
-            || detail.contains("Rate limit")
-            || detail.contains("rate_limit")
-        {
-            Self {
-                title: "Rate Limited".into(),
-                detail: detail.clone(),
-                recovery: Some("Wait a moment, then try again".into()),
-                is_transient: true,
-            }
-        } else if detail.contains("500")
-            || detail.contains("502")
-            || detail.contains("503")
-            || detail.contains("Server error")
-        {
-            Self {
-                title: "Server Error".into(),
-                detail: detail.clone(),
-                recovery: Some("Try again — the provider may be experiencing issues".into()),
-                is_transient: true,
-            }
-        } else if detail.contains("Could not save") {
-            Self {
-                title: "Save Error".into(),
-                detail: detail.clone(),
-                recovery: Some("Check file permissions".into()),
-                is_transient: false,
-            }
-        } else {
-            Self {
-                title: "Error".into(),
-                detail,
-                recovery: None,
-                is_transient: false,
-            }
-        }
-    }
-}
-
 // ── Toast notifications ────────────────────────────────────────────────────────
 
 /// Non-blocking notification that auto-dismisses after a timeout.
@@ -1202,9 +1142,7 @@ struct App {
     busy: bool,
     spinner_tick: usize,
     pending_perm: Option<PendingPerm>,
-    /// Error modal: shown as overlay, dismissed with Enter/Esc/Space.
-    pending_error: Option<ErrorInfo>,
-    /// Unified overlay stack (new system — ErrorOverlay, ReadOnlyOverlay, etc.)
+    /// Unified overlay stack (errors, read-only, choices, etc.)
     overlay_stack: OverlayStack,
     prompt_tx: mpsc::UnboundedSender<String>,
     /// Channel to request session resume in agent_task.
@@ -1286,9 +1224,6 @@ struct App {
     last_plan_raw: Option<String>,
     /// Set to true when /plan <task> is sent; cleared after the agent responds and the plan is parsed.
     awaiting_plan_response: bool,
-    /// Rules overlay: Some = popup visible, None = hidden.
-    /// Each entry is (file_path_display, first_3_lines_preview).
-    rules_overlay: Option<Vec<(String, String)>>,
     /// When true, fire desktop notification + terminal bell after each agent turn
     /// (subject to the MIN_ELAPSED_SECS gate in `notify.rs`).
     notify_enabled: bool,
@@ -1390,7 +1325,6 @@ impl App {
             busy: false,
             spinner_tick: 0,
             pending_perm: None,
-            pending_error: None,
             overlay_stack: OverlayStack::new(),
             prompt_tx,
             resume_tx,
@@ -1436,7 +1370,6 @@ impl App {
             last_plan: None,
             last_plan_raw: None,
             awaiting_plan_response: false,
-            rules_overlay: None,
             notify_enabled,
             reviewer_enabled,
             recovering: false,
@@ -2946,113 +2879,24 @@ fn render(frame: &mut Frame, app: &mut App) {
         );
     }
 
-    // ── Error modal ──────────────────────────────────────────────────────────
-    if let Some(ref err_info) = app.pending_error {
-        let inner_w = input_area.width.saturating_sub(4) as usize;
-        let wrapped = word_wrap(&err_info.detail, inner_w);
-        let recovery_lines = err_info
-            .recovery
-            .as_ref()
-            .map(|r| word_wrap(r, inner_w))
-            .unwrap_or_default();
-        // blank + recovery + "[ OK ]" = variable; borders = +2
-        let extra = if recovery_lines.is_empty() {
-            0
-        } else {
-            recovery_lines.len() + 1
-        };
-        let popup_h = ((wrapped.len() + extra + 4) as u16).min(area.height.saturating_sub(4));
-        let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
-
-        let mut content: Vec<Line<'static>> = wrapped
-            .into_iter()
-            .map(|l| {
-                Line::from(vec![Span::styled(
-                    format!("  {}", l),
-                    Style::default().fg(Color::White),
-                )])
-            })
-            .collect();
-        if !recovery_lines.is_empty() {
-            content.push(Line::raw(""));
-            for l in recovery_lines {
-                content.push(Line::from(vec![Span::styled(
-                    format!("  → {}", l),
-                    Style::default().fg(Color::Cyan),
-                )]));
-            }
-        }
-        content.push(Line::raw(""));
-        content.push(Line::from(vec![Span::styled(
-            "  [ OK ]  (Enter / Esc / Space)",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )]));
-
-        let title = format!(" {} ", err_info.title);
-        frame.render_widget(Clear, popup_rect);
-        frame.render_widget(
-            Paragraph::new(content).block(modal_block(&title, Color::Red)),
-            popup_rect,
-        );
-    }
-
-    // ── Rules overlay ─────────────────────────────────────────────────────────
-    if let Some(ref rules) = app.rules_overlay {
-        let mut content: Vec<Line<'static>> = Vec::new();
-        if rules.is_empty() {
-            content.push(Line::from(vec![Span::styled(
-                "  No active rules.".to_string(),
-                Style::default().fg(Color::DarkGray),
-            )]));
-        } else {
-            for (id, text) in rules {
-                if id.trim().is_empty() {
-                    content.push(Line::raw(""));
-                } else {
-                    // Rule ID as header
-                    content.push(Line::from(vec![Span::styled(
-                        format!("  {}", id),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )]));
-                    // Rule text content
-                    content.push(Line::from(vec![Span::styled(
-                        format!("    {}", truncate_chars(text, 74)),
-                        Style::default().fg(Color::Gray),
-                    )]));
-                    content.push(Line::raw(""));
-                }
-            }
-        }
-        content.push(Line::raw(""));
-        content.push(Line::from(vec![Span::styled(
-            "  [ Close ]  (Enter / Esc)".to_string(),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )]));
-
-        let popup_h = ((content.len() as u16) + 2).min(area.height.saturating_sub(4));
-        let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
-        frame.render_widget(Clear, popup_rect);
-        frame.render_widget(
-            Paragraph::new(content)
-                .block(modal_block(" Active Rules ", Color::Cyan))
-                .wrap(Wrap { trim: false }),
-            popup_rect,
-        );
-    }
-
-    // ── Overlay stack (new system) ───────────────────────────────────────────
+    // ── Overlay stack ────────────────────────────────────────────────────────
     for overlay in app.overlay_stack.iter() {
         match overlay {
             OverlayKind::Error(e) => {
                 let inner_w = input_area.width.saturating_sub(4) as usize;
                 let wrapped = word_wrap(&e.message, inner_w);
-                let popup_h = ((wrapped.len() as u16) + 4).min(area.height.saturating_sub(4));
+                let recovery_lines = e
+                    .recovery
+                    .as_ref()
+                    .map(|r| word_wrap(r, inner_w))
+                    .unwrap_or_default();
+                let extra = if recovery_lines.is_empty() {
+                    0
+                } else {
+                    recovery_lines.len() + 1
+                };
+                let popup_h =
+                    ((wrapped.len() + extra + 4) as u16).min(area.height.saturating_sub(4));
                 let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
                 let mut content: Vec<Line<'static>> = wrapped
                     .into_iter()
@@ -3063,6 +2907,15 @@ fn render(frame: &mut Frame, app: &mut App) {
                         )])
                     })
                     .collect();
+                if !recovery_lines.is_empty() {
+                    content.push(Line::raw(""));
+                    for l in recovery_lines {
+                        content.push(Line::from(vec![Span::styled(
+                            format!("  → {}", l),
+                            Style::default().fg(Color::Cyan),
+                        )]));
+                    }
+                }
                 content.push(Line::raw(""));
                 content.push(Line::from(vec![Span::styled(
                     "  [ OK ]  (Enter / Esc / Space)",
@@ -4709,7 +4562,6 @@ fn cmd_help(app: &mut App) {
 }
 
 fn cmd_keys(app: &mut App) {
-    use crate::overlay::{OverlayKind, ReadOnlyOverlay};
     let lines: Vec<(String, String)> = vec![
         (
             "Navigation".into(),
@@ -5471,10 +5323,12 @@ fn cmd_plan(app: &mut App, cmd: &str) {
                         path.display()
                     ))),
                     Err(e) => {
-                        app.pending_error = Some(ErrorInfo::from_message(format!(
-                            "Could not save plan: {}",
-                            e
-                        )))
+                        app.overlay_stack.push(OverlayKind::Error(
+                            ErrorOverlay::from_message(format!(
+                                "Could not save plan: {}",
+                                e
+                            )),
+                        ))
                     }
                 }
             } else if let Some(ref plan) = app.last_plan_snapshot {
@@ -5484,10 +5338,12 @@ fn cmd_plan(app: &mut App, cmd: &str) {
                         path.display()
                     ))),
                     Err(e) => {
-                        app.pending_error = Some(ErrorInfo::from_message(format!(
-                            "Could not save plan: {}",
-                            e
-                        )))
+                        app.overlay_stack.push(OverlayKind::Error(
+                            ErrorOverlay::from_message(format!(
+                                "Could not save plan: {}",
+                                e
+                            )),
+                        ))
                     }
                 }
             } else {
@@ -5530,7 +5386,9 @@ fn cmd_plan(app: &mut App, cmd: &str) {
                 ));
             }
             Err(e) => {
-                app.pending_error = Some(ErrorInfo::from_message(format!("list plans: {}", e)));
+                app.overlay_stack.push(OverlayKind::Error(
+                    ErrorOverlay::from_message(format!("list plans: {}", e)),
+                ));
             }
         },
         "" => {
@@ -5795,7 +5653,11 @@ fn cmd_rules(app: &mut App) {
             overlay_content.push((rule.id.clone(), rule.text.clone()));
         }
     }
-    app.rules_overlay = Some(overlay_content);
+    app.overlay_stack
+        .push(OverlayKind::ReadOnly(ReadOnlyOverlay::new(
+            "Active Rules",
+            overlay_content,
+        )));
 }
 
 fn cmd_image(app: &mut App, cmd: &str) {
@@ -7556,10 +7418,12 @@ fn handle_plan_editor_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         )));
                     }
                     Err(e) => {
-                        app.pending_error = Some(ErrorInfo::from_message(format!(
-                            "Could not save plan: {}",
-                            e
-                        )));
+                        app.overlay_stack.push(OverlayKind::Error(
+                            ErrorOverlay::from_message(format!(
+                                "Could not save plan: {}",
+                                e
+                            )),
+                        ));
                     }
                 }
             }
@@ -8274,28 +8138,6 @@ fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             return;
         }
         OverlayKeyResult::NotHandled | OverlayKeyResult::NoOverlay => {}
-    }
-
-    // ── Error modal (dismiss with Enter / Esc / Space) ───────────────────────
-    if app.pending_error.is_some() {
-        match event.code {
-            Enter | Esc | Char(' ') => {
-                app.pending_error = None;
-            }
-            _ => {}
-        }
-        return;
-    }
-
-    // ── Rules overlay (dismiss with Enter / Esc) ─────────────────────────────
-    if app.rules_overlay.is_some() {
-        match event.code {
-            Enter | Esc => {
-                app.rules_overlay = None;
-            }
-            _ => {}
-        }
-        return;
     }
 
     // ── Model picker (modal) ─────────────────────────────────────────────────
@@ -10621,7 +10463,9 @@ async fn event_loop(
                             app.model = prev.clone();
                             let _ = app.model_switch_tx.send(prev);
                         }
-                        app.pending_error = Some(ErrorInfo::from_message(msg));
+                        app.overlay_stack.push(OverlayKind::Error(
+                            ErrorOverlay::from_message(msg),
+                        ));
                         app.on_agent_done();
                     }
                     Some(AgentEvent::ResumedSession { messages }) => {

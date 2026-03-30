@@ -1582,7 +1582,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
                 .and_then(|c| c.profiles.get(&profile).cloned());
             let api_key = prof_entry
                 .as_ref()
-                .map(|p| resolve_display_api_key(p))
+                .map(resolve_display_api_key)
                 .unwrap_or_default();
             let roles: Vec<(String, String)> = loaded
                 .as_ref()

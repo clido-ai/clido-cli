@@ -1,6 +1,7 @@
 # Rust
 .tmp/
 target/
+doc/
 
 # Cursor IDE (plans, skills — repo-specific)
 .cursor/

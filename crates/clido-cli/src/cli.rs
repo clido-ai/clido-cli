@@ -492,35 +492,4 @@ impl Cli {
     pub fn prompt_str(&self) -> String {
         self.prompt.join(" ").trim().to_string()
     }
-
-    /// True if this is a run (no subcommand or subcommand is not sessions/version/init). Used for REPL.
-    #[allow(dead_code)]
-    pub fn is_run(&self) -> bool {
-        match &self.subcommand {
-            None => true,
-            Some(Subcommand::Sessions { .. }) => false,
-            Some(Subcommand::Version) => false,
-            Some(Subcommand::Init) => false,
-            Some(Subcommand::Doctor) => false,
-            Some(Subcommand::Config { .. }) => false,
-            Some(Subcommand::Workflow { .. }) => false,
-            Some(Subcommand::ListModels { .. }) => false,
-            Some(Subcommand::UpdatePricing) => false,
-            Some(Subcommand::Run { .. }) => false,
-            Some(Subcommand::Stats { .. }) => false,
-            Some(Subcommand::Audit { .. }) => false,
-            Some(Subcommand::Completions { .. }) => false,
-            Some(Subcommand::Man) => false,
-            Some(Subcommand::Memory { .. }) => false,
-            Some(Subcommand::FetchModels { .. }) => false,
-            Some(Subcommand::Index { .. }) => false,
-            Some(Subcommand::Commit { .. }) => false,
-            Some(Subcommand::Checkpoint { .. }) => false,
-            Some(Subcommand::Rollback { .. }) => false,
-            Some(Subcommand::Plan { .. }) => false,
-            Some(Subcommand::Profile { .. }) => false,
-            Some(Subcommand::ListSessions) => false,
-            Some(Subcommand::ShowSession { .. }) => false,
-        }
-    }
 }

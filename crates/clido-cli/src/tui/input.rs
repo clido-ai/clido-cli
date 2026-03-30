@@ -985,6 +985,11 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     use KeyCode::*;
     use KeyModifiers as Km;
 
+    // Any keypress clears an active mouse selection.
+    app.selection_anchor = None;
+    app.selection_end = None;
+    app.selecting = false;
+
     // Ctrl+C / Ctrl+D always quits
     if matches!(
         (event.modifiers, event.code),

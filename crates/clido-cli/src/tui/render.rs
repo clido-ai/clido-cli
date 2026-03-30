@@ -194,6 +194,10 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     frame.render_widget(header_para, header_area);
 
     // ── Chat ──
+    // Store chat area bounds for mouse selection handlers.
+    app.chat_area_y = (chat_area.y, chat_area.y + chat_area.height);
+    app.chat_area_width = chat_area.width;
+
     if is_welcome_only(app) {
         render_welcome(frame, app, chat_area);
     } else {
@@ -218,6 +222,31 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             para.scroll((scroll.min(u16::MAX as u32) as u16, 0)),
             chat_area,
         );
+
+        // ── Selection highlight overlay ──
+        if let (Some(anchor), Some(end)) = (app.selection_anchor, app.selection_end) {
+            let sel_start_y = anchor.1.min(end.1);
+            let sel_end_y = anchor.1.max(end.1);
+            let (sel_start_x, sel_end_x) = if anchor.1 < end.1 || (anchor.1 == end.1 && anchor.0 <= end.0) {
+                (anchor.0, end.0)
+            } else {
+                (end.0, anchor.0)
+            };
+            let buf = frame.buffer_mut();
+            for y in sel_start_y..=sel_end_y {
+                if y < chat_area.y || y >= chat_area.y + chat_area.height {
+                    continue;
+                }
+                let x_start = if y == sel_start_y { sel_start_x.max(chat_area.x) } else { chat_area.x };
+                let x_end = if y == sel_end_y { sel_end_x.min(chat_area.x + chat_area.width) } else { chat_area.x + chat_area.width };
+                for x in x_start..x_end {
+                    if let Some(cell) = buf.cell_mut((x, y)) {
+                        cell.set_bg(Color::Rgb(60, 80, 120));
+                        cell.set_fg(Color::White);
+                    }
+                }
+            }
+        }
     }
 
     // ── Status strip ──
@@ -2791,6 +2820,11 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
 
     if let Some(cached) = app.render_cache.get(&cache_key) {
         return cached.clone();
+    }
+
+    // Hard cap: evict all if too many entries (safety net against memory leaks).
+    if app.render_cache.len() >= 512 {
+        app.render_cache.clear();
     }
 
     let result = build_lines_w_uncached(app, width);

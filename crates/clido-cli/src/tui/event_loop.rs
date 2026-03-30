@@ -7,7 +7,10 @@ use clido_agent::AgentLoop;
 use clido_core::ClidoError;
 use clido_storage::SessionWriter;
 use crossterm::{
-    event::{DisableBracketedPaste, EnableBracketedPaste, Event, EventStream, MouseEventKind},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, EventStream, MouseButton, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -133,6 +136,89 @@ pub(super) fn copy_to_clipboard(text: &str) -> Result<(), String> {
 #[allow(dead_code)]
 pub(super) fn copy_to_clipboard_osc52(text: &str) -> Result<(), String> {
     copy_to_clipboard(text)
+}
+
+/// Extract plain text from the chat area between two screen coordinates.
+///
+/// This builds the same rendered lines the chat uses, wraps them to the chat
+/// width, applies the current scroll offset, and extracts text between the
+/// anchor and end points.  Coordinates are absolute screen (row, col).
+pub(super) fn extract_selected_text(
+    app: &super::App,
+    anchor: (u16, u16),
+    end: (u16, u16),
+) -> String {
+    use super::render::build_lines_w_uncached;
+
+    let (chat_y_start, _chat_y_end) = app.chat_area_y;
+    let chat_width = if app.chat_area_width > 0 { app.chat_area_width } else { 120 };
+
+    let lines = build_lines_w_uncached(app, chat_width as usize);
+
+    // ratatui's Paragraph wraps lines; we need the same wrapping to map screen
+    // rows to text.  Do a simple character-level wrap simulation.
+    let mut wrapped: Vec<String> = Vec::new();
+    for line in &lines {
+        let plain: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        if plain.is_empty() {
+            wrapped.push(String::new());
+        } else {
+            // Simple wrap by width.
+            let mut remaining = plain.as_str();
+            while !remaining.is_empty() {
+                let take = remaining
+                    .char_indices()
+                    .nth(chat_width as usize)
+                    .map(|(i, _)| i)
+                    .unwrap_or(remaining.len());
+                wrapped.push(remaining[..take].to_string());
+                remaining = &remaining[take..];
+            }
+        }
+    }
+
+    // Map screen rows to wrapped lines, accounting for scroll.
+    let scroll = if app.following {
+        app.max_scroll
+    } else {
+        app.scroll.min(app.max_scroll)
+    };
+
+    // Normalize so start <= end (top-to-bottom).
+    let (start, end) = if anchor.0 < end.0 || (anchor.0 == end.0 && anchor.1 <= end.1) {
+        (anchor, end)
+    } else {
+        (end, anchor)
+    };
+
+    let start_line = scroll as usize + (start.0.saturating_sub(chat_y_start)) as usize;
+    let end_line = scroll as usize + (end.0.saturating_sub(chat_y_start)) as usize;
+
+    let mut result = String::new();
+    for i in start_line..=end_line.min(wrapped.len().saturating_sub(1)) {
+        if i >= wrapped.len() {
+            break;
+        }
+        let line = &wrapped[i];
+        let chars: Vec<char> = line.chars().collect();
+        let (col_start, col_end) = if i == start_line && i == end_line {
+            (start.1 as usize, end.1 as usize)
+        } else if i == start_line {
+            (start.1 as usize, chars.len())
+        } else if i == end_line {
+            (0, end.1 as usize)
+        } else {
+            (0, chars.len())
+        };
+        let cs = col_start.min(chars.len());
+        let ce = col_end.min(chars.len());
+        let slice: String = chars[cs..ce].iter().collect();
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str(&slice);
+    }
+    result
 }
 
 // ── Agent background task ─────────────────────────────────────────────────────
@@ -1179,7 +1265,11 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let _ = execute!(std::io::stderr(), LeaveAlternateScreen);
+        let _ = execute!(
+            std::io::stderr(),
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
         #[cfg(unix)]
         unsafe {
             let mut t: libc::termios = std::mem::zeroed();
@@ -1200,7 +1290,12 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
 
     enable_raw_mode()?;
     let mut out = stdout();
-    execute!(out, EnterAlternateScreen, EnableBracketedPaste)?;
+    execute!(
+        out,
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        EnableMouseCapture
+    )?;
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
 
@@ -1415,6 +1510,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     let _ = disable_raw_mode();
     let _ = execute!(
         terminal.backend_mut(),
+        DisableMouseCapture,
         DisableBracketedPaste,
         LeaveAlternateScreen
     );
@@ -1635,6 +1731,47 @@ pub(super) async fn event_loop(
                         match m.kind {
                             MouseEventKind::ScrollDown => scroll_down(app, 3),
                             MouseEventKind::ScrollUp => scroll_up(app, 3),
+                            MouseEventKind::Down(MouseButton::Left) => {
+                                let (chat_y_start, chat_y_end) = app.chat_area_y;
+                                if m.row >= chat_y_start && m.row < chat_y_end {
+                                    app.selection_anchor = Some((m.row, m.column));
+                                    app.selection_end = Some((m.row, m.column));
+                                    app.selecting = true;
+                                }
+                            }
+                            MouseEventKind::Drag(MouseButton::Left) => {
+                                if app.selecting {
+                                    let (chat_y_start, chat_y_end) = app.chat_area_y;
+                                    app.selection_end = Some((m.row, m.column));
+                                    // Auto-scroll when dragging past chat area edges.
+                                    if m.row < chat_y_start + 1 {
+                                        scroll_up(app, 2);
+                                    } else if m.row >= chat_y_end.saturating_sub(1) {
+                                        scroll_down(app, 2);
+                                    }
+                                }
+                            }
+                            MouseEventKind::Up(MouseButton::Left) => {
+                                if app.selecting {
+                                    app.selecting = false;
+                                    // Copy selected text to clipboard if there's a
+                                    // non-trivial selection.
+                                    if let (Some(anchor), Some(end)) =
+                                        (app.selection_anchor, app.selection_end)
+                                    {
+                                        if anchor != end {
+                                            let text =
+                                                extract_selected_text(app, anchor, end);
+                                            if !text.is_empty() {
+                                                let _ = copy_to_clipboard(&text);
+                                            }
+                                        }
+                                    }
+                                    // Clear selection after brief delay (render shows it
+                                    // one more frame so user sees what was copied).
+                                    // Actual clearing happens on next mouse down or keypress.
+                                }
+                            }
                             _ => {}
                         }
                     }

@@ -1,6 +1,7 @@
 //! Agent loop and execution.
 
 pub mod agent_loop;
+pub mod provider_prompts;
 pub mod sub_agent;
 
 pub use agent_loop::{

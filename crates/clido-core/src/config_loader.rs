@@ -173,6 +173,9 @@ pub struct RolesSection {
     /// Task decomposition / planning model.
     #[serde(default)]
     pub planner: Option<String>,
+    /// Fallback model when the primary provider fails.
+    #[serde(default)]
+    pub fallback: Option<String>,
     /// Arbitrary user-defined roles.
     #[serde(flatten)]
     pub extra: HashMap<String, String>,
@@ -193,6 +196,9 @@ impl RolesSection {
         }
         if let Some(m) = &self.planner {
             map.insert("planner".into(), m.clone());
+        }
+        if let Some(m) = &self.fallback {
+            map.insert("fallback".into(), m.clone());
         }
         map
     }

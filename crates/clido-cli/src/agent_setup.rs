@@ -6,6 +6,7 @@ use clido_core::{
     agent_config_from_loaded, load_config, load_pricing, AgentConfig, LoadedConfig, PermissionMode,
     PricingTable,
 };
+use clido_providers::{FallbackProvider, RetryProvider};
 use clido_tools::{default_registry_with_todo_store, McpTool, TodoItem, ToolRegistry};
 use std::io::{self, IsTerminal};
 use std::path::Path;
@@ -29,6 +30,8 @@ pub struct AgentSetup {
     /// Shared todo list written by the agent's TodoWrite tool.
     #[allow(dead_code)]
     pub todo_store: TodoStore,
+    /// Fast/cheap model name from [roles] config, for utility tasks.
+    pub fast_model: Option<String>,
 }
 
 impl AgentSetup {
@@ -63,6 +66,7 @@ impl AgentSetup {
         reviewer_enabled: Arc<AtomicBool>,
         external_todo_store: Option<TodoStore>,
     ) -> Result<Self, anyhow::Error> {
+        let fast_model = loaded.roles.fast.clone();
         let profile_name = cli
             .profile
             .as_deref()
@@ -87,7 +91,31 @@ impl AgentSetup {
 
         let permission_mode = parse_permission_mode(cli.permission_mode.as_deref());
 
-        let system_prompt = assemble_system_prompt(cli)?;
+        let mut system_prompt = assemble_system_prompt(cli)?;
+
+        // Load project-specific context from .clido.md if present.
+        let clido_md_path = workspace_root.join(".clido.md");
+        if clido_md_path.is_file() {
+            if let Ok(project_ctx) = std::fs::read_to_string(&clido_md_path) {
+                let trimmed = project_ctx.trim();
+                if !trimmed.is_empty() {
+                    system_prompt = format!(
+                        "<project_context>\n{}\n</project_context>\n\n{}",
+                        trimmed, system_prompt
+                    );
+                }
+            }
+        }
+
+        // Append provider-specific prompt instructions.
+        let provider_name = profile.provider.as_str();
+        let model_name = cli.model.as_deref().unwrap_or(&profile.model);
+        let family =
+            clido_agent::provider_prompts::ProviderFamily::detect(provider_name, model_name);
+        let suffix = clido_agent::provider_prompts::provider_specific_instructions(family);
+        if !suffix.is_empty() {
+            system_prompt = format!("{}\n{}", system_prompt, suffix);
+        }
 
         let mut config = agent_config_from_loaded(
             &loaded,
@@ -221,6 +249,16 @@ impl AgentSetup {
                 None
             };
 
+        // Wrap provider with retry logic for transient failures.
+        let provider = RetryProvider::wrap(provider);
+
+        // Wrap with fallback provider if configured.
+        let provider = if let Some(ref fallback_model) = loaded.roles.fallback {
+            FallbackProvider::wrap(provider.clone(), provider.clone(), fallback_model.clone())
+        } else {
+            provider
+        };
+
         Ok(AgentSetup {
             provider,
             registry,
@@ -228,6 +266,7 @@ impl AgentSetup {
             ask_user,
             pricing_table,
             todo_store,
+            fast_model,
         })
     }
 

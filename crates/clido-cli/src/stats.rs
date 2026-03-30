@@ -50,6 +50,7 @@ pub fn run_stats(session_id: Option<&str>, json: bool) -> Result<(), anyhow::Err
                     num_turns: msgs,
                     total_cost_usd: cost,
                     preview,
+                    title: None,
                 }]
             }
             Err(e) => return Err(anyhow::anyhow!("session not found: {}", e)),

@@ -3,14 +3,18 @@
 use std::sync::Arc;
 
 pub mod anthropic;
+pub mod fallback;
 pub mod openai;
 pub mod provider;
 pub mod registry;
+pub mod retry;
 
 pub use anthropic::AnthropicProvider;
+pub use fallback::FallbackProvider;
 pub use openai::OpenAICompatProvider;
 pub use provider::{ModelEntry, ModelProvider, StreamEvent};
 pub use registry::{ProviderDef, PROVIDER_REGISTRY};
+pub use retry::RetryProvider;
 
 use clido_core::{ClidoError, Result};
 

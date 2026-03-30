@@ -265,6 +265,8 @@ pub struct AgentLoop {
     /// returned string (if any) is injected as a `<git_context>` addendum to the
     /// system prompt on every call to `run()` / `run_with_extra_blocks()`.
     git_context_fn: Option<Box<dyn Fn() -> Option<String> + Send + Sync>>,
+    /// Optional fast/cheap model name for utility tasks (titles, commits, summaries).
+    fast_model: Option<String>,
 }
 
 impl AgentLoop {
@@ -297,12 +299,19 @@ impl AgentLoop {
             doom_monitor: VecDeque::new(),
             budget_warned_pcts: Vec::new(),
             git_context_fn: None,
+            fast_model: None,
         }
     }
 
     /// Enable or disable planner mode (--planner CLI flag).
     pub fn with_planner(mut self, enabled: bool) -> Self {
         self.planner_mode = enabled;
+        self
+    }
+
+    /// Set the fast model for utility tasks (from [roles] fast config).
+    pub fn with_fast_model(mut self, model: Option<String>) -> Self {
+        self.fast_model = model;
         self
     }
 
@@ -337,6 +346,7 @@ impl AgentLoop {
             doom_monitor: VecDeque::new(),
             budget_warned_pcts: Vec::new(),
             git_context_fn: None,
+            fast_model: None,
         }
     }
 
@@ -381,6 +391,17 @@ impl AgentLoop {
     /// Return the model currently active for this session.
     pub fn current_model(&self) -> &str {
         &self.config.model
+    }
+
+    fn fast_config(&self) -> AgentConfig {
+        if let Some(ref fast) = self.fast_model {
+            AgentConfig {
+                model: fast.clone(),
+                ..self.config.clone()
+            }
+        } else {
+            self.config.clone()
+        }
     }
 
     /// Replace the active tool registry (used by TUI workdir changes).
@@ -471,13 +492,14 @@ impl AgentLoop {
             .max_context_tokens
             .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
         // Pass threshold=0 to force compaction unconditionally.
+        let summarize_config = self.fast_config();
         let compacted = compact_with_summary(
             &self.history,
             sys_tokens,
             max_ctx,
             0.0,
             self.provider.as_ref(),
-            &self.config,
+            &summarize_config,
         )
         .await?;
         let after = compacted.len();
@@ -505,6 +527,45 @@ impl AgentLoop {
             }],
         }];
         let response = self.provider.complete(&messages, &[], &self.config).await?;
+        let text = response
+            .content
+            .iter()
+            .find_map(|b| {
+                if let ContentBlock::Text { text } = b {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+        Ok((text, response.usage))
+    }
+
+    pub async fn complete_simple_fast(&self, prompt: &str) -> clido_core::Result<String> {
+        self.complete_simple_fast_with_usage(prompt)
+            .await
+            .map(|(text, _)| text)
+    }
+
+    pub async fn complete_simple_fast_with_usage(
+        &self,
+        prompt: &str,
+    ) -> clido_core::Result<(String, clido_core::Usage)> {
+        let messages = vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: prompt.to_string(),
+            }],
+        }];
+        let config = if let Some(ref fast) = self.fast_model {
+            AgentConfig {
+                model: fast.clone(),
+                ..self.config.clone()
+            }
+        } else {
+            self.config.clone()
+        };
+        let response = self.provider.complete(&messages, &[], &config).await?;
         let text = response
             .content
             .iter()
@@ -564,13 +625,14 @@ impl AgentLoop {
                 .config
                 .compaction_threshold
                 .unwrap_or(DEFAULT_COMPACTION_THRESHOLD);
+            let summarize_config = self.fast_config();
             let to_send = compact_with_summary(
                 &self.history,
                 system_tokens,
                 max_ctx,
                 threshold,
                 self.provider.as_ref(),
-                &self.config,
+                &summarize_config,
             )
             .await?;
 
@@ -1064,13 +1126,14 @@ impl AgentLoop {
                 .config
                 .compaction_threshold
                 .unwrap_or(DEFAULT_COMPACTION_THRESHOLD);
+            let summarize_config = self.fast_config();
             let to_send = compact_with_summary(
                 &self.history,
                 system_tokens,
                 max_ctx,
                 threshold,
                 self.provider.as_ref(),
-                &self.config,
+                &summarize_config,
             )
             .await?;
 

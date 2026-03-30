@@ -40,10 +40,16 @@ pub async fn run_commit(
 
     // Step 3: Call the LLM via a minimal agent setup.
     let setup = crate::agent_setup::AgentSetup::build(cli, workspace_root)?;
+    // Use fast model for commit message generation if configured.
+    let commit_model = setup
+        .fast_model
+        .clone()
+        .unwrap_or_else(|| setup.config.model.clone());
     let agent = clido_agent::AgentLoop::new(
         setup.provider,
         setup.registry,
         clido_core::AgentConfig {
+            model: commit_model,
             system_prompt: Some(system_prompt.to_string()),
             max_turns: 1,
             ..setup.config

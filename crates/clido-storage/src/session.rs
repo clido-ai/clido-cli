@@ -55,6 +55,9 @@ pub enum SessionLine {
         num_turns: u32,
         duration_ms: u64,
     },
+    Title {
+        title: String,
+    },
 }
 
 /// Replace a token that starts at `start` with a redacted placeholder.
@@ -147,6 +150,7 @@ pub struct SessionSummary {
     pub num_turns: u32,
     pub total_cost_usd: f64,
     pub preview: String,
+    pub title: Option<String>,
 }
 
 /// Append-only session file writer.
@@ -357,7 +361,7 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
                         ..
                     }) = first
                     {
-                        let (num_turns, total_cost_usd, preview) = summarize_lines(&lines);
+                        let (num_turns, total_cost_usd, preview, title) = summarize_lines(&lines);
                         // Skip sessions with no user messages (launched but nothing sent).
                         if num_turns == 0 {
                             continue;
@@ -369,6 +373,7 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
                             num_turns,
                             total_cost_usd,
                             preview,
+                            title,
                         });
                     }
                 }
@@ -379,12 +384,13 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
     Ok(summaries)
 }
 
-fn summarize_lines(lines: &[SessionLine]) -> (u32, f64, String) {
+fn summarize_lines(lines: &[SessionLine]) -> (u32, f64, String, Option<String>) {
     let mut result_turns: Option<u32> = None;
     let mut result_cost: Option<f64> = None;
     let mut user_turn_count = 0u32;
     let mut preview = String::new();
     let mut preview_set = false;
+    let mut title: Option<String> = None;
     for line in lines {
         match line {
             SessionLine::UserMessage { content, .. } => {
@@ -411,12 +417,15 @@ fn summarize_lines(lines: &[SessionLine]) -> (u32, f64, String) {
                 result_turns = Some(*n);
                 result_cost = Some(*c);
             }
+            SessionLine::Title { title: t } => {
+                title = Some(t.clone());
+            }
             _ => {}
         }
     }
     let num_turns = result_turns.unwrap_or(user_turn_count);
     let total_cost_usd = result_cost.unwrap_or(0.0);
-    (num_turns, total_cost_usd, preview)
+    (num_turns, total_cost_usd, preview, title)
 }
 
 #[cfg(test)]

@@ -298,6 +298,9 @@ pub struct RolesConfig {
     /// Model for the "planner" role.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub planner: Option<String>,
+    /// Fallback model when the primary provider fails.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<String>,
     /// Arbitrary user-defined roles. Key is role name, value is model ID.
     #[serde(flatten)]
     pub extra: std::collections::HashMap<String, String>,
@@ -311,6 +314,7 @@ impl RolesConfig {
             "reasoning" | "smart" => self.reasoning.as_deref(),
             "critic" => self.critic.as_deref(),
             "planner" => self.planner.as_deref(),
+            "fallback" => self.fallback.as_deref(),
             other => self.extra.get(other).map(|s| s.as_str()),
         }
     }
@@ -437,6 +441,7 @@ mod tests {
             reasoning: Some("o3".to_string()),
             critic: Some("claude-opus-4".to_string()),
             planner: Some("gemini-pro".to_string()),
+            fallback: None,
             extra: Default::default(),
         };
         assert_eq!(roles.resolve("fast"), Some("gpt-4o-mini"));
@@ -455,6 +460,7 @@ mod tests {
             reasoning: None,
             critic: None,
             planner: None,
+            fallback: None,
             extra,
         };
         assert_eq!(roles.resolve("custom"), Some("my-model"));

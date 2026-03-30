@@ -46,12 +46,7 @@ impl OpenAICompatProvider {
         user_agent: Option<String>,
     ) -> Self {
         let ua = user_agent.unwrap_or_else(|| format!("clido/{}", env!("CARGO_PKG_VERSION")));
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .connect_timeout(Duration::from_secs(15))
-            .user_agent(ua)
-            .build()
-            .expect("failed to build reqwest::Client — TLS backend unavailable");
+        let client = crate::http_client::build_http_client(&ua);
         Self {
             client,
             api_key,

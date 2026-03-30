@@ -780,11 +780,13 @@ mod tests {
 
     #[test]
     fn roles_section_as_map_includes_all_roles() {
-        let mut r = RolesSection::default();
-        r.fast = Some("fast-model".to_string());
-        r.reasoning = Some("reasoning-model".to_string());
-        r.critic = Some("critic-model".to_string());
-        r.planner = Some("planner-model".to_string());
+        let mut r = RolesSection {
+            fast: Some("fast-model".to_string()),
+            reasoning: Some("reasoning-model".to_string()),
+            critic: Some("critic-model".to_string()),
+            planner: Some("planner-model".to_string()),
+            ..Default::default()
+        };
         r.extra
             .insert("custom".to_string(), "custom-model".to_string());
 

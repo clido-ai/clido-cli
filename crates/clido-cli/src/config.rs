@@ -399,6 +399,7 @@ api_key = \"sk-ant-old\"\n";
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn run_config_set_no_file_returns_error() {
         // When CLIDO_CONFIG points to a nonexistent file, set_config should error
         // Use a file path guaranteed not to exist
@@ -416,6 +417,7 @@ api_key = \"sk-ant-old\"\n";
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn run_config_show_prints_profile() {
         let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
@@ -436,6 +438,7 @@ api_key = \"sk-ant-old\"\n";
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn run_config_show_with_api_key_env() {
         let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
@@ -452,6 +455,7 @@ api_key = \"sk-ant-old\"\n";
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn run_config_show_with_no_api_key() {
         let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
@@ -468,6 +472,7 @@ api_key = \"sk-ant-old\"\n";
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn run_config_set_model_via_file() {
         let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
@@ -493,6 +498,7 @@ api_key = \"sk-ant-old\"\n";
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn run_config_set_api_key_via_file() {
         let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
@@ -522,6 +528,7 @@ api_key = \"sk-ant-old\"\n";
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn run_config_set_provider_via_file() {
         let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
@@ -550,6 +557,7 @@ api_key = \"sk-ant-old\"\n";
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn run_config_set_unknown_key_returns_error() {
         let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
@@ -568,6 +576,7 @@ api_key = \"sk-ant-old\"\n";
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn run_config_show_with_base_url() {
         let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();

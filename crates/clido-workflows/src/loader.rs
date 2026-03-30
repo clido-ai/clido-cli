@@ -351,7 +351,6 @@ steps:
                 .unwrap()
                 .to_string()
                 .contains("Invalid workflow YAML")
-                || true
         );
     }
 
@@ -359,7 +358,7 @@ steps:
     fn load_nonexistent_file_returns_error() {
         let result = load(std::path::Path::new("/nonexistent_file_xyz_12345.yaml"));
         assert!(result.is_err());
-        assert!(result.err().unwrap().to_string().contains("Failed to read") || true);
+        assert!(result.err().unwrap().to_string().contains("Failed to read"));
     }
 
     #[test]

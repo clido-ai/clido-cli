@@ -28,13 +28,7 @@ impl AnthropicProvider {
     /// When `user_agent` is `None`, defaults to `"clido/<version>"`.
     pub fn new_with_user_agent(api_key: String, model: String, user_agent: Option<String>) -> Self {
         let ua = user_agent.unwrap_or_else(|| format!("clido/{}", env!("CARGO_PKG_VERSION")));
-        let client = reqwest::Client::builder()
-            // Total request timeout (connect + send + body read).
-            .timeout(Duration::from_secs(120))
-            .connect_timeout(Duration::from_secs(15))
-            .user_agent(ua)
-            .build()
-            .expect("failed to build reqwest::Client — TLS backend unavailable");
+        let client = crate::http_client::build_http_client(&ua);
         Self {
             client,
             api_key,
@@ -604,6 +598,149 @@ fn decode_anthropic_event(
     }
 }
 
+#[async_trait]
+impl ModelProvider for AnthropicProvider {
+    async fn complete(
+        &self,
+        messages: &[Message],
+        tools: &[ToolSchema],
+        config: &AgentConfig,
+    ) -> Result<ModelResponse> {
+        self.complete_impl(messages, tools, config).await
+    }
+
+    async fn complete_stream(
+        &self,
+        messages: &[Message],
+        tools: &[ToolSchema],
+        config: &AgentConfig,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>> {
+        // Build the same body as complete_impl, but with "stream": true.
+        let mut system = config
+            .system_prompt
+            .as_deref()
+            .unwrap_or("You are a helpful coding assistant.")
+            .to_string();
+        for m in messages.iter() {
+            if m.role == Role::System {
+                for b in &m.content {
+                    if let ContentBlock::Text { text } = b {
+                        system.push('\n');
+                        system.push_str(text);
+                    }
+                }
+            }
+        }
+        let anthropic_messages: Vec<serde_json::Value> = messages
+            .iter()
+            .filter(|m| m.role != Role::System)
+            .map(message_to_anthropic)
+            .collect::<Result<Vec<_>>>()?;
+
+        let anthropic_tools: Vec<serde_json::Value> = tools
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.input_schema
+                })
+            })
+            .collect();
+
+        let system_blocks = serde_json::json!([{
+            "type": "text",
+            "text": system,
+            "cache_control": {"type": "ephemeral"}
+        }]);
+
+        let max_tokens = config.max_output_tokens.unwrap_or(8192);
+        let body = serde_json::json!({
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "system": system_blocks,
+            "messages": anthropic_messages,
+            "tools": anthropic_tools,
+            "stream": true
+        });
+
+        let response = self
+            .client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("anthropic-beta", "prompt-caching-2024-07-31")
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ClidoError::Provider(format!("stream request failed: {e}")))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let retry_after = response
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok());
+            let text = response.text().await.unwrap_or_default();
+            if status.as_u16() == 429 {
+                let lower = text.to_lowercase();
+                let is_sub = retry_after.is_some_and(|s| s > 300)
+                    || lower.contains("quota")
+                    || lower.contains("subscription")
+                    || lower.contains("limit exceeded")
+                    || lower.contains("allowance");
+                return Err(ClidoError::RateLimited {
+                    message: format!("429 (model: {}): {}", self.model, text.chars().take(300).collect::<String>()),
+                    retry_after_secs: retry_after,
+                    is_subscription_limit: is_sub,
+                });
+            }
+            return Err(ClidoError::Provider(extract_api_error(status, &text)));
+        }
+
+        let byte_stream = response.bytes_stream();
+        Ok(Box::pin(parse_anthropic_sse(byte_stream)))
+    }
+
+    async fn list_models(&self) -> Vec<crate::provider::ModelEntry> {
+        let resp = match self
+            .client
+            .get("https://api.anthropic.com/v1/models")
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("list_models: request failed: {}", e);
+                return vec![];
+            }
+        };
+        if !resp.status().is_success() {
+            warn!("list_models: API returned status {}", resp.status());
+            return vec![];
+        }
+        let json = match resp.json::<serde_json::Value>().await {
+            Ok(j) => j,
+            Err(e) => {
+                warn!("list_models: failed to parse response: {}", e);
+                return vec![];
+            }
+        };
+        let mut models: Vec<crate::provider::ModelEntry> = json["data"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .filter_map(|m| m["id"].as_str().map(crate::provider::ModelEntry::available))
+            .collect();
+        models.sort_by(|a, b| a.id.cmp(&b.id));
+        models
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -906,148 +1043,5 @@ mod tests {
         let p = AnthropicProvider::new("sk-ant-fake".to_string(), "claude-3-haiku".to_string());
         // Just assert it constructs without panic.
         let _ = p;
-    }
-}
-
-#[async_trait]
-impl ModelProvider for AnthropicProvider {
-    async fn complete(
-        &self,
-        messages: &[Message],
-        tools: &[ToolSchema],
-        config: &AgentConfig,
-    ) -> Result<ModelResponse> {
-        self.complete_impl(messages, tools, config).await
-    }
-
-    async fn complete_stream(
-        &self,
-        messages: &[Message],
-        tools: &[ToolSchema],
-        config: &AgentConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>> {
-        // Build the same body as complete_impl, but with "stream": true.
-        let mut system = config
-            .system_prompt
-            .as_deref()
-            .unwrap_or("You are a helpful coding assistant.")
-            .to_string();
-        for m in messages.iter() {
-            if m.role == Role::System {
-                for b in &m.content {
-                    if let ContentBlock::Text { text } = b {
-                        system.push('\n');
-                        system.push_str(text);
-                    }
-                }
-            }
-        }
-        let anthropic_messages: Vec<serde_json::Value> = messages
-            .iter()
-            .filter(|m| m.role != Role::System)
-            .map(message_to_anthropic)
-            .collect::<Result<Vec<_>>>()?;
-
-        let anthropic_tools: Vec<serde_json::Value> = tools
-            .iter()
-            .map(|t| {
-                serde_json::json!({
-                    "name": t.name,
-                    "description": t.description,
-                    "input_schema": t.input_schema
-                })
-            })
-            .collect();
-
-        let system_blocks = serde_json::json!([{
-            "type": "text",
-            "text": system,
-            "cache_control": {"type": "ephemeral"}
-        }]);
-
-        let max_tokens = config.max_output_tokens.unwrap_or(8192);
-        let body = serde_json::json!({
-            "model": self.model,
-            "max_tokens": max_tokens,
-            "system": system_blocks,
-            "messages": anthropic_messages,
-            "tools": anthropic_tools,
-            "stream": true
-        });
-
-        let response = self
-            .client
-            .post("https://api.anthropic.com/v1/messages")
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("anthropic-beta", "prompt-caching-2024-07-31")
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| ClidoError::Provider(format!("stream request failed: {e}")))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let retry_after = response
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse::<u64>().ok());
-            let text = response.text().await.unwrap_or_default();
-            if status.as_u16() == 429 {
-                let lower = text.to_lowercase();
-                let is_sub = retry_after.is_some_and(|s| s > 300)
-                    || lower.contains("quota")
-                    || lower.contains("subscription")
-                    || lower.contains("limit exceeded")
-                    || lower.contains("allowance");
-                return Err(ClidoError::RateLimited {
-                    message: format!("429 (model: {}): {}", self.model, text.chars().take(300).collect::<String>()),
-                    retry_after_secs: retry_after,
-                    is_subscription_limit: is_sub,
-                });
-            }
-            return Err(ClidoError::Provider(extract_api_error(status, &text)));
-        }
-
-        let byte_stream = response.bytes_stream();
-        Ok(Box::pin(parse_anthropic_sse(byte_stream)))
-    }
-
-    async fn list_models(&self) -> Vec<crate::provider::ModelEntry> {
-        let resp = match self
-            .client
-            .get("https://api.anthropic.com/v1/models")
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                warn!("list_models: request failed: {}", e);
-                return vec![];
-            }
-        };
-        if !resp.status().is_success() {
-            warn!("list_models: API returned status {}", resp.status());
-            return vec![];
-        }
-        let json = match resp.json::<serde_json::Value>().await {
-            Ok(j) => j,
-            Err(e) => {
-                warn!("list_models: failed to parse response: {}", e);
-                return vec![];
-            }
-        };
-        let mut models: Vec<crate::provider::ModelEntry> = json["data"]
-            .as_array()
-            .unwrap_or(&vec![])
-            .iter()
-            .filter_map(|m| m["id"].as_str().map(crate::provider::ModelEntry::available))
-            .collect();
-        models.sort_by(|a, b| a.id.cmp(&b.id));
-        models
     }
 }

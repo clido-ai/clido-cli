@@ -271,7 +271,7 @@ mod tests {
     #[tokio::test]
     async fn test_git_tool_log_count_capped_at_50() {
         // Verify the count is capped: build_args with count 9999 produces -50
-        let args = build_args("log", None, 9999u32.min(50));
+        let args = build_args("log", None, 50);
         assert!(args.contains(&"-50".to_string()));
     }
 

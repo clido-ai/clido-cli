@@ -262,6 +262,73 @@ fn check_rules_files(cwd: &std::path::Path, use_color: bool, warnings: &mut Vec<
     }
 }
 
+fn check_agents_config(
+    loaded: &clido_core::LoadedConfig,
+    use_color: bool,
+    warnings: &mut Vec<String>,
+) {
+    let slots = [
+        ("main", loaded.agents.main.as_ref()),
+        ("worker", loaded.agents.worker.as_ref()),
+        ("reviewer", loaded.agents.reviewer.as_ref()),
+    ];
+    let mut any_configured = false;
+    for (role, slot) in &slots {
+        let Some(slot) = slot else { continue };
+        any_configured = true;
+        // Verify the API key is reachable for non-local providers.
+        if slot.provider == "local" {
+            print_ok(
+                use_color,
+                &format!("agents.{}: local provider ({})", role, slot.model),
+            );
+            continue;
+        }
+        let key_available = slot.api_key.is_some()
+            || slot
+                .api_key_env
+                .as_deref()
+                .map(|e| env::var(e).is_ok())
+                .unwrap_or(false);
+        if key_available {
+            print_ok(
+                use_color,
+                &format!(
+                    "agents.{}: {} / {} — API key OK",
+                    role, slot.provider, slot.model
+                ),
+            );
+        } else {
+            warnings.push(format!(
+                "agents.{}: no API key configured for provider '{}' (set api_key or api_key_env in [agents.{}]).",
+                role, slot.provider, role
+            ));
+        }
+    }
+    if !any_configured {
+        print_info(
+            use_color,
+            "agents: no sub-agent slots configured (run /init to set up worker/reviewer)",
+        );
+    }
+}
+
+fn print_ok(use_color: bool, msg: &str) {
+    if use_color {
+        println!("{}✓ {}{}", ansi::GREEN, msg, ansi::RESET);
+    } else {
+        println!("✓ {}", msg);
+    }
+}
+
+fn print_info(use_color: bool, msg: &str) {
+    if use_color {
+        println!("{}ℹ {}{}", ansi::DIM, msg, ansi::RESET);
+    } else {
+        println!("ℹ {}", msg);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,72 +561,5 @@ mod tests {
         let mut warnings = Vec::new();
         check_api_key_format(&profile, "default", true, &mut warnings);
         assert!(!warnings.is_empty());
-    }
-}
-
-fn check_agents_config(
-    loaded: &clido_core::LoadedConfig,
-    use_color: bool,
-    warnings: &mut Vec<String>,
-) {
-    let slots = [
-        ("main", loaded.agents.main.as_ref()),
-        ("worker", loaded.agents.worker.as_ref()),
-        ("reviewer", loaded.agents.reviewer.as_ref()),
-    ];
-    let mut any_configured = false;
-    for (role, slot) in &slots {
-        let Some(slot) = slot else { continue };
-        any_configured = true;
-        // Verify the API key is reachable for non-local providers.
-        if slot.provider == "local" {
-            print_ok(
-                use_color,
-                &format!("agents.{}: local provider ({})", role, slot.model),
-            );
-            continue;
-        }
-        let key_available = slot.api_key.is_some()
-            || slot
-                .api_key_env
-                .as_deref()
-                .map(|e| env::var(e).is_ok())
-                .unwrap_or(false);
-        if key_available {
-            print_ok(
-                use_color,
-                &format!(
-                    "agents.{}: {} / {} — API key OK",
-                    role, slot.provider, slot.model
-                ),
-            );
-        } else {
-            warnings.push(format!(
-                "agents.{}: no API key configured for provider '{}' (set api_key or api_key_env in [agents.{}]).",
-                role, slot.provider, role
-            ));
-        }
-    }
-    if !any_configured {
-        print_info(
-            use_color,
-            "agents: no sub-agent slots configured (run /init to set up worker/reviewer)",
-        );
-    }
-}
-
-fn print_ok(use_color: bool, msg: &str) {
-    if use_color {
-        println!("{}✓ {}{}", ansi::GREEN, msg, ansi::RESET);
-    } else {
-        println!("✓ {}", msg);
-    }
-}
-
-fn print_info(use_color: bool, msg: &str) {
-    if use_color {
-        println!("{}ℹ {}{}", ansi::DIM, msg, ansi::RESET);
-    } else {
-        println!("ℹ {}", msg);
     }
 }

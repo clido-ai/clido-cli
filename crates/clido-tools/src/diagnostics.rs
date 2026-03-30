@@ -623,7 +623,7 @@ mod tests {
 
     #[test]
     fn diagnostics_tool_default() {
-        let tool = DiagnosticsTool::default();
+        let tool = DiagnosticsTool;
         assert_eq!(tool.name(), "Diagnostics");
     }
 

@@ -97,6 +97,70 @@ pub fn load_credentials(config_dir: &std::path::Path) -> HashMap<String, String>
 }
 
 /// Build a provider from profile, resolving the API key from the environment.
+
+pub fn make_provider(
+    profile_name: &str,
+    profile: &ProfileEntry,
+    provider_override: Option<&str>,
+    model_override: Option<&str>,
+) -> Result<Arc<dyn ModelProvider>, String> {
+    let provider_name = provider_override.unwrap_or(profile.provider.as_str());
+
+    let is_local = PROVIDER_REGISTRY
+        .iter()
+        .find(|d| d.id == provider_name)
+        .map(|d| d.is_local)
+        .unwrap_or(provider_name == "local");
+
+    let api_key = if is_local {
+        // Local/Ollama doesn't require an API key.
+        profile.api_key.clone().unwrap_or_default()
+    } else {
+        // Resolution order:
+        // 1. Env var (explicit api_key_env or provider's conventional var)
+        // 2. Credentials file (~/.config/clido/credentials)
+        // 3. Literal api_key in config.toml (backward compat)
+        let env_var = profile
+            .api_key_env
+            .as_deref()
+            .unwrap_or_else(|| default_api_key_env(provider_name));
+        let from_env = if !env_var.is_empty() {
+            env::var(env_var).ok().filter(|v| !v.is_empty())
+        } else {
+            None
+        };
+
+        if let Some(key) = from_env {
+            key
+        } else {
+            let from_creds = default_config_dir()
+                .map(|dir| load_credentials(&dir))
+                .and_then(|creds| creds.get(provider_name).cloned())
+                .filter(|v| !v.is_empty());
+
+            if let Some(key) = from_creds {
+                key
+            } else if let Some(key) = &profile.api_key {
+                key.clone()
+            } else {
+                return Err(format!(
+                    "No API key configured for profile '{}'. Run 'clido init' to set up your provider, or 'clido doctor' to diagnose.",
+                    profile_name
+                ));
+            }
+        }
+    };
+    let model = model_override.unwrap_or(&profile.model).to_string();
+    build_provider_with_ua(
+        provider_name,
+        api_key,
+        model,
+        profile.base_url.as_deref(),
+        profile.user_agent.clone(),
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,67 +362,4 @@ mod tests {
         let result = make_provider("default", &profile, None, None);
         assert!(result.is_ok());
     }
-}
-
-pub fn make_provider(
-    profile_name: &str,
-    profile: &ProfileEntry,
-    provider_override: Option<&str>,
-    model_override: Option<&str>,
-) -> Result<Arc<dyn ModelProvider>, String> {
-    let provider_name = provider_override.unwrap_or(profile.provider.as_str());
-
-    let is_local = PROVIDER_REGISTRY
-        .iter()
-        .find(|d| d.id == provider_name)
-        .map(|d| d.is_local)
-        .unwrap_or(provider_name == "local");
-
-    let api_key = if is_local {
-        // Local/Ollama doesn't require an API key.
-        profile.api_key.clone().unwrap_or_default()
-    } else {
-        // Resolution order:
-        // 1. Env var (explicit api_key_env or provider's conventional var)
-        // 2. Credentials file (~/.config/clido/credentials)
-        // 3. Literal api_key in config.toml (backward compat)
-        let env_var = profile
-            .api_key_env
-            .as_deref()
-            .unwrap_or_else(|| default_api_key_env(provider_name));
-        let from_env = if !env_var.is_empty() {
-            env::var(env_var).ok().filter(|v| !v.is_empty())
-        } else {
-            None
-        };
-
-        if let Some(key) = from_env {
-            key
-        } else {
-            let from_creds = default_config_dir()
-                .map(|dir| load_credentials(&dir))
-                .and_then(|creds| creds.get(provider_name).cloned())
-                .filter(|v| !v.is_empty());
-
-            if let Some(key) = from_creds {
-                key
-            } else if let Some(key) = &profile.api_key {
-                key.clone()
-            } else {
-                return Err(format!(
-                    "No API key configured for profile '{}'. Run 'clido init' to set up your provider, or 'clido doctor' to diagnose.",
-                    profile_name
-                ));
-            }
-        }
-    };
-    let model = model_override.unwrap_or(&profile.model).to_string();
-    build_provider_with_ua(
-        provider_name,
-        api_key,
-        model,
-        profile.base_url.as_deref(),
-        profile.user_agent.clone(),
-    )
-    .map_err(|e| e.to_string())
 }

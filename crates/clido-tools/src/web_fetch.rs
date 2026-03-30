@@ -190,7 +190,7 @@ mod tests {
     /// Lines 21-22: Default impl.
     #[test]
     fn web_fetch_tool_default() {
-        let tool = WebFetchTool::default();
+        let tool = WebFetchTool;
         assert_eq!(tool.name(), "WebFetch");
     }
 

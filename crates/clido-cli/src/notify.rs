@@ -43,6 +43,12 @@ pub fn notify_done(session_id: &str, elapsed_secs: u64, cost_usd: f64) {
     }
 }
 
+/// Returns true if a notification should fire for the given elapsed time.
+/// Extracted for testability without needing the `desktop-notify` feature.
+pub fn should_notify(elapsed_secs: u64) -> bool {
+    elapsed_secs >= MIN_ELAPSED_SECS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,10 +77,4 @@ mod tests {
         // One below: should not fire.
         assert!(!should_notify(MIN_ELAPSED_SECS - 1));
     }
-}
-
-/// Returns true if a notification should fire for the given elapsed time.
-/// Extracted for testability without needing the `desktop-notify` feature.
-pub fn should_notify(elapsed_secs: u64) -> bool {
-    elapsed_secs >= MIN_ELAPSED_SECS
 }

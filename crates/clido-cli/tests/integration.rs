@@ -510,7 +510,7 @@ fn cli_stream_json_result_has_model_field() {
     let last: serde_json::Value = stdout
         .lines()
         .filter(|l| !l.trim().is_empty())
-        .last()
+        .next_back()
         .and_then(|l| serde_json::from_str(l).ok())
         .expect("expected at least one JSON line on stdout");
     assert_eq!(last["type"], "result", "last line must be result");
@@ -538,8 +538,7 @@ fn cli_stream_json_result_has_model_field() {
     // Find the init line (first non-empty JSON line).
     let first: serde_json::Value = stdout
         .lines()
-        .filter(|l| !l.trim().is_empty())
-        .next()
+        .find(|l| !l.trim().is_empty())
         .and_then(|l| serde_json::from_str(l).ok())
         .expect("expected init line");
     assert_eq!(first["type"], "system");

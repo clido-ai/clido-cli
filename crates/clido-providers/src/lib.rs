@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 pub mod anthropic;
 pub mod fallback;
+pub mod http_client;
 pub mod openai;
 pub mod provider;
 pub mod registry;

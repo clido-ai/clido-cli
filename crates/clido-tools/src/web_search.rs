@@ -480,7 +480,7 @@ mod tests {
 
     #[test]
     fn web_search_tool_default() {
-        let tool = WebSearchTool::default();
+        let tool = WebSearchTool;
         assert_eq!(tool.name(), "WebSearch");
         assert!(tool.is_read_only());
         let schema = tool.schema();
@@ -577,15 +577,7 @@ mod tests {
     // passes `TIMEOUT_SECS` directly — this test validates the value is sensible.)
     #[test]
     fn web_search_timeout_constant_is_set() {
-        assert!(
-            TIMEOUT_SECS > 0,
-            "TIMEOUT_SECS must be positive so the HTTP client has a timeout"
-        );
-        // Sanity-check: should be a reasonable upper bound, not infinite.
-        assert!(
-            TIMEOUT_SECS <= 120,
-            "TIMEOUT_SECS={TIMEOUT_SECS} seems unreasonably large"
-        );
+        assert_eq!(TIMEOUT_SECS, 15);
     }
 
     // T03-2: HTTP error response — the execute() function returns a meaningful

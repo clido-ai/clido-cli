@@ -566,7 +566,7 @@ mod tests {
 
     #[test]
     fn summarize_lines_with_result_line() {
-        let lines = vec![
+        let lines = [
             SessionLine::Meta {
                 session_id: "s1".into(),
                 schema_version: SCHEMA_VERSION,
@@ -722,7 +722,7 @@ mod tests {
             .append(true)
             .open(&path)
             .unwrap();
-        writeln!(file, "").unwrap();
+        writeln!(file).unwrap();
         writeln!(file, "   ").unwrap();
         drop(file);
         // Loading should succeed and not include the blank lines

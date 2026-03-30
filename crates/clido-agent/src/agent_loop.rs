@@ -28,6 +28,14 @@ const DOOM_LOOP_THRESHOLD: usize = 3;
 /// Budget warning thresholds (percentage of limit consumed).
 const BUDGET_WARNING_PCTS: &[u8] = &[50, 80, 90];
 
+/// Wrap a tool error in structured feedback to help the model self-correct.
+fn format_tool_error_for_reflection(tool_name: &str, error_output: &str) -> String {
+    format!(
+        "[Tool Error] The {} tool returned an error:\n{}\n\nPlease analyze what went wrong and try a corrected approach.",
+        tool_name, error_output
+    )
+}
+
 /// The result of a permission request — what the user decided.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PermGrant {
@@ -267,6 +275,8 @@ pub struct AgentLoop {
     git_context_fn: Option<Box<dyn Fn() -> Option<String> + Send + Sync>>,
     /// Optional fast/cheap model name for utility tasks (titles, commits, summaries).
     fast_model: Option<String>,
+    /// Count of consecutive turns with tool errors (resets on success).
+    consecutive_tool_errors: usize,
 }
 
 impl AgentLoop {
@@ -300,6 +310,7 @@ impl AgentLoop {
             budget_warned_pcts: Vec::new(),
             git_context_fn: None,
             fast_model: None,
+            consecutive_tool_errors: 0,
         }
     }
 
@@ -347,6 +358,7 @@ impl AgentLoop {
             budget_warned_pcts: Vec::new(),
             git_context_fn: None,
             fast_model: None,
+            consecutive_tool_errors: 0,
         }
     }
 
@@ -845,7 +857,9 @@ impl AgentLoop {
                     };
 
                     let mut tool_results = Vec::new();
-                    for ((id, _, _), (output, duration_ms)) in tool_uses.iter().zip(outputs.iter())
+                    let mut had_errors = false;
+                    for ((id, name, _), (output, duration_ms)) in
+                        tool_uses.iter().zip(outputs.iter())
                     {
                         if let Some(ref mut w) = session {
                             w.log_write_line(&SessionLine::ToolResult {
@@ -858,11 +872,33 @@ impl AgentLoop {
                                 mtime_nanos: output.mtime_nanos,
                             });
                         }
+                        if output.is_error {
+                            had_errors = true;
+                        }
                         tool_results.push(ContentBlock::ToolResult {
                             tool_use_id: id.clone(),
-                            content: output.content.clone(),
+                            content: if output.is_error {
+                                format_tool_error_for_reflection(name, &output.content)
+                            } else {
+                                output.content.clone()
+                            },
                             is_error: output.is_error,
                         });
+                    }
+                    // Track consecutive tool errors for escalating hints.
+                    if had_errors {
+                        self.consecutive_tool_errors += 1;
+                        if self.consecutive_tool_errors >= 3 {
+                            tool_results.push(ContentBlock::Text {
+                                text: format!(
+                                    "[Warning] You've had {} consecutive turns with tool errors. \
+                                     Step back and reconsider your approach before trying again.",
+                                    self.consecutive_tool_errors
+                                ),
+                            });
+                        }
+                    } else {
+                        self.consecutive_tool_errors = 0;
                     }
                     self.history.push(Message {
                         role: Role::User,
@@ -1388,6 +1424,7 @@ impl AgentLoop {
                     };
 
                     let mut tool_results = Vec::new();
+                    let mut had_errors = false;
                     for ((id, name, _), (output, duration_ms)) in
                         tool_uses.iter().zip(outputs.iter())
                     {
@@ -1402,9 +1439,16 @@ impl AgentLoop {
                                 mtime_nanos: output.mtime_nanos,
                             });
                         }
+                        if output.is_error {
+                            had_errors = true;
+                        }
                         tool_results.push(ContentBlock::ToolResult {
                             tool_use_id: id.clone(),
-                            content: output.content.clone(),
+                            content: if output.is_error {
+                                format_tool_error_for_reflection(name, &output.content)
+                            } else {
+                                output.content.clone()
+                            },
                             is_error: output.is_error,
                         });
 
@@ -1432,6 +1476,21 @@ impl AgentLoop {
                             // A successful tool call resets the doom counter.
                             self.doom_monitor.clear();
                         }
+                    }
+                    // Track consecutive tool errors for escalating hints.
+                    if had_errors {
+                        self.consecutive_tool_errors += 1;
+                        if self.consecutive_tool_errors >= 3 {
+                            tool_results.push(ContentBlock::Text {
+                                text: format!(
+                                    "[Warning] You've had {} consecutive turns with tool errors. \
+                                     Step back and reconsider your approach before trying again.",
+                                    self.consecutive_tool_errors
+                                ),
+                            });
+                        }
+                    } else {
+                        self.consecutive_tool_errors = 0;
                     }
                     self.history.push(Message {
                         role: Role::User,
@@ -1827,6 +1886,32 @@ async fn open_in_editor_blocking(proposed: &str, file_path: &std::path::Path) ->
 ///
 /// Falls back to the static-placeholder path (identical to `assemble()`) if the
 /// summarization call fails for any reason, so the agent loop is never blocked.
+/// Compress tool result content in older messages to reduce context before summarization.
+/// Keeps the last `preserve_recent` messages intact, only compresses older ones.
+fn compress_tool_results(messages: &mut [Message], preserve_recent: usize) {
+    let compress_end = messages.len().saturating_sub(preserve_recent);
+    for msg in messages[..compress_end].iter_mut() {
+        for block in msg.content.iter_mut() {
+            if let ContentBlock::ToolResult { content, .. } = block {
+                if content.len() > 500 {
+                    // Use char_indices for safe multi-byte truncation.
+                    let boundary = content
+                        .char_indices()
+                        .nth(300)
+                        .map(|(i, _)| i)
+                        .unwrap_or(content.len());
+                    let truncated = format!(
+                        "{}... [truncated {} chars]",
+                        &content[..boundary],
+                        content.len() - boundary
+                    );
+                    *content = truncated;
+                }
+            }
+        }
+    }
+}
+
 async fn compact_with_summary(
     messages: &[Message],
     system_prompt_tokens: u32,
@@ -1889,8 +1974,12 @@ async fn compact_with_summary(
     let to_compact = &msgs[..start];
     let tail = &msgs[start..];
 
+    // Compress old tool results to reduce summarization input.
+    let mut compressed = to_compact.to_vec();
+    compress_tool_results(&mut compressed, 4);
+
     // Try LLM summarization; log and fall back to static text on failure.
-    let summary_text = match summarize_messages(to_compact, provider, config).await {
+    let summary_text = match summarize_messages(&compressed, provider, config).await {
         Ok(s) => {
             tracing::info!(
                 dropped = to_compact.len(),

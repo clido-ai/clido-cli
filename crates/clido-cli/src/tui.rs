@@ -496,7 +496,6 @@ enum ProfileOverlayMode {
 /// Steps for the in-TUI new profile wizard.
 #[derive(Debug, Clone, PartialEq)]
 enum ProfileCreateStep {
-    Name,
     Provider,
     ApiKey,
     Model,
@@ -625,7 +624,7 @@ impl ProfileOverlayState {
             reviewer_model: String::new(),
             cursor: 0,
             mode: ProfileOverlayMode::Creating {
-                step: ProfileCreateStep::Name,
+                step: ProfileCreateStep::Provider,
             },
             input: String::new(),
             input_cursor: 0,
@@ -3876,18 +3875,11 @@ fn render_profile_create(
     );
 
     let (step_num, step_total, step_label, current_value, placeholder) = match step {
-        ProfileCreateStep::Name => (
-            1,
-            4,
-            "Profile name",
-            &st.name,
-            "optional — Enter to auto-generate from provider",
-        ),
-        ProfileCreateStep::Provider => (2, 4, "Provider", &st.provider, "select a provider"),
-        ProfileCreateStep::ApiKey => (3, 4, "API key", &st.api_key, "paste your key here"),
+        ProfileCreateStep::Provider => (1, 3, "Provider", &st.provider, "select a provider"),
+        ProfileCreateStep::ApiKey => (2, 3, "API key", &st.api_key, "paste your key here"),
         ProfileCreateStep::Model => (
-            4,
-            4,
+            3,
+            3,
             "Default model",
             &st.model,
             "e.g. claude-opus-4-5, gpt-4o",
@@ -7627,50 +7619,26 @@ fn handle_profile_overlay_key(app: &mut App, event: crossterm::event::KeyEvent) 
                 Enter => {
                     let value = st.input.trim().to_string();
                     match step {
-                        ProfileCreateStep::Name => {
-                            // If user typed a name, use it. If blank, auto-generate later from provider.
-                            if !value.is_empty() {
-                                let dup = clido_core::load_config(&app.workspace_root)
-                                    .ok()
-                                    .map(|c| c.profiles.contains_key(&value))
-                                    .unwrap_or(false);
-                                if dup {
-                                    st.status =
-                                        Some(format!("  ✗ Profile '{}' already exists", value));
-                                    return;
-                                }
-                                st.name = value;
-                            }
-                            st.input.clear();
-                            st.input_cursor = 0;
-                            st.provider_picker = ProviderPickerState::new();
-                            st.provider_picker.clamp();
-                            st.mode = ProfileOverlayMode::Creating {
-                                step: ProfileCreateStep::Provider,
-                            };
-                        }
                         ProfileCreateStep::Provider => {
                             if let Some(id) = st.provider_picker.selected_id() {
                                 st.provider = id.to_string();
-                                // Auto-generate profile name only if user left it blank.
-                                if st.name.is_empty() {
-                                    let existing = clido_core::load_config(&app.workspace_root)
-                                        .ok()
-                                        .map(|c| c.profiles.keys().cloned().collect::<Vec<_>>())
-                                        .unwrap_or_default();
-                                    let base = id.to_string();
-                                    if !existing.contains(&base) {
-                                        st.name = base;
-                                    } else {
-                                        let mut n = 2u32;
-                                        loop {
-                                            let candidate = format!("{base}-{n}");
-                                            if !existing.contains(&candidate) {
-                                                st.name = candidate;
-                                                break;
-                                            }
-                                            n += 1;
+                                // Auto-generate profile name from provider.
+                                let existing = clido_core::load_config(&app.workspace_root)
+                                    .ok()
+                                    .map(|c| c.profiles.keys().cloned().collect::<Vec<_>>())
+                                    .unwrap_or_default();
+                                let base = id.to_string();
+                                if !existing.contains(&base) {
+                                    st.name = base;
+                                } else {
+                                    let mut n = 2u32;
+                                    loop {
+                                        let candidate = format!("{base}-{n}");
+                                        if !existing.contains(&candidate) {
+                                            st.name = candidate;
+                                            break;
                                         }
+                                        n += 1;
                                     }
                                 }
                                 let needs_key = st.provider_picker.selected_requires_key();
@@ -10426,7 +10394,7 @@ async fn event_loop(
                             let accepts_text = matches!(
                                 &ov.mode,
                                 ProfileOverlayMode::Creating {
-                                    step: ProfileCreateStep::Name | ProfileCreateStep::ApiKey,
+                                    step: ProfileCreateStep::ApiKey,
                                 } | ProfileOverlayMode::EditField(_)
                             );
                             if accepts_text {
@@ -11520,7 +11488,7 @@ mod tests {
         assert_eq!(
             ov.mode,
             ProfileOverlayMode::Creating {
-                step: ProfileCreateStep::Name
+                step: ProfileCreateStep::Provider
             }
         );
         assert!(ov.name.is_empty());

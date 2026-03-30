@@ -8,6 +8,12 @@ use clido_core::{ClidoError, Result};
 use futures::Stream;
 use std::pin::Pin;
 use std::time::Duration;
+
+use crate::backoff::{
+    network_backoff_secs, parse_retry_after_secs, rate_limit_backoff_secs,
+    server_error_backoff_secs, MAX_NETWORK_ATTEMPTS, MAX_RATE_LIMIT_ATTEMPTS,
+    MAX_SERVER_ERROR_ATTEMPTS,
+};
 use tracing::warn;
 
 use crate::provider::{ModelProvider, StreamEvent};
@@ -33,20 +39,24 @@ impl OpenAICompatProvider {
         base_url: String,
         extra_headers: Vec<(String, String)>,
     ) -> Self {
-        Self::new_with_user_agent(api_key, model, base_url, extra_headers, None)
+        Self::new_with_user_agent(
+            api_key,
+            model,
+            base_url,
+            extra_headers,
+            &format!("clido/{}", env!("CARGO_PKG_VERSION")),
+        )
     }
 
-    /// Like [`new`] but with an explicit User-Agent override.
-    /// When `user_agent` is `None`, defaults to `"clido/<version>"`.
+    /// Like [`new`] but with an explicit User-Agent header.
     pub fn new_with_user_agent(
         api_key: String,
         model: String,
         base_url: String,
         extra_headers: Vec<(String, String)>,
-        user_agent: Option<String>,
+        user_agent: &str,
     ) -> Self {
-        let ua = user_agent.unwrap_or_else(|| format!("clido/{}", env!("CARGO_PKG_VERSION")));
-        let client = crate::http_client::build_http_client(&ua);
+        let client = crate::http_client::build_http_client(user_agent);
         Self {
             client,
             api_key,
@@ -230,7 +240,10 @@ impl OpenAICompatProvider {
             "max_tokens": max_tokens,
             "messages": openai_messages
         });
-        body["messages"].as_array_mut().unwrap().insert(
+        body["messages"]
+            .as_array_mut()
+            .expect("messages field must be an array")
+            .insert(
             0,
             serde_json::json!({ "role": "system", "content": system_content }),
         );
@@ -238,10 +251,6 @@ impl OpenAICompatProvider {
             body["tools"] = serde_json::Value::Array(openai_tools);
             body["tool_choice"] = serde_json::json!("auto");
         }
-
-        const MAX_RATE_LIMIT_ATTEMPTS: u32 = 6;
-        const MAX_SERVER_ERROR_ATTEMPTS: u32 = 5;
-        const MAX_NETWORK_ATTEMPTS: u32 = 4;
 
         let mut rate_limit_attempts = 0u32;
         let mut server_error_attempts = 0u32;
@@ -286,11 +295,7 @@ impl OpenAICompatProvider {
             let status = res.status();
 
             if status.as_u16() == 429 {
-                let retry_after_secs = res
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.trim().parse::<u64>().ok());
+                let retry_after_secs = parse_retry_after_secs(res.headers());
                 let retry_after = retry_after_secs.map(|s| Duration::from_secs(s.min(300)));
                 let body = res.text().await.unwrap_or_default();
 
@@ -454,18 +459,6 @@ fn is_openai_chat_model(id: &str) -> bool {
         || id.starts_with("o3")
         || id.starts_with("o4")
         || id.starts_with("chatgpt-")
-}
-
-fn rate_limit_backoff_secs(attempt: u32) -> u64 {
-    (15u64 * (1u64 << (attempt - 1).min(3))).min(120)
-}
-
-fn server_error_backoff_secs(attempt: u32) -> u64 {
-    (1u64 << (attempt - 1).min(4)).min(16)
-}
-
-fn network_backoff_secs(attempt: u32) -> u64 {
-    (1u64 << (attempt - 1).min(2)).min(4)
 }
 
 /// Convert Clido messages to OpenAI chat format. Returns (system_content, messages).
@@ -742,7 +735,10 @@ impl ModelProvider for OpenAICompatProvider {
             "stream": true,
             "stream_options": {"include_usage": true}
         });
-        body["messages"].as_array_mut().unwrap().insert(
+        body["messages"]
+            .as_array_mut()
+            .expect("messages field must be an array")
+            .insert(
             0,
             serde_json::json!({ "role": "system", "content": system_content }),
         );
@@ -770,11 +766,7 @@ impl ModelProvider for OpenAICompatProvider {
 
         let status = response.status();
         if !status.is_success() {
-            let retry_after = response
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse::<u64>().ok());
+            let retry_after = crate::backoff::parse_retry_after_secs(response.headers());
             let text = response.text().await.unwrap_or_default();
             let preview: String = text.chars().take(300).collect();
             if status.as_u16() == 429 {
@@ -1159,37 +1151,6 @@ mod tests {
         } else {
             panic!("expected tool_use block");
         }
-    }
-
-    // ── backoff helpers ────────────────────────────────────────────────────
-
-    #[test]
-    fn rate_limit_backoff_increases_and_caps() {
-        assert_eq!(rate_limit_backoff_secs(1), 15);
-        assert_eq!(rate_limit_backoff_secs(2), 30);
-        assert_eq!(rate_limit_backoff_secs(3), 60);
-        assert_eq!(rate_limit_backoff_secs(4), 120); // capped at 120
-        assert_eq!(rate_limit_backoff_secs(5), 120); // still capped
-        assert_eq!(rate_limit_backoff_secs(10), 120);
-    }
-
-    #[test]
-    fn server_error_backoff_exponential() {
-        assert_eq!(server_error_backoff_secs(1), 1);
-        assert_eq!(server_error_backoff_secs(2), 2);
-        assert_eq!(server_error_backoff_secs(3), 4);
-        assert_eq!(server_error_backoff_secs(4), 8);
-        assert_eq!(server_error_backoff_secs(5), 16);
-        assert_eq!(server_error_backoff_secs(6), 16); // capped at 16
-    }
-
-    #[test]
-    fn network_backoff_increases_and_caps() {
-        assert_eq!(network_backoff_secs(1), 1);
-        assert_eq!(network_backoff_secs(2), 2);
-        assert_eq!(network_backoff_secs(3), 4);
-        assert_eq!(network_backoff_secs(4), 4); // capped at 4
-        assert_eq!(network_backoff_secs(10), 4);
     }
 
     // ── request_url ────────────────────────────────────────────────────────

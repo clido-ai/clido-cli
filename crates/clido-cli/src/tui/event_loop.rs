@@ -133,7 +133,6 @@ pub(super) fn copy_to_clipboard(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[allow(dead_code)]
 pub(super) fn copy_to_clipboard_osc52(text: &str) -> Result<(), String> {
     copy_to_clipboard(text)
 }

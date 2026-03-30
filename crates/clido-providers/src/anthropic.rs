@@ -8,6 +8,12 @@ use clido_core::{ClidoError, Result};
 use futures::Stream;
 use std::pin::Pin;
 use std::time::Duration;
+
+use crate::backoff::{
+    network_backoff_secs, parse_retry_after, parse_retry_after_secs, rate_limit_backoff_secs,
+    server_error_backoff_secs, MAX_NETWORK_ATTEMPTS, MAX_RATE_LIMIT_ATTEMPTS,
+    MAX_SERVER_ERROR_ATTEMPTS,
+};
 use tracing::{debug, warn};
 
 use crate::provider::{ModelProvider, StreamEvent};
@@ -21,14 +27,16 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     pub fn new(api_key: String, model: String) -> Self {
-        Self::new_with_user_agent(api_key, model, None)
+        Self::new_with_user_agent(
+            api_key,
+            model,
+            &format!("clido/{}", env!("CARGO_PKG_VERSION")),
+        )
     }
 
-    /// Like [`new`] but with an explicit User-Agent override.
-    /// When `user_agent` is `None`, defaults to `"clido/<version>"`.
-    pub fn new_with_user_agent(api_key: String, model: String, user_agent: Option<String>) -> Self {
-        let ua = user_agent.unwrap_or_else(|| format!("clido/{}", env!("CARGO_PKG_VERSION")));
-        let client = crate::http_client::build_http_client(&ua);
+    /// Like [`new`] but with an explicit User-Agent header.
+    pub fn new_with_user_agent(api_key: String, model: String, user_agent: &str) -> Self {
+        let client = crate::http_client::build_http_client(user_agent);
         Self {
             client,
             api_key,
@@ -90,11 +98,6 @@ impl AnthropicProvider {
             "tools": anthropic_tools
         });
 
-        // Max attempts for each failure category.
-        const MAX_RATE_LIMIT_ATTEMPTS: u32 = 6;
-        const MAX_SERVER_ERROR_ATTEMPTS: u32 = 5;
-        const MAX_NETWORK_ATTEMPTS: u32 = 4;
-
         let mut rate_limit_attempts = 0u32;
         let mut server_error_attempts = 0u32;
         let mut network_attempts = 0u32;
@@ -138,11 +141,7 @@ impl AnthropicProvider {
             if status.as_u16() == 429 {
                 // Rate limited — respect Retry-After or use exponential backoff.
                 let retry_after = parse_retry_after(res.headers());
-                let retry_after_secs = res
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.trim().parse::<u64>().ok());
+                let retry_after_secs = parse_retry_after_secs(res.headers());
                 let body = res.text().await.unwrap_or_default();
 
                 // Subscription/quota limits have long reset times or specific error text.
@@ -259,32 +258,6 @@ impl AnthropicProvider {
             return Err(ClidoError::Provider(extract_api_error(status, &text)));
         }
     }
-}
-
-/// Parse `Retry-After` header value (integer seconds only; HTTP-date not supported).
-fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
-    headers
-        .get("retry-after")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        // Cap at 5 minutes to avoid waiting forever on a bad header value.
-        .map(|secs| Duration::from_secs(secs.min(300)))
-}
-
-/// Backoff for rate limits: 15s, 30s, 60s, 90s, 120s, …
-fn rate_limit_backoff_secs(attempt: u32) -> u64 {
-    let base: u64 = 15 * (1u64 << (attempt - 1).min(3));
-    base.min(120)
-}
-
-/// Backoff for server errors: 1s, 2s, 4s, 8s, 16s.
-fn server_error_backoff_secs(attempt: u32) -> u64 {
-    (1u64 << (attempt - 1).min(4)).min(16)
-}
-
-/// Backoff for network errors: 1s, 2s, 4s.
-fn network_backoff_secs(attempt: u32) -> u64 {
-    (1u64 << (attempt - 1).min(2)).min(4)
 }
 
 /// Try to extract a clean message from an Anthropic error JSON body.
@@ -690,11 +663,7 @@ impl ModelProvider for AnthropicProvider {
 
         let status = response.status();
         if !status.is_success() {
-            let retry_after = response
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse::<u64>().ok());
+            let retry_after = crate::backoff::parse_retry_after_secs(response.headers());
             let text = response.text().await.unwrap_or_default();
             if status.as_u16() == 429 {
                 let lower = text.to_lowercase();
@@ -761,36 +730,6 @@ impl ModelProvider for AnthropicProvider {
 mod tests {
     use super::*;
     use clido_core::{ContentBlock, Role};
-
-    // ── backoff helpers ────────────────────────────────────────────────────────
-
-    #[test]
-    fn rate_limit_backoff_increases_and_caps() {
-        assert_eq!(rate_limit_backoff_secs(1), 15);
-        assert_eq!(rate_limit_backoff_secs(2), 30);
-        assert_eq!(rate_limit_backoff_secs(3), 60);
-        assert_eq!(rate_limit_backoff_secs(4), 120);
-        assert_eq!(rate_limit_backoff_secs(5), 120); // capped
-        assert_eq!(rate_limit_backoff_secs(10), 120); // still capped
-    }
-
-    #[test]
-    fn server_error_backoff_exponential() {
-        assert_eq!(server_error_backoff_secs(1), 1);
-        assert_eq!(server_error_backoff_secs(2), 2);
-        assert_eq!(server_error_backoff_secs(3), 4);
-        assert_eq!(server_error_backoff_secs(4), 8);
-        assert_eq!(server_error_backoff_secs(5), 16);
-        assert_eq!(server_error_backoff_secs(6), 16); // capped at 16
-    }
-
-    #[test]
-    fn network_backoff_exponential() {
-        assert_eq!(network_backoff_secs(1), 1);
-        assert_eq!(network_backoff_secs(2), 2);
-        assert_eq!(network_backoff_secs(3), 4);
-        assert_eq!(network_backoff_secs(4), 4); // capped at 4
-    }
 
     // ── extract_api_error ──────────────────────────────────────────────────────
 

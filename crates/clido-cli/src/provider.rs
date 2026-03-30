@@ -64,15 +64,9 @@ pub fn default_api_key_env(provider: &str) -> &'static str {
 }
 
 /// Derive the clido config directory from `CLIDO_CONFIG` env var or the
-/// platform default. Returns `None` if the directory cannot be determined.
+/// platform default. Delegates to [`clido_core::global_config_dir`].
 pub fn default_config_dir() -> Option<std::path::PathBuf> {
-    if let Ok(p_str) = env::var("CLIDO_CONFIG") {
-        std::path::Path::new(&p_str)
-            .parent()
-            .map(|p| p.to_path_buf())
-    } else {
-        directories::ProjectDirs::from("", "", "clido").map(|d| d.config_dir().to_path_buf())
-    }
+    clido_core::global_config_dir()
 }
 
 /// Load API keys from `<config_dir>/credentials` (TOML `[keys]` section).

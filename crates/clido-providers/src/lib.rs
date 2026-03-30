@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 pub mod anthropic;
+pub mod backoff;
 pub mod fallback;
 pub mod http_client;
 pub mod openai;
@@ -74,9 +75,7 @@ pub fn build_provider_with_ua(
     if let Some(def) = PROVIDER_REGISTRY.iter().find(|d| d.id == provider_name) {
         if def.is_anthropic {
             return Ok(Arc::new(AnthropicProvider::new_with_user_agent(
-                api_key,
-                model,
-                Some(ua),
+                api_key, model, &ua,
             )));
         }
         let url = if def.is_local || def.id == "alibabacloud" {
@@ -90,11 +89,7 @@ pub fn build_provider_with_ua(
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         Ok(Arc::new(OpenAICompatProvider::new_with_user_agent(
-            api_key,
-            model,
-            url,
-            headers,
-            Some(ua),
+            api_key, model, url, headers, &ua,
         )))
     } else {
         let valid: Vec<&str> = PROVIDER_REGISTRY.iter().map(|d| d.id).collect();

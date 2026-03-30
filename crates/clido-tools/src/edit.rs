@@ -559,7 +559,7 @@ fn lines_to_byte_range(content: &str, line_start: usize, window_size: usize) -> 
 }
 
 /// Narrow a fuzzy window byte range to best-match lines for old_lines.
-#[allow(dead_code)]
+#[cfg(test)]
 fn narrow_fuzzy_match(
     content: &str,
     byte_start: usize,
@@ -600,7 +600,7 @@ fn narrow_fuzzy_match(
 }
 
 /// Given a byte position in content, return the 0-indexed line number.
-#[allow(dead_code)]
+#[cfg(test)]
 fn byte_start_line(content: &str, byte_pos: usize) -> usize {
     content[..byte_pos.min(content.len())].matches('\n').count()
 }

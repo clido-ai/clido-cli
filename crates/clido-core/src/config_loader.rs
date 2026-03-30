@@ -357,6 +357,12 @@ pub fn global_config_path() -> Option<PathBuf> {
         .map(|d: directories::ProjectDirs| d.config_dir().join("config.toml"))
 }
 
+/// Path to the global config directory (parent of `global_config_path()`).
+/// Returns `None` if the directory cannot be determined.
+pub fn global_config_dir() -> Option<PathBuf> {
+    global_config_path().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+}
+
 /// True if any config file exists (global or project). Used to decide first-run vs normal run.
 pub fn config_file_exists(cwd: &Path) -> bool {
     if global_config_path().map(|p| p.exists()).unwrap_or(false) {

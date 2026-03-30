@@ -111,7 +111,7 @@ impl ModelProvider for RetryProvider {
                 Err(e) => return Err(e),
             }
         }
-        Err(last_err.unwrap())
+        Err(last_err.expect("retry loop guarantees at least one error"))
     }
 
     async fn complete_stream(

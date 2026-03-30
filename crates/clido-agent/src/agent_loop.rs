@@ -825,7 +825,10 @@ impl AgentLoop {
                 Some(plan)
             }
             Err(e) => {
-                warn!("Architect planning failed (falling back to direct execution): {}", e);
+                warn!(
+                    "Architect planning failed (falling back to direct execution): {}",
+                    e
+                );
                 None
             }
         }
@@ -2289,7 +2292,7 @@ fn find_unsummarized_tool_pairs(messages: &[Message], max: usize) -> Vec<(usize,
 /// Proactively summarize oldest tool pairs to reduce context before hitting compaction.
 /// Replaces the tool result content with a 1-sentence LLM summary.
 async fn proactive_summarize_pairs(
-    history: &mut Vec<Message>,
+    history: &mut [Message],
     provider: &dyn ModelProvider,
     config: &AgentConfig,
     preserve_recent: usize,

@@ -103,12 +103,10 @@ const DANGEROUS_PATTERNS: &[&str] = &[
 fn is_dangerous_command(command: &str) -> Option<&'static str> {
     let lower = command.to_lowercase();
     let normalized = lower.replace("  ", " ");
-    for pattern in DANGEROUS_PATTERNS {
-        if normalized.contains(pattern) {
-            return Some(pattern);
-        }
-    }
-    None
+    DANGEROUS_PATTERNS
+        .iter()
+        .find(|&&pattern| normalized.contains(pattern))
+        .copied()
 }
 
 /// Strip known secret-bearing env vars from a command before spawning.

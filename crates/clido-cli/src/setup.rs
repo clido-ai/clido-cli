@@ -24,6 +24,7 @@ use ratatui::{
 };
 
 use crate::errors::CliError;
+use crate::list_picker::{ListPicker, PickerItem};
 use crate::text_input::TextInput;
 use crate::ui::{setup_use_color, setup_use_rich_ui, SETUP_BANNER_ASCII};
 
@@ -101,6 +102,58 @@ pub struct SavedApiKeyOffer {
     pub api_key: String,
 }
 
+// ── ListPicker wrapper types ──────────────────────────────────────────────────
+
+/// Wraps a provider-registry index for use in [`ListPicker`].
+#[derive(Debug, Clone)]
+struct ProviderEntry(usize);
+
+impl PickerItem for ProviderEntry {
+    fn filter_text(&self) -> String {
+        PROVIDER_REGISTRY[self.0].name.to_string()
+    }
+    fn filter_text_secondary(&self) -> Option<String> {
+        Some(PROVIDER_REGISTRY[self.0].description.to_string())
+    }
+}
+
+/// A model-picker item: either a fetched model or the "Custom…" sentinel.
+#[derive(Debug, Clone)]
+enum ModelOption {
+    Entry(ModelEntry),
+    Custom,
+}
+
+impl PickerItem for ModelOption {
+    fn filter_text(&self) -> String {
+        match self {
+            ModelOption::Entry(m) => m.id.clone(),
+            ModelOption::Custom => "Custom\u{2026}".to_string(),
+        }
+    }
+}
+
+fn make_provider_picker() -> ListPicker<ProviderEntry> {
+    let items: Vec<ProviderEntry> = (0..PROVIDER_REGISTRY.len()).map(ProviderEntry).collect();
+    ListPicker::without_filter(items, 20)
+}
+
+fn make_provider_picker_at(selected: usize) -> ListPicker<ProviderEntry> {
+    let mut picker = make_provider_picker();
+    picker.selected = selected.min(PROVIDER_REGISTRY.len().saturating_sub(1));
+    picker
+}
+
+fn make_model_picker(models: &[ModelEntry]) -> ListPicker<ModelOption> {
+    let items: Vec<ModelOption> = models
+        .iter()
+        .cloned()
+        .map(ModelOption::Entry)
+        .chain(std::iter::once(ModelOption::Custom))
+        .collect();
+    ListPicker::new(items, 10)
+}
+
 // ── TUI setup state ───────────────────────────────────────────────────────────
 
 /// Setup steps: [ProfileName →] Provider → Credential → FetchModels → Model → SubAgentIntro → [Worker] → [Reviewer] → Roles → Done.
@@ -132,10 +185,8 @@ struct SetupState {
     needs_fetch: bool,
     /// Profile name when in profile-create / profile-edit mode.
     profile_name: String,
-    provider_cursor: usize,
-    model_cursor: usize,
-    model_scroll: usize,
-    model_search: String,
+    provider_picker: ListPicker<ProviderEntry>,
+    model_picker: ListPicker<ModelOption>,
     custom_model: bool,
     provider: usize,
     credential: String,
@@ -152,20 +203,18 @@ struct SetupState {
     configure_worker: bool,
     configure_reviewer: bool,
     worker_provider: usize,
+    worker_provider_picker: ListPicker<ProviderEntry>,
     worker_credential: String,
     worker_model: String,
     worker_fetched_models: Vec<ModelEntry>,
-    worker_model_cursor: usize,
-    worker_model_scroll: usize,
-    worker_model_search: String,
+    worker_model_picker: ListPicker<ModelOption>,
     worker_custom_model: bool,
     reviewer_provider: usize,
+    reviewer_provider_picker: ListPicker<ProviderEntry>,
     reviewer_credential: String,
     reviewer_model: String,
     reviewer_fetched_models: Vec<ModelEntry>,
-    reviewer_model_cursor: usize,
-    reviewer_model_scroll: usize,
-    reviewer_model_search: String,
+    reviewer_model_picker: ListPicker<ModelOption>,
     reviewer_custom_model: bool,
     worker_needs_fetch: bool,
     reviewer_needs_fetch: bool,
@@ -204,10 +253,8 @@ impl SetupState {
             step: SetupStep::Provider,
             needs_fetch: false,
             profile_name: String::new(),
-            provider_cursor: 0,
-            model_cursor: 0,
-            model_scroll: 0,
-            model_search: String::new(),
+            provider_picker: make_provider_picker(),
+            model_picker: make_model_picker(&[]),
             custom_model: false,
             provider: 0,
             credential: String::new(),
@@ -222,20 +269,18 @@ impl SetupState {
             configure_worker: false,
             configure_reviewer: false,
             worker_provider: 0,
+            worker_provider_picker: make_provider_picker(),
             worker_credential: String::new(),
             worker_model: String::new(),
             worker_fetched_models: Vec::new(),
-            worker_model_cursor: 0,
-            worker_model_scroll: 0,
-            worker_model_search: String::new(),
+            worker_model_picker: make_model_picker(&[]),
             worker_custom_model: false,
             reviewer_provider: 0,
+            reviewer_provider_picker: make_provider_picker(),
             reviewer_credential: String::new(),
             reviewer_model: String::new(),
             reviewer_fetched_models: Vec::new(),
-            reviewer_model_cursor: 0,
-            reviewer_model_scroll: 0,
-            reviewer_model_search: String::new(),
+            reviewer_model_picker: make_model_picker(&[]),
             reviewer_custom_model: false,
             worker_needs_fetch: false,
             reviewer_needs_fetch: false,
@@ -268,10 +313,8 @@ impl SetupState {
             step: initial_step,
             needs_fetch: false,
             profile_name: pre_fill.profile_name.clone(),
-            provider_cursor: provider_idx,
-            model_cursor: 0,
-            model_scroll: 0,
-            model_search: String::new(),
+            provider_picker: make_provider_picker_at(provider_idx),
+            model_picker: make_model_picker(&[]),
             custom_model: false,
             provider: provider_idx,
             credential: String::new(),
@@ -286,20 +329,18 @@ impl SetupState {
             configure_worker: false,
             configure_reviewer: false,
             worker_provider: provider_idx,
+            worker_provider_picker: make_provider_picker_at(provider_idx),
             worker_credential: String::new(),
             worker_model: String::new(),
             worker_fetched_models: Vec::new(),
-            worker_model_cursor: 0,
-            worker_model_scroll: 0,
-            worker_model_search: String::new(),
+            worker_model_picker: make_model_picker(&[]),
             worker_custom_model: false,
             reviewer_provider: provider_idx,
+            reviewer_provider_picker: make_provider_picker_at(provider_idx),
             reviewer_credential: String::new(),
             reviewer_model: String::new(),
             reviewer_fetched_models: Vec::new(),
-            reviewer_model_cursor: 0,
-            reviewer_model_scroll: 0,
-            reviewer_model_search: String::new(),
+            reviewer_model_picker: make_model_picker(&[]),
             reviewer_custom_model: false,
             worker_needs_fetch: false,
             reviewer_needs_fetch: false,
@@ -348,63 +389,12 @@ impl SetupState {
         !self.fetched_models.is_empty() && !self.custom_model
     }
 
-    /// Returns filtered model entries matching the current search query.
-    fn filtered_models(&self) -> Vec<&ModelEntry> {
-        if self.model_search.is_empty() {
-            self.fetched_models.iter().collect()
-        } else {
-            let q = self.model_search.to_lowercase();
-            self.fetched_models
-                .iter()
-                .filter(|m| m.id.to_lowercase().contains(&q))
-                .collect()
-        }
-    }
-
     fn worker_model_list_mode(&self) -> bool {
         !self.worker_fetched_models.is_empty() && !self.worker_custom_model
     }
 
     fn reviewer_model_list_mode(&self) -> bool {
         !self.reviewer_fetched_models.is_empty() && !self.reviewer_custom_model
-    }
-
-    fn filtered_worker_models(&self) -> Vec<&ModelEntry> {
-        if self.worker_model_search.is_empty() {
-            self.worker_fetched_models.iter().collect()
-        } else {
-            let q = self.worker_model_search.to_lowercase();
-            self.worker_fetched_models
-                .iter()
-                .filter(|m| m.id.to_lowercase().contains(&q))
-                .collect()
-        }
-    }
-
-    fn filtered_reviewer_models(&self) -> Vec<&ModelEntry> {
-        if self.reviewer_model_search.is_empty() {
-            self.reviewer_fetched_models.iter().collect()
-        } else {
-            let q = self.reviewer_model_search.to_lowercase();
-            self.reviewer_fetched_models
-                .iter()
-                .filter(|m| m.id.to_lowercase().contains(&q))
-                .collect()
-        }
-    }
-
-    fn clamp_model_scroll(&mut self, visible_rows: usize) {
-        let visible = visible_rows.max(1);
-        if self.model_cursor < self.model_scroll {
-            self.model_scroll = self.model_cursor;
-        } else if self.model_cursor >= self.model_scroll + visible {
-            self.model_scroll = self.model_cursor + 1 - visible;
-        }
-        let total = self.filtered_models().len() + 1;
-        let max_scroll = total.saturating_sub(visible);
-        if self.model_scroll > max_scroll {
-            self.model_scroll = max_scroll;
-        }
     }
 }
 
@@ -575,8 +565,10 @@ fn draw_profile_name(f: &mut Frame, area: Rect, s: &SetupState) {
 
 fn draw_provider(f: &mut Frame, area: Rect, s: &SetupState) {
     let mut lines = vec![Line::raw("")];
-    for (i, def) in PROVIDER_REGISTRY.iter().enumerate() {
-        lines.push(if i == s.provider_cursor {
+    for (i, entry) in s.provider_picker.items().iter().enumerate() {
+        let def = &PROVIDER_REGISTRY[entry.0];
+        let selected = i == s.provider_picker.selected;
+        lines.push(if selected {
             let mut spans = vec![
                 Span::styled(
                     " ▶ ",
@@ -595,7 +587,7 @@ fn draw_provider(f: &mut Frame, area: Rect, s: &SetupState) {
                     Style::default().fg(Color::DarkGray),
                 ),
             ];
-            if s.current_credential.is_some() && i == s.provider_cursor {
+            if s.current_credential.is_some() {
                 spans.push(Span::styled(
                     "  (current)",
                     Style::default()
@@ -826,15 +818,16 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
         );
 
         // Search box
+        let filter_text = &s.model_picker.filter.text;
         let search_block = Block::default()
             .title(" Search ")
             .borders(Borders::ALL)
-            .border_style(if s.model_search.is_empty() {
+            .border_style(if filter_text.is_empty() {
                 Style::default().fg(Color::DarkGray)
             } else {
                 Style::default().fg(Color::Yellow)
             });
-        let search_content = if s.model_search.is_empty() {
+        let search_content = if filter_text.is_empty() {
             Line::from(vec![Span::styled(
                 " type to filter…",
                 Style::default()
@@ -842,41 +835,33 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
                     .add_modifier(Modifier::DIM),
             )])
         } else {
-            Line::from(format!(" {}", s.model_search))
+            Line::from(format!(" {}", filter_text))
         };
         f.render_widget(
             Paragraph::new(search_content).block(search_block),
             search_area,
         );
         // Show cursor in search box
-        f.set_cursor_position((
-            search_area.x + 2 + s.model_search.chars().count() as u16,
-            search_area.y + 1,
-        ));
+        let cursor_pos = s
+            .model_picker
+            .filter
+            .cursor
+            .min(filter_text.chars().count());
+        f.set_cursor_position((search_area.x + 2 + cursor_pos as u16, search_area.y + 1));
 
-        // Filtered model list + "Custom…"
-        // We use a sentinel `None` to represent the "Custom…" entry at the end.
-        let filtered = s.filtered_models();
+        // Filtered model list via picker state
         let visible_rows = list_area.height.saturating_sub(2) as usize;
-
-        // Build an index list: Some(entry) for real models, None for "Custom…"
-        let display_entries: Vec<Option<&ModelEntry>> = filtered
-            .iter()
-            .map(|e| Some(*e))
-            .chain(std::iter::once(None))
-            .collect();
-
-        let scroll = s.model_scroll;
-        let visible = &display_entries[scroll.min(display_entries.len())..];
-        let visible = &visible[..visible.len().min(visible_rows)];
+        let total = s.model_picker.filtered_count();
+        let scroll = s.model_picker.scroll_offset.min(total.saturating_sub(1));
+        let end = (scroll + visible_rows).min(total);
+        let filtered_indices = s.model_picker.filtered_indices();
 
         let mut lines = vec![Line::raw("")];
-        for (rel_i, entry) in visible.iter().enumerate() {
-            let abs_i = scroll + rel_i;
-            let selected = abs_i == s.model_cursor;
-            match entry {
-                None => {
-                    // "Custom…" entry
+        for (i, &orig_idx) in filtered_indices.iter().enumerate().take(end).skip(scroll) {
+            let item = &s.model_picker.items()[orig_idx];
+            let selected = i == s.model_picker.selected;
+            match item {
+                ModelOption::Custom => {
                     lines.push(if selected {
                         Line::from(vec![
                             Span::styled(
@@ -886,7 +871,7 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
                                     .add_modifier(Modifier::BOLD),
                             ),
                             Span::styled(
-                                "Custom…",
+                                "Custom\u{2026}",
                                 Style::default()
                                     .fg(Color::White)
                                     .add_modifier(Modifier::BOLD),
@@ -895,11 +880,11 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
                     } else {
                         Line::from(vec![
                             Span::raw("   "),
-                            Span::styled("Custom…", Style::default().fg(Color::DarkGray)),
+                            Span::styled("Custom\u{2026}", Style::default().fg(Color::DarkGray)),
                         ])
                     });
                 }
-                Some(entry) if entry.available => {
+                ModelOption::Entry(entry) if entry.available => {
                     lines.push(if selected {
                         Line::from(vec![
                             Span::styled(
@@ -922,7 +907,7 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
                         ])
                     });
                 }
-                Some(entry) => {
+                ModelOption::Entry(entry) => {
                     // Unavailable model — greyed out with a "no endpoints" marker
                     lines.push(if selected {
                         Line::from(vec![
@@ -949,12 +934,26 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
         }
         lines.push(Line::raw(""));
 
-        let avail_count = filtered.iter().filter(|e| e.available).count();
-        let title = if !s.model_search.is_empty() {
+        // Count only real model entries (not Custom sentinel)
+        let filtered_model_count = s
+            .model_picker
+            .filtered_items()
+            .filter(|(_, o)| matches!(o, ModelOption::Entry(_)))
+            .count();
+        let avail_count = s
+            .model_picker
+            .filtered_items()
+            .filter_map(|(_, o)| match o {
+                ModelOption::Entry(m) => Some(m),
+                _ => None,
+            })
+            .filter(|m| m.available)
+            .count();
+        let title = if !s.model_picker.filter.text.is_empty() {
             format!(
                 " Model  ({} available / {} matched / {} total) ",
                 avail_count,
-                filtered.len(),
+                filtered_model_count,
                 s.fetched_models.len()
             )
         } else {
@@ -1130,14 +1129,16 @@ fn draw_subagent_provider(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer
         title_area,
     );
 
-    let cursor = if is_reviewer {
-        s.reviewer_provider
+    let picker = if is_reviewer {
+        &s.reviewer_provider_picker
     } else {
-        s.worker_provider
+        &s.worker_provider_picker
     };
     let mut lines = vec![Line::raw("")];
-    for (i, def) in PROVIDER_REGISTRY.iter().enumerate() {
-        lines.push(if i == cursor {
+    for (i, entry) in picker.items().iter().enumerate() {
+        let def = &PROVIDER_REGISTRY[entry.0];
+        let selected = i == picker.selected;
+        lines.push(if selected {
             Line::from(vec![
                 Span::styled(
                     " ▶ ",
@@ -1293,20 +1294,21 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
             info_area,
         );
 
-        let search = if is_reviewer {
-            &s.reviewer_model_search
+        let picker = if is_reviewer {
+            &s.reviewer_model_picker
         } else {
-            &s.worker_model_search
+            &s.worker_model_picker
         };
+        let filter_text = &picker.filter.text;
         let search_block = Block::default()
             .title(" Search ")
             .borders(Borders::ALL)
-            .border_style(if search.is_empty() {
+            .border_style(if filter_text.is_empty() {
                 Style::default().fg(Color::DarkGray)
             } else {
                 Style::default().fg(Color::Yellow)
             });
-        let search_content = if search.is_empty() {
+        let search_content = if filter_text.is_empty() {
             Line::from(vec![Span::styled(
                 " type to filter…",
                 Style::default()
@@ -1314,45 +1316,27 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
                     .add_modifier(Modifier::DIM),
             )])
         } else {
-            Line::from(format!(" {}", search))
+            Line::from(format!(" {}", filter_text))
         };
         f.render_widget(
             Paragraph::new(search_content).block(search_block),
             search_area,
         );
-        f.set_cursor_position((
-            search_area.x + 2 + search.chars().count() as u16,
-            search_area.y + 1,
-        ));
+        let cursor_pos = picker.filter.cursor.min(filter_text.chars().count());
+        f.set_cursor_position((search_area.x + 2 + cursor_pos as u16, search_area.y + 1));
 
-        let (filtered, cursor, scroll) = if is_reviewer {
-            (
-                s.filtered_reviewer_models(),
-                s.reviewer_model_cursor,
-                s.reviewer_model_scroll,
-            )
-        } else {
-            (
-                s.filtered_worker_models(),
-                s.worker_model_cursor,
-                s.worker_model_scroll,
-            )
-        };
         let visible_rows = list_area.height.saturating_sub(2) as usize;
-        let display_entries: Vec<Option<&ModelEntry>> = filtered
-            .iter()
-            .map(|e| Some(*e))
-            .chain(std::iter::once(None))
-            .collect();
-        let visible_slice = &display_entries[scroll.min(display_entries.len())..];
-        let visible_slice = &visible_slice[..visible_slice.len().min(visible_rows)];
+        let total = picker.filtered_count();
+        let scroll = picker.scroll_offset.min(total.saturating_sub(1));
+        let end = (scroll + visible_rows).min(total);
+        let filtered_indices = picker.filtered_indices();
 
         let mut lines = vec![Line::raw("")];
-        for (rel_i, entry) in visible_slice.iter().enumerate() {
-            let abs_i = scroll + rel_i;
-            let selected = abs_i == cursor;
-            match entry {
-                None => {
+        for (i, &orig_idx) in filtered_indices.iter().enumerate().take(end).skip(scroll) {
+            let item = &picker.items()[orig_idx];
+            let selected = i == picker.selected;
+            match item {
+                ModelOption::Custom => {
                     lines.push(if selected {
                         Line::from(vec![
                             Span::styled(
@@ -1362,7 +1346,7 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
                                     .add_modifier(Modifier::BOLD),
                             ),
                             Span::styled(
-                                "Custom…",
+                                "Custom\u{2026}",
                                 Style::default()
                                     .fg(Color::White)
                                     .add_modifier(Modifier::BOLD),
@@ -1371,11 +1355,11 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
                     } else {
                         Line::from(vec![
                             Span::raw("   "),
-                            Span::styled("Custom…", Style::default().fg(Color::DarkGray)),
+                            Span::styled("Custom\u{2026}", Style::default().fg(Color::DarkGray)),
                         ])
                     });
                 }
-                Some(e) if e.available => {
+                ModelOption::Entry(e) if e.available => {
                     lines.push(if selected {
                         Line::from(vec![
                             Span::styled(
@@ -1398,7 +1382,7 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
                         ])
                     });
                 }
-                Some(e) => {
+                ModelOption::Entry(e) => {
                     lines.push(if selected {
                         Line::from(vec![
                             Span::styled(" ▶ ", Style::default().fg(Color::DarkGray)),
@@ -1483,21 +1467,21 @@ fn setup_event_loop(
                 api_key,
                 base_url,
             ));
-            s.model_cursor = 0;
-            s.model_scroll = 0;
+            s.model_picker = make_model_picker(&s.fetched_models);
             // If reinit, pre-select the current model in the list.
             if !s.current_model.is_empty() {
                 if let Some(idx) = s
-                    .fetched_models
+                    .model_picker
+                    .items()
                     .iter()
-                    .position(|m| m.id == s.current_model)
+                    .position(|o| matches!(o, ModelOption::Entry(m) if m.id == s.current_model))
                 {
-                    s.model_cursor = idx;
+                    s.model_picker.selected = idx;
                     // Try to center it in the visible window (assume ~10 visible rows).
-                    s.model_scroll = idx.saturating_sub(5);
+                    s.model_picker.scroll_offset = idx.saturating_sub(5);
                 }
             }
-            s.model_search.clear();
+            s.model_picker.filter.clear();
             s.clear_typed_input();
             s.step = SetupStep::Model;
             continue;
@@ -1520,9 +1504,7 @@ fn setup_event_loop(
                 base_url,
             ));
             s.worker_custom_model = s.worker_fetched_models.is_empty();
-            s.worker_model_cursor = 0;
-            s.worker_model_scroll = 0;
-            s.worker_model_search.clear();
+            s.worker_model_picker = make_model_picker(&s.worker_fetched_models);
             s.clear_typed_input();
             s.step = SetupStep::WorkerModel;
             continue;
@@ -1545,9 +1527,7 @@ fn setup_event_loop(
                 base_url,
             ));
             s.reviewer_custom_model = s.reviewer_fetched_models.is_empty();
-            s.reviewer_model_cursor = 0;
-            s.reviewer_model_scroll = 0;
-            s.reviewer_model_search.clear();
+            s.reviewer_model_picker = make_model_picker(&s.reviewer_fetched_models);
             s.clear_typed_input();
             s.step = SetupStep::ReviewerModel;
             continue;
@@ -1620,22 +1600,14 @@ fn setup_event_loop(
                             return Ok(SetupOutcome::Cancelled);
                         }
                     }
-                    KeyCode::Up => {
-                        if s.provider_cursor > 0 {
-                            s.provider_cursor -= 1;
-                        }
-                    }
-                    KeyCode::Down => {
-                        if s.provider_cursor < PROVIDER_REGISTRY.len() - 1 {
-                            s.provider_cursor += 1;
-                        }
-                    }
                     KeyCode::Enter => {
-                        s.provider = s.provider_cursor;
+                        s.provider = s.provider_picker.selected;
                         s.init_credential_step();
                         s.step = SetupStep::Credential;
                     }
-                    _ => {}
+                    _ => {
+                        s.provider_picker.handle_key(key);
+                    }
                 },
 
                 // ── Credential input ──────────────────────────────────────
@@ -1721,34 +1693,18 @@ fn setup_event_loop(
 
                 // ── Model list selection ──────────────────────────────────
                 SetupStep::Model if s.model_list_mode() => {
-                    // Compute visible rows from terminal size for scroll clamping.
+                    // Update visible rows for scroll management.
                     let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
-                    // Overhead: header(1) + info(2) + search_box(3) + hint(1) + list_borders(2)
                     let visible_rows = (term_h as usize).saturating_sub(9).max(1);
+                    s.model_picker.visible_rows = visible_rows;
 
                     match key.code {
-                        KeyCode::Up => {
-                            if s.model_cursor > 0 {
-                                s.model_cursor -= 1;
-                                s.clamp_model_scroll(visible_rows);
-                            }
-                        }
-                        KeyCode::Down => {
-                            let filtered_len = s.filtered_models().len();
-                            // +1 for "Custom…" entry
-                            if s.model_cursor < filtered_len {
-                                s.model_cursor += 1;
-                                s.clamp_model_scroll(visible_rows);
-                            }
-                        }
-                        KeyCode::Enter => {
-                            let filtered = s.filtered_models();
-                            if s.model_cursor == filtered.len() {
-                                // "Custom…" selected
+                        KeyCode::Enter => match s.model_picker.selected_item() {
+                            Some(ModelOption::Custom) => {
                                 s.custom_model = true;
                                 s.clear_typed_input();
-                            } else if s.model_cursor < filtered.len() {
-                                let entry = filtered[s.model_cursor];
+                            }
+                            Some(ModelOption::Entry(entry)) => {
                                 if !entry.available {
                                     s.error = Some(format!(
                                         "{} has no endpoints — pick a different model",
@@ -1759,29 +1715,22 @@ fn setup_event_loop(
                                     s.step = SetupStep::SubAgentIntro;
                                 }
                             }
-                        }
-                        KeyCode::Backspace => {
-                            s.model_search.pop();
-                            s.model_cursor = 0;
-                            s.model_scroll = 0;
-                        }
+                            None => {}
+                        },
                         KeyCode::Esc => {
-                            if !s.model_search.is_empty() {
-                                s.model_search.clear();
-                                s.model_cursor = 0;
-                                s.model_scroll = 0;
+                            if !s.model_picker.filter.text.is_empty() {
+                                s.model_picker.filter.clear();
+                                s.model_picker.apply_filter();
+                                s.model_picker.home();
                             } else {
                                 s.step = SetupStep::Credential;
                                 s.text_input.set_text(s.credential.clone());
                                 s.credential_pick_active = false;
                             }
                         }
-                        KeyCode::Char(c) => {
-                            s.model_search.push(c);
-                            s.model_cursor = 0;
-                            s.model_scroll = 0;
+                        _ => {
+                            s.model_picker.handle_key(key);
                         }
-                        _ => {}
                     }
                 }
 
@@ -1849,6 +1798,7 @@ fn setup_event_loop(
                             s.configure_worker = true;
                             s.configure_reviewer = false;
                             s.worker_provider = s.provider;
+                            s.worker_provider_picker.selected = s.provider;
                             s.step = SetupStep::WorkerProvider;
                         }
                         1 => {
@@ -1856,6 +1806,7 @@ fn setup_event_loop(
                             s.configure_worker = true;
                             s.configure_reviewer = true;
                             s.worker_provider = s.provider;
+                            s.worker_provider_picker.selected = s.provider;
                             s.step = SetupStep::WorkerProvider;
                         }
                         _ => {
@@ -1874,17 +1825,8 @@ fn setup_event_loop(
 
                 // ── Worker provider ───────────────────────────────────────
                 SetupStep::WorkerProvider => match key.code {
-                    KeyCode::Up => {
-                        if s.worker_provider > 0 {
-                            s.worker_provider -= 1;
-                        }
-                    }
-                    KeyCode::Down => {
-                        if s.worker_provider < PROVIDER_REGISTRY.len() - 1 {
-                            s.worker_provider += 1;
-                        }
-                    }
                     KeyCode::Enter => {
+                        s.worker_provider = s.worker_provider_picker.selected;
                         if s.worker_provider == s.provider {
                             // Same provider as main — reuse credential
                             s.worker_credential = s.credential.clone();
@@ -1902,7 +1844,9 @@ fn setup_event_loop(
                         s.role_cursor = 0;
                         s.role_edit_field = RoleEditField::None;
                     }
-                    _ => {}
+                    _ => {
+                        s.worker_provider_picker.handle_key(key);
+                    }
                 },
 
                 // ── Worker credential ─────────────────────────────────────
@@ -1960,25 +1904,14 @@ fn setup_event_loop(
                 SetupStep::WorkerModel if s.worker_model_list_mode() => {
                     let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
                     let visible_rows = (term_h as usize).saturating_sub(9).max(1);
+                    s.worker_model_picker.visible_rows = visible_rows;
                     match key.code {
-                        KeyCode::Up => {
-                            if s.worker_model_cursor > 0 {
-                                s.worker_model_cursor -= 1;
-                            }
-                        }
-                        KeyCode::Down => {
-                            let filtered_len = s.filtered_worker_models().len();
-                            if s.worker_model_cursor < filtered_len {
-                                s.worker_model_cursor += 1;
-                            }
-                        }
-                        KeyCode::Enter => {
-                            let filtered = s.filtered_worker_models();
-                            if s.worker_model_cursor == filtered.len() {
+                        KeyCode::Enter => match s.worker_model_picker.selected_item() {
+                            Some(ModelOption::Custom) => {
                                 s.worker_custom_model = true;
                                 s.clear_typed_input();
-                            } else if s.worker_model_cursor < filtered.len() {
-                                let entry = filtered[s.worker_model_cursor];
+                            }
+                            Some(ModelOption::Entry(entry)) => {
                                 if !entry.available {
                                     s.error = Some(format!(
                                         "{} has no endpoints — pick a different model",
@@ -1988,6 +1921,7 @@ fn setup_event_loop(
                                     s.worker_model = entry.id.clone();
                                     if s.configure_reviewer {
                                         s.reviewer_provider = s.provider;
+                                        s.reviewer_provider_picker.selected = s.provider;
                                         s.step = SetupStep::ReviewerProvider;
                                     } else {
                                         s.step = SetupStep::Roles;
@@ -1996,39 +1930,20 @@ fn setup_event_loop(
                                     }
                                 }
                             }
-                        }
-                        KeyCode::Backspace => {
-                            s.worker_model_search.pop();
-                            s.worker_model_cursor = 0;
-                            s.worker_model_scroll = 0;
-                        }
+                            None => {}
+                        },
                         KeyCode::Esc => {
-                            if !s.worker_model_search.is_empty() {
-                                s.worker_model_search.clear();
-                                s.worker_model_cursor = 0;
-                                s.worker_model_scroll = 0;
+                            if !s.worker_model_picker.filter.text.is_empty() {
+                                s.worker_model_picker.filter.clear();
+                                s.worker_model_picker.apply_filter();
+                                s.worker_model_picker.home();
                             } else {
                                 s.step = SetupStep::WorkerProvider;
                             }
                         }
-                        KeyCode::Char(c) => {
-                            s.worker_model_search.push(c);
-                            s.worker_model_cursor = 0;
-                            s.worker_model_scroll = 0;
+                        _ => {
+                            s.worker_model_picker.handle_key(key);
                         }
-                        _ => {}
-                    }
-                    // Clamp scroll
-                    let filtered_len = s.filtered_worker_models().len();
-                    let total = filtered_len + 1;
-                    if s.worker_model_cursor < s.worker_model_scroll {
-                        s.worker_model_scroll = s.worker_model_cursor;
-                    } else if s.worker_model_cursor >= s.worker_model_scroll + visible_rows {
-                        s.worker_model_scroll = s.worker_model_cursor + 1 - visible_rows;
-                    }
-                    let max_scroll = total.saturating_sub(visible_rows);
-                    if s.worker_model_scroll > max_scroll {
-                        s.worker_model_scroll = max_scroll;
                     }
                 }
 
@@ -2084,17 +1999,8 @@ fn setup_event_loop(
 
                 // ── Reviewer provider ─────────────────────────────────────
                 SetupStep::ReviewerProvider => match key.code {
-                    KeyCode::Up => {
-                        if s.reviewer_provider > 0 {
-                            s.reviewer_provider -= 1;
-                        }
-                    }
-                    KeyCode::Down => {
-                        if s.reviewer_provider < PROVIDER_REGISTRY.len() - 1 {
-                            s.reviewer_provider += 1;
-                        }
-                    }
                     KeyCode::Enter => {
+                        s.reviewer_provider = s.reviewer_provider_picker.selected;
                         if s.reviewer_provider == s.provider {
                             s.reviewer_credential = s.credential.clone();
                             s.reviewer_needs_fetch = true;
@@ -2110,7 +2016,9 @@ fn setup_event_loop(
                         s.role_cursor = 0;
                         s.role_edit_field = RoleEditField::None;
                     }
-                    _ => {}
+                    _ => {
+                        s.reviewer_provider_picker.handle_key(key);
+                    }
                 },
 
                 // ── Reviewer credential ───────────────────────────────────
@@ -2167,25 +2075,14 @@ fn setup_event_loop(
                 SetupStep::ReviewerModel if s.reviewer_model_list_mode() => {
                     let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
                     let visible_rows = (term_h as usize).saturating_sub(9).max(1);
+                    s.reviewer_model_picker.visible_rows = visible_rows;
                     match key.code {
-                        KeyCode::Up => {
-                            if s.reviewer_model_cursor > 0 {
-                                s.reviewer_model_cursor -= 1;
-                            }
-                        }
-                        KeyCode::Down => {
-                            let filtered_len = s.filtered_reviewer_models().len();
-                            if s.reviewer_model_cursor < filtered_len {
-                                s.reviewer_model_cursor += 1;
-                            }
-                        }
-                        KeyCode::Enter => {
-                            let filtered = s.filtered_reviewer_models();
-                            if s.reviewer_model_cursor == filtered.len() {
+                        KeyCode::Enter => match s.reviewer_model_picker.selected_item() {
+                            Some(ModelOption::Custom) => {
                                 s.reviewer_custom_model = true;
                                 s.clear_typed_input();
-                            } else if s.reviewer_model_cursor < filtered.len() {
-                                let entry = filtered[s.reviewer_model_cursor];
+                            }
+                            Some(ModelOption::Entry(entry)) => {
                                 if !entry.available {
                                     s.error = Some(format!(
                                         "{} has no endpoints — pick a different model",
@@ -2198,39 +2095,20 @@ fn setup_event_loop(
                                     s.role_edit_field = RoleEditField::None;
                                 }
                             }
-                        }
-                        KeyCode::Backspace => {
-                            s.reviewer_model_search.pop();
-                            s.reviewer_model_cursor = 0;
-                            s.reviewer_model_scroll = 0;
-                        }
+                            None => {}
+                        },
                         KeyCode::Esc => {
-                            if !s.reviewer_model_search.is_empty() {
-                                s.reviewer_model_search.clear();
-                                s.reviewer_model_cursor = 0;
-                                s.reviewer_model_scroll = 0;
+                            if !s.reviewer_model_picker.filter.text.is_empty() {
+                                s.reviewer_model_picker.filter.clear();
+                                s.reviewer_model_picker.apply_filter();
+                                s.reviewer_model_picker.home();
                             } else {
                                 s.step = SetupStep::ReviewerProvider;
                             }
                         }
-                        KeyCode::Char(c) => {
-                            s.reviewer_model_search.push(c);
-                            s.reviewer_model_cursor = 0;
-                            s.reviewer_model_scroll = 0;
+                        _ => {
+                            s.reviewer_model_picker.handle_key(key);
                         }
-                        _ => {}
-                    }
-                    // Clamp scroll
-                    let filtered_len = s.filtered_reviewer_models().len();
-                    let total = filtered_len + 1;
-                    if s.reviewer_model_cursor < s.reviewer_model_scroll {
-                        s.reviewer_model_scroll = s.reviewer_model_cursor;
-                    } else if s.reviewer_model_cursor >= s.reviewer_model_scroll + visible_rows {
-                        s.reviewer_model_scroll = s.reviewer_model_cursor + 1 - visible_rows;
-                    }
-                    let max_scroll = total.saturating_sub(visible_rows);
-                    if s.reviewer_model_scroll > max_scroll {
-                        s.reviewer_model_scroll = max_scroll;
                     }
                 }
 
@@ -2325,13 +2203,11 @@ fn setup_event_loop(
                             }
                             KeyCode::Esc => {
                                 // Back to model selection (keep chosen model)
-                                if s.custom_model {
-                                    s.step = SetupStep::Model;
-                                } else {
-                                    s.step = SetupStep::Model;
-                                    s.model_search.clear();
-                                    s.model_cursor = 0;
-                                    s.model_scroll = 0;
+                                s.step = SetupStep::Model;
+                                if !s.custom_model {
+                                    s.model_picker.filter.clear();
+                                    s.model_picker.apply_filter();
+                                    s.model_picker.home();
                                 }
                             }
                             _ => {}
@@ -3486,8 +3362,8 @@ mod tests {
     fn setup_state_new_defaults() {
         let s = SetupState::new();
         assert_eq!(s.step, SetupStep::Provider);
-        assert_eq!(s.provider_cursor, 0);
-        assert_eq!(s.model_cursor, 0);
+        assert_eq!(s.provider_picker.selected, 0);
+        assert_eq!(s.model_picker.selected, 0);
         assert!(!s.custom_model);
         assert!(s.model.is_empty());
         assert!(s.text_input.text.is_empty());

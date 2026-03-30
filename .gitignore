@@ -3,6 +3,13 @@
 target/
 doc/
 
+# OS
+.DS_Store
+
+# Editors
+*.swp
+*.swo
+
 # Cursor IDE (plans, skills — repo-specific)
 .cursor/
 

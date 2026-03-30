@@ -107,6 +107,85 @@ impl AgentSetup {
             }
         }
 
+        // Load skills from .clido/skills/ directory (project-local and global).
+        {
+            let mut skill_texts = Vec::new();
+            let skills_dir = workspace_root.join(".clido").join("skills");
+            if skills_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&skills_dir) {
+                    let mut paths: Vec<_> = entries
+                        .filter_map(|e| e.ok())
+                        .filter(|e| {
+                            e.path()
+                                .extension()
+                                .map(|ext| ext == "md" || ext == "txt")
+                                .unwrap_or(false)
+                        })
+                        .map(|e| e.path())
+                        .collect();
+                    paths.sort();
+                    for path in paths {
+                        if let Ok(content) = std::fs::read_to_string(&path) {
+                            let trimmed = content.trim();
+                            if !trimmed.is_empty() {
+                                let name = path
+                                    .file_stem()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_default();
+                                skill_texts.push(format!("### {}\n{}", name, trimmed));
+                            }
+                        }
+                    }
+                }
+            }
+            // Also load from ~/.clido/skills/ (global skills).
+            let global_skills_dir = std::env::var("HOME")
+                .map(|h| std::path::PathBuf::from(h).join(".clido").join("skills"))
+                .ok();
+            if let Some(ref global_skills) = global_skills_dir {
+                if global_skills.is_dir() {
+                    if let Ok(entries) = std::fs::read_dir(global_skills) {
+                        let mut paths: Vec<_> = entries
+                            .filter_map(|e| e.ok())
+                            .filter(|e| {
+                                e.path()
+                                    .extension()
+                                    .map(|ext| ext == "md" || ext == "txt")
+                                    .unwrap_or(false)
+                            })
+                            .map(|e| e.path())
+                            .collect();
+                        paths.sort();
+                        for path in paths {
+                            if let Ok(content) = std::fs::read_to_string(&path) {
+                                let trimmed = content.trim();
+                                if !trimmed.is_empty() {
+                                    let name = path
+                                        .file_stem()
+                                        .map(|s| s.to_string_lossy().to_string())
+                                        .unwrap_or_default();
+                                    // Avoid duplicates if project has same-named skill
+                                    if !skill_texts
+                                        .iter()
+                                        .any(|s| s.starts_with(&format!("### {}\n", name)))
+                                    {
+                                        skill_texts.push(format!("### {}\n{}", name, trimmed));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if !skill_texts.is_empty() {
+                system_prompt = format!(
+                    "{}\n\n<skills>\n{}\n</skills>",
+                    system_prompt,
+                    skill_texts.join("\n\n")
+                );
+            }
+        }
+
         // Append provider-specific prompt instructions.
         let provider_name = profile.provider.as_str();
         let model_name = cli.model.as_deref().unwrap_or(&profile.model);

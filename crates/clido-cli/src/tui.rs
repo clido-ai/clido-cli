@@ -42,6 +42,7 @@ use crate::prompt_enhance::{
     load_prompt_mode, load_rules, project_rules_path, project_settings_path, save_prompt_mode,
     save_rules, EnhancementCtx, PromptMode, PromptRules, RuleEntry,
 };
+use crate::repl::expand_at_file_refs;
 use clido_index::RepoIndex;
 use clido_memory::MemoryStore;
 use clido_planner::{Complexity, Plan, PlanEditor, TaskStatus};
@@ -1517,6 +1518,8 @@ impl App {
                 *guard = Some((img.media_type.to_string(), img.base64_data));
             }
         }
+        // Expand @file references in user input
+        let text = expand_at_file_refs(&text, std::env::current_dir().ok().as_deref());
         // Check for per-turn @model-name prefix.
         let send_result = if let Some((per_turn_model, actual_prompt)) = parse_per_turn_model(&text)
         {

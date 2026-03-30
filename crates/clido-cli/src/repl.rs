@@ -15,6 +15,60 @@ use crate::git_context::GitContext;
 use crate::sessions;
 use crate::ui::{ansi, cli_use_color};
 
+/// Expand `@file` references in user input by reading the files and appending their content.
+/// Returns the expanded text with file contents appended as context blocks.
+pub(crate) fn expand_at_file_refs(text: &str, workspace: Option<&std::path::Path>) -> String {
+    let mut files_found = Vec::new();
+
+    for word in text.split_whitespace() {
+        if !word.starts_with('@') || word.len() < 3 {
+            continue;
+        }
+        let path_str = &word[1..]; // strip leading @
+                                   // Must look like a file path (contains / or has extension with .)
+        if !path_str.contains('/') && !path_str.contains('.') {
+            continue;
+        }
+        // Skip agent mentions
+        if matches!(
+            path_str,
+            "worker" | "reviewer" | "explore" | "general" | "w" | "r" | "e" | "g"
+        ) {
+            continue;
+        }
+        let path = if let Some(ws) = workspace {
+            ws.join(path_str)
+        } else {
+            std::path::PathBuf::from(path_str)
+        };
+
+        if path.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let lines = content.lines().count();
+                let truncated = if lines > 500 {
+                    let first_500: String =
+                        content.lines().take(500).collect::<Vec<_>>().join("\n");
+                    format!("{}\n... ({} more lines truncated)", first_500, lines - 500)
+                } else {
+                    content
+                };
+                files_found.push((path_str.to_string(), truncated));
+            }
+        }
+    }
+
+    if files_found.is_empty() {
+        return text.to_string();
+    }
+
+    let mut result = text.to_string();
+    result.push_str("\n\n---\nReferenced files:");
+    for (path, content) in &files_found {
+        result.push_str(&format!("\n\n### {}\n```\n{}\n```", path, content));
+    }
+    result
+}
+
 /// Parse `@agent` mention routing from a prompt.
 ///
 /// Returns `(agent_hint, cleaned_prompt)` where `agent_hint` is `Some("worker")` etc.
@@ -231,6 +285,9 @@ pub async fn run_repl(cli: Cli) -> Result<(), anyhow::Error> {
                 line.to_string()
             }
         };
+
+        // Expand @file references in user input
+        let prompt = expand_at_file_refs(&prompt, std::env::current_dir().ok().as_deref());
 
         let result = if first_turn {
             loop_

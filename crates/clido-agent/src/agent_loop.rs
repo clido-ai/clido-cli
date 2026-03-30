@@ -36,6 +36,58 @@ fn format_tool_error_for_reflection(tool_name: &str, error_output: &str) -> Stri
     )
 }
 
+/// Build an enhanced error message for edit tool failures that includes
+/// the target file's content around the failed region to help the model self-correct.
+fn enhanced_edit_error(tool_name: &str, error_output: &str, input: &serde_json::Value) -> String {
+    if !matches!(tool_name, "Edit" | "MultiEdit") {
+        return format_tool_error_for_reflection(tool_name, error_output);
+    }
+
+    let file_path = input
+        .get("file_path")
+        .or_else(|| input.get("path"))
+        .and_then(|v| v.as_str());
+
+    let file_context = if let Some(path) = file_path {
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                let lines: Vec<&str> = content.lines().collect();
+                let total = lines.len();
+                if total <= 100 {
+                    format!(
+                        "\n\n[File Content ({} lines)]:\n```\n{}\n```",
+                        total, content
+                    )
+                } else {
+                    let head: String = lines[..30].join("\n");
+                    let tail: String = lines[total - 30..].join("\n");
+                    format!(
+                        "\n\n[File Excerpt ({} lines total)]:\n```\n{}\n... ({} lines omitted) ...\n{}\n```",
+                        total, head, total - 60, tail
+                    )
+                }
+            }
+            Err(_) => String::new(),
+        }
+    } else {
+        String::new()
+    };
+
+    let old_str_hint = input
+        .get("old_string")
+        .or_else(|| input.get("old_str"))
+        .and_then(|v| v.as_str())
+        .map(|s| format!("\n\n[You searched for]:\n```\n{}\n```", s))
+        .unwrap_or_default();
+
+    format!(
+        "[Tool Error] The {} tool returned an error:\n{}{}{}\n\n\
+         Hint: Re-read the file with the Read tool to see the current content, \
+         then retry with the exact text from the file. Do NOT guess the content.",
+        tool_name, error_output, old_str_hint, file_context
+    )
+}
+
 /// Create a git checkpoint of dirty working tree before AI edits.
 /// Only runs once per agent session to avoid excessive commits.
 async fn maybe_create_checkpoint(workspace: Option<&std::path::Path>) -> Option<String> {
@@ -919,7 +971,7 @@ impl AgentLoop {
 
                     let mut tool_results = Vec::new();
                     let mut had_errors = false;
-                    for ((id, name, _), (output, duration_ms)) in
+                    for ((id, name, input), (output, duration_ms)) in
                         tool_uses.iter().zip(outputs.iter())
                     {
                         if let Some(ref mut w) = session {
@@ -939,7 +991,7 @@ impl AgentLoop {
                         tool_results.push(ContentBlock::ToolResult {
                             tool_use_id: id.clone(),
                             content: if output.is_error {
-                                format_tool_error_for_reflection(name, &output.content)
+                                enhanced_edit_error(name, &output.content, input)
                             } else {
                                 output.content.clone()
                             },
@@ -1486,7 +1538,7 @@ impl AgentLoop {
 
                     let mut tool_results = Vec::new();
                     let mut had_errors = false;
-                    for ((id, name, _), (output, duration_ms)) in
+                    for ((id, name, input), (output, duration_ms)) in
                         tool_uses.iter().zip(outputs.iter())
                     {
                         if let Some(ref mut w) = session {
@@ -1506,7 +1558,7 @@ impl AgentLoop {
                         tool_results.push(ContentBlock::ToolResult {
                             tool_use_id: id.clone(),
                             content: if output.is_error {
-                                format_tool_error_for_reflection(name, &output.content)
+                                enhanced_edit_error(name, &output.content, input)
                             } else {
                                 output.content.clone()
                             },

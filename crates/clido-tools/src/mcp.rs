@@ -11,15 +11,27 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
 
+/// Transport type for MCP connections.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransport {
+    #[default]
+    Stdio,
+    Http,
+}
+
 /// Configuration for an MCP server.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct McpServerConfig {
     pub name: String,
+    /// For stdio transport: command to spawn. For HTTP transport: base URL.
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub transport: McpTransport,
 }
 
 /// MCP config file format.
@@ -283,18 +295,229 @@ pub fn load_mcp_config(path: &std::path::Path) -> anyhow::Result<McpConfig> {
 }
 
 // ---------------------------------------------------------------------------
+// McpHttpClient: MCP client over HTTP (JSON-RPC 2.0 via POST requests)
+// ---------------------------------------------------------------------------
+
+/// MCP client over HTTP (JSON-RPC 2.0 via POST requests).
+pub struct McpHttpClient {
+    base_url: String,
+    client: reqwest::Client,
+    next_id: Mutex<u64>,
+    pub config: McpServerConfig,
+}
+
+impl McpHttpClient {
+    /// Create a new HTTP-based MCP client.
+    /// The `command` field of the config is used as the base URL.
+    pub fn new(config: McpServerConfig) -> anyhow::Result<Self> {
+        let base_url = config.command.clone();
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        if let Some(auth) = config.env.get("AUTHORIZATION") {
+            if let Ok(val) = auth.parse() {
+                headers.insert("Authorization", val);
+            }
+        }
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
+        Ok(Self {
+            base_url,
+            client,
+            next_id: Mutex::new(1),
+            config,
+        })
+    }
+
+    async fn next_id(&self) -> u64 {
+        let mut id = self.next_id.lock().await;
+        let v = *id;
+        *id += 1;
+        v
+    }
+
+    async fn send_request(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let id = self.next_id().await;
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params
+        });
+        let resp = self
+            .client
+            .post(&self.base_url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("MCP HTTP request failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(anyhow::anyhow!("MCP HTTP error: status {}", resp.status()));
+        }
+
+        let resp_json: JsonRpcResponse = resp
+            .json()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to parse MCP HTTP response: {}", e))?;
+
+        if let Some(err) = resp_json.error {
+            return Err(anyhow::anyhow!("MCP server error: {}", err));
+        }
+        Ok(resp_json.result.unwrap_or(serde_json::Value::Null))
+    }
+
+    /// Send the `initialize` handshake over HTTP.
+    pub async fn initialize(&self) -> anyhow::Result<serde_json::Value> {
+        self.send_request(
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": { "name": "clido", "version": "0.1.0" }
+            }),
+        )
+        .await
+    }
+
+    /// List tools exposed by the server via HTTP.
+    pub async fn list_tools(&self) -> anyhow::Result<Vec<McpToolDef>> {
+        let result = self
+            .send_request("tools/list", serde_json::json!({}))
+            .await?;
+        let tools = result
+            .get("tools")
+            .and_then(|t| t.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut defs = Vec::new();
+        for t in tools {
+            let name = t
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let description = t
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let input_schema = t
+                .get("inputSchema")
+                .cloned()
+                .unwrap_or(serde_json::json!({"type": "object"}));
+            let read_only = t
+                .get("annotations")
+                .and_then(|a| a.get("readOnlyHint"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !name.is_empty() {
+                defs.push(McpToolDef {
+                    name,
+                    description,
+                    input_schema,
+                    read_only,
+                });
+            }
+        }
+        Ok(defs)
+    }
+
+    /// Call a tool by name with the given arguments via HTTP.
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let result = self
+            .send_request(
+                "tools/call",
+                serde_json::json!({ "name": name, "arguments": arguments }),
+            )
+            .await?;
+        // Extract text content from MCP response if present
+        if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
+            let text: Vec<String> = content
+                .iter()
+                .filter_map(|item| {
+                    if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                        item.get("text").and_then(|t| t.as_str()).map(String::from)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !text.is_empty() {
+                return Ok(serde_json::Value::String(text.join("\n")));
+            }
+        }
+        Ok(result)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// McpTransportClient: unified wrapper over stdio and HTTP transports
+// ---------------------------------------------------------------------------
+
+/// MCP transport wrapper — supports both stdio and HTTP.
+pub enum McpTransportClient {
+    Stdio(Arc<McpClient>),
+    Http(Arc<McpHttpClient>),
+}
+
+impl McpTransportClient {
+    /// Call a tool on whichever underlying transport is active.
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        match self {
+            Self::Stdio(c) => c.call_tool(name, arguments).await,
+            Self::Http(c) => c.call_tool(name, arguments).await,
+        }
+    }
+
+    /// Retrieve the server config.
+    pub fn config(&self) -> &McpServerConfig {
+        match self {
+            Self::Stdio(c) => &c.config,
+            Self::Http(c) => &c.config,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // McpTool: Tool trait wrapper for a single MCP tool
 // ---------------------------------------------------------------------------
 
 /// A `Tool`-trait implementation that delegates execution to an MCP server.
 pub struct McpTool {
     def: McpToolDef,
-    client: Arc<McpClient>,
+    client: McpTransportClient,
 }
 
 impl McpTool {
+    /// Create an `McpTool` backed by a stdio transport.
     pub fn new(def: McpToolDef, client: Arc<McpClient>) -> Self {
-        Self { def, client }
+        Self {
+            def,
+            client: McpTransportClient::Stdio(client),
+        }
+    }
+
+    /// Create an `McpTool` backed by an HTTP transport.
+    pub fn new_http(def: McpToolDef, client: Arc<McpHttpClient>) -> Self {
+        Self {
+            def,
+            client: McpTransportClient::Http(client),
+        }
     }
 }
 
@@ -377,6 +600,7 @@ mod tests {
             command: "cat".to_string(),
             args: vec![],
             env: HashMap::new(),
+            transport: McpTransport::default(),
         };
         let result = McpClient::spawn(cfg);
         if let Ok(client) = result {

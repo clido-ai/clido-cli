@@ -27,6 +27,46 @@ use tracing::{debug, warn};
 const DOOM_LOOP_THRESHOLD: usize = 3;
 /// Budget warning thresholds (percentage of limit consumed).
 const BUDGET_WARNING_PCTS: &[u8] = &[50, 80, 90];
+/// Proactive summarization triggers at this fraction of max context (below full compaction).
+const PROACTIVE_SUMMARIZE_THRESHOLD: f64 = 0.50;
+/// Maximum number of tool pairs to summarize per turn (to limit latency).
+const MAX_PROACTIVE_SUMMARIES_PER_TURN: usize = 5;
+
+/// Detect potential prompt injection patterns in tool arguments.
+/// Returns the matched pattern category if suspicious content is found.
+fn detect_injection(input: &serde_json::Value) -> Option<&'static str> {
+    let text = match input {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Object(_) => serde_json::to_string(input).unwrap_or_default(),
+        _ => return None,
+    };
+    let lower = text.to_lowercase();
+
+    static PATTERNS: &[(&str, &str)] = &[
+        ("ignore previous instructions", "instruction override"),
+        ("ignore all previous", "instruction override"),
+        ("disregard previous", "instruction override"),
+        ("forget your instructions", "instruction override"),
+        ("you are now", "role hijacking"),
+        ("new system prompt", "system prompt injection"),
+        ("override system prompt", "system prompt injection"),
+        ("<system>", "XML tag injection"),
+        ("</system>", "XML tag injection"),
+        ("<|im_start|>", "chat template injection"),
+        ("<|im_end|>", "chat template injection"),
+        ("human:", "role boundary injection"),
+        ("assistant:", "role boundary injection"),
+        ("[inst]", "instruction tag injection"),
+        ("[/inst]", "instruction tag injection"),
+    ];
+
+    for (pattern, category) in PATTERNS {
+        if lower.contains(pattern) {
+            return Some(category);
+        }
+    }
+    None
+}
 
 /// Wrap a tool error in structured feedback to help the model self-correct.
 fn format_tool_error_for_reflection(tool_name: &str, error_output: &str) -> String {
@@ -736,6 +776,36 @@ impl AgentLoop {
             turns += 1;
             self.last_turn_count = turns;
 
+            // Proactive summarization: at 50% capacity, start replacing oldest tool pairs
+            // with 1-sentence summaries to delay full compaction.
+            {
+                let sys_tok = self
+                    .config
+                    .system_prompt
+                    .as_ref()
+                    .map(|s| estimate_tokens_str(s))
+                    .unwrap_or(0);
+                let max_tok = self
+                    .config
+                    .max_context_tokens
+                    .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
+                let current = sys_tok + estimate_tokens_messages(&self.history);
+                let proactive_limit = ((max_tok as f64) * PROACTIVE_SUMMARIZE_THRESHOLD) as u32;
+                if current > proactive_limit {
+                    let fast_cfg = self.fast_config();
+                    let count = proactive_summarize_pairs(
+                        &mut self.history,
+                        self.provider.as_ref(),
+                        &fast_cfg,
+                        8, // preserve last 8 messages
+                    )
+                    .await;
+                    if count > 0 {
+                        debug!("Proactively summarized {} tool pairs", count);
+                    }
+                }
+            }
+
             let system_tokens = self
                 .config
                 .system_prompt
@@ -1261,6 +1331,36 @@ impl AgentLoop {
             turns += 1;
             self.last_turn_count = turns;
 
+            // Proactive summarization: at 50% capacity, start replacing oldest tool pairs
+            // with 1-sentence summaries to delay full compaction.
+            {
+                let sys_tok = self
+                    .config
+                    .system_prompt
+                    .as_ref()
+                    .map(|s| estimate_tokens_str(s))
+                    .unwrap_or(0);
+                let max_tok = self
+                    .config
+                    .max_context_tokens
+                    .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
+                let current = sys_tok + estimate_tokens_messages(&self.history);
+                let proactive_limit = ((max_tok as f64) * PROACTIVE_SUMMARIZE_THRESHOLD) as u32;
+                if current > proactive_limit {
+                    let fast_cfg = self.fast_config();
+                    let count = proactive_summarize_pairs(
+                        &mut self.history,
+                        self.provider.as_ref(),
+                        &fast_cfg,
+                        8, // preserve last 8 messages
+                    )
+                    .await;
+                    if count > 0 {
+                        debug!("Proactively summarized {} tool pairs", count);
+                    }
+                }
+            }
+
             let system_tokens = self
                 .config
                 .system_prompt
@@ -1657,6 +1757,43 @@ impl AgentLoop {
             }
         }
 
+        // ── Prompt injection detection ────────────────────────────────────────
+        // Warn on suspicious tool arguments; for write-capable tools, ask the user.
+        if let Some(category) = detect_injection(input) {
+            warn!(
+                "Potential prompt injection detected in {} args: {}",
+                name, category
+            );
+            if let Some(tool) = self.tools.get(name) {
+                if !tool.is_read_only() {
+                    if let Some(ref ask) = self.ask_user {
+                        let req = PermRequest {
+                            tool_name: name.to_string(),
+                            description: format!(
+                                "⚠️ Potential prompt injection ({}) detected in tool arguments. Allow?",
+                                category
+                            ),
+                            diff: None,
+                            proposed_content: None,
+                            file_path: None,
+                        };
+                        match ask.ask(req).await {
+                            PermGrant::Allow | PermGrant::AllowAll => {}
+                            PermGrant::Deny | PermGrant::EditInEditor => {
+                                return ToolOutput::err(format!(
+                                    "Blocked: potential prompt injection ({}) in tool arguments.",
+                                    category
+                                ));
+                            }
+                            PermGrant::DenyWithFeedback(msg) => {
+                                return ToolOutput::err(msg);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // ── Per-file permission rules ────────────────────────────────────────
         // If the config has `permission_rules`, evaluate them against the tool's
         // primary file argument (the first string value in `input`) before falling
@@ -2013,6 +2150,148 @@ async fn open_in_editor_blocking(proposed: &str, file_path: &std::path::Path) ->
 ///
 /// Falls back to the static-placeholder path (identical to `assemble()`) if the
 /// summarization call fails for any reason, so the agent loop is never blocked.
+/// Find indices of the oldest tool_call + tool_result message pairs in history
+/// that haven't already been summarized. Returns pairs of (assistant_idx, user_idx).
+fn find_unsummarized_tool_pairs(messages: &[Message], max: usize) -> Vec<(usize, usize)> {
+    let mut pairs = Vec::new();
+    let mut i = 0;
+    while i < messages.len().saturating_sub(1) && pairs.len() < max {
+        let msg = &messages[i];
+        let next = &messages[i + 1];
+        // Look for Assistant message with ToolUse followed by User message with ToolResult
+        if msg.role == Role::Assistant
+            && next.role == Role::User
+            && msg
+                .content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::ToolUse { .. }))
+            && next
+                .content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::ToolResult { .. }))
+        {
+            // Skip if already summarized (contains our marker)
+            let already_summarized = next.content.iter().any(|b| {
+                if let ContentBlock::ToolResult { content, .. } = b {
+                    content.starts_with("[Summary]")
+                } else {
+                    false
+                }
+            });
+            if !already_summarized {
+                pairs.push((i, i + 1));
+            }
+        }
+        i += 1;
+    }
+    pairs
+}
+
+/// Proactively summarize oldest tool pairs to reduce context before hitting compaction.
+/// Replaces the tool result content with a 1-sentence LLM summary.
+async fn proactive_summarize_pairs(
+    history: &mut Vec<Message>,
+    provider: &dyn ModelProvider,
+    config: &AgentConfig,
+    preserve_recent: usize,
+) -> usize {
+    // Only consider messages outside the "recent" window
+    let safe_len = history.len().saturating_sub(preserve_recent);
+    if safe_len < 2 {
+        return 0;
+    }
+
+    let pairs =
+        find_unsummarized_tool_pairs(&history[..safe_len], MAX_PROACTIVE_SUMMARIES_PER_TURN);
+    if pairs.is_empty() {
+        return 0;
+    }
+
+    let mut summarized = 0;
+    for (asst_idx, user_idx) in &pairs {
+        // Build a concise representation of the tool call + result
+        let tool_call_text: String = history[*asst_idx]
+            .content
+            .iter()
+            .filter_map(|b| {
+                if let ContentBlock::ToolUse { name, input, .. } = b {
+                    let input_preview: String = serde_json::to_string(input)
+                        .unwrap_or_default()
+                        .chars()
+                        .take(200)
+                        .collect();
+                    Some(format!("{}({})", name, input_preview))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let result_text: String = history[*user_idx]
+            .content
+            .iter()
+            .filter_map(|b| {
+                if let ContentBlock::ToolResult {
+                    content, is_error, ..
+                } = b
+                {
+                    let prefix = if *is_error { "ERROR: " } else { "" };
+                    let preview: String = content.chars().take(500).collect();
+                    Some(format!("{}{}", prefix, preview))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let prompt = format!(
+            "Summarize this tool interaction in ONE sentence (max 100 words). \
+             Focus on the outcome/result, not the process.\n\n\
+             Tool call: {}\nResult: {}",
+            tool_call_text, result_text
+        );
+
+        // Use fast model for summarization
+        let messages_for_llm = vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: prompt.clone(),
+            }],
+        }];
+
+        match provider.complete(&messages_for_llm, &[], config).await {
+            Ok(response) => {
+                let summary = response
+                    .content
+                    .iter()
+                    .find_map(|b| {
+                        if let ContentBlock::Text { text } = b {
+                            Some(text.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "Tool interaction completed.".to_string());
+
+                // Replace tool result content with summary
+                for block in &mut history[*user_idx].content {
+                    if let ContentBlock::ToolResult { content, .. } = block {
+                        *content = format!("[Summary] {}", summary);
+                    }
+                }
+                summarized += 1;
+            }
+            Err(e) => {
+                warn!("Proactive summarization failed: {}", e);
+                break; // Stop if LLM call fails
+            }
+        }
+    }
+    summarized
+}
+
 /// Compress tool result content in older messages to reduce context before summarization.
 /// Keeps the last `preserve_recent` messages intact, only compresses older ones.
 fn compress_tool_results(messages: &mut [Message], preserve_recent: usize) {

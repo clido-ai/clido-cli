@@ -39,7 +39,10 @@ pub use git_tool::GitTool;
 pub use glob_tool::GlobTool;
 pub use grep_tool::GrepTool;
 pub use ls_tool::LsTool;
-pub use mcp::{load_mcp_config, McpClient, McpConfig, McpServerConfig, McpTool, McpToolDef};
+pub use mcp::{
+    load_mcp_config, McpClient, McpConfig, McpHttpClient, McpServerConfig, McpTool, McpToolDef,
+    McpTransport, McpTransportClient,
+};
 pub use multi_edit::MultiEditTool;
 pub use path_guard::PathGuard;
 pub use read::ReadTool;

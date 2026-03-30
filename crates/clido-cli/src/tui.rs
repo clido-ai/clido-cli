@@ -9214,6 +9214,7 @@ async fn agent_task(
         Box::new(move || GitContext::discover(&git_workspace).map(|ctx| ctx.to_prompt_section()));
     let mut agent = AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
         .with_fast_model(setup.fast_model)
+        .with_reasoning_model(setup.reasoning_model)
         .with_emitter(emitter)
         .with_planner(planner_mode)
         .with_git_context_fn(git_context_fn);

@@ -82,6 +82,7 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
     // Capture model name and tool names before the registry is consumed by AgentLoop.
     let model = setup.config.model.clone();
     let fast_model = setup.fast_model.clone();
+    let reasoning_model = setup.reasoning_model.clone();
     let tool_names: Vec<String> = setup
         .registry
         .schemas()
@@ -145,6 +146,7 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
                 let mut loop_ =
                     AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
                         .with_fast_model(fast_model.clone())
+                        .with_reasoning_model(reasoning_model.clone())
                         .with_git_context_fn(git_fn);
                 if let Some(ref a) = audit {
                     loop_ = loop_.with_audit_log(a.clone());
@@ -185,6 +187,7 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
                     setup.ask_user,
                 )
                 .with_fast_model(fast_model.clone())
+                .with_reasoning_model(reasoning_model.clone())
                 .with_git_context_fn(git_fn2);
                 if let Some(ref a) = audit {
                     loop_ = loop_.with_audit_log(a.clone());
@@ -216,6 +219,7 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
             let mut loop_ =
                 AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
                     .with_fast_model(fast_model)
+                    .with_reasoning_model(reasoning_model)
                     .with_planner(cli.planner)
                     .with_git_context_fn(git_fn3);
             if let Some(ref a) = audit {

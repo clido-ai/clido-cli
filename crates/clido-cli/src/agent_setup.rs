@@ -32,6 +32,8 @@ pub struct AgentSetup {
     pub todo_store: TodoStore,
     /// Fast/cheap model name from [roles] config, for utility tasks.
     pub fast_model: Option<String>,
+    /// Reasoning/smart model name from [roles] config, for architect→editor planning.
+    pub reasoning_model: Option<String>,
 }
 
 impl AgentSetup {
@@ -67,6 +69,7 @@ impl AgentSetup {
         external_todo_store: Option<TodoStore>,
     ) -> Result<Self, anyhow::Error> {
         let fast_model = loaded.roles.fast.clone();
+        let reasoning_model = loaded.roles.reasoning.clone();
         let profile_name = cli
             .profile
             .as_deref()
@@ -346,6 +349,7 @@ impl AgentSetup {
             pricing_table,
             todo_store,
             fast_model,
+            reasoning_model,
         })
     }
 

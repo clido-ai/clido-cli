@@ -244,6 +244,7 @@ pub async fn run_repl(cli: Cli) -> Result<(), anyhow::Error> {
         Box::new(move || GitContext::discover(&git_wr).map(|ctx| ctx.to_prompt_section()));
     let mut loop_ = AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
         .with_fast_model(setup.fast_model)
+        .with_reasoning_model(setup.reasoning_model)
         .with_git_context_fn(git_fn);
     let mut first_turn = true;
     let mut total_turns: u32 = 0;

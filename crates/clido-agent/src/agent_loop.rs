@@ -424,6 +424,10 @@ pub struct AgentLoop {
     git_context_fn: Option<Box<dyn Fn() -> Option<String> + Send + Sync>>,
     /// Optional fast/cheap model name for utility tasks (titles, commits, summaries).
     fast_model: Option<String>,
+    /// Optional reasoning/smart model name for architect→editor planning.
+    /// When set, complex prompts are first analyzed by this model to produce a plan,
+    /// which is then injected as context for the main (editor) model.
+    reasoning_model: Option<String>,
     /// Count of consecutive turns with tool errors (resets on success).
     consecutive_tool_errors: usize,
     /// Whether we've already created a pre-edit checkpoint this session.
@@ -461,6 +465,7 @@ impl AgentLoop {
             budget_warned_pcts: Vec::new(),
             git_context_fn: None,
             fast_model: None,
+            reasoning_model: None,
             consecutive_tool_errors: 0,
             checkpoint_created: false,
         }
@@ -475,6 +480,14 @@ impl AgentLoop {
     /// Set the fast model for utility tasks (from [roles] fast config).
     pub fn with_fast_model(mut self, model: Option<String>) -> Self {
         self.fast_model = model;
+        self
+    }
+
+    /// Set the reasoning model for architect→editor pipeline (from [roles] reasoning config).
+    /// When set, complex user prompts are first analyzed by this model to produce a plan,
+    /// which is injected as context for the main model.
+    pub fn with_reasoning_model(mut self, model: Option<String>) -> Self {
+        self.reasoning_model = model;
         self
     }
 
@@ -510,6 +523,7 @@ impl AgentLoop {
             budget_warned_pcts: Vec::new(),
             git_context_fn: None,
             fast_model: None,
+            reasoning_model: None,
             consecutive_tool_errors: 0,
             checkpoint_created: false,
         }
@@ -743,6 +757,78 @@ impl AgentLoop {
             })
             .unwrap_or_default();
         Ok((text, response.usage))
+    }
+
+    /// Use the reasoning model (architect) to generate a plan for complex prompts.
+    /// Returns None if no reasoning model is configured or if the prompt is too simple.
+    async fn architect_plan(&self, user_input: &str) -> Option<String> {
+        let reasoning = self.reasoning_model.as_ref()?;
+
+        // Only invoke architect for non-trivial prompts (>50 chars, not simple questions)
+        if user_input.len() < 50 {
+            return None;
+        }
+        let lower = user_input.to_lowercase();
+        // Skip for simple queries that don't need planning
+        if lower.starts_with("what ")
+            || lower.starts_with("how ")
+            || lower.starts_with("why ")
+            || lower.starts_with("explain ")
+            || lower.starts_with("show ")
+        {
+            return None;
+        }
+
+        let architect_prompt = format!(
+            "You are the ARCHITECT. Analyze the following task and produce a concise implementation plan.\n\
+             Focus on: which files to change, what approach to use, edge cases to handle.\n\
+             Be specific but brief (max 200 words). Do NOT write code — just the plan.\n\n\
+             Task: {}",
+            user_input
+        );
+
+        let messages = vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: architect_prompt,
+            }],
+        }];
+
+        let config = AgentConfig {
+            model: reasoning.clone(),
+            ..self.config.clone()
+        };
+
+        match self.provider.complete(&messages, &[], &config).await {
+            Ok(response) => {
+                let plan = response
+                    .content
+                    .iter()
+                    .find_map(|b| {
+                        if let ContentBlock::Text { text } = b {
+                            Some(text.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+
+                if plan.is_empty() {
+                    return None;
+                }
+
+                debug!(
+                    "Architect plan generated ({} chars, model={})",
+                    plan.len(),
+                    reasoning
+                );
+                Some(plan)
+            }
+            Err(e) => {
+                warn!("Architect planning failed (falling back to direct execution): {}", e);
+                None
+            }
+        }
     }
 
     /// Continue from existing history (resume). Does not push a new user message; runs the loop until EndTurn or max_turns.
@@ -1168,10 +1254,23 @@ impl AgentLoop {
         }
 
         let history_before = self.history.len();
+
+        // Architect→Editor pipeline: if reasoning model is configured, generate a plan
+        // and prepend it to the user message so the editor model has structured guidance.
+        let plan_prefix = self.architect_plan(user_input).await;
+        let effective_input = if let Some(ref plan) = plan_prefix {
+            format!(
+                "<architect_plan>\n{}\n</architect_plan>\n\n{}",
+                plan, user_input
+            )
+        } else {
+            user_input.to_string()
+        };
+
         let user_msg = Message {
             role: Role::User,
             content: vec![ContentBlock::Text {
-                text: user_input.to_string(),
+                text: effective_input,
             }],
         };
         self.history.push(user_msg.clone());

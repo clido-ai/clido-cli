@@ -1140,8 +1140,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     recovery_lines.len() + 1
                 };
                 let total_lines = wrapped.len() + extra + 2; // +2: blank + OK footer
-                let popup_h =
-                    ((total_lines as u16) + 2).min(area.height.saturating_sub(4));
+                let popup_h = ((total_lines as u16) + 2).min(area.height.saturating_sub(4));
                 let inner_h = popup_h.saturating_sub(2) as usize;
                 e.max_scroll = total_lines.saturating_sub(inner_h);
                 e.scroll_offset = e.scroll_offset.min(e.max_scroll);

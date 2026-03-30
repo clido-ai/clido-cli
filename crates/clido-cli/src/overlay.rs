@@ -228,13 +228,11 @@ impl ReadOnlyOverlay {
                 OverlayAction::Consumed
             }
             KeyCode::PageUp => {
-                self.scroll_offset =
-                    self.scroll_offset.saturating_sub(self.visible_rows.max(1));
+                self.scroll_offset = self.scroll_offset.saturating_sub(self.visible_rows.max(1));
                 OverlayAction::Consumed
             }
             KeyCode::PageDown => {
-                self.scroll_offset =
-                    (self.scroll_offset + self.visible_rows.max(1)).min(max);
+                self.scroll_offset = (self.scroll_offset + self.visible_rows.max(1)).min(max);
                 OverlayAction::Consumed
             }
             _ => OverlayAction::Consumed,

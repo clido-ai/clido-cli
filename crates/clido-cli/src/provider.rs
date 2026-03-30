@@ -97,7 +97,6 @@ pub fn load_credentials(config_dir: &std::path::Path) -> HashMap<String, String>
 }
 
 /// Build a provider from profile, resolving the API key from the environment.
-
 pub fn make_provider(
     profile_name: &str,
     profile: &ProfileEntry,

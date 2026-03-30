@@ -197,6 +197,8 @@ impl SessionWriter {
         let redacted = redact_secrets(&json);
         self.file.write_all(redacted.as_bytes())?;
         self.file.write_all(b"\n")?;
+        // Flush immediately so sessions appear in /sessions without delay.
+        self.file.flush()?;
         Ok(())
     }
 

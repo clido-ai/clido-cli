@@ -816,6 +816,14 @@ pub(super) async fn agent_task(
                                 .to_string(),
                         )).is_err() { return; }
                     }
+                    Err(ClidoError::RateLimited { message, retry_after_secs, is_subscription_limit }) => {
+                        session_exit = "rate_limited";
+                        if event_tx.send(AgentEvent::RateLimited {
+                            message,
+                            retry_after_secs,
+                            is_subscription_limit,
+                        }).is_err() { return; }
+                    }
                     Err(e) => {
                         session_exit = "error";
                         if event_tx.send(AgentEvent::Err(e.to_string())).is_err() {
@@ -1773,6 +1781,42 @@ pub(super) async fn event_loop(
                         app.overlay_stack.push(OverlayKind::Error(
                             ErrorOverlay::from_message(msg),
                         ));
+                        app.on_agent_done();
+                    }
+                    Some(AgentEvent::RateLimited { message, retry_after_secs, is_subscription_limit }) => {
+                        last_agent_activity = std::time::Instant::now();
+                        if let Some(prev) = app.per_turn_prev_model.take() {
+                            app.model = prev.clone();
+                            let _ = app.channels.model_switch_tx.send(prev);
+                        }
+                        // Build a user-friendly message with reset time
+                        let reset_info = match retry_after_secs {
+                            Some(secs) if secs >= 3600 => {
+                                let h = secs / 3600;
+                                let m = (secs % 3600) / 60;
+                                format!("resets in ~{}h {:02}m", h, m)
+                            }
+                            Some(secs) if secs >= 60 => {
+                                format!("resets in ~{}m", secs / 60)
+                            }
+                            Some(secs) => format!("resets in ~{}s", secs),
+                            None => "reset time unknown".to_string(),
+                        };
+                        if is_subscription_limit {
+                            app.push(ChatLine::Info(format!(
+                                "  ⚠ Subscription limit reached — {reset_info}"
+                            )));
+                            app.push(ChatLine::Info(format!(
+                                "    {message}"
+                            )));
+                            app.push(ChatLine::Info(
+                                "    Tip: use /profile <name> to switch to another provider".into()
+                            ));
+                        } else {
+                            app.push(ChatLine::Info(format!(
+                                "  ⚠ Rate limited — {reset_info}. {message}"
+                            )));
+                        }
                         app.on_agent_done();
                     }
                     Some(AgentEvent::ResumedSession { messages }) => {

@@ -8,6 +8,16 @@ pub enum ClidoError {
     #[error("provider error: {0}")]
     Provider(String),
 
+    /// Rate limited by provider — includes reset time if known.
+    #[error("rate limited: {message}")]
+    RateLimited {
+        message: String,
+        /// Seconds until the rate limit resets (from Retry-After or X-RateLimit-Reset).
+        retry_after_secs: Option<u64>,
+        /// Whether this is a subscription/quota limit (long reset) vs burst limit (short reset).
+        is_subscription_limit: bool,
+    },
+
     #[error("tool error: {tool_name}: {message}")]
     Tool { tool_name: String, message: String },
 

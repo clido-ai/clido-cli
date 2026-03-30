@@ -144,7 +144,43 @@ impl AnthropicProvider {
             if status.as_u16() == 429 {
                 // Rate limited — respect Retry-After or use exponential backoff.
                 let retry_after = parse_retry_after(res.headers());
-                let _text = res.text().await.unwrap_or_default();
+                let retry_after_secs = res
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.trim().parse::<u64>().ok());
+                let body = res.text().await.unwrap_or_default();
+
+                // Subscription/quota limits have long reset times or specific error text.
+                let is_subscription = retry_after_secs.map_or(false, |s| s > 300)
+                    || body.contains("quota")
+                    || body.contains("subscription")
+                    || body.contains("limit exceeded")
+                    || body.contains("allowance");
+
+                if is_subscription {
+                    let reset_msg = if let Some(secs) = retry_after_secs {
+                        let hrs = secs / 3600;
+                        let mins = (secs % 3600) / 60;
+                        if hrs > 0 {
+                            format!("resets in ~{}h {}m", hrs, mins)
+                        } else {
+                            format!("resets in ~{}m", mins)
+                        }
+                    } else {
+                        "reset time unknown".to_string()
+                    };
+                    return Err(ClidoError::RateLimited {
+                        message: format!(
+                            "Subscription rate limit reached ({}). {}",
+                            reset_msg,
+                            if body.len() > 200 { &body[..200] } else { &body }
+                        ),
+                        retry_after_secs,
+                        is_subscription_limit: true,
+                    });
+                }
+
                 rate_limit_attempts += 1;
                 if rate_limit_attempts < MAX_RATE_LIMIT_ATTEMPTS {
                     let delay = retry_after.unwrap_or_else(|| {
@@ -159,10 +195,14 @@ impl AnthropicProvider {
                     tokio::time::sleep(delay).await;
                     continue;
                 }
-                return Err(ClidoError::Provider(format!(
-                    "Rate limit exceeded after {} attempts. Please wait and try again.",
-                    MAX_RATE_LIMIT_ATTEMPTS
-                )));
+                return Err(ClidoError::RateLimited {
+                    message: format!(
+                        "Rate limit exceeded after {} retries. Please wait and try again.",
+                        MAX_RATE_LIMIT_ATTEMPTS
+                    ),
+                    retry_after_secs,
+                    is_subscription_limit: false,
+                });
             }
 
             let text = res
@@ -386,9 +426,21 @@ fn parse_anthropic_sse(
         // index → tool_use_id (needed because content_block_delta only carries index)
         let mut index_to_id: std::collections::HashMap<u64, String> =
             std::collections::HashMap::new();
+        // If no bytes arrive for this long, treat it as a stall and abort.
+        const STREAM_CHUNK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
         let mut stream = std::pin::pin!(byte_stream);
-        while let Some(chunk) = stream.next().await {
+        loop {
+            let chunk = match tokio::time::timeout(STREAM_CHUNK_TIMEOUT, stream.next()).await {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => break, // stream ended naturally
+                Err(_elapsed) => {
+                    let _ = tx.send(Err(ClidoError::Provider(
+                        "streaming stalled — no data received for 90 seconds".to_string(),
+                    ))).await;
+                    return;
+                }
+            };
             let bytes = match chunk {
                 Ok(b) => b,
                 Err(e) => {
@@ -894,7 +946,25 @@ impl ModelProvider for AnthropicProvider {
 
         let status = response.status();
         if !status.is_success() {
+            let retry_after = response
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok());
             let text = response.text().await.unwrap_or_default();
+            if status.as_u16() == 429 {
+                let lower = text.to_lowercase();
+                let is_sub = retry_after.map_or(false, |s| s > 300)
+                    || lower.contains("quota")
+                    || lower.contains("subscription")
+                    || lower.contains("limit exceeded")
+                    || lower.contains("allowance");
+                return Err(ClidoError::RateLimited {
+                    message: format!("429 (model: {}): {}", self.model, text.chars().take(300).collect::<String>()),
+                    retry_after_secs: retry_after,
+                    is_subscription_limit: is_sub,
+                });
+            }
             return Err(ClidoError::Provider(extract_api_error(status, &text)));
         }
 

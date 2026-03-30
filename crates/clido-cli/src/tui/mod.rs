@@ -140,6 +140,12 @@ pub(super) enum AgentEvent {
     Response(String),
     Interrupted,
     Err(String),
+    /// Provider rate limit — carries structured info for special TUI handling.
+    RateLimited {
+        message: String,
+        retry_after_secs: Option<u64>,
+        is_subscription_limit: bool,
+    },
     /// Emitted once when the agent session is created.
     SessionStarted(String),
     /// Emitted when a session is resumed; carries display messages.

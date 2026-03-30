@@ -2930,7 +2930,8 @@ pub async fn run_create_profile(initial_name: Option<String>) -> Result<(), anyh
         saved_api_keys,
     };
 
-    let config_path = setup_default_config_path()?;
+    let config_path = clido_core::global_config_path()
+        .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
 
     let state = if setup_use_rich_ui() {
         match tokio::task::spawn_blocking(move || run_tui_setup_state_blocking(Some(pre_fill)))
@@ -3017,7 +3018,8 @@ pub async fn run_edit_profile(
         saved_api_keys,
     };
 
-    let config_path = setup_default_config_path()?;
+    let config_path = clido_core::global_config_path()
+        .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
 
     let state = if setup_use_rich_ui() {
         match tokio::task::spawn_blocking(move || run_tui_setup_state_blocking(Some(pre_fill)))
@@ -3147,16 +3149,6 @@ fn run_tui_setup_state_blocking(
     result
 }
 
-fn setup_default_config_path() -> Result<PathBuf, anyhow::Error> {
-    if let Ok(p) = std::env::var("CLIDO_CONFIG") {
-        Ok(PathBuf::from(p))
-    } else {
-        let dir = directories::ProjectDirs::from("", "", "clido")
-            .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
-        Ok(dir.config_dir().join("config.toml"))
-    }
-}
-
 async fn write_setup_config(
     use_stdout: bool,
     pre_fill: Option<SetupPreFill>,
@@ -3165,7 +3157,8 @@ async fn write_setup_config(
         match run_tui_setup(pre_fill).await? {
             SetupOutcome::Cancelled => return Ok(()),
             SetupOutcome::Finished(state) => {
-                let path = setup_default_config_path()?;
+                let path = clido_core::global_config_path()
+                    .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
                 let credentials = collect_credentials_from_state(&state);
                 let toml = build_full_config_toml(&state);
                 (path, toml, credentials)

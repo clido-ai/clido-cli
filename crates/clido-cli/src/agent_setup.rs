@@ -479,14 +479,6 @@ fn build_routing_instructions(has_worker: bool, has_reviewer: bool) -> String {
     lines.join("\n")
 }
 
-/// Compute the clido config file path (mirrors setup.rs logic).
-pub fn global_config_path() -> Option<std::path::PathBuf> {
-    if let Ok(p) = std::env::var("CLIDO_CONFIG") {
-        return Some(std::path::PathBuf::from(p));
-    }
-    directories::ProjectDirs::from("", "", "clido").map(|d| d.config_dir().join("config.toml"))
-}
-
 /// If an MCP config path is provided, spawn MCP servers and register their tools.
 /// Errors are printed to stderr but never fatal — the agent runs with whatever
 /// tools were successfully registered.
@@ -584,7 +576,7 @@ fn build_registry(
         })
         .map(|s| s.split(',').map(|x| x.trim().to_string()).collect());
     // Block the config file from all tool access so its contents never leave the local system.
-    let blocked = global_config_path().into_iter().collect::<Vec<_>>();
+    let blocked = clido_core::global_config_path().into_iter().collect::<Vec<_>>();
     let sandbox = cli.sandbox;
     let (mut registry, mut todo_store) =
         default_registry_with_todo_store(workspace_root.to_path_buf(), blocked, sandbox);

@@ -59,7 +59,8 @@ fn show_config() -> Result<(), anyhow::Error> {
 }
 
 fn set_config(key: &str, value: &str) -> Result<(), anyhow::Error> {
-    let config_path = config_path()?;
+    let config_path = clido_core::global_config_path()
+        .ok_or_else(|| CliError::Config("Could not determine config directory.".into()))?;
     if !config_path.exists() {
         return Err(
             CliError::Config("No config file found. Run 'clido init' first.".into()).into(),
@@ -322,18 +323,17 @@ api_key = \"sk-ant-old\"\n";
         assert!(result.contains("model = \"x\""));
     }
 
-    // ── config_path: CLIDO_CONFIG env var ─────────────────────────────────
+    // ── global_config_path: CLIDO_CONFIG env var ──────────────────────────
 
     #[test]
-    fn config_path_uses_env_var() {
-        // Set a custom env var and verify config_path returns that path
+    fn global_config_path_uses_env_var() {
+        // Set a custom env var and verify global_config_path returns that path
         let tmp = tempfile::tempdir().unwrap();
         let custom_path = tmp.path().join("custom_config.toml");
         std::env::set_var("CLIDO_CONFIG", custom_path.to_str().unwrap());
-        let result = config_path();
+        let result = clido_core::global_config_path();
         std::env::remove_var("CLIDO_CONFIG");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), custom_path);
+        assert_eq!(result, Some(custom_path));
     }
 
     // ── set_config: unknown key returns error ──────────────────────────────
@@ -582,13 +582,4 @@ api_key = \"sk-ant-old\"\n";
         std::env::remove_var("CLIDO_CONFIG");
         assert!(result.is_ok());
     }
-}
-
-fn config_path() -> Result<PathBuf, anyhow::Error> {
-    if let Ok(p) = env::var("CLIDO_CONFIG") {
-        return Ok(PathBuf::from(p));
-    }
-    directories::ProjectDirs::from("", "", "clido")
-        .map(|d| d.config_dir().join("config.toml"))
-        .ok_or_else(|| CliError::Config("Could not determine config directory.".into()).into())
 }

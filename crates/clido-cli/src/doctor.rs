@@ -204,7 +204,7 @@ fn check_config_permissions(use_color: bool, warnings: &mut Vec<String>) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let config_path = crate::agent_setup::global_config_path();
+        let config_path = clido_core::global_config_path();
         if let Some(path) = config_path {
             if path.exists() {
                 match std::fs::metadata(&path) {

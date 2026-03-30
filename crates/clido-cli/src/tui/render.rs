@@ -650,8 +650,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             picker.picker.filtered_items().collect();
         let n_rows = filtered.len().min(VISIBLE) as u16;
         // border(2) + header(1) + blank(1) + filter(1) + rows = n_rows + 5
-        let popup_h =
-            (n_rows + 5).min(input_area.y.saturating_sub(hint_area.y) + hint_area.y + input_area.y);
+        let popup_h = (n_rows + 5).min(input_area.y.saturating_sub(2));
         let popup_h = popup_h.min(area.height.saturating_sub(4));
         let popup_h = (n_rows + 5).min(popup_h.max(6));
         let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
@@ -1125,7 +1124,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // ── Overlay stack ────────────────────────────────────────────────────────
-    for overlay in app.overlay_stack.iter() {
+    for overlay in app.overlay_stack.iter_mut() {
         match overlay {
             OverlayKind::Error(e) => {
                 let inner_w = input_area.width.saturating_sub(4) as usize;
@@ -1140,8 +1139,12 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 } else {
                     recovery_lines.len() + 1
                 };
+                let total_lines = wrapped.len() + extra + 2; // +2: blank + OK footer
                 let popup_h =
-                    ((wrapped.len() + extra + 4) as u16).min(area.height.saturating_sub(4));
+                    ((total_lines as u16) + 2).min(area.height.saturating_sub(4));
+                let inner_h = popup_h.saturating_sub(2) as usize;
+                e.max_scroll = total_lines.saturating_sub(inner_h);
+                e.scroll_offset = e.scroll_offset.min(e.max_scroll);
                 let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
                 let mut content: Vec<Line<'static>> = wrapped
                     .into_iter()
@@ -1168,10 +1171,16 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD),
                 )]));
+                let hint_title = if e.max_scroll > 0 {
+                    format!(" {} — ↑↓ scroll · Enter/Esc close ", e.title)
+                } else {
+                    format!(" {} ", e.title)
+                };
                 frame.render_widget(Clear, popup_rect);
                 frame.render_widget(
                     Paragraph::new(content)
-                        .block(modal_block(&format!(" {} ", e.title), Color::Red)),
+                        .block(modal_block(&hint_title, Color::Red))
+                        .scroll((e.scroll_offset as u16, 0)),
                     popup_rect,
                 );
             }
@@ -1213,10 +1222,15 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                         .add_modifier(Modifier::BOLD),
                 )]));
                 let popup_h = ((content.len() as u16) + 2).min(area.height.saturating_sub(4));
+                let inner_h = popup_h.saturating_sub(2) as usize;
+                // Update scroll metadata so handle_key can compute bounds correctly.
+                r.visible_rows = inner_h;
+                r.max_scroll = content.len().saturating_sub(inner_h);
+                r.scroll_offset = r.scroll_offset.min(r.max_scroll);
                 let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
                 let scroll_offset = r.scroll_offset as u16;
                 frame.render_widget(Clear, popup_rect);
-                let hint_text = if content.len() as u16 > popup_h.saturating_sub(2) {
+                let hint_text = if r.max_scroll > 0 {
                     format!(" {} — ↑↓ scroll · Esc close ", r.title)
                 } else {
                     format!(" {} — Esc close ", r.title)
@@ -2695,8 +2709,9 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
     };
     let cache_key = (content_hash, width);
 
-    // Evict stale entries when the message list shrinks (e.g. after /compact).
-    if msg_count < app.render_cache_msg_count {
+    // Evict stale entries when the message list changes (shrinks after /compact,
+    // or grows with new messages) to prevent unbounded cache growth.
+    if msg_count != app.render_cache_msg_count {
         app.render_cache.clear();
     }
     app.render_cache_msg_count = msg_count;

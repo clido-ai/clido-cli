@@ -415,6 +415,17 @@ fn messages_to_openai(messages: &[Message]) -> Result<(Option<String>, Vec<serde
     let mut system_parts: Vec<String> = Vec::new();
     let mut openai_messages: Vec<serde_json::Value> = Vec::new();
 
+    // Some providers (e.g. Kimi kimi-for-coding) require `reasoning_content` to be present
+    // in *every* assistant message with tool_calls when thinking is active in the session.
+    // Detect whether any message in this conversation has a thinking block so we can
+    // include the field (even as empty string) where it would otherwise be absent.
+    let has_thinking_in_conv = messages.iter().any(|m| {
+        m.role == Role::Assistant
+            && m.content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::Thinking { .. }))
+    });
+
     for m in messages.iter() {
         match m.role {
             Role::System => {
@@ -517,7 +528,10 @@ fn messages_to_openai(messages: &[Message]) -> Result<(Option<String>, Vec<serde
                         "content": content_val,
                         "tool_calls": tool_calls
                     });
-                    if !reasoning_content.is_empty() {
+                    // Always include reasoning_content when thinking is active in the
+                    // conversation — some providers (e.g. Kimi kimi-for-coding) require
+                    // the field to be present on every assistant tool_calls message.
+                    if !reasoning_content.is_empty() || has_thinking_in_conv {
                         msg["reasoning_content"] = serde_json::Value::String(reasoning_content);
                     }
                     openai_messages.push(msg);
@@ -526,7 +540,7 @@ fn messages_to_openai(messages: &[Message]) -> Result<(Option<String>, Vec<serde
                         "role": "assistant",
                         "content": text_content
                     });
-                    if !reasoning_content.is_empty() {
+                    if !reasoning_content.is_empty() || has_thinking_in_conv {
                         msg["reasoning_content"] = serde_json::Value::String(reasoning_content);
                     }
                     openai_messages.push(msg);

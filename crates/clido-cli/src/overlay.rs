@@ -74,6 +74,10 @@ pub struct ErrorOverlay {
     pub message: String,
     /// Optional recovery hint shown below the message.
     pub recovery: Option<String>,
+    /// Current scroll offset (in lines). Updated by key handler.
+    pub scroll_offset: usize,
+    /// Maximum scroll offset. Updated by the renderer after layout.
+    pub max_scroll: usize,
 }
 
 impl ErrorOverlay {
@@ -82,6 +86,8 @@ impl ErrorOverlay {
             title: "Error".into(),
             message: message.into(),
             recovery: None,
+            scroll_offset: 0,
+            max_scroll: 0,
         }
     }
 
@@ -90,6 +96,8 @@ impl ErrorOverlay {
             title: title.into(),
             message: message.into(),
             recovery: None,
+            scroll_offset: 0,
+            max_scroll: 0,
         }
     }
 
@@ -105,6 +113,8 @@ impl ErrorOverlay {
                 title: "Authentication Error".into(),
                 message: detail,
                 recovery: Some("Check your API key in /profile edit".into()),
+                scroll_offset: 0,
+                max_scroll: 0,
             }
         } else if detail.contains("429")
             || detail.contains("Rate limit")
@@ -114,6 +124,8 @@ impl ErrorOverlay {
                 title: "Rate Limited".into(),
                 message: detail,
                 recovery: Some("Wait a moment, then try again".into()),
+                scroll_offset: 0,
+                max_scroll: 0,
             }
         } else if detail.contains("500")
             || detail.contains("502")
@@ -124,18 +136,24 @@ impl ErrorOverlay {
                 title: "Server Error".into(),
                 message: detail,
                 recovery: Some("Try again — the provider may be experiencing issues".into()),
+                scroll_offset: 0,
+                max_scroll: 0,
             }
         } else if detail.contains("Could not save") {
             Self {
                 title: "Save Error".into(),
                 message: detail,
                 recovery: Some("Check file permissions".into()),
+                scroll_offset: 0,
+                max_scroll: 0,
             }
         } else {
             Self {
                 title: "Error".into(),
                 message: detail,
                 recovery: None,
+                scroll_offset: 0,
+                max_scroll: 0,
             }
         }
     }
@@ -144,6 +162,24 @@ impl ErrorOverlay {
         use crossterm::event::KeyCode;
         match key.code {
             KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ') => OverlayAction::Dismiss,
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                OverlayAction::Consumed
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.scroll_offset < self.max_scroll {
+                    self.scroll_offset += 1;
+                }
+                OverlayAction::Consumed
+            }
+            KeyCode::PageUp => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(10);
+                OverlayAction::Consumed
+            }
+            KeyCode::PageDown => {
+                self.scroll_offset = (self.scroll_offset + 10).min(self.max_scroll);
+                OverlayAction::Consumed
+            }
             _ => OverlayAction::Consumed,
         }
     }
@@ -155,7 +191,10 @@ pub struct ReadOnlyOverlay {
     pub title: String,
     pub lines: Vec<(String, String)>, // (heading, body) pairs
     pub scroll_offset: usize,
+    /// Number of visible content rows in the popup (updated by renderer).
     pub visible_rows: usize,
+    /// Maximum scroll offset (updated by renderer after layout).
+    pub max_scroll: usize,
 }
 
 impl ReadOnlyOverlay {
@@ -165,6 +204,7 @@ impl ReadOnlyOverlay {
             lines,
             scroll_offset: 0,
             visible_rows: 20,
+            max_scroll: 0,
         }
     }
 
@@ -177,19 +217,19 @@ impl ReadOnlyOverlay {
                 OverlayAction::Consumed
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let max = self.lines.len().saturating_sub(self.visible_rows);
-                if self.scroll_offset < max {
+                if self.scroll_offset < self.max_scroll {
                     self.scroll_offset += 1;
                 }
                 OverlayAction::Consumed
             }
             KeyCode::PageUp => {
-                self.scroll_offset = self.scroll_offset.saturating_sub(self.visible_rows);
+                self.scroll_offset =
+                    self.scroll_offset.saturating_sub(self.visible_rows.max(1));
                 OverlayAction::Consumed
             }
             KeyCode::PageDown => {
-                let max = self.lines.len().saturating_sub(self.visible_rows);
-                self.scroll_offset = (self.scroll_offset + self.visible_rows).min(max);
+                self.scroll_offset =
+                    (self.scroll_offset + self.visible_rows.max(1)).min(self.max_scroll);
                 OverlayAction::Consumed
             }
             _ => OverlayAction::Consumed,
@@ -378,6 +418,11 @@ impl OverlayStack {
     /// Iterate overlays bottom-to-top (for rendering).
     pub fn iter(&self) -> impl Iterator<Item = &OverlayKind> {
         self.stack.iter()
+    }
+
+    /// Mutable iteration bottom-to-top (allows renderer to update scroll metadata).
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut OverlayKind> {
+        self.stack.iter_mut()
     }
 
     /// Clear all overlays.

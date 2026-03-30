@@ -78,11 +78,15 @@ pub(super) fn copy_to_clipboard(text: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         if let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
-            if let Some(stdin) = child.stdin.as_mut() {
-                let _ = stdin.write_all(text.as_bytes());
-            }
-            if child.wait().map(|s| s.success()).unwrap_or(false) {
-                return Ok(());
+            if let Some(mut stdin) = child.stdin.take() {
+                if stdin.write_all(text.as_bytes()).is_err() {
+                    // fall through to OSC 52 fallback
+                } else {
+                    drop(stdin);
+                    if child.wait().map(|s| s.success()).unwrap_or(false) {
+                        return Ok(());
+                    }
+                }
             }
         }
     }
@@ -100,8 +104,11 @@ pub(super) fn copy_to_clipboard(text: &str) -> Result<(), String> {
                 .stdin(Stdio::piped())
                 .spawn()
             {
-                if let Some(stdin) = child.stdin.as_mut() {
-                    let _ = stdin.write_all(text.as_bytes());
+                if let Some(mut stdin) = child.stdin.take() {
+                    if stdin.write_all(text.as_bytes()).is_err() {
+                        continue; // try next clipboard tool
+                    }
+                    drop(stdin);
                 }
                 if child.wait().map(|s| s.success()).unwrap_or(false) {
                     return Ok(());
@@ -170,7 +177,7 @@ pub(super) async fn agent_task(
     let mut setup = match setup_result {
         Ok(s) => s,
         Err(e) => {
-            let _ = event_tx.send(AgentEvent::Err(e.to_string()));
+            if event_tx.send(AgentEvent::Err(e.to_string())).is_err() { return; }
             return;
         }
     };
@@ -194,11 +201,11 @@ pub(super) async fn agent_task(
     let mut writer = match writer {
         Ok(w) => w,
         Err(e) => {
-            let _ = event_tx.send(AgentEvent::Err(e.to_string()));
+            if event_tx.send(AgentEvent::Err(e.to_string())).is_err() { return; }
             return;
         }
     };
-    let _ = event_tx.send(AgentEvent::SessionStarted(session_id.clone()));
+    if event_tx.send(AgentEvent::SessionStarted(session_id.clone())).is_err() { return; }
 
     let emitter: Arc<dyn EventEmitter> = Arc::new(TuiEmitter {
         tx: event_tx.clone(),
@@ -233,7 +240,7 @@ pub(super) async fn agent_task(
     if let Some(resume_session_id) = cli.resume.clone() {
         match clido_storage::SessionReader::load(&workspace_root, &resume_session_id) {
             Err(e) => {
-                let _ = event_tx.send(AgentEvent::Err(format!("resume failed: {}", e)));
+                if event_tx.send(AgentEvent::Err(format!("resume failed: {}", e))).is_err() { return; }
             }
             Ok(lines) => {
                 let new_history = clido_agent::session_lines_to_messages(&lines);
@@ -243,7 +250,7 @@ pub(super) async fn agent_task(
                         writer = new_writer;
                     }
                     Err(e) => {
-                        let _ = event_tx.send(AgentEvent::Err(format!("resume writer: {}", e)));
+                        if event_tx.send(AgentEvent::Err(format!("resume writer: {}", e))).is_err() { return; }
                     }
                 }
                 // Warn if any files referenced in the session have changed since recording.
@@ -255,11 +262,11 @@ pub(super) async fn agent_task(
                         .map(|p| format!("  • {}", p))
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let _ = event_tx.send(AgentEvent::Thinking(format!(
+                    if event_tx.send(AgentEvent::Thinking(format!(
                         "⚠ Some files referenced in this session have changed since it was recorded:\n{}\n\
                          The agent's context may be stale for these files.",
                         list
-                    )));
+                    ))).is_err() { return; }
                 }
                 let mut msgs: Vec<(String, String)> = Vec::new();
                 for line in &lines {
@@ -295,7 +302,7 @@ pub(super) async fn agent_task(
                     }
                 }
                 first_turn = false;
-                let _ = event_tx.send(AgentEvent::ResumedSession { messages: msgs });
+                if event_tx.send(AgentEvent::ResumedSession { messages: msgs }).is_err() { return; }
             }
         }
     }
@@ -311,12 +318,12 @@ pub(super) async fn agent_task(
                     if let Ok(mut state) = perms.lock() {
                         state.clear_all_grants();
                     }
-                    let _ = event_tx.send(AgentEvent::WorkdirSwitched {
+                    if event_tx.send(AgentEvent::WorkdirSwitched {
                         path: new_workspace,
-                    });
+                    }).is_err() { return; }
                 }
                 Err(e) => {
-                    let _ = event_tx.send(AgentEvent::Err(format!("workdir switch failed: {}", e)));
+                    if event_tx.send(AgentEvent::Err(format!("workdir switch failed: {}", e))).is_err() { return; }
                 }
             }
         }
@@ -357,9 +364,9 @@ pub(super) async fn agent_task(
         match action {
             AgentAction::SwitchModel(model_name) => {
                 agent.set_model(model_name.clone());
-                let _ = event_tx.send(AgentEvent::ModelSwitched {
+                if event_tx.send(AgentEvent::ModelSwitched {
                     to_model: model_name,
-                });
+                }).is_err() { return; }
             }
             AgentAction::SetWorkspace(new_workspace) => {
                 match AgentSetup::build(&cli, &new_workspace) {
@@ -369,9 +376,9 @@ pub(super) async fn agent_task(
                         if let Ok(mut state) = perms.lock() {
                             state.clear_all_grants();
                         }
-                        let _ = event_tx.send(AgentEvent::WorkdirSwitched {
+                        if event_tx.send(AgentEvent::WorkdirSwitched {
                             path: new_workspace,
-                        });
+                        }).is_err() { return; }
                     }
                     Err(e) => {
                         let _ =
@@ -382,17 +389,17 @@ pub(super) async fn agent_task(
             AgentAction::CompactNow => {
                 match agent.compact_history_now().await {
                     Ok((before, after)) => {
-                        let _ = event_tx.send(AgentEvent::Compacted { before, after });
+                        if event_tx.send(AgentEvent::Compacted { before, after }).is_err() { return; }
                         // Emit updated token counts so the context bar refreshes.
-                        let _ = event_tx.send(AgentEvent::TokenUsage {
+                        if event_tx.send(AgentEvent::TokenUsage {
                             input_tokens: agent.cumulative_input_tokens,
                             output_tokens: agent.cumulative_output_tokens,
                             cost_usd: agent.cumulative_cost_usd,
                             context_max_tokens,
-                        });
+                        }).is_err() { return; }
                     }
                     Err(e) => {
-                        let _ = event_tx.send(AgentEvent::Err(format!("compact: {}", e)));
+                        if event_tx.send(AgentEvent::Err(format!("compact: {}", e))).is_err() { return; }
                     }
                 }
             }
@@ -423,12 +430,12 @@ pub(super) async fn agent_task(
                             agent.current_model(),
                             &setup.pricing_table,
                         );
-                        let _ = event_tx.send(AgentEvent::TokenUsage {
+                        if event_tx.send(AgentEvent::TokenUsage {
                             input_tokens: plan_usage.input_tokens,
                             output_tokens: plan_usage.output_tokens,
                             cost_usd: plan_cost,
                             context_max_tokens,
-                        });
+                        }).is_err() { return; }
                         // Try to parse as a full Plan with metadata first.
                         let plan_opt = clido_planner::parse_plan_with_meta(&plan_text).ok();
                         if let Some(plan) = plan_opt {
@@ -450,7 +457,7 @@ pub(super) async fn agent_task(
                                 .collect();
                             // If plan_no_edit is NOT set, emit PlanReady to open the TUI editor.
                             if !cli.plan_no_edit {
-                                let _ = event_tx.send(AgentEvent::PlanReady { plan });
+                                if event_tx.send(AgentEvent::PlanReady { plan }).is_err() { return; }
                                 // Mark first_turn as consumed so the next prompt (execution)
                                 // does not try to re-plan.
                                 first_turn = false;
@@ -459,9 +466,9 @@ pub(super) async fn agent_task(
                                 // 'x' key sends a combined prompt via send_now.
                                 continue;
                             } else {
-                                let _ = event_tx.send(AgentEvent::PlanCreated {
+                                if event_tx.send(AgentEvent::PlanCreated {
                                     tasks: task_descriptions,
-                                });
+                                }).is_err() { return; }
                             }
                         }
                         // If parse fails, silently proceed (fallback to reactive)
@@ -540,19 +547,19 @@ pub(super) async fn agent_task(
                 first_turn = false;
 
                 // Emit token usage before response/error so TUI updates cost display.
-                let _ = event_tx.send(AgentEvent::TokenUsage {
+                if event_tx.send(AgentEvent::TokenUsage {
                     input_tokens: agent.cumulative_input_tokens,
                     output_tokens: agent.cumulative_output_tokens,
                     cost_usd: agent.cumulative_cost_usd,
                     context_max_tokens,
-                });
+                }).is_err() { return; }
 
                 let mut session_exit: &str = "success";
 
                 match result {
                     Ok(text) => {
                         auto_continue_count = 0; // reset on clean completion
-                        let _ = event_tx.send(AgentEvent::Response(text.clone()));
+                        if event_tx.send(AgentEvent::Response(text.clone())).is_err() { return; }
 
                         // Generate session title after first successful response.
                         if !title_generated {
@@ -609,16 +616,16 @@ pub(super) async fn agent_task(
                     Err(ClidoError::Interrupted) => {
                         auto_continue_count = 0;
                         session_exit = "interrupted";
-                        let _ = event_tx.send(AgentEvent::Interrupted);
+                        if event_tx.send(AgentEvent::Interrupted).is_err() { return; }
                     }
                     Err(ClidoError::MaxTurnsExceeded) => {
                         auto_continue_count += 1;
                         if auto_continue_count <= MAX_AUTO_CONTINUES {
                             // Silently inject a continue prompt — the agent picks up from
                             // exactly where it left off since history is intact.
-                            let _ = event_tx.send(AgentEvent::Thinking(
+                            if event_tx.send(AgentEvent::Thinking(
                                 "↻ Continuing (turn limit reached)…".to_string(),
-                            ));
+                            )).is_err() { return; }
                             // Heartbeat also covers the auto-continue LLM call.
                             let hb_tx2 = event_tx.clone();
                             let hb2 = tokio::spawn(async move {
@@ -642,51 +649,51 @@ pub(super) async fn agent_task(
                                 )
                                 .await;
                             hb2.abort();
-                            let _ = event_tx.send(AgentEvent::TokenUsage {
+                            if event_tx.send(AgentEvent::TokenUsage {
                                 input_tokens: agent.cumulative_input_tokens,
                                 output_tokens: agent.cumulative_output_tokens,
                                 cost_usd: agent.cumulative_cost_usd,
                                 context_max_tokens,
-                            });
+                            }).is_err() { return; }
                             match continue_result {
                                 Ok(text) => {
                                     auto_continue_count = 0;
-                                    let _ = event_tx.send(AgentEvent::Response(text));
+                                    if event_tx.send(AgentEvent::Response(text)).is_err() { return; }
                                 }
                                 Err(ClidoError::Interrupted) => {
                                     auto_continue_count = 0;
                                     session_exit = "interrupted";
-                                    let _ = event_tx.send(AgentEvent::Interrupted);
+                                    if event_tx.send(AgentEvent::Interrupted).is_err() { return; }
                                 }
                                 Err(e) => {
                                     session_exit = "error";
-                                    let _ = event_tx.send(AgentEvent::Err(e.to_string()));
+                                    if event_tx.send(AgentEvent::Err(e.to_string())).is_err() { return; }
                                 }
                             }
                         } else {
                             // Hard cap hit: surface a friendly, actionable message.
                             session_exit = "error";
-                            let _ = event_tx.send(AgentEvent::Err(format!(
+                            if event_tx.send(AgentEvent::Err(format!(
                                 "Reached the turn limit {} times without finishing.\n\
                                  History is intact — type \"continue\" to keep going,\n\
                                  or start a new task.",
                                 MAX_AUTO_CONTINUES
-                            )));
+                            ))).is_err() { return; }
                             auto_continue_count = 0; // reset so next message works
                         }
                     }
                     Err(ClidoError::BudgetExceeded) => {
                         // Show a warning in chat but don't block — user can keep going
                         // by sending another message. Remove or raise --max-budget-usd to silence.
-                        let _ = event_tx.send(AgentEvent::Response(
+                        if event_tx.send(AgentEvent::Response(
                             "  ⚠ budget limit reached (set via --max-budget-usd or config). \
                              You can keep sending messages; raise or remove the limit to suppress this warning."
                                 .to_string(),
-                        ));
+                        )).is_err() { return; }
                     }
                     Err(e) => {
                         session_exit = "error";
-                        let _ = event_tx.send(AgentEvent::Err(e.to_string()));
+                        if event_tx.send(AgentEvent::Err(e.to_string())).is_err() { return; }
                     }
                 }
 
@@ -700,7 +707,7 @@ pub(super) async fn agent_task(
             AgentAction::Resume(resume_session_id) => {
                 match clido_storage::SessionReader::load(&workspace_root, &resume_session_id) {
                     Err(e) => {
-                        let _ = event_tx.send(AgentEvent::Err(format!("resume failed: {}", e)));
+                        if event_tx.send(AgentEvent::Err(format!("resume failed: {}", e))).is_err() { return; }
                     }
                     Ok(lines) => {
                         let new_history = clido_agent::session_lines_to_messages(&lines);
@@ -752,7 +759,7 @@ pub(super) async fn agent_task(
                             }
                         }
                         first_turn = false; // already have history
-                        let _ = event_tx.send(AgentEvent::ResumedSession { messages: msgs });
+                        if event_tx.send(AgentEvent::ResumedSession { messages: msgs }).is_err() { return; }
                     }
                 }
             }

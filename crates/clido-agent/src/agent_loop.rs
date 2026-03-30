@@ -2429,7 +2429,10 @@ async fn compact_with_summary(
     config: &AgentConfig,
 ) -> Result<Vec<Message>> {
     // Deduplicate repeated file reads before counting tokens.
-    let deduped = dedup_file_reads(messages);
+    // Then repair any orphaned tool_use blocks that dedup may have created by
+    // dropping a user message whose ToolResult content was a duplicate.
+    let mut deduped = dedup_file_reads(messages);
+    repair_orphaned_tool_calls(&mut deduped);
     let msgs = deduped.as_slice();
 
     let threshold_limit = ((max_context_tokens as f64) * compaction_threshold) as u32;

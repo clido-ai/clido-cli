@@ -58,11 +58,12 @@ impl ReadCache {
     /// Insert a file's content into the cache.
     ///
     /// If the cache is full the least-recently-used entry is evicted first.
-    pub fn insert(&self, path: PathBuf, content_hash: String, content: String) {
+    pub fn insert(&self, path: PathBuf, content_hash: impl Into<String>, content: impl Into<String>) {
         let mut inner = self.inner.lock().unwrap();
         inner.gen += 1;
         let gen = inner.gen;
-        let key = (path, content_hash);
+        let content = content.into();
+        let key = (path, content_hash.into());
         if let std::collections::hash_map::Entry::Occupied(mut e) = inner.map.entry(key.clone()) {
             e.get_mut().0 = content;
             e.get_mut().1 = gen;

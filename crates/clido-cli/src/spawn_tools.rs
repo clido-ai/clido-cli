@@ -85,7 +85,7 @@ impl Tool for SpawnWorkerTool {
     async fn execute(&self, input: serde_json::Value) -> ToolOutput {
         let task = match input["task"].as_str() {
             Some(t) => t.to_string(),
-            None => return ToolOutput::err("SpawnWorker: missing 'task' field".into()),
+            None => return ToolOutput::err("SpawnWorker: missing 'task' field"),
         };
         let context = input["context"].as_str().unwrap_or("").to_string();
         let output_format = input["output_format"].as_str().unwrap_or("plain text");
@@ -193,13 +193,12 @@ impl Tool for SpawnReviewerTool {
         if !self.enabled.load(Ordering::Relaxed) {
             return ToolOutput::ok(
                 "Reviewer is currently disabled (use `/reviewer on` to re-enable). \
-                 Complete the task without a review."
-                    .into(),
+                 Complete the task without a review.",
             );
         }
         let output = match input["output"].as_str() {
             Some(o) => o.to_string(),
-            None => return ToolOutput::err("SpawnReviewer: missing 'output' field".into()),
+            None => return ToolOutput::err("SpawnReviewer: missing 'output' field"),
         };
         let criteria = input["criteria"]
             .as_str()

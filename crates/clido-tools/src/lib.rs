@@ -140,9 +140,9 @@ pub struct ToolOutput {
 }
 
 impl ToolOutput {
-    pub fn ok(content: String) -> Self {
+    pub fn ok(content: impl Into<String>) -> Self {
         Self {
-            content,
+            content: content.into(),
             is_error: false,
             path: None,
             content_hash: None,
@@ -150,9 +150,9 @@ impl ToolOutput {
             diff: None,
         }
     }
-    pub fn err(content: String) -> Self {
+    pub fn err(content: impl Into<String>) -> Self {
         Self {
-            content,
+            content: content.into(),
             is_error: true,
             path: None,
             content_hash: None,
@@ -161,16 +161,16 @@ impl ToolOutput {
         }
     }
     pub fn ok_with_meta(
-        content: String,
-        path: String,
-        content_hash: String,
+        content: impl Into<String>,
+        path: impl Into<String>,
+        content_hash: impl Into<String>,
         mtime_nanos: u64,
     ) -> Self {
         Self {
-            content,
+            content: content.into(),
             is_error: false,
-            path: Some(path),
-            content_hash: Some(content_hash),
+            path: Some(path.into()),
+            content_hash: Some(content_hash.into()),
             mtime_nanos: Some(mtime_nanos),
             diff: None,
         }
@@ -223,20 +223,20 @@ mod tests {
 
     #[test]
     fn tool_output_ok() {
-        let out = ToolOutput::ok("hello".into());
+        let out = ToolOutput::ok("hello");
         assert!(!out.is_error);
         assert_eq!(out.content, "hello");
     }
 
     #[test]
     fn tool_output_err() {
-        let out = ToolOutput::err("bad".into());
+        let out = ToolOutput::err("bad");
         assert!(out.is_error);
     }
 
     #[test]
     fn tool_output_ok_with_meta() {
-        let out = ToolOutput::ok_with_meta("done".into(), "/a/b".into(), "abc123".into(), 42);
+        let out = ToolOutput::ok_with_meta("done", "/a/b", "abc123", 42);
         assert!(!out.is_error);
         assert_eq!(out.path, Some("/a/b".to_string()));
         assert_eq!(out.content_hash, Some("abc123".to_string()));

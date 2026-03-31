@@ -34,9 +34,9 @@ pub struct OpenAICompatProvider {
 impl OpenAICompatProvider {
     /// Generic constructor for any OpenAI-compatible endpoint.
     pub fn new(
-        api_key: String,
-        model: String,
-        base_url: String,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+        base_url: impl Into<String>,
         extra_headers: Vec<(String, String)>,
     ) -> Self {
         Self::new_with_user_agent(
@@ -50,24 +50,24 @@ impl OpenAICompatProvider {
 
     /// Like [`new`] but with an explicit User-Agent header.
     pub fn new_with_user_agent(
-        api_key: String,
-        model: String,
-        base_url: String,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+        base_url: impl Into<String>,
         extra_headers: Vec<(String, String)>,
         user_agent: &str,
     ) -> Self {
         let client = crate::http_client::build_http_client(user_agent);
         Self {
             client,
-            api_key,
-            model,
-            base_url,
+            api_key: api_key.into(),
+            model: model.into(),
+            base_url: base_url.into(),
             extra_headers,
         }
     }
 
     /// OpenRouter: same API shape, fixed base URL and required headers.
-    pub fn new_openrouter(api_key: String, model: String) -> Self {
+    pub fn new_openrouter(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         let extra_headers = vec![
             (
                 "HTTP-Referer".to_string(),
@@ -84,17 +84,17 @@ impl OpenAICompatProvider {
     }
 
     /// OpenAI: standard base URL, Bearer auth.
-    pub fn new_openai(api_key: String, model: String) -> Self {
+    pub fn new_openai(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(api_key, model, OPENAI_BASE_URL.to_string(), vec![])
     }
 
     /// Mistral: OpenAI-compatible API.
-    pub fn new_mistral(api_key: String, model: String) -> Self {
+    pub fn new_mistral(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(api_key, model, MISTRAL_BASE_URL.to_string(), vec![])
     }
 
     /// MiniMax: OpenAI-compatible API.
-    pub fn new_minimax(api_key: String, model: String) -> Self {
+    pub fn new_minimax(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(
             api_key,
             model,
@@ -104,7 +104,7 @@ impl OpenAICompatProvider {
     }
 
     /// Kimi (Moonshot AI): OpenAI-compatible API.
-    pub fn new_kimi(api_key: String, model: String) -> Self {
+    pub fn new_kimi(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(
             api_key,
             model,
@@ -114,7 +114,7 @@ impl OpenAICompatProvider {
     }
 
     /// Kimi Code: coding-optimised Kimi endpoint.
-    pub fn new_kimi_code(api_key: String, model: String) -> Self {
+    pub fn new_kimi_code(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(
             api_key,
             model,
@@ -124,7 +124,7 @@ impl OpenAICompatProvider {
     }
 
     /// DeepSeek: OpenAI-compatible API.
-    pub fn new_deepseek(api_key: String, model: String) -> Self {
+    pub fn new_deepseek(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(
             api_key,
             model,
@@ -134,7 +134,7 @@ impl OpenAICompatProvider {
     }
 
     /// Groq: fast inference, OpenAI-compatible API.
-    pub fn new_groq(api_key: String, model: String) -> Self {
+    pub fn new_groq(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(
             api_key,
             model,
@@ -144,7 +144,7 @@ impl OpenAICompatProvider {
     }
 
     /// Cerebras: OpenAI-compatible API.
-    pub fn new_cerebras(api_key: String, model: String) -> Self {
+    pub fn new_cerebras(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(
             api_key,
             model,
@@ -154,7 +154,7 @@ impl OpenAICompatProvider {
     }
 
     /// Together AI: OpenAI-compatible API.
-    pub fn new_togetherai(api_key: String, model: String) -> Self {
+    pub fn new_togetherai(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(
             api_key,
             model,
@@ -164,7 +164,7 @@ impl OpenAICompatProvider {
     }
 
     /// Fireworks AI: OpenAI-compatible API.
-    pub fn new_fireworks(api_key: String, model: String) -> Self {
+    pub fn new_fireworks(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(
             api_key,
             model,
@@ -174,12 +174,12 @@ impl OpenAICompatProvider {
     }
 
     /// xAI (Grok): OpenAI-compatible API.
-    pub fn new_xai(api_key: String, model: String) -> Self {
+    pub fn new_xai(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(api_key, model, "https://api.x.ai/v1".to_string(), vec![])
     }
 
     /// Perplexity: OpenAI-compatible API.
-    pub fn new_perplexity(api_key: String, model: String) -> Self {
+    pub fn new_perplexity(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(
             api_key,
             model,
@@ -189,7 +189,7 @@ impl OpenAICompatProvider {
     }
 
     /// Google Gemini: OpenAI-compatible API.
-    pub fn new_gemini(api_key: String, model: String) -> Self {
+    pub fn new_gemini(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new(
             api_key,
             model,

@@ -121,7 +121,7 @@ impl Tool for TruncateTool {
     async fn execute(&self, input: serde_json::Value) -> ToolOutput {
         let content = match input.get("content").and_then(|v| v.as_str()) {
             Some(s) => s,
-            None => return ToolOutput::err("Missing required field: content".into()),
+            None => return ToolOutput::err("Missing required field: content"),
         };
         let label = input
             .get("label")

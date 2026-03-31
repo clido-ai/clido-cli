@@ -78,8 +78,8 @@ impl Tool for MultiEditTool {
     async fn execute(&self, input: serde_json::Value) -> ToolOutput {
         let edits_raw = match input.get("edits").and_then(|v| v.as_array()) {
             Some(arr) if !arr.is_empty() => arr.clone(),
-            Some(_) => return ToolOutput::err("edits list is empty".into()),
-            None => return ToolOutput::err("Missing required field: edits".into()),
+            Some(_) => return ToolOutput::err("edits list is empty"),
+            None => return ToolOutput::err("Missing required field: edits"),
         };
 
         // Phase 1: Parse and validate all edits before touching disk.

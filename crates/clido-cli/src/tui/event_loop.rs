@@ -28,7 +28,7 @@ use super::*;
 pub(super) fn tui_memory_store_path() -> Result<std::path::PathBuf, String> {
     if let Some(dirs) = directories::ProjectDirs::from("", "", "clido") {
         let data = dirs.data_dir().to_path_buf();
-        std::fs::create_dir_all(&data).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&data).map_err(|e| format!("create data dir: {e}"))?;
         return Ok(data.join("memory.db"));
     }
     Ok(std::path::PathBuf::from(".clido-memory.db"))

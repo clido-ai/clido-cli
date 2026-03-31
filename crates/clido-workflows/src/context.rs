@@ -61,9 +61,9 @@ impl WorkflowContext {
     }
 
     /// Set output for a step (e.g. "explore.output" -> "...").
-    pub fn set_step_output(&mut self, step_id: &str, output_name: &str, value: String) {
+    pub fn set_step_output(&mut self, step_id: &str, output_name: &str, value: impl Into<String>) {
         self.step_outputs
-            .insert(format!("{}.{}", step_id, output_name), value);
+            .insert(format!("{}.{}", step_id, output_name), value.into());
     }
 
     /// Get step output for template (steps.step_id.output_name).

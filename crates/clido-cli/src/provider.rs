@@ -151,10 +151,8 @@ pub fn make_provider(
         profile.base_url.as_deref(),
         profile.user_agent.clone(),
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| format!("build provider: {e}"))
 }
-
-#[cfg(test)]
 mod tests {
     use super::*;
 

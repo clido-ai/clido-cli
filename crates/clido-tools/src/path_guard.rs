@@ -28,7 +28,8 @@ impl PathGuard {
 
     /// Canonicalize path and ensure it is under workspace_root and not blocked.
     pub fn resolve_and_check(&self, path: &str) -> Result<PathBuf, String> {
-        let root_canon = std::fs::canonicalize(&self.root).map_err(|e| e.to_string())?;
+        let root_canon = std::fs::canonicalize(&self.root)
+            .map_err(|e| format!("canonicalize workspace root: {e}"))?;
         let joined = if Path::new(path).is_absolute() {
             PathBuf::from(path)
         } else {
@@ -38,7 +39,8 @@ impl PathGuard {
         if !normalized.starts_with(&root_canon) {
             return Err("Access denied: path outside working directory.".to_string());
         }
-        let canonical = std::fs::canonicalize(&normalized).map_err(|e| e.to_string())?;
+        let canonical = std::fs::canonicalize(&normalized)
+            .map_err(|e| format!("canonicalize {}: {e}", normalized.display()))?;
         if !canonical.starts_with(&root_canon) {
             return Err("Access denied: path outside working directory.".to_string());
         }
@@ -50,14 +52,16 @@ impl PathGuard {
 
     /// Resolve path for write: file may not exist yet.
     pub fn resolve_for_write(&self, path: &str) -> Result<PathBuf, String> {
-        let root_canon = std::fs::canonicalize(&self.root).map_err(|e| e.to_string())?;
+        let root_canon = std::fs::canonicalize(&self.root)
+            .map_err(|e| format!("canonicalize workspace root: {e}"))?;
         let joined = if Path::new(path).is_absolute() {
             PathBuf::from(path)
         } else {
             root_canon.join(path)
         };
         if joined.exists() {
-            let canonical = std::fs::canonicalize(&joined).map_err(|e| e.to_string())?;
+            let canonical = std::fs::canonicalize(&joined)
+                .map_err(|e| format!("canonicalize {}: {e}", joined.display()))?;
             if !canonical.starts_with(&root_canon) {
                 return Err("Access denied: path outside working directory.".to_string());
             }

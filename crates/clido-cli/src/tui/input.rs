@@ -513,7 +513,7 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                 st.input.clear();
                                 st.input_cursor = 0;
                                 st.mode = ProfileOverlayMode::Overview;
-                                let st = app.profile_overlay.as_mut().unwrap();
+                                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                                 st.save();
                                 let name = st.name.clone();
                                 let msg = st
@@ -681,12 +681,12 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
         // ── PickingProvider: structured provider picker ─────────────────────
         ProfileOverlayMode::PickingProvider { .. } => match event.code {
             Esc => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 st.provider_picker = ProviderPickerState::new();
                 st.mode = ProfileOverlayMode::Overview;
             }
             Enter => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 st.commit_provider_pick();
                 st.save();
                 let name = st.name.clone();
@@ -698,7 +698,7 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                 }
             }
             Up => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 if st.provider_picker.selected > 0 {
                     st.provider_picker.selected -= 1;
                     if st.provider_picker.selected < st.provider_picker.scroll_offset {
@@ -707,7 +707,7 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                 }
             }
             Down => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 let n = st.provider_picker.filtered().len();
                 if n > 0 && st.provider_picker.selected + 1 < n {
                     st.provider_picker.selected += 1;
@@ -720,12 +720,12 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                 }
             }
             Char(c) => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 st.provider_picker.filter.push(c);
                 st.provider_picker.clamp();
             }
             Backspace => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 st.provider_picker.filter.pop();
                 st.provider_picker.clamp();
             }
@@ -735,12 +735,12 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
         // ── PickingModel: structured model picker ────────────────────────────
         ProfileOverlayMode::PickingModel { .. } => match event.code {
             Esc => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 st.profile_model_picker = None;
                 st.mode = ProfileOverlayMode::Overview;
             }
             Enter => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 st.commit_model_pick();
                 st.save();
                 let name = st.name.clone();
@@ -752,7 +752,7 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                 }
             }
             Up => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 if let Some(ref mut picker) = st.profile_model_picker {
                     if picker.selected > 0 {
                         picker.selected -= 1;
@@ -763,7 +763,7 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                 }
             }
             Down => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 if let Some(ref mut picker) = st.profile_model_picker {
                     let vis = crossterm::terminal::size()
                         .map(|(_, h)| (h as usize).saturating_sub(12).max(3))
@@ -778,14 +778,14 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                 }
             }
             Char(c) => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 if let Some(ref mut picker) = st.profile_model_picker {
                     picker.filter.push(c);
                     picker.clamp();
                 }
             }
             Backspace => {
-                let st = app.profile_overlay.as_mut().unwrap();
+                let st = app.profile_overlay.as_mut().expect("profile overlay active");
                 if let Some(ref mut picker) = st.profile_model_picker {
                     picker.filter.pop();
                     picker.clamp();
@@ -812,10 +812,10 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                 }
                 Enter => {
                     let models: Vec<ModelEntry> = app.known_models.clone();
-                    app.profile_overlay.as_mut().unwrap().begin_edit(&models);
+                    app.profile_overlay.as_mut().expect("profile overlay active").begin_edit(&models);
                 }
                 KeyCode::Char('s') if event.modifiers.contains(Km::CONTROL) => {
-                    let st = app.profile_overlay.as_mut().unwrap();
+                    let st = app.profile_overlay.as_mut().expect("profile overlay active");
                     st.save();
                     // Update live app state if it's the active profile
                     let name = st.name.clone();
@@ -849,11 +849,11 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
         ProfileOverlayMode::EditField(_) => {
             match event.code {
                 Esc => {
-                    let st = app.profile_overlay.as_mut().unwrap();
+                    let st = app.profile_overlay.as_mut().expect("profile overlay active");
                     st.cancel_edit();
                 }
                 Enter => {
-                    let st = app.profile_overlay.as_mut().unwrap();
+                    let st = app.profile_overlay.as_mut().expect("profile overlay active");
                     st.commit_edit();
                     // Auto-save on field commit
                     st.save();
@@ -878,35 +878,35 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                     }
                 }
                 Backspace => {
-                    let st = app.profile_overlay.as_mut().unwrap();
+                    let st = app.profile_overlay.as_mut().expect("profile overlay active");
                     delete_char_before_cursor_pe(st);
                 }
                 Delete => {
-                    let st = app.profile_overlay.as_mut().unwrap();
+                    let st = app.profile_overlay.as_mut().expect("profile overlay active");
                     delete_char_at_cursor_pe(st);
                 }
                 Left => {
-                    let st = app.profile_overlay.as_mut().unwrap();
+                    let st = app.profile_overlay.as_mut().expect("profile overlay active");
                     if st.input_cursor > 0 {
                         st.input_cursor -= 1;
                     }
                 }
                 Right => {
-                    let st = app.profile_overlay.as_mut().unwrap();
+                    let st = app.profile_overlay.as_mut().expect("profile overlay active");
                     if st.input_cursor < st.input.chars().count() {
                         st.input_cursor += 1;
                     }
                 }
                 Home => {
-                    let st = app.profile_overlay.as_mut().unwrap();
+                    let st = app.profile_overlay.as_mut().expect("profile overlay active");
                     st.input_cursor = 0;
                 }
                 End => {
-                    let st = app.profile_overlay.as_mut().unwrap();
+                    let st = app.profile_overlay.as_mut().expect("profile overlay active");
                     st.input_cursor = st.input.chars().count();
                 }
                 Char(c) => {
-                    let st = app.profile_overlay.as_mut().unwrap();
+                    let st = app.profile_overlay.as_mut().expect("profile overlay active");
                     let b = char_byte_pos_tui(&st.input, st.input_cursor);
                     st.input.insert(b, c);
                     st.input_cursor += 1;

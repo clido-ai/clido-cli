@@ -744,7 +744,7 @@ pub(crate) fn save_roles_to_config(
 ) -> Result<(), String> {
     // Read existing config text (may not exist yet).
     let existing = if path.exists() {
-        std::fs::read_to_string(path).map_err(|e| e.to_string())?
+        std::fs::read_to_string(path).map_err(|e| format!("read config: {e}"))?
     } else {
         String::new()
     };
@@ -753,7 +753,7 @@ pub(crate) fn save_roles_to_config(
     let mut doc: toml::Value = if existing.is_empty() {
         toml::Value::Table(toml::map::Map::new())
     } else {
-        toml::from_str(&existing).map_err(|e| e.to_string())?
+        toml::from_str(&existing).map_err(|e| format!("parse config TOML: {e}"))?
     };
 
     // Build the new [roles] table.
@@ -770,12 +770,12 @@ pub(crate) fn save_roles_to_config(
         }
     }
 
-    let new_text = toml::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+    let new_text = toml::to_string_pretty(&doc).map_err(|e| format!("serialize config: {e}"))?;
     // Ensure parent directory exists.
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("create config dir: {e}"))?;
     }
-    std::fs::write(path, new_text).map_err(|e| e.to_string())?;
+    std::fs::write(path, new_text).map_err(|e| format!("write config: {e}"))?;
     Ok(())
 }
 
@@ -789,14 +789,14 @@ pub(crate) fn save_default_model_to_config(
         return Ok(());
     }
     let existing = if path.exists() {
-        std::fs::read_to_string(path).map_err(|e| e.to_string())?
+        std::fs::read_to_string(path).map_err(|e| format!("read config: {e}"))?
     } else {
         String::new()
     };
     let mut doc: toml::Value = if existing.is_empty() {
         toml::Value::Table(toml::map::Map::new())
     } else {
-        toml::from_str(&existing).map_err(|e| e.to_string())?
+        toml::from_str(&existing).map_err(|e| format!("parse config TOML: {e}"))?
     };
     if let toml::Value::Table(ref mut root) = doc {
         let profile_table = root
@@ -811,11 +811,11 @@ pub(crate) fn save_default_model_to_config(
             }
         }
     }
-    let new_text = toml::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+    let new_text = toml::to_string_pretty(&doc).map_err(|e| format!("serialize config: {e}"))?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("create config dir: {e}"))?;
     }
-    std::fs::write(path, new_text).map_err(|e| e.to_string())?;
+    std::fs::write(path, new_text).map_err(|e| format!("write config: {e}"))?;
     Ok(())
 }
 

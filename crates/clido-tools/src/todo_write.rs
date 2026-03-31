@@ -130,7 +130,7 @@ impl Tool for TodoWriteTool {
     async fn execute(&self, input: serde_json::Value) -> ToolOutput {
         let items_raw = match input.get("todos").and_then(|v| v.as_array()) {
             Some(arr) => arr.clone(),
-            None => return ToolOutput::err("Missing required field: todos".into()),
+            None => return ToolOutput::err("Missing required field: todos"),
         };
 
         let mut items: Vec<TodoItem> = Vec::with_capacity(items_raw.len());
@@ -179,7 +179,7 @@ impl Tool for TodoWriteTool {
             Ok(mut guard) => {
                 *guard = items;
             }
-            Err(_) => return ToolOutput::err("Internal error: todo store lock poisoned".into()),
+            Err(_) => return ToolOutput::err("Internal error: todo store lock poisoned"),
         }
 
         ToolOutput::ok(format!(

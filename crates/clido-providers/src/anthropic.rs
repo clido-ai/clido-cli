@@ -26,7 +26,7 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    pub fn new(api_key: String, model: String) -> Self {
+    pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new_with_user_agent(
             api_key,
             model,
@@ -35,12 +35,16 @@ impl AnthropicProvider {
     }
 
     /// Like [`new`] but with an explicit User-Agent header.
-    pub fn new_with_user_agent(api_key: String, model: String, user_agent: &str) -> Self {
+    pub fn new_with_user_agent(
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+        user_agent: &str,
+    ) -> Self {
         let client = crate::http_client::build_http_client(user_agent);
         Self {
             client,
-            api_key,
-            model,
+            api_key: api_key.into(),
+            model: model.into(),
         }
     }
 

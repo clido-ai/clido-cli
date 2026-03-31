@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Action to take when a permission rule matches a tool's file argument.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuleAction {
     /// Automatically allow without prompting.
@@ -63,7 +63,7 @@ pub fn evaluate_rules(
 ) -> Option<(RuleAction, Option<String>)> {
     for rule in rules {
         if rule.matches(path) {
-            return Some((rule.action.clone(), rule.reason.clone()));
+            return Some((rule.action, rule.reason.clone()));
         }
     }
     None

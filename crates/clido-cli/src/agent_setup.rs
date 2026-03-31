@@ -356,7 +356,7 @@ impl AgentSetup {
     /// Convenience wrapper that loads config and pricing from disk.
     /// Prefer `build_with_preloaded` when the caller already has these.
     pub fn build(cli: &Cli, workspace_root: &Path) -> Result<Self, anyhow::Error> {
-        let loaded = load_config(workspace_root).map_err(|e| CliError::Usage(e.to_string()))?;
+        let loaded = load_config(workspace_root).map_err(|e| CliError::Usage(format!("load config: {e}")))?;
         let (pricing_table, _) = load_pricing();
         Self::build_with_preloaded(
             cli,
@@ -409,10 +409,8 @@ fn build_provider_from_slot(
         slot.base_url.as_deref(),
         slot.user_agent.clone(),
     )
-    .map_err(|e| e.to_string())
-}
-
-fn build_routing_instructions(has_worker: bool, has_reviewer: bool) -> String {
+    .map_err(|e| format!("build sub-agent provider: {e}"))
+}(has_worker: bool, has_reviewer: bool) -> String {
     let mut lines = vec!["## Sub-Agent Routing".to_string(), String::new()];
     if has_worker {
         lines.push(

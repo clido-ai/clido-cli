@@ -1911,13 +1911,13 @@ api_key = "sk-openai-worker"
         let cfg = agent_config_from_loaded(
             &loaded,
             "default",
-            Some(10),     // CLI override
-            None,         // config's max_budget_usd should be used
-            None,         // config's model should be used
+            Some(10), // CLI override
+            None,     // config's max_budget_usd should be used
+            None,     // config's model should be used
             None,
             None,
-            false,        // CLI quiet=false, but config quiet=true → OR'd = true
-            None,         // config's max_concurrent_tools should be used
+            false, // CLI quiet=false, but config quiet=true → OR'd = true
+            None,  // config's max_concurrent_tools should be used
         )
         .unwrap();
         assert_eq!(cfg.max_turns, 10);
@@ -2012,10 +2012,9 @@ api_key = "sk-openai-worker"
             roles: RolesSection::default(),
             agents: crate::config::AgentsConfig::default(),
         };
-        let cfg = agent_config_from_loaded(
-            &loaded, "default", None, None, None, None, None, true, None,
-        )
-        .unwrap();
+        let cfg =
+            agent_config_from_loaded(&loaded, "default", None, None, None, None, None, true, None)
+                .unwrap();
         assert!(cfg.quiet);
     }
 

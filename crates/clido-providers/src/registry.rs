@@ -282,14 +282,22 @@ mod tests {
     fn all_providers_have_non_empty_id_and_name() {
         for p in PROVIDER_REGISTRY {
             assert!(!p.id.is_empty(), "provider id must not be empty");
-            assert!(!p.name.is_empty(), "provider name must not be empty for {}", p.id);
+            assert!(
+                !p.name.is_empty(),
+                "provider name must not be empty for {}",
+                p.id
+            );
         }
     }
 
     #[test]
     fn all_providers_have_non_empty_base_url() {
         for p in PROVIDER_REGISTRY {
-            assert!(!p.base_url.is_empty(), "base_url must not be empty for {}", p.id);
+            assert!(
+                !p.base_url.is_empty(),
+                "base_url must not be empty for {}",
+                p.id
+            );
         }
     }
 
@@ -308,8 +316,14 @@ mod tests {
 
     #[test]
     fn kimi_code_is_subscription() {
-        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "kimi-code").unwrap();
-        assert!(p.is_subscription, "kimi-code should be a subscription provider");
+        let p = PROVIDER_REGISTRY
+            .iter()
+            .find(|p| p.id == "kimi-code")
+            .unwrap();
+        assert!(
+            p.is_subscription,
+            "kimi-code should be a subscription provider"
+        );
     }
 
     #[test]
@@ -371,13 +385,19 @@ mod tests {
 
     #[test]
     fn api_key_env_openrouter() {
-        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "openrouter").unwrap();
+        let p = PROVIDER_REGISTRY
+            .iter()
+            .find(|p| p.id == "openrouter")
+            .unwrap();
         assert_eq!(p.api_key_env, "OPENROUTER_API_KEY");
     }
 
     #[test]
     fn api_key_env_anthropic() {
-        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "anthropic").unwrap();
+        let p = PROVIDER_REGISTRY
+            .iter()
+            .find(|p| p.id == "anthropic")
+            .unwrap();
         assert_eq!(p.api_key_env, "ANTHROPIC_API_KEY");
     }
 
@@ -389,7 +409,10 @@ mod tests {
 
     #[test]
     fn api_key_env_deepseek() {
-        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "deepseek").unwrap();
+        let p = PROVIDER_REGISTRY
+            .iter()
+            .find(|p| p.id == "deepseek")
+            .unwrap();
         assert_eq!(p.api_key_env, "DEEPSEEK_API_KEY");
     }
 
@@ -408,7 +431,10 @@ mod tests {
     #[test]
     fn api_key_env_local_is_empty() {
         let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "local").unwrap();
-        assert_eq!(p.api_key_env, "", "local provider should have no API key env var");
+        assert_eq!(
+            p.api_key_env, "",
+            "local provider should have no API key env var"
+        );
     }
 
     #[test]
@@ -419,13 +445,19 @@ mod tests {
 
     #[test]
     fn api_key_env_mistral() {
-        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "mistral").unwrap();
+        let p = PROVIDER_REGISTRY
+            .iter()
+            .find(|p| p.id == "mistral")
+            .unwrap();
         assert_eq!(p.api_key_env, "MISTRAL_API_KEY");
     }
 
     #[test]
     fn api_key_env_alibabacloud() {
-        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "alibabacloud").unwrap();
+        let p = PROVIDER_REGISTRY
+            .iter()
+            .find(|p| p.id == "alibabacloud")
+            .unwrap();
         assert_eq!(p.api_key_env, "DASHSCOPE_API_KEY");
     }
 
@@ -448,7 +480,11 @@ mod tests {
             if p.id == "anthropic" {
                 assert!(p.is_anthropic, "anthropic should have is_anthropic=true");
             } else {
-                assert!(!p.is_anthropic, "{} should not have is_anthropic=true", p.id);
+                assert!(
+                    !p.is_anthropic,
+                    "{} should not have is_anthropic=true",
+                    p.id
+                );
             }
         }
     }
@@ -472,7 +508,10 @@ mod tests {
 
     #[test]
     fn openrouter_has_extra_headers() {
-        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "openrouter").unwrap();
+        let p = PROVIDER_REGISTRY
+            .iter()
+            .find(|p| p.id == "openrouter")
+            .unwrap();
         assert!(
             !p.extra_headers.is_empty(),
             "openrouter should have extra headers"

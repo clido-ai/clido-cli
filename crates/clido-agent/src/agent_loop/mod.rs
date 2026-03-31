@@ -7,8 +7,8 @@ mod security;
 
 use async_trait::async_trait;
 use clido_context::{
-    estimate_tokens_messages,
-    estimate_tokens_str, DEFAULT_COMPACTION_THRESHOLD, DEFAULT_MAX_CONTEXT_TOKENS,
+    estimate_tokens_messages, estimate_tokens_str, DEFAULT_COMPACTION_THRESHOLD,
+    DEFAULT_MAX_CONTEXT_TOKENS,
 };
 use clido_core::{
     compute_cost_usd, AgentConfig, ContentBlock, HooksConfig, Message, PermissionMode, Role,
@@ -28,8 +28,8 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
-pub use history::session_lines_to_messages;
 use context::{compact_with_summary, PROACTIVE_SUMMARIZE_THRESHOLD};
+pub use history::session_lines_to_messages;
 use security::{detect_injection, enhanced_edit_error};
 /// How many consecutive identical tool failures trigger doom-loop detection.
 const DOOM_LOOP_THRESHOLD: usize = 3;

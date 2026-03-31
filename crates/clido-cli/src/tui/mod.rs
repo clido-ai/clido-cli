@@ -61,11 +61,11 @@ use ratatui::style::Color;
 use tokio::sync::{mpsc, oneshot};
 
 #[allow(unused_imports)]
-use clido_agent::{AskUser, PermGrant as AgentPermGrant, PermRequest as AgentPermRequest};
-#[allow(unused_imports)]
 use crate::overlay::{ErrorOverlay, OverlayKind};
 #[allow(unused_imports)]
 use crate::prompt_enhance::PromptMode;
+#[allow(unused_imports)]
+use clido_agent::{AskUser, PermGrant as AgentPermGrant, PermRequest as AgentPermRequest};
 
 pub(super) const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 

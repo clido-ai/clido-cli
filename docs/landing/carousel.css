@@ -1,0 +1,114 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   TUI Scene Carousel — CSS-only animated demo
+   12 scenes, 4s each = 48s total cycle
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Carousel container ── */
+.carousel {
+  position: relative;
+  min-height: 460px;
+}
+
+.scene {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  opacity: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+/* ── JS-controlled scene switching (no CSS keyframes needed) ── */
+.scene.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ── Scene caption (below terminal) ── */
+.carousel-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 0 1rem;
+}
+
+.carousel-caption {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: center;
+  min-width: 280px;
+  transition: opacity 0.3s;
+}
+
+.carousel-dots {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.carousel-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: rgba(150,200,255,0.15);
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  padding: 0;
+}
+.carousel-dot:hover {
+  background: rgba(150,200,255,0.3);
+}
+.carousel-dot.active {
+  background: var(--brand);
+  box-shadow: 0 0 6px rgba(150,200,255,0.4);
+  width: 18px;
+  border-radius: 3px;
+}
+
+.carousel-nav {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.carousel-nav button {
+  background: rgba(150,200,255,0.06);
+  border: 1px solid rgba(150,200,255,0.1);
+  color: var(--text-muted);
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s;
+}
+.carousel-nav button:hover {
+  background: rgba(150,200,255,0.15);
+  border-color: rgba(150,200,255,0.25);
+  color: var(--brand);
+}
+
+/* ── Staggered reveal for content inside active scenes ── */
+.scene.active .rv { opacity: 0; animation: rv-in 0.3s ease forwards; }
+.scene.active .rv1 { animation-delay: 0.3s; }
+.scene.active .rv2 { animation-delay: 0.6s; }
+.scene.active .rv3 { animation-delay: 0.9s; }
+.scene.active .rv4 { animation-delay: 1.2s; }
+.scene.active .rv5 { animation-delay: 1.5s; }
+.scene.active .rv6 { animation-delay: 1.8s; }
+.scene.active .rv7 { animation-delay: 2.1s; }
+.scene.active .rv8 { animation-delay: 2.4s; }
+.scene:not(.active) .rv { opacity: 0; }
+
+@keyframes rv-in { to { opacity: 1; } }
+
+/* Typewriter effect */
+.scene.active .tw {
+  overflow: hidden; white-space: nowrap;
+  display: inline-block; width: 0;
+  animation: tw-type 1.5s steps(40) 0.3s forwards;
+}
+.scene:not(.active) .tw { width: 0; }
+@keyframes tw-type { to { width: 100%; } }

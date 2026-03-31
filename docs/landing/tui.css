@@ -1,0 +1,219 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   TUI CSS — pixel-perfect terminal recreation
+   All colors from actual Rust source: crates/clido-cli/src/tui/render/
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── macOS window chrome ── */
+.macos-window {
+  border-radius: 10px; overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 25px 70px rgba(0,0,0,0.55), 0 0 100px rgba(150,200,255,0.03);
+}
+.macos-titlebar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; background: #2d2d2d; border-bottom: 1px solid #1a1a1a;
+}
+.macos-btn { width: 12px; height: 12px; border-radius: 50%; }
+.macos-btn.close { background: #ff5f57; }
+.macos-btn.min { background: #febc2e; }
+.macos-btn.max { background: #28c840; }
+.macos-title {
+  flex: 1; text-align: center; font-size: 0.8rem; color: #999;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin-right: 52px;
+}
+
+/* ── TUI container ── */
+.tui {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Fira Code', monospace;
+  font-size: 13px; line-height: 1.45;
+  background: var(--term-bg); color: var(--term-fg);
+  display: flex; flex-direction: column;
+  user-select: none; -webkit-user-select: none;
+  overflow: hidden;
+}
+
+/* ── Header ── */
+.tui-header { padding: 4px 8px; }
+.tui-hline { display: flex; white-space: nowrap; overflow: hidden; }
+.tui-brand { font-weight: 700; }
+.tui-brand .c { color: var(--title-text); }
+.tui-brand .s { color: var(--soft-accent); }
+.tui-dim { color: var(--term-dim); }
+.tui-dim-i { color: var(--term-dim); font-style: italic; }
+
+/* ── Chat area ── */
+.tui-chat {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding: 1rem 0;
+}
+.tui-msgs {
+  flex: 1; padding: 8px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+  overflow: hidden;
+}
+
+/* ── Welcome panel ── */
+.wp {
+  border: 1px solid var(--border-dark); border-radius: 8px;
+  min-width: 420px; max-width: 520px; position: relative;
+}
+.wp-title {
+  position: absolute; top: -1px; left: 12px;
+  transform: translateY(-50%);
+  background: var(--term-bg); padding: 0 6px;
+  font-weight: 700; font-size: 13px;
+}
+.wp-title .c { color: var(--title-text); }
+.wp-title .s { color: var(--soft-accent); }
+.wp-body { padding: 12px 0; }
+.wp-line { padding: 0 20px; height: 20px; display: flex; align-items: center; white-space: nowrap; }
+.wp-line.e { height: 10px; }
+
+/* Welcome panel text classes */
+.wm { color: var(--muted); }
+.ws { color: var(--soft); }
+.wsb { color: var(--soft); font-weight: 700; }
+.wg { color: var(--dim-green); }
+.wy { color: var(--dim-yellow); }
+.wa { color: var(--soft-accent); font-weight: 700; }
+.wsp { color: var(--muted); margin: 0 3px; }
+
+/* ── Message labels ── */
+.l-you { color: var(--term-green); font-weight: 700; }
+.l-agent { color: var(--term-cyan); font-weight: 700; }
+.l-dim { color: var(--term-dim); font-size: 12px; }
+.m-text { color: var(--term-fg); margin-top: 2px; }
+.m-heading { color: var(--term-cyan); font-weight: 700; }
+
+/* Code blocks */
+.m-code { margin: 4px 0; padding-left: 2px; }
+.m-code .b { color: #565f89; }
+.m-code .ct { color: rgba(255,255,255,0.6); }
+
+/* Diff lines */
+.d-add { color: var(--term-green); opacity: 0.6; }
+.d-del { color: var(--term-red); opacity: 0.6; }
+.d-ctx { color: var(--term-dim); }
+.d-hunk { color: var(--term-cyan); opacity: 0.6; }
+
+/* ── Status strip ── */
+.tui-status { padding: 2px 8px; min-height: 32px; }
+.st-line { display: flex; gap: 6px; white-space: nowrap; font-size: 13px; }
+.st-done { color: var(--term-dim); }
+.st-accent { color: var(--soft-accent); opacity: 0.6; }
+.st-green { color: var(--term-green); opacity: 0.6; }
+.st-yellow { color: var(--term-yellow); opacity: 0.6; }
+.st-err { color: var(--term-red); opacity: 0.6; }
+
+/* ── Queue strip ── */
+.tui-queue { padding: 0 8px; height: 20px; }
+
+/* ── Hint line ── */
+.tui-hint {
+  padding: 2px 8px; display: flex; white-space: nowrap; overflow: hidden; font-size: 13px;
+}
+.hk { color: #565f89; }
+.hl { color: #565f89; opacity: 0.65; }
+
+/* ── Input box ── */
+.tui-iw { padding: 4px 8px 8px; }
+.tui-in {
+  border: 1px solid var(--soft-accent);
+  min-height: 42px; display: flex; flex-direction: column; position: relative;
+}
+.tui-in.thinking { border-color: var(--magenta); }
+.tui-in.thinking .tui-it { color: var(--magenta); }
+.tui-in.rate-limit { border-color: var(--term-yellow); }
+.tui-in.rate-limit .tui-it { color: var(--term-yellow); }
+
+.tui-it {
+  position: absolute; top: -1px; left: 8px;
+  transform: translateY(-50%);
+  background: var(--term-bg); padding: 0 4px;
+  color: var(--soft-accent); font-size: 13px; white-space: nowrap;
+}
+.tui-ib { padding: 8px 12px; min-height: 20px; }
+
+.cursor {
+  display: inline-block; width: 7px; height: 15px;
+  background: var(--term-fg);
+  animation: blink 1s step-end infinite;
+  vertical-align: text-bottom;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ── Overlay modals (popups above input) ── */
+.tui-overlay {
+  margin: 0 8px; border: 1px solid; padding: 0;
+  position: relative;
+}
+.tui-overlay-title {
+  position: absolute; top: -1px; left: 8px;
+  transform: translateY(-50%);
+  background: var(--term-bg); padding: 0 6px;
+  font-size: 13px; white-space: nowrap;
+}
+
+/* Permission popup */
+.tui-overlay.perm { border-color: var(--term-yellow); }
+.tui-overlay.perm .tui-overlay-title { color: var(--term-yellow); }
+
+/* Slash completion popup */
+.tui-overlay.slash { border-color: var(--soft-accent); }
+.tui-overlay.slash .tui-overlay-title { color: var(--soft-accent); }
+
+/* Session picker */
+.tui-overlay.sessions { border-color: var(--term-cyan); }
+.tui-overlay.sessions .tui-overlay-title { color: var(--term-cyan); }
+
+/* Model picker */
+.tui-overlay.models { border-color: var(--magenta); }
+.tui-overlay.models .tui-overlay-title { color: var(--magenta); }
+
+/* Profile picker */
+.tui-overlay.profiles { border-color: var(--term-cyan); }
+.tui-overlay.profiles .tui-overlay-title { color: var(--term-cyan); }
+
+/* Error overlay */
+.tui-overlay.error { border-color: var(--term-red); }
+.tui-overlay.error .tui-overlay-title { color: var(--term-red); }
+
+/* Overlay rows */
+.ov-row { padding: 0 12px; height: 20px; display: flex; align-items: center; white-space: nowrap; overflow: hidden; }
+.ov-row.sel { background: var(--selection-bg); color: white; }
+.ov-row.unsel { color: #aaa; }
+.ov-row .marker { width: 20px; display: inline-block; }
+.ov-row .marker.active { color: var(--term-cyan); font-weight: 700; }
+.ov-row.sel .marker.active { color: white; }
+
+/* Section headers in overlays */
+.ov-section { padding: 2px 12px; color: var(--term-dim); font-size: 13px; opacity: 0.6; }
+
+/* Overlay hint footer */
+.ov-hint { padding: 4px 12px; color: var(--term-dim); font-size: 13px; opacity: 0.6; }
+
+/* Permission options */
+.perm-row { padding: 2px 12px; height: 22px; display: flex; align-items: center; white-space: nowrap; }
+.perm-row .pm { width: 24px; display: inline-block; }
+.perm-row.sel .pm { color: var(--term-yellow); font-weight: 700; }
+.perm-row.sel .pl { color: white; font-weight: 700; }
+.perm-row.unsel .pl { color: var(--term-dim); }
+.perm-row .ph { color: var(--term-dim); opacity: 0.6; margin-left: 8px; }
+
+/* ── Spinner ── */
+.spinner::before {
+  content: '⠋';
+  animation: spin 0.8s steps(1) infinite;
+}
+@keyframes spin {
+  0%   { content: '⠋'; } 10%  { content: '⠙'; } 20%  { content: '⠹'; }
+  30%  { content: '⠸'; } 40%  { content: '⠼'; } 50%  { content: '⠴'; }
+  60%  { content: '⠦'; } 70%  { content: '⠧'; } 80%  { content: '⠇'; } 90%  { content: '⠏'; }
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .wp { min-width: 0; max-width: 100%; margin: 0 8px; }
+  .tui { font-size: 11px; }
+  .tui-hint { display: none; }
+  .macos-title { display: none; }
+}

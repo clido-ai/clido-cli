@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>clido — AI coding agent for your terminal</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="tui.css">
+<link rel="stylesheet" href="carousel.css">
+</head>
+<body>
+
+<!-- ═══ Navigation ═══════════════════════════════════════════════════════ -->
+<nav>
+  <span class="nav-brand">
+    <span class="text">cli</span><span class="semi">;</span><span class="text">do</span>
+  </span>
+  <div class="nav-links">
+    <a href="/guide/introduction">Docs</a>
+    <a href="/guide/quick-start">Quick Start</a>
+    <a href="https://github.com/0xKurt/clido" class="nav-cta">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<!-- ═══ Hero ══════════════════════════════════════════════════════════════ -->
+<section class="hero">
+  <h1><span>cli</span><span class="semi">;</span><span>do</span></h1>
+  <p class="tagline">An AI coding agent that lives in your terminal.</p>
+  <p class="sub">Persistent sessions. Full tool access. Multi-provider. One binary.</p>
+  <div class="hero-providers">
+    <span class="pill">Anthropic</span>
+    <span class="pill">OpenAI</span>
+    <span class="pill">OpenRouter</span>
+    <span class="pill">Kimi</span>
+    <span class="pill">Gemini</span>
+    <span class="pill">xAI</span>
+    <span class="pill">Ollama</span>
+  </div>
+  <div class="hero-actions">
+    <a href="/guide/quick-start" class="btn btn-primary">Get Started</a>
+    <a href="https://github.com/0xKurt/clido" class="btn btn-secondary">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:0.6"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</section>
+
+<!-- ═══ Install ═══════════════════════════════════════════════════════════ -->
+<div class="install-banner">
+  <code>curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh</code>
+  <button onclick="navigator.clipboard.writeText('curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     ANIMATED TUI CAROUSEL — 12 scenes showing every major feature
+     ═══════════════════════════════════════════════════════════════════════ -->
+<section style="max-width:900px; margin:0 auto 2rem; padding:0 1.5rem">
+  <div class="macos-window">
+    <div class="macos-titlebar">
+      <div class="macos-btn close"></div>
+      <div class="macos-btn min"></div>
+      <div class="macos-btn max"></div>
+      <div class="macos-title">clido — zsh — 96×32</div>
+    </div>
+    <div class="tui carousel" id="carousel">
+
+<!-- ═══ SCENE 0: Welcome / Startup ═══════════════════════════════════════ -->
+<div class="scene active" data-caption="Startup — the welcome screen shows your config at a glance">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app</span></div>
+  </div>
+  <div class="tui-chat">
+    <div class="wp">
+      <div class="wp-title"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></div>
+      <div class="wp-body">
+        <div class="wp-line e"></div>
+        <div class="wp-line"><span class="wm">~/projects/my-app</span></div>
+        <div class="wp-line e"></div>
+        <div class="wp-line"><span class="wm">profile&nbsp;&nbsp;</span><span class="wsb">default</span></div>
+        <div class="wp-line"><span class="wm">provider&nbsp;</span><span class="ws">anthropic</span><span class="wsp">&nbsp;&nbsp;·&nbsp;&nbsp;</span><span class="ws">claude-sonnet-4-20250514</span></div>
+        <div class="wp-line"><span class="wg">key ✓</span><span class="wsp">&nbsp;&nbsp;·&nbsp;&nbsp;</span><span class="wy">budget $50.00</span><span class="wsp">&nbsp;&nbsp;·&nbsp;&nbsp;</span><span class="wg">fast gpt-4.1-mini</span></div>
+        <div class="wp-line e"></div>
+        <div class="wp-line"><span class="wa">/help&nbsp;&nbsp;&nbsp;/model&nbsp;&nbsp;&nbsp;/settings&nbsp;&nbsp;&nbsp;/config</span></div>
+        <div class="wp-line"><span class="wm">↑↓=history&nbsp;&nbsp;PgUp/Dn=scroll&nbsp;&nbsp;Ctrl+/=stop</span></div>
+        <div class="wp-line e"></div>
+      </div>
+    </div>
+  </div>
+  <div class="tui-status"><div class="st-line"></div><div class="st-line"></div></div>
+  <div class="tui-queue"></div>
+  <div class="tui-hint">
+    <span class="hk">&nbsp;&nbsp;Enter</span><span class="hl">&nbsp;send&nbsp;&nbsp;</span>
+    <span class="hk">Shift+Enter</span><span class="hl">&nbsp;newline&nbsp;&nbsp;</span>
+    <span class="hk">Esc</span><span class="hl">&nbsp;clear&nbsp;&nbsp;</span>
+    <span class="hk">↑↓</span><span class="hl">&nbsp;history&nbsp;&nbsp;</span>
+    <span class="hk">/help</span><span class="hl">&nbsp;commands&nbsp;&nbsp;</span>
+    <span class="hk">Ctrl+C</span><span class="hl">&nbsp;quit</span>
+  </div>
+  <div class="tui-iw"><div class="tui-in">
+    <div class="tui-it">Ask anything&nbsp;&nbsp;(Enter=send&nbsp;&nbsp;Shift+Enter=newline&nbsp;&nbsp;/help=commands)</div>
+    <div class="tui-ib"><span class="cursor"></span></div>
+  </div></div>
+</div>
+
+<!-- ═══ SCENE 1: User types a prompt ═════════════════════════════════════ -->
+<div class="scene" data-caption="Ask anything — type a task and the agent starts working">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app&nbsp;&nbsp;&nbsp;session: $0.00&nbsp;&nbsp;0 tok</span></div>
+  </div>
+  <div class="tui-msgs"><div style="flex:1"></div></div>
+  <div class="tui-status"><div class="st-line"></div><div class="st-line"></div></div>
+  <div class="tui-queue"></div>
+  <div class="tui-hint"><span class="hk">&nbsp;&nbsp;Enter</span><span class="hl">&nbsp;send&nbsp;&nbsp;</span><span class="hk">↑↓</span><span class="hl">&nbsp;history</span></div>
+  <div class="tui-iw"><div class="tui-in">
+    <div class="tui-it">Ask anything&nbsp;&nbsp;(Enter=send&nbsp;&nbsp;Shift+Enter=newline&nbsp;&nbsp;/help=commands)</div>
+    <div class="tui-ib"><span class="tw">add pagination to the /api/users endpoint</span><span class="cursor"></span></div>
+  </div></div>
+</div>
+
+<!-- ═══ SCENE 2: Agent thinking + reading files ══════════════════════════ -->
+<div class="scene" data-caption="Thinking — the agent reads your codebase before making changes">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app&nbsp;&nbsp;&nbsp;session: $0.0312&nbsp;&nbsp;4.2k tok&nbsp;&nbsp;8% window</span></div>
+  </div>
+  <div class="tui-msgs">
+    <div><span class="l-you">you</span><div class="m-text">add pagination to the /api/users endpoint</div></div>
+    <div style="margin-top:8px">
+      <span class="l-agent">clido</span> <span class="l-dim">claude-sonnet-4</span>
+      <div class="m-text rv rv1">I'll add cursor-based pagination to the users endpoint. Let me first look at</div>
+      <div class="m-text rv rv2">the current implementation.</div>
+    </div>
+  </div>
+  <div class="tui-status">
+    <div class="st-line rv rv3"><span class="st-done">&nbsp;&nbsp;✓&nbsp;Read</span><span class="st-done">&nbsp;&nbsp;src/routes/users.rs</span><span class="st-done">&nbsp;42ms</span></div>
+    <div class="st-line rv rv4"><span class="st-accent">&nbsp;&nbsp;<span class="spinner"></span>&nbsp;Grep</span><span style="color:var(--term-dim)">&nbsp;&nbsp;"Pagination" in src/</span><span style="color:var(--term-dim)">&nbsp;0.3s</span></div>
+  </div>
+  <div class="tui-queue"></div>
+  <div class="tui-hint"><span class="hk">&nbsp;&nbsp;Enter</span><span class="hl">&nbsp;send&nbsp;&nbsp;</span><span class="hk">Ctrl+Enter</span><span class="hl">&nbsp;interrupt</span></div>
+  <div class="tui-iw"><div class="tui-in thinking">
+    <div class="tui-it"><span class="spinner"></span>&nbsp;thinking… 3s&nbsp;&nbsp;(type a follow-up to queue, Ctrl+Enter to interrupt)</div>
+    <div class="tui-ib"><span class="cursor"></span></div>
+  </div></div>
+</div>
+
+<!-- ═══ SCENE 3: Agent writes code + runs tests ══════════════════════════ -->
+<div class="scene" data-caption="Tool use — reads files, writes code, runs tests, iterates">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app&nbsp;&nbsp;&nbsp;session: $0.0847&nbsp;&nbsp;12.6k tok&nbsp;&nbsp;22% window</span></div>
+  </div>
+  <div class="tui-msgs">
+    <div><span class="l-you">you</span><div class="m-text">add pagination to the /api/users endpoint</div></div>
+    <div style="margin-top:8px">
+      <span class="l-agent">clido</span> <span class="l-dim">claude-sonnet-4</span>
+      <div class="m-text rv rv1">I've added cursor-based pagination. Here are the changes:</div>
+      <div class="m-text rv rv2" style="margin-top:4px"><span class="m-heading">▸ Changes</span></div>
+      <div class="m-code rv rv3">
+        <div><span class="b">┌─ </span><span style="color:var(--term-dim)">rust</span></div>
+        <div><span class="b">│</span> <span class="ct">pub async fn list_users(</span></div>
+        <div><span class="b">│</span> <span class="ct">&nbsp;&nbsp;&nbsp;&nbsp;Query(params): Query&lt;PaginationParams&gt;,</span></div>
+        <div><span class="b">│</span> <span class="ct">&nbsp;&nbsp;&nbsp;&nbsp;State(db): State&lt;DbPool&gt;,</span></div>
+        <div><span class="b">│</span> <span class="ct">) -&gt; Result&lt;Json&lt;PaginatedResponse&lt;User&gt;&gt;&gt; {</span></div>
+        <div><span class="b">│</span> <span class="ct">&nbsp;&nbsp;&nbsp;&nbsp;let page = db.users()</span></div>
+        <div><span class="b">│</span> <span class="ct">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.after(params.cursor)</span></div>
+        <div><span class="b">│</span> <span class="ct">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.limit(params.limit.unwrap_or(25))</span></div>
+        <div><span class="b">│</span> <span class="ct">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.fetch().await?;</span></div>
+        <div><span class="b">└──────────────</span></div>
+      </div>
+      <div class="m-text rv rv7" style="margin-top:4px">Tests passing. Endpoint now accepts <span style="color:var(--term-yellow);opacity:0.6">?cursor=</span> and <span style="color:var(--term-yellow);opacity:0.6">?limit=</span> params.</div>
+    </div>
+  </div>
+  <div class="tui-status">
+    <div class="st-line rv rv4"><span class="st-green">&nbsp;&nbsp;✓&nbsp;Edit</span><span class="st-done">&nbsp;&nbsp;src/routes/users.rs (+42 -8)</span><span class="st-done">&nbsp;128ms</span></div>
+    <div class="st-line rv rv5"><span class="st-yellow">&nbsp;&nbsp;✓&nbsp;Bash</span><span class="st-done">&nbsp;&nbsp;cargo test -- users::pagination</span><span class="st-done">&nbsp;3.2s</span></div>
+  </div>
+  <div class="tui-queue"></div>
+  <div class="tui-hint"><span class="hk">&nbsp;&nbsp;Enter</span><span class="hl">&nbsp;send&nbsp;&nbsp;</span><span class="hk">↑↓</span><span class="hl">&nbsp;history</span></div>
+  <div class="tui-iw"><div class="tui-in">
+    <div class="tui-it">Ask anything&nbsp;&nbsp;(Enter=send&nbsp;&nbsp;Shift+Enter=newline&nbsp;&nbsp;/help=commands)</div>
+    <div class="tui-ib"><span class="cursor"></span></div>
+  </div></div>
+</div>
+
+<!-- ═══ SCENE 4: Code diff ═══════════════════════════════════════════════ -->
+<div class="scene" data-caption="Diffs — see exactly what changed, line by line">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app&nbsp;&nbsp;&nbsp;session: $0.0921&nbsp;&nbsp;14.1k tok&nbsp;&nbsp;24% window</span></div>
+  </div>
+  <div class="tui-msgs">
+    <div>
+      <span class="l-agent">clido</span> <span class="l-dim">claude-sonnet-4</span>
+      <div class="m-text rv rv1" style="margin-top:2px"><span class="d-ctx">&nbsp;&nbsp;src/routes/users.rs</span></div>
+      <div class="m-text rv rv2"><span class="d-hunk">&nbsp;&nbsp;@@ -12,8 +12,14 @@</span></div>
+      <div class="m-text rv rv2"><span class="d-ctx">&nbsp;&nbsp; 12&nbsp; use axum::extract::{Query, State};</span></div>
+      <div class="m-text rv rv3"><span class="d-del">&nbsp;&nbsp; 13&nbsp;-pub async fn list_users(</span></div>
+      <div class="m-text rv rv3"><span class="d-del">&nbsp;&nbsp; 14&nbsp;-&nbsp;&nbsp;&nbsp;&nbsp;State(db): State&lt;DbPool&gt;,</span></div>
+      <div class="m-text rv rv3"><span class="d-del">&nbsp;&nbsp; 15&nbsp;-) -&gt; Result&lt;Json&lt;Vec&lt;User&gt;&gt;&gt; {</span></div>
+      <div class="m-text rv rv4"><span class="d-add">&nbsp;&nbsp; 13&nbsp;+pub async fn list_users(</span></div>
+      <div class="m-text rv rv4"><span class="d-add">&nbsp;&nbsp; 14&nbsp;+&nbsp;&nbsp;&nbsp;&nbsp;Query(params): Query&lt;PaginationParams&gt;,</span></div>
+      <div class="m-text rv rv4"><span class="d-add">&nbsp;&nbsp; 15&nbsp;+&nbsp;&nbsp;&nbsp;&nbsp;State(db): State&lt;DbPool&gt;,</span></div>
+      <div class="m-text rv rv5"><span class="d-add">&nbsp;&nbsp; 16&nbsp;+) -&gt; Result&lt;Json&lt;PaginatedResponse&lt;User&gt;&gt;&gt; {</span></div>
+      <div class="m-text rv rv5"><span class="d-add">&nbsp;&nbsp; 17&nbsp;+&nbsp;&nbsp;&nbsp;&nbsp;let page = db.users()</span></div>
+      <div class="m-text rv rv6"><span class="d-add">&nbsp;&nbsp; 18&nbsp;+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.after(params.cursor)</span></div>
+      <div class="m-text rv rv6"><span class="d-add">&nbsp;&nbsp; 19&nbsp;+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.limit(params.limit.unwrap_or(25))</span></div>
+      <div class="m-text rv rv7"><span class="d-add">&nbsp;&nbsp; 20&nbsp;+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.fetch().await?;</span></div>
+    </div>
+  </div>
+  <div class="tui-status">
+    <div class="st-line"><span class="st-green">&nbsp;&nbsp;✓&nbsp;Edit</span><span class="st-done">&nbsp;&nbsp;src/routes/users.rs (+42 -8)</span><span class="st-done">&nbsp;128ms</span></div>
+    <div class="st-line"></div>
+  </div>
+  <div class="tui-queue"></div>
+  <div class="tui-hint"><span class="hk">&nbsp;&nbsp;PgUp/PgDn</span><span class="hl">&nbsp;scroll&nbsp;&nbsp;</span><span class="hk">Enter</span><span class="hl">&nbsp;send</span></div>
+  <div class="tui-iw"><div class="tui-in">
+    <div class="tui-it">Ask anything&nbsp;&nbsp;(Enter=send&nbsp;&nbsp;Shift+Enter=newline&nbsp;&nbsp;/help=commands)</div>
+    <div class="tui-ib"><span class="cursor"></span></div>
+  </div></div>
+</div>
+
+<!-- ═══ SCENE 5: /enhance command ════════════════════════════════════════ -->
+<div class="scene" data-caption="/enhance — turn a rough idea into a structured execution plan">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app&nbsp;&nbsp;&nbsp;session: $0.1205&nbsp;&nbsp;18.1k tok&nbsp;&nbsp;31% window</span></div>
+  </div>
+  <div class="tui-msgs">
+    <div>
+      <span class="l-you">you</span>
+      <div class="m-text" style="color:var(--soft-accent)">/enhance refactor auth middleware to support JWT refresh tokens</div>
+    </div>
+    <div style="margin-top:8px">
+      <span class="l-agent">clido</span> <span class="l-dim">enhancer</span>
+      <div class="m-text rv rv1" style="margin-top:4px"><span class="m-heading">▸ Task Understanding</span></div>
+      <div class="m-text rv rv2" style="color:var(--text-muted)">Refactor existing auth middleware to add JWT refresh token rotation</div>
+      <div class="m-text rv rv2" style="color:var(--text-muted)">with sliding window expiry. Currently uses single access tokens.</div>
+      <div class="m-text rv rv3" style="margin-top:6px"><span class="m-heading">▸ Execution Plan</span></div>
+      <div class="m-text rv rv4" style="color:var(--text-muted)">1. Inspect src/middleware/auth.rs and src/models/token.rs</div>
+      <div class="m-text rv rv5" style="color:var(--text-muted)">2. Add RefreshToken model with rotation tracking</div>
+      <div class="m-text rv rv6" style="color:var(--text-muted)">3. Create /auth/refresh endpoint with family detection</div>
+      <div class="m-text rv rv7" style="color:var(--text-muted)">4. Update middleware to check expiry and auto-refresh</div>
+      <div class="m-text rv rv8" style="color:var(--text-muted)">5. Add integration tests for the refresh flow</div>
+    </div>
+  </div>
+  <div class="tui-status">
+    <div class="st-line rv rv2"><span class="st-done">&nbsp;&nbsp;✓&nbsp;Enhance</span><span class="st-done">&nbsp;&nbsp;prompt expanded 10 → 847 tokens</span><span class="st-done">&nbsp;1.4s</span></div>
+    <div class="st-line"></div>
+  </div>
+  <div class="tui-queue">
+    <div class="st-line rv rv8"><span style="color:var(--term-cyan);opacity:0.6">&nbsp;&nbsp;▶&nbsp;</span><span class="st-done">executing enhanced plan…</span></div>
+  </div>
+  <div class="tui-hint"><span class="hk">&nbsp;&nbsp;Enter</span><span class="hl">&nbsp;send&nbsp;&nbsp;</span><span class="hk">Ctrl+Enter</span><span class="hl">&nbsp;interrupt</span></div>
+  <div class="tui-iw"><div class="tui-in thinking">
+    <div class="tui-it"><span class="spinner"></span>&nbsp;thinking… 2s&nbsp;&nbsp;(type a follow-up to queue, Ctrl+Enter to interrupt)</div>
+    <div class="tui-ib"><span class="cursor"></span></div>
+  </div></div>
+</div>
+
+<!-- ═══ SCENE 6: Slash command popup ═════════════════════════════════════ -->
+<div class="scene" data-caption="Slash commands — 40+ commands for git, models, sessions, and more">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app</span></div>
+  </div>
+  <div class="tui-msgs"><div style="flex:1"></div></div>
+  <div class="tui-status"><div class="st-line"></div><div class="st-line"></div></div>
+  <div class="tui-queue"></div>
+  <!-- Slash completion overlay -->
+  <div class="tui-overlay slash" style="margin-bottom:4px">
+    <div class="tui-overlay-title">42 commands</div>
+    <div style="padding:8px 0">
+      <div class="ov-section">── Session</div>
+      <div class="ov-row sel"><span class="marker">▶</span><span style="color:var(--term-cyan);font-weight:700;width:140px;display:inline-block">/help</span><span class="st-done">show key bindings and all slash commands</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="color:var(--term-cyan);font-weight:700;width:140px;display:inline-block">/sessions</span><span class="st-done">list &amp; resume recent sessions</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="color:var(--term-cyan);font-weight:700;width:140px;display:inline-block">/clear</span><span class="st-done">clear the conversation</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="color:var(--term-cyan);font-weight:700;width:140px;display:inline-block">/export</span><span class="st-done">save conversation to markdown file</span></div>
+      <div class="ov-section">── Settings</div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="color:var(--term-cyan);font-weight:700;width:140px;display:inline-block">/config</span><span class="st-done">show all settings</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="color:var(--term-cyan);font-weight:700;width:140px;display:inline-block">/settings</span><span class="st-done">open settings editor</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="color:var(--term-cyan);font-weight:700;width:140px;display:inline-block">/enhance &lt;prompt&gt;</span><span class="st-done">enhance prompt with structured planning</span></div>
+      <div class="ov-section">── Git</div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="color:var(--term-cyan);font-weight:700;width:140px;display:inline-block">/ship [message]</span><span class="st-done">stage → commit → push</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="color:var(--term-cyan);font-weight:700;width:140px;display:inline-block">/save [message]</span><span class="st-done">stage → commit locally, no push</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="color:var(--term-cyan);font-weight:700;width:140px;display:inline-block">/pr [title]</span><span class="st-done">create a pull request</span></div>
+      <div class="ov-hint">↑↓ navigate · Tab/Enter select · Esc close&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓↓ 32 more</div>
+    </div>
+  </div>
+  <div class="tui-iw"><div class="tui-in">
+    <div class="tui-it">Ask anything&nbsp;&nbsp;(Enter=send&nbsp;&nbsp;Shift+Enter=newline&nbsp;&nbsp;/help=commands)</div>
+    <div class="tui-ib"><span style="color:var(--term-fg)">/</span><span class="cursor"></span></div>
+  </div></div>
+</div>
+
+<!-- ═══ SCENE 7: Model picker ════════════════════════════════════════════ -->
+<div class="scene" data-caption="/model — search and switch models, mark favorites, compare pricing">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app</span></div>
+  </div>
+  <div class="tui-msgs"><div style="flex:1"></div></div>
+  <div class="tui-status"><div class="st-line"></div><div class="st-line"></div></div>
+  <div class="tui-queue"></div>
+  <!-- Model picker overlay -->
+  <div class="tui-overlay models" style="margin-bottom:4px">
+    <div class="tui-overlay-title">Models — 8 found</div>
+    <div style="padding:8px 0">
+      <div class="ov-row unsel" style="color:white">&nbsp;&nbsp;Filter: <span style="color:var(--term-fg)">claude</span><span class="cursor" style="height:13px;width:6px"></span></div>
+      <div class="ov-row unsel" style="height:14px"><span class="st-done">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;model&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;provider&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$/M in&nbsp;&nbsp;&nbsp;$/M out&nbsp;&nbsp;ctx k</span></div>
+      <div class="ov-section">&nbsp;&nbsp;★ Favorites</div>
+      <div class="ov-row sel"><span class="marker">★</span><span style="width:260px;display:inline-block">claude-sonnet-4-20250514</span><span style="width:100px;display:inline-block">anthropic</span><span style="width:70px;display:inline-block;text-align:right">3.00</span><span style="width:70px;display:inline-block;text-align:right">15.00</span><span style="width:50px;display:inline-block;text-align:right">200k</span></div>
+      <div class="ov-section">&nbsp;&nbsp;⏱ Recent</div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="width:260px;display:inline-block">claude-opus-4-20250514</span><span style="width:100px;display:inline-block">anthropic</span><span style="width:70px;display:inline-block;text-align:right">15.00</span><span style="width:70px;display:inline-block;text-align:right">75.00</span><span style="width:50px;display:inline-block;text-align:right">200k</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="width:260px;display:inline-block">claude-haiku-3.5-20241022</span><span style="width:100px;display:inline-block">anthropic</span><span style="width:70px;display:inline-block;text-align:right">0.80</span><span style="width:70px;display:inline-block;text-align:right">4.00</span><span style="width:50px;display:inline-block;text-align:right">200k</span></div>
+      <div class="ov-section">&nbsp;&nbsp;All</div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="width:260px;display:inline-block">claude-sonnet-4-20250514</span><span style="width:100px;display:inline-block">openrouter</span><span style="width:70px;display:inline-block;text-align:right">3.00</span><span style="width:70px;display:inline-block;text-align:right">15.00</span><span style="width:50px;display:inline-block;text-align:right">200k</span></div>
+      <div class="ov-hint">↑↓ navigate · Enter select · Ctrl+S save default · f fav · Esc close</div>
+    </div>
+  </div>
+  <div class="tui-hint"><span class="hk">&nbsp;&nbsp;[Models]</span><span class="hl">&nbsp;&nbsp;</span><span class="hk">Enter</span><span class="hl">&nbsp;send</span></div>
+  <div class="tui-iw"><div class="tui-in">
+    <div class="tui-it">Ask anything&nbsp;&nbsp;(Enter=send&nbsp;&nbsp;Shift+Enter=newline&nbsp;&nbsp;/help=commands)</div>
+    <div class="tui-ib"><span class="cursor"></span></div>
+  </div></div>
+</div>
+
+<!-- ═══ SCENE 8: Session picker ══════════════════════════════════════════ -->
+<div class="scene" data-caption="/sessions — resume any past conversation, search by content">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app</span></div>
+  </div>
+  <div class="tui-msgs"><div style="flex:1"></div></div>
+  <div class="tui-status"><div class="st-line"></div><div class="st-line"></div></div>
+  <div class="tui-queue"></div>
+  <!-- Session picker overlay -->
+  <div class="tui-overlay sessions" style="margin-bottom:4px">
+    <div class="tui-overlay-title">Sessions — 14 total</div>
+    <div style="padding:8px 0">
+      <div class="ov-row unsel" style="height:14px"><span class="st-done">&nbsp;&nbsp;id&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;turns&nbsp;&nbsp;cost&nbsp;&nbsp;&nbsp;&nbsp;when&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;preview</span></div>
+      <div class="ov-row unsel" style="height:14px"><span class="st-done">&nbsp;&nbsp;────────&nbsp;&nbsp;─────&nbsp;&nbsp;──────&nbsp;&nbsp;───────────&nbsp;&nbsp;────────────────────────</span></div>
+      <div class="ov-row sel"><span class="marker">▶</span><span style="width:72px;display:inline-block">a8f3c2e1</span><span style="width:50px;display:inline-block;text-align:right">12</span><span style="width:60px;display:inline-block;text-align:right">$1.24</span><span style="width:90px;display:inline-block;text-align:right">5m ago</span><span>&nbsp;&nbsp;add pagination to the users endpoint</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="width:72px;display:inline-block">7b2d9f04</span><span style="width:50px;display:inline-block;text-align:right">8</span><span style="width:60px;display:inline-block;text-align:right">$0.67</span><span style="width:90px;display:inline-block;text-align:right">2h ago</span><span>&nbsp;&nbsp;fix auth middleware regression</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="width:72px;display:inline-block">3e8a1c7b</span><span style="width:50px;display:inline-block;text-align:right">24</span><span style="width:60px;display:inline-block;text-align:right">$3.41</span><span style="width:90px;display:inline-block;text-align:right">1d ago</span><span>&nbsp;&nbsp;refactor database connection pool</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="width:72px;display:inline-block">c4f0e5a2</span><span style="width:50px;display:inline-block;text-align:right">6</span><span style="width:60px;display:inline-block;text-align:right">$0.38</span><span style="width:90px;display:inline-block;text-align:right">2d ago</span><span>&nbsp;&nbsp;add OpenAPI docs for all endpoints</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="width:72px;display:inline-block">9d1b7f83</span><span style="width:50px;display:inline-block;text-align:right">15</span><span style="width:60px;display:inline-block;text-align:right">$1.89</span><span style="width:90px;display:inline-block;text-align:right">3d ago</span><span>&nbsp;&nbsp;implement rate limiting middleware</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="width:72px;display:inline-block">e2c4a6d0</span><span style="width:50px;display:inline-block;text-align:right">3</span><span style="width:60px;display:inline-block;text-align:right">$0.12</span><span style="width:90px;display:inline-block;text-align:right">5d ago</span><span>&nbsp;&nbsp;setup CI with github actions</span></div>
+      <div class="ov-hint">↑↓ navigate · Enter resume · d delete · type to filter · Esc close&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓↓ 8 more</div>
+    </div>
+  </div>
+  <div class="tui-hint"><span class="hk" style="color:var(--soft-accent);opacity:0.6">&nbsp;&nbsp;[Sessions]&nbsp;&nbsp;</span><span class="hk">Enter</span><span class="hl">&nbsp;send</span></div>
+  <div class="tui-iw"><div class="tui-in">
+    <div class="tui-it">Ask anything&nbsp;&nbsp;(Enter=send&nbsp;&nbsp;Shift+Enter=newline&nbsp;&nbsp;/help=commands)</div>
+    <div class="tui-ib"><span class="cursor"></span></div>
+  </div></div>
+</div>
+
+<!-- ═══ SCENE 9: Profile picker ══════════════════════════════════════════ -->
+<div class="scene" data-caption="/profile — switch between provider/model configurations instantly">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app</span></div>
+  </div>
+  <div class="tui-msgs"><div style="flex:1"></div></div>
+  <div class="tui-status"><div class="st-line"></div><div class="st-line"></div></div>
+  <div class="tui-queue"></div>
+  <!-- Profile picker overlay -->
+  <div class="tui-overlay profiles" style="margin-bottom:4px">
+    <div class="tui-overlay-title">Profiles — default</div>
+    <div style="padding:8px 0">
+      <div class="ov-row unsel" style="height:14px"><span class="st-done">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;profile&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;provider / model</span></div>
+      <div class="ov-row sel"><span class="marker active">▶</span><span style="width:24px">●</span><span style="width:160px;display:inline-block">default</span><span>anthropic / claude-sonnet-4-20250514</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="width:24px">&nbsp;</span><span style="width:160px;display:inline-block">fast</span><span>openai / gpt-4.1-mini</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="width:24px">&nbsp;</span><span style="width:160px;display:inline-block">local</span><span>ollama / deepseek-coder:33b</span></div>
+      <div class="ov-row unsel"><span class="marker">&nbsp;</span><span style="width:24px">&nbsp;</span><span style="width:160px;display:inline-block">review</span><span>anthropic / claude-opus-4-20250514</span></div>
+      <div style="height:4px"></div>
+      <div class="ov-hint">↑↓ navigate · Enter switch · n new · e edit · type to filter · Esc close</div>
+    </div>
+  </div>
+  <div class="tui-hint"><span class="hk" style="color:var(--soft-accent);opacity:0.6">&nbsp;&nbsp;[Profiles]&nbsp;&nbsp;</span><span class="hk">Enter</span><span class="hl">&nbsp;send</span></div>
+  <div class="tui-iw"><div class="tui-in">
+    <div class="tui-it">Ask anything&nbsp;&nbsp;(Enter=send&nbsp;&nbsp;Shift+Enter=newline&nbsp;&nbsp;/help=commands)</div>
+    <div class="tui-ib"><span class="cursor"></span></div>
+  </div></div>
+</div>
+
+<!-- ═══ SCENE 10: Permission prompt ══════════════════════════════════════ -->
+<div class="scene" data-caption="Permissions — approve, deny, or allow tools for the entire session">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app&nbsp;&nbsp;&nbsp;session: $0.1847&nbsp;&nbsp;24.3k tok&nbsp;&nbsp;41% window</span></div>
+  </div>
+  <div class="tui-msgs">
+    <div><span class="l-you">you</span><div class="m-text">run the test suite and fix any failures</div></div>
+    <div style="margin-top:6px"><span class="l-agent">clido</span> <span class="l-dim">claude-sonnet-4</span>
+      <div class="m-text">I'll run the tests first to see the current state.</div>
+    </div>
+  </div>
+  <div class="tui-status">
+    <div class="st-line"><span class="st-yellow">&nbsp;&nbsp;<span class="spinner"></span>&nbsp;Bash</span><span class="st-done">&nbsp;&nbsp;cargo test</span><span class="st-done">&nbsp;0.2s</span></div>
+    <div class="st-line"></div>
+  </div>
+  <div class="tui-queue"></div>
+  <!-- Permission overlay -->
+  <div class="tui-overlay perm" style="margin-bottom:4px">
+    <div class="tui-overlay-title">Allow Bash?</div>
+    <div style="padding:8px 0">
+      <div class="ov-row unsel"><span class="st-done">&nbsp;&nbsp;cargo test --workspace -- --nocapture</span></div>
+      <div style="height:6px"></div>
+      <div class="perm-row sel"><span class="pm">&nbsp;▶</span><span class="pl" style="width:220px;display:inline-block">Allow once</span><span class="ph">(1) this invocation only</span></div>
+      <div class="perm-row unsel"><span class="pm">&nbsp;&nbsp;</span><span class="pl" style="width:220px;display:inline-block">Allow for session</span><span class="ph">(2) all calls to Bash until you quit</span></div>
+      <div class="perm-row unsel"><span class="pm">&nbsp;&nbsp;</span><span class="pl" style="width:220px;display:inline-block">Allow all tools</span><span class="ph">(3) skip all permission checks this session</span></div>
+      <div class="perm-row unsel"><span class="pm">&nbsp;&nbsp;</span><span class="pl" style="width:220px;display:inline-block">Deny</span><span class="ph">(4) block this call, agent continues</span></div>
+      <div class="perm-row unsel"><span class="pm">&nbsp;&nbsp;</span><span class="pl" style="width:220px;display:inline-block">Deny with feedback</span><span class="ph">(5) block and explain why</span></div>
+      <div style="height:4px"></div>
+      <div class="ov-hint">&nbsp;&nbsp;↑↓/1-5 select&nbsp;&nbsp;&nbsp;Enter confirm&nbsp;&nbsp;&nbsp;Esc deny</div>
+    </div>
+  </div>
+  <div class="tui-iw"><div class="tui-in thinking">
+    <div class="tui-it">⏸ waiting for permission…</div>
+    <div class="tui-ib"></div>
+  </div></div>
+</div>
+
+<!-- ═══ SCENE 11: Subscription provider (Kimi) ═══════════════════════════ -->
+<div class="scene" data-caption="Subscriptions — token usage tracking for subscription-based providers">
+  <div class="tui-header">
+    <div class="tui-hline">
+      <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+      <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;kimi-code&nbsp;&nbsp;kimi-k2-0711-chat&nbsp;&nbsp;[kimi]</span>
+    </div>
+    <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app&nbsp;&nbsp;&nbsp;session: 45.2k tok&nbsp;&nbsp;8 turns&nbsp;&nbsp;38% window</span></div>
+  </div>
+  <div class="tui-chat">
+    <div class="wp">
+      <div class="wp-title"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></div>
+      <div class="wp-body">
+        <div class="wp-line e"></div>
+        <div class="wp-line"><span class="wm">~/projects/my-app</span></div>
+        <div class="wp-line e"></div>
+        <div class="wp-line"><span class="wm">profile&nbsp;&nbsp;</span><span class="wsb">kimi</span></div>
+        <div class="wp-line"><span class="wm">provider&nbsp;</span><span class="ws">kimi-code</span><span class="wsp">&nbsp;&nbsp;·&nbsp;&nbsp;</span><span class="ws">kimi-k2-0711-chat</span></div>
+        <div class="wp-line"><span class="wg">key ✓</span><span class="wsp">&nbsp;&nbsp;·&nbsp;&nbsp;</span><span class="wg">subscription</span><span class="wsp">&nbsp;&nbsp;·&nbsp;&nbsp;</span><span class="wg">fast gpt-4.1-mini</span></div>
+        <div class="wp-line e"></div>
+        <div class="wp-line"><span class="wa">/help&nbsp;&nbsp;&nbsp;/model&nbsp;&nbsp;&nbsp;/settings&nbsp;&nbsp;&nbsp;/config</span></div>
+        <div class="wp-line"><span class="wm">↑↓=history&nbsp;&nbsp;PgUp/Dn=scroll&nbsp;&nbsp;Ctrl+/=stop</span></div>
+        <div class="wp-line e"></div>
+      </div>
+    </div>
+  </div>
+  <div class="tui-status"><div class="st-line"></div><div class="st-line"></div></div>
+  <div class="tui-queue"></div>
+  <div class="tui-hint">
+    <span class="hk">&nbsp;&nbsp;Enter</span><span class="hl">&nbsp;send&nbsp;&nbsp;</span>
+    <span class="hk">Shift+Enter</span><span class="hl">&nbsp;newline&nbsp;&nbsp;</span>
+    <span class="hk">↑↓</span><span class="hl">&nbsp;history&nbsp;&nbsp;</span>
+    <span class="hk">/help</span><span class="hl">&nbsp;commands&nbsp;&nbsp;</span>
+    <span class="hk">Ctrl+C</span><span class="hl">&nbsp;quit</span>
+  </div>
+  <div class="tui-iw"><div class="tui-in">
+    <div class="tui-it">Ask anything&nbsp;&nbsp;(Enter=send&nbsp;&nbsp;Shift+Enter=newline&nbsp;&nbsp;/help=commands)</div>
+    <div class="tui-ib"><span class="cursor"></span></div>
+  </div></div>
+</div>
+
+    </div><!-- /carousel -->
+  </div><!-- /macos-window -->
+
+  <!-- Carousel controls -->
+  <div class="carousel-controls">
+    <div class="carousel-nav">
+      <button onclick="prevScene()" aria-label="Previous">‹</button>
+      <button onclick="nextScene()" aria-label="Next">›</button>
+    </div>
+    <div class="carousel-dots" id="dots"></div>
+    <div class="carousel-caption" id="caption"></div>
+  </div>
+</section>
+
+<div class="section-break"><hr></div>
+
+<!-- ═══ Features ══════════════════════════════════════════════════════════ -->
+<section class="features">
+  <h2 class="section-heading">What you get</h2>
+  <p class="section-sub">A terminal agent that reads, writes, runs, and iterates on your code.</p>
+  <div class="feature-grid">
+    <div class="feature-card glass">
+      <div class="feature-icon">🛠️</div>
+      <h3>Reads, writes, runs</h3>
+      <p>Built-in Bash, Read, Write, Glob, Grep. The agent navigates your codebase, edits files, runs tests, and iterates until the task is done.</p>
+    </div>
+    <div class="feature-card glass">
+      <div class="feature-icon">🧠</div>
+      <h3>Persistent memory</h3>
+      <p>Sessions stored as JSONL. Resume with <code>--continue</code>. Long-term SQLite memory surfaces relevant context from past conversations.</p>
+    </div>
+    <div class="feature-card glass">
+      <div class="feature-icon">🔌</div>
+      <h3>Any provider, any model</h3>
+      <p>Anthropic, OpenAI, OpenRouter, Kimi, Gemini, xAI, Ollama. Switch at runtime. Define profiles for different tasks.</p>
+    </div>
+    <div class="feature-card glass">
+      <div class="feature-icon">⚡</div>
+      <h3>Two-tier routing</h3>
+      <p>Use a fast model for tool calls and a capable model for reasoning. Cut cost without cutting quality. Configurable per profile.</p>
+    </div>
+    <div class="feature-card glass">
+      <div class="feature-icon">🔧</div>
+      <h3>MCP tool servers</h3>
+      <p>Connect any Model Context Protocol server over stdio. External tools appear natively to the agent alongside built-in tools.</p>
+    </div>
+    <div class="feature-card glass">
+      <div class="feature-icon">📋</div>
+      <h3>YAML workflows</h3>
+      <p>Multi-step agent pipelines. Dynamic parameters, parallel steps, retry policies, pre-flight checks. Reproducible automation.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Workflow ══════════════════════════════════════════════════════════ -->
+<section class="workflow">
+  <h2 class="section-heading">Three steps</h2>
+  <p class="section-sub" style="margin-bottom:2rem">Install → configure → use. No package managers, no runtimes.</p>
+  <div class="workflow-steps">
+    <div class="wf-step">
+      <div class="wf-num">1</div>
+      <div class="wf-content">
+        <h3>Install the binary</h3>
+        <p>One command. Downloads a prebuilt binary for your platform. macOS (arm64, x86) and Linux (x86, arm64).</p>
+      </div>
+    </div>
+    <div class="wf-step">
+      <div class="wf-num">2</div>
+      <div class="wf-content">
+        <h3>Set your API key</h3>
+        <p>The setup wizard runs on first launch. Or edit <code>~/.config/clido/config.toml</code> directly.</p>
+      </div>
+    </div>
+    <div class="wf-step">
+      <div class="wf-num">3</div>
+      <div class="wf-content">
+        <h3>Run <code>clido</code> in any project</h3>
+        <p>Ask questions. Write code. Run tests. Refactor. The agent has full workspace access and persists everything.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Footer ════════════════════════════════════════════════════════════ -->
+<footer>
+  <p style="margin-bottom:0.5rem">
+    <span class="mono" style="color:var(--title-text);font-weight:700">cli<span style="color:var(--brand)">;</span>do</span>
+    &nbsp;·&nbsp; Open source
+  </p>
+  <p>
+    <a href="https://github.com/0xKurt/clido">GitHub</a>
+    &nbsp;&nbsp;·&nbsp;&nbsp;
+    <a href="/guide/introduction">Documentation</a>
+    &nbsp;&nbsp;·&nbsp;&nbsp;
+    <a href="/guide/quick-start">Quick Start</a>
+  </p>
+</footer>
+
+<!-- ═══ Carousel JS ══════════════════════════════════════════════════════ -->
+<script>
+(function() {
+  const scenes = document.querySelectorAll('#carousel .scene');
+  const dotsEl = document.getElementById('dots');
+  const captionEl = document.getElementById('caption');
+  let current = 0;
+  let timer;
+  const INTERVAL = 4000;
+
+  // Build dots
+  scenes.forEach((_, i) => {
+    const dot = document.createElement('button');
+    dot.className = 'carousel-dot' + (i === 0 ? ' active' : '');
+    dot.setAttribute('aria-label', 'Scene ' + (i + 1));
+    dot.onclick = () => goTo(i);
+    dotsEl.appendChild(dot);
+  });
+
+  function goTo(idx) {
+    scenes[current].classList.remove('active');
+    dotsEl.children[current].classList.remove('active');
+    current = ((idx % scenes.length) + scenes.length) % scenes.length;
+    scenes[current].classList.add('active');
+    dotsEl.children[current].classList.add('active');
+    captionEl.textContent = scenes[current].dataset.caption || '';
+    resetTimer();
+  }
+
+  function resetTimer() {
+    clearInterval(timer);
+    timer = setInterval(() => goTo(current + 1), INTERVAL);
+  }
+
+  window.nextScene = () => goTo(current + 1);
+  window.prevScene = () => goTo(current - 1);
+
+  // Keyboard navigation
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') { goTo(current + 1); }
+    else if (e.key === 'ArrowLeft') { goTo(current - 1); }
+  });
+
+  // Pause on hover
+  const carousel = document.querySelector('.macos-window');
+  carousel.addEventListener('mouseenter', () => clearInterval(timer));
+  carousel.addEventListener('mouseleave', resetTimer);
+
+  // Init
+  captionEl.textContent = scenes[0].dataset.caption || '';
+  timer = setInterval(() => goTo(current + 1), INTERVAL);
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,230 @@
+/* ── Reset & Base ──────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --soft-accent:  #96C8FF;
+  --selection-bg: #343E4E;
+  --border-dark:  #37465F;
+  --title-text:   #D2DCF0;
+  --muted:        #6E7D96;
+  --soft:         #B9C3D7;
+  --dim-green:    #64B478;
+  --dim-yellow:   #C8B45A;
+  --term-bg:      #1a1b26;
+  --term-fg:      #c0caf5;
+  --term-dim:     #565f89;
+  --magenta:      #bb9af7;
+  --term-cyan:    #7dcfff;
+  --term-green:   #9ece6a;
+  --term-red:     #f7768e;
+  --term-yellow:  #e0af68;
+
+  --page-bg:      #0a0e14;
+  --surface:      rgba(22,27,34,0.6);
+  --surface-solid:#161b22;
+  --surface-2:    rgba(33,38,45,0.6);
+  --text:         #e6edf3;
+  --text-muted:   #8b949e;
+  --brand:        #96C8FF;
+  --brand-dim:    rgba(150,200,255,0.12);
+
+  --glass:        rgba(22,27,34,0.45);
+  --glass-border: rgba(150,200,255,0.08);
+  --glass-blur:   16px;
+}
+
+html {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: var(--page-bg);
+  color: var(--text);
+  scroll-behavior: smooth;
+}
+
+body { min-height: 100vh; overflow-x: hidden; }
+
+body::before {
+  content: '';
+  position: fixed; top: -40%; left: -20%;
+  width: 80%; height: 80%;
+  background: radial-gradient(ellipse, rgba(150,200,255,0.04) 0%, transparent 70%);
+  pointer-events: none; z-index: -1;
+}
+body::after {
+  content: '';
+  position: fixed; bottom: -30%; right: -20%;
+  width: 70%; height: 70%;
+  background: radial-gradient(ellipse, rgba(187,154,247,0.03) 0%, transparent 70%);
+  pointer-events: none; z-index: -1;
+}
+
+a { color: var(--brand); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.mono { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace; }
+
+/* ── Glass ─────────────────────────────────────────────────────────────── */
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+}
+
+/* ── Nav ───────────────────────────────────────────────────────────────── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 2rem; height: 56px;
+  background: rgba(10,14,20,0.75);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(150,200,255,0.06);
+}
+.nav-brand {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 1.25rem; font-weight: 700;
+}
+.nav-brand .semi { color: var(--brand); }
+.nav-brand .text { color: var(--title-text); }
+.nav-links { display: flex; gap: 1.5rem; align-items: center; }
+.nav-links a { color: var(--text-muted); font-size: 0.9rem; transition: color 0.15s; }
+.nav-links a:hover { color: var(--text); text-decoration: none; }
+.nav-cta {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.4rem 1rem;
+  background: rgba(150,200,255,0.08);
+  border: 1px solid rgba(150,200,255,0.15);
+  border-radius: 6px;
+  color: var(--brand) !important;
+  font-size: 0.85rem; font-weight: 500;
+  transition: all 0.2s; backdrop-filter: blur(8px);
+}
+.nav-cta:hover { background: rgba(150,200,255,0.18); border-color: rgba(150,200,255,0.3); text-decoration: none !important; }
+
+/* ── Hero ──────────────────────────────────────────────────────────────── */
+.hero { padding: 7rem 2rem 2.5rem; text-align: center; max-width: 720px; margin: 0 auto; }
+.hero h1 {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 3.5rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 1rem;
+}
+.hero h1 .semi { color: var(--brand); }
+.hero .tagline { font-size: 1.3rem; color: var(--text); line-height: 1.5; margin-bottom: 0.75rem; }
+.hero .sub { font-size: 1rem; color: var(--text-muted); line-height: 1.6; max-width: 560px; margin: 0 auto 1.75rem; }
+
+.hero-providers { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; margin-bottom: 2rem; }
+.hero-providers .pill {
+  padding: 0.3rem 0.85rem;
+  background: rgba(150,200,255,0.06); border: 1px solid rgba(150,200,255,0.1);
+  border-radius: 20px; font-size: 0.8rem; color: var(--muted);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  backdrop-filter: blur(8px); transition: all 0.2s;
+}
+.hero-providers .pill:hover { border-color: rgba(150,200,255,0.25); color: var(--soft); }
+
+.hero-actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.btn {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  padding: 0.65rem 1.5rem; border-radius: 8px;
+  font-size: 0.95rem; font-weight: 500;
+  transition: all 0.2s; border: 1px solid transparent;
+}
+.btn-primary { background: var(--brand); color: var(--page-bg); }
+.btn-primary:hover { background: #b0d8ff; box-shadow: 0 0 24px rgba(150,200,255,0.2); text-decoration: none; }
+.btn-secondary {
+  background: rgba(33,38,45,0.6); color: var(--text);
+  border-color: rgba(150,200,255,0.1); backdrop-filter: blur(8px);
+}
+.btn-secondary:hover { border-color: rgba(150,200,255,0.25); text-decoration: none; }
+
+/* ── Install ───────────────────────────────────────────────────────────── */
+.install-banner {
+  max-width: 620px; margin: 0 auto 2.5rem;
+  background: rgba(22,27,34,0.5); border: 1px solid rgba(150,200,255,0.08);
+  border-radius: 10px; padding: 0.7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  backdrop-filter: blur(12px);
+}
+.install-banner code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.82rem; color: var(--soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.install-banner button {
+  background: rgba(150,200,255,0.08); border: 1px solid rgba(150,200,255,0.12);
+  color: var(--text-muted); padding: 0.35rem 0.85rem; border-radius: 6px;
+  font-size: 0.8rem; cursor: pointer; white-space: nowrap; transition: all 0.2s;
+}
+.install-banner button:hover { background: rgba(150,200,255,0.15); border-color: rgba(150,200,255,0.3); color: var(--brand); }
+
+/* ── Sections ──────────────────────────────────────────────────────────── */
+.section-break { max-width: 900px; margin: 0 auto 4rem; padding: 0 2rem; text-align: center; }
+.section-break hr { border: none; height: 1px; background: linear-gradient(90deg, transparent, rgba(150,200,255,0.12), transparent); }
+.section-heading { text-align: center; margin-bottom: 0.5rem; font-size: 1.5rem; font-weight: 700; }
+.section-sub {
+  text-align: center; color: var(--text-muted); font-size: 0.95rem;
+  margin-bottom: 2.5rem; max-width: 520px; margin-left: auto; margin-right: auto;
+}
+
+/* ── Features ──────────────────────────────────────────────────────────── */
+.features { max-width: 960px; margin: 0 auto 4rem; padding: 0 2rem; }
+.feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.feature-card {
+  border-radius: 12px; padding: 1.5rem; transition: all 0.25s;
+}
+.feature-card:hover { border-color: rgba(150,200,255,0.15); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.feature-icon {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 8px; margin-bottom: 1rem; font-size: 1.1rem;
+  background: rgba(150,200,255,0.06); border: 1px solid rgba(150,200,255,0.08);
+}
+.feature-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.4rem; }
+.feature-card p { font-size: 0.85rem; color: var(--text-muted); line-height: 1.55; }
+.feature-card code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  background: rgba(150,200,255,0.06); padding: 0.1rem 0.35rem;
+  border-radius: 3px; font-size: 0.8rem; color: var(--soft);
+}
+
+/* ── Workflow ──────────────────────────────────────────────────────────── */
+.workflow { max-width: 700px; margin: 0 auto 4rem; padding: 0 2rem; }
+.workflow-steps { display: flex; flex-direction: column; position: relative; }
+.workflow-steps::before {
+  content: ''; position: absolute; left: 19px; top: 36px; bottom: 12px;
+  width: 1px; background: linear-gradient(180deg, var(--brand), rgba(150,200,255,0.1));
+}
+.wf-step { display: flex; gap: 1.25rem; align-items: flex-start; padding: 0.75rem 0; }
+.wf-num {
+  flex-shrink: 0; width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--glass); backdrop-filter: blur(8px);
+  border: 1px solid rgba(150,200,255,0.15);
+  color: var(--brand); font-size: 0.9rem; font-weight: 700;
+  font-family: 'SF Mono', monospace; z-index: 1;
+}
+.wf-content { padding-top: 6px; }
+.wf-content h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem; }
+.wf-content p { font-size: 0.9rem; color: var(--text-muted); line-height: 1.5; }
+.wf-content code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  background: rgba(150,200,255,0.06); padding: 0.12rem 0.4rem;
+  border-radius: 4px; font-size: 0.82rem; color: var(--soft);
+}
+
+/* ── Footer ────────────────────────────────────────────────────────────── */
+footer {
+  text-align: center; padding: 3rem 2rem;
+  border-top: 1px solid rgba(150,200,255,0.06);
+  color: var(--text-muted); font-size: 0.85rem;
+}
+footer a { color: var(--text-muted); }
+footer a:hover { color: var(--text); }
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 768px) { .feature-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .hero { padding: 6rem 1.25rem 2rem; }
+  .hero h1 { font-size: 2.5rem; }
+  nav { padding: 0 1rem; }
+  .nav-links a:not(.nav-cta) { display: none; }
+  .feature-grid { grid-template-columns: 1fr; }
+}

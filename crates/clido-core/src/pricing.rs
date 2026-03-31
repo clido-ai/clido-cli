@@ -294,4 +294,255 @@ cache_read_per_mtok = 0.30
         let cost = compute_cost_usd(&usage, "unknown", &table);
         assert!((cost - 15.0).abs() < 0.001);
     }
+
+    // ── Additional compute_cost_usd tests ─────────────────────────────
+
+    #[test]
+    fn cost_zero_tokens_with_cache_fields_none() {
+        let usage = Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: None,
+            cache_read_input_tokens: None,
+        };
+        let table = PricingTable::default();
+        assert_eq!(compute_cost_usd(&usage, "whatever", &table), 0.0);
+    }
+
+    #[test]
+    fn cost_zero_tokens_with_cache_fields_some_zero() {
+        let usage = Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: Some(0),
+            cache_read_input_tokens: Some(0),
+        };
+        let table = PricingTable::default();
+        assert_eq!(compute_cost_usd(&usage, "anything", &table), 0.0);
+    }
+
+    #[test]
+    fn cost_unknown_model_uses_fallback_rates() {
+        // Fallback: input $3/mtok, output $15/mtok
+        let usage = make_usage(500_000, 200_000);
+        let table = PricingTable::default();
+        let cost = compute_cost_usd(&usage, "totally-unknown-model-xyz", &table);
+        let expected = 0.5 * 3.0 + 0.2 * 15.0; // 1.5 + 3.0 = 4.5
+        assert!(
+            (cost - expected).abs() < 0.0001,
+            "expected {expected}, got {cost}"
+        );
+    }
+
+    #[test]
+    fn cost_table_entry_without_cache_rates_uses_derived_defaults() {
+        // When cache rates are None, cache_creation = input * 1.25, cache_read = input * 0.10
+        let mut models = HashMap::new();
+        models.insert(
+            "test-model".to_string(),
+            ModelPricingEntry {
+                name: "test-model".to_string(),
+                provider: "test".to_string(),
+                input_per_mtok: 10.0,
+                output_per_mtok: 30.0,
+                cache_creation_per_mtok: None,
+                cache_read_per_mtok: None,
+                context_window: None,
+            },
+        );
+        let table = PricingTable { models };
+        let usage = make_usage_with_cache(0, 0, 1_000_000, 1_000_000);
+        let cost = compute_cost_usd(&usage, "test-model", &table);
+        // cache_creation = 10.0 * 1.25 = 12.5; cache_read = 10.0 * 0.10 = 1.0
+        let expected = 12.5 + 1.0;
+        assert!(
+            (cost - expected).abs() < 0.001,
+            "expected {expected}, got {cost}"
+        );
+    }
+
+    #[test]
+    fn cost_combined_all_token_types() {
+        let mut models = HashMap::new();
+        models.insert(
+            "full-model".to_string(),
+            ModelPricingEntry {
+                name: "full-model".to_string(),
+                provider: "test".to_string(),
+                input_per_mtok: 2.0,
+                output_per_mtok: 8.0,
+                cache_creation_per_mtok: Some(4.0),
+                cache_read_per_mtok: Some(0.5),
+                context_window: Some(128_000),
+            },
+        );
+        let table = PricingTable { models };
+        let usage = Usage {
+            input_tokens: 1_000_000,
+            output_tokens: 500_000,
+            cache_creation_input_tokens: Some(200_000),
+            cache_read_input_tokens: Some(3_000_000),
+        };
+        let cost = compute_cost_usd(&usage, "full-model", &table);
+        // input: 1.0 * 2.0 = 2.0
+        // output: 0.5 * 8.0 = 4.0
+        // cache_create: 0.2 * 4.0 = 0.8
+        // cache_read: 3.0 * 0.5 = 1.5
+        let expected = 2.0 + 4.0 + 0.8 + 1.5;
+        assert!(
+            (cost - expected).abs() < 0.0001,
+            "expected {expected}, got {cost}"
+        );
+    }
+
+    #[test]
+    fn cost_small_token_counts_precision() {
+        // 1 token each — should be tiny but non-zero with fallback
+        let usage = make_usage(1, 1);
+        let table = PricingTable::default();
+        let cost = compute_cost_usd(&usage, "x", &table);
+        // (1/1_000_000) * 3 + (1/1_000_000) * 15 = 18e-6
+        let expected = 18.0 / 1_000_000.0;
+        assert!(
+            (cost - expected).abs() < 1e-12,
+            "expected {expected}, got {cost}"
+        );
+    }
+
+    #[test]
+    fn cost_only_cache_creation_tokens() {
+        let usage = Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: Some(1_000_000),
+            cache_read_input_tokens: None,
+        };
+        let table = PricingTable::default();
+        let cost = compute_cost_usd(&usage, "x", &table);
+        // fallback cache_creation = 3.0 * 1.25 = 3.75
+        assert!((cost - 3.75).abs() < 0.001, "expected 3.75, got {cost}");
+    }
+
+    #[test]
+    fn cost_only_cache_read_tokens() {
+        let usage = Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: None,
+            cache_read_input_tokens: Some(1_000_000),
+        };
+        let table = PricingTable::default();
+        let cost = compute_cost_usd(&usage, "x", &table);
+        // fallback cache_read = 3.0 * 0.10 = 0.30
+        assert!((cost - 0.30).abs() < 0.001, "expected 0.30, got {cost}");
+    }
+
+    // ── PricingToml deserialization edge cases ─────────────────────────
+
+    #[test]
+    fn pricing_toml_multiple_models() {
+        let toml_str = r#"
+[model.model-a]
+name = "Model A"
+provider = "provider-a"
+input_per_mtok = 1.0
+output_per_mtok = 2.0
+
+[model.model-b]
+name = "Model B"
+provider = "provider-b"
+input_per_mtok = 5.0
+output_per_mtok = 10.0
+cache_creation_per_mtok = 6.0
+cache_read_per_mtok = 0.5
+context_window = 32000
+"#;
+        let parsed: PricingToml = toml::from_str(toml_str).unwrap();
+        assert_eq!(parsed.model.len(), 2);
+        assert!(parsed.model.contains_key("model-a"));
+        assert!(parsed.model.contains_key("model-b"));
+
+        let a = &parsed.model["model-a"];
+        assert_eq!(a.provider, "provider-a");
+        assert_eq!(a.cache_creation_per_mtok, None);
+        assert_eq!(a.cache_read_per_mtok, None);
+        assert_eq!(a.context_window, None);
+
+        let b = &parsed.model["model-b"];
+        assert_eq!(b.input_per_mtok, 5.0);
+        assert_eq!(b.cache_creation_per_mtok, Some(6.0));
+        assert_eq!(b.context_window, Some(32000));
+    }
+
+    #[test]
+    fn pricing_toml_invalid_returns_default_via_fallback() {
+        let bad_toml = "this is not valid toml [[[";
+        let result = toml::from_str::<PricingToml>(bad_toml);
+        assert!(result.is_err(), "invalid TOML should fail to parse");
+    }
+
+    // ── PricingTable lookup ───────────────────────────────────────────
+
+    #[test]
+    fn pricing_table_get_returns_none_for_missing_model() {
+        let table = PricingTable::default();
+        assert!(table.models.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn pricing_table_get_returns_entry_for_present_model() {
+        let mut models = HashMap::new();
+        models.insert(
+            "my-model".to_string(),
+            ModelPricingEntry {
+                name: "my-model".to_string(),
+                provider: "test".to_string(),
+                input_per_mtok: 1.0,
+                output_per_mtok: 2.0,
+                cache_creation_per_mtok: None,
+                cache_read_per_mtok: None,
+                context_window: None,
+            },
+        );
+        let table = PricingTable { models };
+        let entry = table.models.get("my-model").unwrap();
+        assert_eq!(entry.name, "my-model");
+        assert_eq!(entry.input_per_mtok, 1.0);
+    }
+
+    #[test]
+    fn cost_model_in_table_vs_missing_differ() {
+        let mut models = HashMap::new();
+        models.insert(
+            "cheap-model".to_string(),
+            ModelPricingEntry {
+                name: "cheap-model".to_string(),
+                provider: "test".to_string(),
+                input_per_mtok: 0.01,
+                output_per_mtok: 0.02,
+                cache_creation_per_mtok: None,
+                cache_read_per_mtok: None,
+                context_window: None,
+            },
+        );
+        let table = PricingTable { models };
+        let usage = make_usage(1_000_000, 1_000_000);
+
+        let cost_known = compute_cost_usd(&usage, "cheap-model", &table);
+        let cost_unknown = compute_cost_usd(&usage, "missing-model", &table);
+
+        // cheap-model: 0.01 + 0.02 = 0.03
+        assert!((cost_known - 0.03).abs() < 0.0001);
+        // fallback: 3.0 + 15.0 = 18.0
+        assert!((cost_unknown - 18.0).abs() < 0.001);
+        assert!(cost_unknown > cost_known);
+    }
+
+    #[test]
+    fn cost_empty_model_id_uses_fallback() {
+        let table = PricingTable::default();
+        let usage = make_usage(1_000_000, 0);
+        let cost = compute_cost_usd(&usage, "", &table);
+        assert!((cost - 3.0).abs() < 0.001);
+    }
 }

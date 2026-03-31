@@ -661,7 +661,7 @@ pub fn agent_config_from_loaded(
 ) -> Result<AgentConfig> {
     let profile = loaded.get_profile(profile_name)?;
     LoadedConfig::validate_provider(&profile.provider)?;
-    let model = cli_model.clone().unwrap_or_else(|| profile.model.clone());
+    let model = cli_model.unwrap_or_else(|| profile.model.clone());
     // Config key is `max-concurrent-tools`; CLI flag is `--max-parallel-tools`.
     // Both refer to the same bounded-concurrency cap. CLI wins when provided.
     let max_parallel_tools = cli_max_parallel_tools
@@ -670,7 +670,7 @@ pub fn agent_config_from_loaded(
     Ok(AgentConfig {
         max_turns: cli_max_turns.unwrap_or(loaded.agent.max_turns),
         max_budget_usd: cli_max_budget_usd.or(loaded.agent.max_budget_usd),
-        model: model.clone(),
+        model,
         system_prompt: cli_system_prompt,
         permission_mode: cli_permission_mode.unwrap_or_default(),
         permission_rules: Vec::new(),
@@ -1538,5 +1538,593 @@ api_key = "sk-openai-worker"
             "should set default_profile: {}",
             content
         );
+    }
+
+    // ── upsert_profile: additional coverage ──────────────────────────────
+
+    #[test]
+    fn upsert_profile_to_nonexistent_file_creates_parents_and_file() {
+        let temp = tempfile::tempdir().unwrap();
+        // Target a path with a non-existent parent directory
+        let cfg_path = temp.path().join("subdir").join("config.toml");
+        assert!(!cfg_path.exists());
+        let entry = ProfileEntry {
+            provider: "anthropic".to_string(),
+            model: "claude-sonnet".to_string(),
+            api_key: Some("sk-ant-new".to_string()),
+            api_key_env: None,
+            base_url: None,
+            user_agent: None,
+            worker: None,
+            reviewer: None,
+        };
+        upsert_profile_in_config(&cfg_path, "fresh", &entry).unwrap();
+        assert!(cfg_path.exists());
+        // Verify the written file is valid TOML with the profile
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        assert_eq!(cf.profile["fresh"].provider, "anthropic");
+        assert_eq!(cf.profile["fresh"].model, "claude-sonnet");
+        // First profile becomes the default
+        assert_eq!(cf.default_profile, "fresh");
+    }
+
+    #[test]
+    fn upsert_profile_preserves_other_profiles() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg_path = temp.path().join("config.toml");
+        std::fs::write(
+            &cfg_path,
+            "default_profile = \"alpha\"\n\
+             [profile.alpha]\nprovider = \"anthropic\"\nmodel = \"m1\"\napi_key = \"k1\"\n\
+             [profile.beta]\nprovider = \"openai\"\nmodel = \"m2\"\napi_key = \"k2\"\n",
+        )
+        .unwrap();
+        let entry = ProfileEntry {
+            provider: "deepseek".to_string(),
+            model: "deepseek-v3".to_string(),
+            api_key: Some("sk-ds".to_string()),
+            api_key_env: None,
+            base_url: None,
+            user_agent: None,
+            worker: None,
+            reviewer: None,
+        };
+        upsert_profile_in_config(&cfg_path, "gamma", &entry).unwrap();
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        assert_eq!(cf.profile.len(), 3);
+        assert!(cf.profile.contains_key("alpha"));
+        assert!(cf.profile.contains_key("beta"));
+        assert!(cf.profile.contains_key("gamma"));
+        // default_profile unchanged since it already existed
+        assert_eq!(cf.default_profile, "alpha");
+    }
+
+    #[test]
+    fn upsert_profile_update_changes_only_target_profile() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg_path = temp.path().join("config.toml");
+        std::fs::write(
+            &cfg_path,
+            "default_profile = \"default\"\n\
+             [profile.default]\nprovider = \"anthropic\"\nmodel = \"old\"\napi_key = \"old-key\"\n\
+             [profile.work]\nprovider = \"openai\"\nmodel = \"gpt-4o\"\napi_key = \"sk-work\"\n",
+        )
+        .unwrap();
+        let updated = ProfileEntry {
+            provider: "anthropic".to_string(),
+            model: "updated-model".to_string(),
+            api_key: Some("updated-key".to_string()),
+            api_key_env: None,
+            base_url: None,
+            user_agent: None,
+            worker: None,
+            reviewer: None,
+        };
+        upsert_profile_in_config(&cfg_path, "default", &updated).unwrap();
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        assert_eq!(cf.profile["default"].model, "updated-model");
+        // Other profile is untouched
+        assert_eq!(cf.profile["work"].model, "gpt-4o");
+    }
+
+    #[test]
+    fn upsert_profile_with_optional_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg_path = temp.path().join("config.toml");
+        let entry = ProfileEntry {
+            provider: "openai".to_string(),
+            model: "gpt-4o".to_string(),
+            api_key: None,
+            api_key_env: Some("OPENAI_API_KEY".to_string()),
+            base_url: Some("https://custom.endpoint.com".to_string()),
+            user_agent: Some("CustomAgent/1.0".to_string()),
+            worker: None,
+            reviewer: None,
+        };
+        upsert_profile_in_config(&cfg_path, "custom", &entry).unwrap();
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        let p = &cf.profile["custom"];
+        assert!(p.api_key.is_none());
+        assert_eq!(p.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(p.base_url.as_deref(), Some("https://custom.endpoint.com"));
+        assert_eq!(p.user_agent.as_deref(), Some("CustomAgent/1.0"));
+    }
+
+    // ── delete_profile: additional coverage ───────────────────────────────
+
+    #[test]
+    fn delete_profile_nonexistent_profile_is_noop() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg_path = temp.path().join("config.toml");
+        std::fs::write(
+            &cfg_path,
+            "default_profile = \"default\"\n\
+             [profile.default]\nprovider = \"anthropic\"\nmodel = \"m\"\napi_key = \"k\"\n",
+        )
+        .unwrap();
+        // Deleting a profile that doesn't exist should succeed silently
+        let result = delete_profile_from_config(&cfg_path, "nonexistent");
+        assert!(result.is_ok());
+        // Original profile still there
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        assert!(cf.profile.contains_key("default"));
+    }
+
+    #[test]
+    fn delete_profile_last_non_default_leaves_default_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg_path = temp.path().join("config.toml");
+        std::fs::write(
+            &cfg_path,
+            "default_profile = \"default\"\n\
+             [profile.default]\nprovider = \"anthropic\"\nmodel = \"m\"\napi_key = \"k\"\n\
+             [profile.extra]\nprovider = \"openai\"\nmodel = \"gpt\"\napi_key = \"sk\"\n",
+        )
+        .unwrap();
+        delete_profile_from_config(&cfg_path, "extra").unwrap();
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        assert_eq!(cf.profile.len(), 1);
+        assert!(cf.profile.contains_key("default"));
+    }
+
+    #[test]
+    fn delete_profile_multiple_profiles_removes_only_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg_path = temp.path().join("config.toml");
+        std::fs::write(
+            &cfg_path,
+            "default_profile = \"alpha\"\n\
+             [profile.alpha]\nprovider = \"anthropic\"\nmodel = \"m\"\napi_key = \"k\"\n\
+             [profile.beta]\nprovider = \"openai\"\nmodel = \"m2\"\napi_key = \"k2\"\n\
+             [profile.gamma]\nprovider = \"deepseek\"\nmodel = \"m3\"\napi_key = \"k3\"\n",
+        )
+        .unwrap();
+        delete_profile_from_config(&cfg_path, "beta").unwrap();
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        assert_eq!(cf.profile.len(), 2);
+        assert!(cf.profile.contains_key("alpha"));
+        assert!(!cf.profile.contains_key("beta"));
+        assert!(cf.profile.contains_key("gamma"));
+    }
+
+    // ── switch_active_profile: additional coverage ────────────────────────
+
+    #[test]
+    fn switch_active_profile_preserves_all_profiles() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg_path = temp.path().join("config.toml");
+        std::fs::write(
+            &cfg_path,
+            "default_profile = \"default\"\n\
+             [profile.default]\nprovider = \"anthropic\"\nmodel = \"m1\"\napi_key = \"k1\"\n\
+             [profile.work]\nprovider = \"openai\"\nmodel = \"m2\"\napi_key = \"k2\"\n",
+        )
+        .unwrap();
+        switch_active_profile(&cfg_path, "work").unwrap();
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        assert_eq!(cf.default_profile, "work");
+        assert!(cf.profile.contains_key("default"));
+        assert!(cf.profile.contains_key("work"));
+        assert_eq!(cf.profile["default"].model, "m1");
+    }
+
+    #[test]
+    fn switch_active_profile_to_nonexistent_profile_succeeds() {
+        // The function just writes the string; it doesn't validate the profile exists.
+        let temp = tempfile::tempdir().unwrap();
+        let cfg_path = temp.path().join("config.toml");
+        std::fs::write(
+            &cfg_path,
+            "default_profile = \"default\"\n\
+             [profile.default]\nprovider = \"anthropic\"\nmodel = \"m\"\napi_key = \"k\"\n",
+        )
+        .unwrap();
+        let result = switch_active_profile(&cfg_path, "nonexistent");
+        assert!(result.is_ok());
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        assert_eq!(cf.default_profile, "nonexistent");
+    }
+
+    #[test]
+    fn switch_active_profile_preserves_hyphen_format_key() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg_path = temp.path().join("config.toml");
+        // Config written with hyphen-style key
+        std::fs::write(
+            &cfg_path,
+            "default-profile = \"default\"\n\
+             [profile.default]\nprovider = \"anthropic\"\nmodel = \"m\"\napi_key = \"k\"\n\
+             [profile.alt]\nprovider = \"openai\"\nmodel = \"m2\"\napi_key = \"k2\"\n",
+        )
+        .unwrap();
+        switch_active_profile(&cfg_path, "alt").unwrap();
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        assert_eq!(cf.default_profile, "alt");
+    }
+
+    #[test]
+    fn switch_active_profile_on_missing_file_returns_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg_path = temp.path().join("does_not_exist.toml");
+        let result = switch_active_profile(&cfg_path, "anything");
+        assert!(result.is_err());
+    }
+
+    // ── load_config: additional coverage ──────────────────────────────────
+
+    #[test]
+    fn load_config_finds_config_in_parent_directory() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        // Place config in parent's .clido/config.toml
+        let parent = temp.path();
+        let clido_dir = parent.join(".clido");
+        std::fs::create_dir_all(&clido_dir).unwrap();
+        std::fs::write(
+            clido_dir.join("config.toml"),
+            "default_profile = \"default\"\n\
+             [profile.default]\nprovider = \"anthropic\"\nmodel = \"from-parent\"\napi_key = \"k\"\n",
+        )
+        .unwrap();
+        // Create a child directory with no config
+        let child = parent.join("subproject");
+        std::fs::create_dir_all(&child).unwrap();
+
+        // Point CLIDO_CONFIG to a non-existent path to skip global config
+        let nonexistent = temp.path().join("no_global.toml");
+        unsafe { std::env::set_var("CLIDO_CONFIG", &nonexistent) };
+        let loaded = load_config(&child).unwrap();
+        unsafe { std::env::remove_var("CLIDO_CONFIG") };
+        assert_eq!(loaded.profiles["default"].model, "from-parent");
+    }
+
+    #[test]
+    fn load_config_no_config_anywhere_returns_error() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        // Override CLIDO_CONFIG to skip global config
+        let nonexistent = temp.path().join("no_global.toml");
+        unsafe { std::env::set_var("CLIDO_CONFIG", &nonexistent) };
+        let result = load_config(temp.path());
+        unsafe { std::env::remove_var("CLIDO_CONFIG") };
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("clido init"), "expected init hint in: {}", msg);
+    }
+
+    #[test]
+    fn load_config_project_config_overrides_global_agent_settings() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        // Global config with agent settings
+        let global_cfg = temp.path().join("global.toml");
+        std::fs::write(
+            &global_cfg,
+            "default_profile = \"default\"\n\
+             [profile.default]\nprovider = \"anthropic\"\nmodel = \"m\"\napi_key = \"k\"\n\
+             [agent]\nmax-turns = 50\nquiet = true\n",
+        )
+        .unwrap();
+        // Project config overrides max-turns
+        let project = temp.path().join("project");
+        std::fs::create_dir_all(project.join(".clido")).unwrap();
+        std::fs::write(
+            project.join(".clido").join("config.toml"),
+            "[agent]\nmax-turns = 300\n",
+        )
+        .unwrap();
+        unsafe { std::env::set_var("CLIDO_CONFIG", &global_cfg) };
+        let loaded = load_config(&project).unwrap();
+        unsafe { std::env::remove_var("CLIDO_CONFIG") };
+        assert_eq!(loaded.agent.max_turns, 300);
+        // quiet is OR'd: global true || project false(default) = true
+        assert!(loaded.agent.quiet);
+    }
+
+    #[test]
+    fn load_config_merges_profiles_from_global_and_project() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let global_cfg = temp.path().join("global.toml");
+        std::fs::write(
+            &global_cfg,
+            "default_profile = \"global-prof\"\n\
+             [profile.global-prof]\nprovider = \"anthropic\"\nmodel = \"m-global\"\napi_key = \"k1\"\n",
+        )
+        .unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir_all(project.join(".clido")).unwrap();
+        std::fs::write(
+            project.join(".clido").join("config.toml"),
+            "default_profile = \"local-prof\"\n\
+             [profile.local-prof]\nprovider = \"openai\"\nmodel = \"m-local\"\napi_key = \"k2\"\n",
+        )
+        .unwrap();
+        unsafe { std::env::set_var("CLIDO_CONFIG", &global_cfg) };
+        let loaded = load_config(&project).unwrap();
+        unsafe { std::env::remove_var("CLIDO_CONFIG") };
+        // Both profiles available
+        assert!(loaded.profiles.contains_key("global-prof"));
+        assert!(loaded.profiles.contains_key("local-prof"));
+        // Project default wins
+        assert_eq!(loaded.default_profile, "local-prof");
+    }
+
+    // ── agent_config_from_loaded: additional coverage ─────────────────────
+
+    #[test]
+    fn agent_config_from_loaded_partial_cli_overrides() {
+        // Only some CLI args provided, rest should come from config
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "default".to_string(),
+            ProfileEntry {
+                provider: "anthropic".to_string(),
+                model: "config-model".to_string(),
+                api_key: Some("k".to_string()),
+                api_key_env: None,
+                base_url: None,
+                user_agent: None,
+                worker: None,
+                reviewer: None,
+            },
+        );
+        let loaded = LoadedConfig {
+            default_profile: "default".to_string(),
+            profiles,
+            agent: AgentSection {
+                max_turns: 150,
+                max_budget_usd: Some(5.0),
+                max_concurrent_tools: Some(6),
+                quiet: true,
+                ..Default::default()
+            },
+            tools: ToolsSection::default(),
+            context: ContextSection::default(),
+            workflows: WorkflowsSection::default(),
+            hooks: HooksConfig::default(),
+            index: IndexSection::default(),
+            roles: RolesSection::default(),
+            agents: crate::config::AgentsConfig::default(),
+        };
+        // Override only max_turns via CLI
+        let cfg = agent_config_from_loaded(
+            &loaded,
+            "default",
+            Some(10),     // CLI override
+            None,         // config's max_budget_usd should be used
+            None,         // config's model should be used
+            None,
+            None,
+            false,        // CLI quiet=false, but config quiet=true → OR'd = true
+            None,         // config's max_concurrent_tools should be used
+        )
+        .unwrap();
+        assert_eq!(cfg.max_turns, 10);
+        assert_eq!(cfg.max_budget_usd, Some(5.0));
+        assert_eq!(cfg.model, "config-model");
+        assert!(cfg.quiet);
+        assert_eq!(cfg.max_parallel_tools, 6);
+    }
+
+    #[test]
+    fn agent_config_from_loaded_with_config_agent_settings() {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "default".to_string(),
+            ProfileEntry {
+                provider: "openai".to_string(),
+                model: "gpt-4o".to_string(),
+                api_key: Some("sk".to_string()),
+                api_key_env: None,
+                base_url: None,
+                user_agent: None,
+                worker: None,
+                reviewer: None,
+            },
+        );
+        let loaded = LoadedConfig {
+            default_profile: "default".to_string(),
+            profiles,
+            agent: AgentSection {
+                max_turns: 75,
+                max_budget_usd: Some(10.0),
+                max_concurrent_tools: Some(12),
+                quiet: false,
+                no_rules: true,
+                rules_file: Some("custom-rules.md".to_string()),
+                max_output_tokens: Some(4096),
+                ..Default::default()
+            },
+            tools: ToolsSection::default(),
+            context: ContextSection {
+                compaction_threshold: 0.5,
+                max_context_tokens: Some(100_000),
+            },
+            workflows: WorkflowsSection::default(),
+            hooks: HooksConfig::default(),
+            index: IndexSection::default(),
+            roles: RolesSection::default(),
+            agents: crate::config::AgentsConfig::default(),
+        };
+        let cfg = agent_config_from_loaded(
+            &loaded, "default", None, None, None, None, None, false, None,
+        )
+        .unwrap();
+        assert_eq!(cfg.max_turns, 75);
+        assert_eq!(cfg.max_budget_usd, Some(10.0));
+        assert_eq!(cfg.max_parallel_tools, 12);
+        assert!(cfg.no_rules);
+        assert_eq!(cfg.rules_file.as_deref(), Some("custom-rules.md"));
+        assert_eq!(cfg.max_output_tokens, Some(4096));
+        assert_eq!(cfg.max_context_tokens, Some(100_000));
+        assert!((cfg.compaction_threshold.unwrap() - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn agent_config_from_loaded_cli_quiet_overrides_config() {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "default".to_string(),
+            ProfileEntry {
+                provider: "anthropic".to_string(),
+                model: "m".to_string(),
+                api_key: Some("k".to_string()),
+                api_key_env: None,
+                base_url: None,
+                user_agent: None,
+                worker: None,
+                reviewer: None,
+            },
+        );
+        let loaded = LoadedConfig {
+            default_profile: "default".to_string(),
+            profiles,
+            agent: AgentSection {
+                quiet: false,
+                ..Default::default()
+            },
+            tools: ToolsSection::default(),
+            context: ContextSection::default(),
+            workflows: WorkflowsSection::default(),
+            hooks: HooksConfig::default(),
+            index: IndexSection::default(),
+            roles: RolesSection::default(),
+            agents: crate::config::AgentsConfig::default(),
+        };
+        let cfg = agent_config_from_loaded(
+            &loaded, "default", None, None, None, None, None, true, None,
+        )
+        .unwrap();
+        assert!(cfg.quiet);
+    }
+
+    #[test]
+    fn agent_config_from_loaded_default_parallel_tools_when_none_set() {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "default".to_string(),
+            ProfileEntry {
+                provider: "anthropic".to_string(),
+                model: "m".to_string(),
+                api_key: Some("k".to_string()),
+                api_key_env: None,
+                base_url: None,
+                user_agent: None,
+                worker: None,
+                reviewer: None,
+            },
+        );
+        let loaded = LoadedConfig {
+            default_profile: "default".to_string(),
+            profiles,
+            agent: AgentSection {
+                max_concurrent_tools: None,
+                ..Default::default()
+            },
+            tools: ToolsSection::default(),
+            context: ContextSection::default(),
+            workflows: WorkflowsSection::default(),
+            hooks: HooksConfig::default(),
+            index: IndexSection::default(),
+            roles: RolesSection::default(),
+            agents: crate::config::AgentsConfig::default(),
+        };
+        let cfg = agent_config_from_loaded(
+            &loaded, "default", None, None, None, None, None, false, None,
+        )
+        .unwrap();
+        // Default is 4 when neither CLI nor config specifies
+        assert_eq!(cfg.max_parallel_tools, 4);
+    }
+
+    // ── roundtrip: upsert then load ──────────────────────────────────────
+
+    #[test]
+    fn upsert_then_load_roundtrip() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let clido_dir = temp.path().join(".clido");
+        std::fs::create_dir_all(&clido_dir).unwrap();
+        let cfg_path = clido_dir.join("config.toml");
+        let entry = ProfileEntry {
+            provider: "anthropic".to_string(),
+            model: "claude-haiku".to_string(),
+            api_key: Some("sk-test".to_string()),
+            api_key_env: None,
+            base_url: None,
+            user_agent: None,
+            worker: None,
+            reviewer: None,
+        };
+        upsert_profile_in_config(&cfg_path, "myprofile", &entry).unwrap();
+        // Point CLIDO_CONFIG away so only the project config is found
+        let nonexistent = temp.path().join("no_global.toml");
+        unsafe { std::env::set_var("CLIDO_CONFIG", &nonexistent) };
+        let loaded = load_config(temp.path()).unwrap();
+        unsafe { std::env::remove_var("CLIDO_CONFIG") };
+        assert_eq!(loaded.profiles["myprofile"].provider, "anthropic");
+        assert_eq!(loaded.profiles["myprofile"].model, "claude-haiku");
+        assert_eq!(loaded.default_profile, "myprofile");
+    }
+
+    #[test]
+    fn upsert_delete_switch_roundtrip() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg_path = temp.path().join("config.toml");
+        // Start with one profile
+        let entry_a = ProfileEntry {
+            provider: "anthropic".to_string(),
+            model: "m-a".to_string(),
+            api_key: Some("k-a".to_string()),
+            api_key_env: None,
+            base_url: None,
+            user_agent: None,
+            worker: None,
+            reviewer: None,
+        };
+        upsert_profile_in_config(&cfg_path, "alpha", &entry_a).unwrap();
+        // Add second profile
+        let entry_b = ProfileEntry {
+            provider: "openai".to_string(),
+            model: "m-b".to_string(),
+            api_key: Some("k-b".to_string()),
+            api_key_env: None,
+            base_url: None,
+            user_agent: None,
+            worker: None,
+            reviewer: None,
+        };
+        upsert_profile_in_config(&cfg_path, "beta", &entry_b).unwrap();
+        // Switch default to beta
+        switch_active_profile(&cfg_path, "beta").unwrap();
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        assert_eq!(cf.default_profile, "beta");
+        // Delete alpha (non-default)
+        delete_profile_from_config(&cfg_path, "alpha").unwrap();
+        let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        assert!(!cf.profile.contains_key("alpha"));
+        assert!(cf.profile.contains_key("beta"));
+        assert_eq!(cf.default_profile, "beta");
     }
 }

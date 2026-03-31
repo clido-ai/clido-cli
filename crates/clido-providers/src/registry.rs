@@ -255,3 +255,241 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_subscription: false,
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Registry invariants ───────────────────────────────────────────
+
+    #[test]
+    fn registry_is_not_empty() {
+        assert!(
+            !PROVIDER_REGISTRY.is_empty(),
+            "PROVIDER_REGISTRY must contain at least one provider"
+        );
+    }
+
+    #[test]
+    fn all_provider_ids_are_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for p in PROVIDER_REGISTRY {
+            assert!(seen.insert(p.id), "duplicate provider id: {}", p.id);
+        }
+    }
+
+    #[test]
+    fn all_providers_have_non_empty_id_and_name() {
+        for p in PROVIDER_REGISTRY {
+            assert!(!p.id.is_empty(), "provider id must not be empty");
+            assert!(!p.name.is_empty(), "provider name must not be empty for {}", p.id);
+        }
+    }
+
+    #[test]
+    fn all_providers_have_non_empty_base_url() {
+        for p in PROVIDER_REGISTRY {
+            assert!(!p.base_url.is_empty(), "base_url must not be empty for {}", p.id);
+        }
+    }
+
+    #[test]
+    fn all_providers_have_non_empty_default_model() {
+        for p in PROVIDER_REGISTRY {
+            assert!(
+                !p.default_model.is_empty(),
+                "default_model must not be empty for {}",
+                p.id
+            );
+        }
+    }
+
+    // ── is_subscription flag ──────────────────────────────────────────
+
+    #[test]
+    fn kimi_code_is_subscription() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "kimi-code").unwrap();
+        assert!(p.is_subscription, "kimi-code should be a subscription provider");
+    }
+
+    #[test]
+    fn non_subscription_providers() {
+        let expected_non_sub = [
+            "openrouter",
+            "anthropic",
+            "openai",
+            "mistral",
+            "minimax",
+            "kimi",
+            "alibabacloud",
+            "deepseek",
+            "groq",
+            "cerebras",
+            "togetherai",
+            "fireworks",
+            "xai",
+            "perplexity",
+            "gemini",
+            "local",
+        ];
+        for id in expected_non_sub {
+            let p = PROVIDER_REGISTRY
+                .iter()
+                .find(|p| p.id == id)
+                .unwrap_or_else(|| panic!("provider {} not found", id));
+            assert!(
+                !p.is_subscription,
+                "{} should NOT be a subscription provider",
+                id
+            );
+        }
+    }
+
+    // ── is_subscription_provider() helper ─────────────────────────────
+
+    #[test]
+    fn is_subscription_provider_returns_true_for_kimi_code() {
+        assert!(is_subscription_provider("kimi-code"));
+    }
+
+    #[test]
+    fn is_subscription_provider_returns_false_for_openai() {
+        assert!(!is_subscription_provider("openai"));
+    }
+
+    #[test]
+    fn is_subscription_provider_returns_false_for_unknown() {
+        assert!(!is_subscription_provider("nonexistent-provider"));
+    }
+
+    #[test]
+    fn is_subscription_provider_returns_false_for_empty_string() {
+        assert!(!is_subscription_provider(""));
+    }
+
+    // ── api_key_env per provider ──────────────────────────────────────
+
+    #[test]
+    fn api_key_env_openrouter() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "openrouter").unwrap();
+        assert_eq!(p.api_key_env, "OPENROUTER_API_KEY");
+    }
+
+    #[test]
+    fn api_key_env_anthropic() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "anthropic").unwrap();
+        assert_eq!(p.api_key_env, "ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn api_key_env_openai() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "openai").unwrap();
+        assert_eq!(p.api_key_env, "OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn api_key_env_deepseek() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "deepseek").unwrap();
+        assert_eq!(p.api_key_env, "DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn api_key_env_gemini() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "gemini").unwrap();
+        assert_eq!(p.api_key_env, "GEMINI_API_KEY");
+    }
+
+    #[test]
+    fn api_key_env_groq() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "groq").unwrap();
+        assert_eq!(p.api_key_env, "GROQ_API_KEY");
+    }
+
+    #[test]
+    fn api_key_env_local_is_empty() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "local").unwrap();
+        assert_eq!(p.api_key_env, "", "local provider should have no API key env var");
+    }
+
+    #[test]
+    fn api_key_env_xai() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "xai").unwrap();
+        assert_eq!(p.api_key_env, "XAI_API_KEY");
+    }
+
+    #[test]
+    fn api_key_env_mistral() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "mistral").unwrap();
+        assert_eq!(p.api_key_env, "MISTRAL_API_KEY");
+    }
+
+    #[test]
+    fn api_key_env_alibabacloud() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "alibabacloud").unwrap();
+        assert_eq!(p.api_key_env, "DASHSCOPE_API_KEY");
+    }
+
+    // ── is_local / is_anthropic flags ─────────────────────────────────
+
+    #[test]
+    fn only_local_provider_is_local() {
+        for p in PROVIDER_REGISTRY {
+            if p.id == "local" {
+                assert!(p.is_local, "local provider should have is_local=true");
+            } else {
+                assert!(!p.is_local, "{} should not have is_local=true", p.id);
+            }
+        }
+    }
+
+    #[test]
+    fn only_anthropic_provider_is_anthropic() {
+        for p in PROVIDER_REGISTRY {
+            if p.id == "anthropic" {
+                assert!(p.is_anthropic, "anthropic should have is_anthropic=true");
+            } else {
+                assert!(!p.is_anthropic, "{} should not have is_anthropic=true", p.id);
+            }
+        }
+    }
+
+    // ── Non-local providers must have an API key env var ──────────────
+
+    #[test]
+    fn non_local_providers_have_api_key_env() {
+        for p in PROVIDER_REGISTRY {
+            if !p.is_local {
+                assert!(
+                    !p.api_key_env.is_empty(),
+                    "non-local provider {} must have an api_key_env",
+                    p.id
+                );
+            }
+        }
+    }
+
+    // ── Extra headers ─────────────────────────────────────────────────
+
+    #[test]
+    fn openrouter_has_extra_headers() {
+        let p = PROVIDER_REGISTRY.iter().find(|p| p.id == "openrouter").unwrap();
+        assert!(
+            !p.extra_headers.is_empty(),
+            "openrouter should have extra headers"
+        );
+        let keys: Vec<&str> = p.extra_headers.iter().map(|(k, _)| *k).collect();
+        assert!(keys.contains(&"HTTP-Referer"));
+        assert!(keys.contains(&"X-Title"));
+    }
+
+    #[test]
+    fn most_providers_have_no_extra_headers() {
+        let with_headers: Vec<&str> = PROVIDER_REGISTRY
+            .iter()
+            .filter(|p| !p.extra_headers.is_empty())
+            .map(|p| p.id)
+            .collect();
+        // Only openrouter should have extra headers
+        assert_eq!(with_headers, vec!["openrouter"]);
+    }
+}

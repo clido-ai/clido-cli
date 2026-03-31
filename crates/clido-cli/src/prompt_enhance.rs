@@ -43,11 +43,11 @@ Your ONLY job is to transform the user's raw input into a **clear, structured ta
 
 You do NOT execute tasks. You ONLY produce the enhanced prompt.
 
-## CRITICAL RULES — read these first
+## RULES
 
-1. **NEVER add scope the user did not ask for.** If the user says "fix the login bug", do NOT add "and write tests, update docs, refactor auth". Only include what is explicitly or obviously implied.
-2. **NEVER invent requirements.** Do not assume coding standards, performance targets, or architectural preferences unless the user stated them or the repo context makes them obvious.
-3. **When in doubt, leave it out.** A slightly under-specified plan is better than one that sends the agent on a wild goose chase.
+1. **Include what is obviously implied.** If the user says "add pagination to the users endpoint", it is obvious that existing tests should be updated and new tests added for the pagination. Include standard engineering practices (tests, error handling, validation) when they are a natural part of the task.
+2. **Do NOT invent unrelated scope.** "Fix the login bug" does NOT mean "also refactor auth, update docs, and add logging". Stick to the task and its natural implications.
+3. **Do NOT invent requirements.** Do not assume coding standards, performance targets, or architectural preferences unless the user stated them or the repo context makes them obvious.
 4. **Keep it proportional.** A one-line request gets a short, focused plan. A detailed multi-paragraph request gets a thorough plan.
 5. **Do NOT produce code.** Only produce the enhanced prompt text.
 6. **Output ONLY the enhanced prompt.** No meta-commentary, no "here is your enhanced prompt", no markdown fences around the whole output.{ctx_block}
@@ -57,14 +57,14 @@ You do NOT execute tasks. You ONLY produce the enhanced prompt.
 Given the user's prompt, produce a structured plan covering ONLY what is relevant:
 
 - **Task**: Restate what the user wants in precise terms.
-- **Scope**: What is in scope (only what the user asked). What is explicitly out of scope (if ambiguity exists).
+- **Scope**: What is in scope (task + natural implications like tests). What is explicitly out of scope (if ambiguity exists).
 - **Steps**: Concrete, ordered steps the agent should take. Each step should be directly actionable.
-- **Verification**: How the agent should verify correctness (tests to run, behavior to check).
+- **Verification**: How the agent should verify correctness (tests to run, build checks, behavior to confirm).
 - **Risks**: Potential issues or edge cases the agent should watch for (only if non-obvious).
 
 ## ADAPTATION RULES
 
-- If the prompt is **vague or short**: expand the task understanding, suggest what to inspect first, but do NOT add scope.
+- If the prompt is **vague or short**: expand the task understanding, suggest what to inspect first, but stay within the natural scope.
 - If the prompt is **already detailed**: tighten it into ordered steps without adding anything new.
 - If the task is **small** (< 5 min of work): keep the plan to 3-5 lines. Do not over-expand.
 - If the task is **large**: break it into phases with clear boundaries.
@@ -104,8 +104,8 @@ mod tests {
     #[test]
     fn system_prompt_contains_critical_guardrails() {
         let prompt = build_system_prompt(None);
-        assert!(prompt.contains("NEVER add scope"));
-        assert!(prompt.contains("NEVER invent requirements"));
+        assert!(prompt.contains("obviously implied"));
+        assert!(prompt.contains("Do NOT invent unrelated scope"));
         assert!(prompt.contains("Do NOT produce code"));
     }
 

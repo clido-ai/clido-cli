@@ -43,6 +43,21 @@ pub fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duratio
     parse_retry_after_secs(headers).map(|secs| Duration::from_secs(secs.min(300)))
 }
 
+// ── Subscription / quota detection ───────────────────────────────────────────
+
+/// Heuristic: does this rate-limit look like a subscription/quota limit rather
+/// than a transient burst limit?
+///
+/// Long retry-after (>5 min) or specific keywords in the error body indicate a
+/// quota/subscription limit that won't reset soon.
+pub fn is_subscription_limit(retry_after_secs: Option<u64>, body: &str) -> bool {
+    retry_after_secs.is_some_and(|s| s > 300)
+        || body.contains("quota")
+        || body.contains("subscription")
+        || body.contains("limit exceeded")
+        || body.contains("allowance")
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

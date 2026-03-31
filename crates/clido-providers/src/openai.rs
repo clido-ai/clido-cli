@@ -301,11 +301,8 @@ impl OpenAICompatProvider {
 
                 // Subscription/quota limits have long reset times (>5min) or
                 // specific error messages about quotas/subscriptions.
-                let is_subscription = retry_after_secs.is_some_and(|s| s > 300)
-                    || body.contains("quota")
-                    || body.contains("subscription")
-                    || body.contains("limit exceeded")
-                    || body.contains("allowance");
+                let is_subscription =
+                    crate::backoff::is_subscription_limit(retry_after_secs, &body);
 
                 if is_subscription {
                     // Don't retry subscription limits — they won't reset soon.
@@ -771,11 +768,7 @@ impl ModelProvider for OpenAICompatProvider {
             let preview: String = text.chars().take(300).collect();
             if status.as_u16() == 429 {
                 let lower = preview.to_lowercase();
-                let is_sub = retry_after.is_some_and(|s| s > 300)
-                    || lower.contains("quota")
-                    || lower.contains("subscription")
-                    || lower.contains("limit exceeded")
-                    || lower.contains("allowance");
+                let is_sub = crate::backoff::is_subscription_limit(retry_after, &lower);
                 return Err(ClidoError::RateLimited {
                     message: format!("429 (model: {}): {}", self.model, preview),
                     retry_after_secs: retry_after,

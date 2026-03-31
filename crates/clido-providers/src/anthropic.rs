@@ -149,11 +149,8 @@ impl AnthropicProvider {
                 let body = res.text().await.unwrap_or_default();
 
                 // Subscription/quota limits have long reset times or specific error text.
-                let is_subscription = retry_after_secs.is_some_and(|s| s > 300)
-                    || body.contains("quota")
-                    || body.contains("subscription")
-                    || body.contains("limit exceeded")
-                    || body.contains("allowance");
+                let is_subscription =
+                    crate::backoff::is_subscription_limit(retry_after_secs, &body);
 
                 if is_subscription {
                     let reset_msg = if let Some(secs) = retry_after_secs {

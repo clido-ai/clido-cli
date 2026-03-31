@@ -342,6 +342,16 @@ impl AgentLoop {
         &self.config.model
     }
 
+    /// Check if the budget has been exceeded and return an error if so.
+    fn check_budget_exceeded(&self) -> Result<()> {
+        if let Some(limit) = self.config.max_budget_usd {
+            if self.cumulative_cost_usd > limit {
+                return Err(ClidoError::BudgetExceeded);
+            }
+        }
+        Ok(())
+    }
+
     fn fast_config(&self) -> AgentConfig {
         if let Some(ref fast) = self.fast_model {
             AgentConfig {
@@ -647,11 +657,7 @@ impl AgentLoop {
             self.cumulative_cache_creation_tokens +=
                 response.usage.cache_creation_input_tokens.unwrap_or(0);
 
-            if let Some(limit) = self.config.max_budget_usd {
-                if self.cumulative_cost_usd > limit {
-                    return Err(ClidoError::BudgetExceeded);
-                }
-            }
+            self.check_budget_exceeded()?;
 
             self.history.push(Message {
                 role: Role::Assistant,
@@ -1216,12 +1222,11 @@ impl AgentLoop {
                 response.usage.cache_creation_input_tokens.unwrap_or(0);
 
             // Budget hard stop
-            if let Some(limit) = self.config.max_budget_usd {
-                if self.cumulative_cost_usd > limit {
-                    return Err(ClidoError::BudgetExceeded);
-                }
+            self.check_budget_exceeded()?;
                 // Budget warnings at 50%, 80%, 90% of limit
-                if let Some(ref e) = self.emit {
+                if let (Some(limit), Some(ref e)) =
+                    (self.config.max_budget_usd, &self.emit)
+                {
                     let pct_used = (self.cumulative_cost_usd / limit * 100.0).floor() as u8;
                     for &threshold_pct in BUDGET_WARNING_PCTS {
                         if pct_used >= threshold_pct
@@ -1233,7 +1238,6 @@ impl AgentLoop {
                         }
                     }
                 }
-            }
 
             debug!(
                 "turn {} stop_reason={:?} usage={}/{}",

@@ -15,7 +15,6 @@ clido-storage = { path = "../clido-storage" }
 clido-tools = { path = "../clido-tools" }
 async-trait = { workspace = true }
 futures = { workspace = true }
-serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }

@@ -481,7 +481,6 @@ dependencies = [
  "clido-storage",
  "clido-tools",
  "futures",
- "serde",
  "serde_json",
  "similar",
  "tempfile",
@@ -498,7 +497,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "similar",
  "tempfile",
  "thiserror 1.0.69",
  "uuid",
@@ -581,9 +579,7 @@ dependencies = [
  "ignore",
  "regex",
  "rusqlite",
- "serde",
  "tempfile",
- "walkdir",
 ]
 
 [[package]]
@@ -593,7 +589,6 @@ dependencies = [
  "anyhow",
  "chrono",
  "rusqlite",
- "serde",
  "serde_json",
  "tempfile",
  "uuid",
@@ -603,7 +598,6 @@ dependencies = [
 name = "clido-planner"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "futures",
  "serde",
@@ -640,8 +634,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
- "thiserror 1.0.69",
- "uuid",
 ]
 
 [[package]]
@@ -674,7 +666,6 @@ dependencies = [
 name = "clido-workflows"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "chrono",
  "clido-core",
@@ -684,7 +675,6 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "tera",
- "thiserror 1.0.69",
  "tokio",
 ]
 

@@ -8,9 +8,7 @@ doctest = false
 
 [dependencies]
 rusqlite = { version = "0.31", features = ["bundled"] }
-serde = { workspace = true }
 anyhow = { workspace = true }
-walkdir = "2"
 regex = { workspace = true }
 ignore = { workspace = true }
 glob = { workspace = true }

@@ -244,9 +244,9 @@ impl OpenAICompatProvider {
             .as_array_mut()
             .expect("messages field must be an array")
             .insert(
-            0,
-            serde_json::json!({ "role": "system", "content": system_content }),
-        );
+                0,
+                serde_json::json!({ "role": "system", "content": system_content }),
+            );
         if !openai_tools.is_empty() {
             body["tools"] = serde_json::Value::Array(openai_tools);
             body["tool_choice"] = serde_json::json!("auto");
@@ -739,9 +739,9 @@ impl ModelProvider for OpenAICompatProvider {
             .as_array_mut()
             .expect("messages field must be an array")
             .insert(
-            0,
-            serde_json::json!({ "role": "system", "content": system_content }),
-        );
+                0,
+                serde_json::json!({ "role": "system", "content": system_content }),
+            );
         if !openai_tools.is_empty() {
             body["tools"] = serde_json::Value::Array(openai_tools);
             body["tool_choice"] = serde_json::json!("auto");

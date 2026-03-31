@@ -2,7 +2,7 @@
 # Clido installer — https://github.com/0xkurt/clido
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh
 #
 # Options (via env vars):
 #   CLIDO_VERSION   Install a specific version (e.g. "v0.1.0"). Default: latest.

@@ -3,7 +3,7 @@
 ## Quick install (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh
 ```
 
 This detects your OS and architecture, downloads the latest release binary, and installs it to `~/.local/bin`.
@@ -12,10 +12,10 @@ This detects your OS and architecture, downloads the latest release binary, and 
 
 ```bash
 # Install a specific version
-CLIDO_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/main/scripts/install.sh | sh
+CLIDO_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh
 
 # Install to a custom directory
-CLIDO_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/main/scripts/install.sh | sh
+CLIDO_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh
 ```
 
 **Supported platforms:** macOS (arm64, x86_64), Linux (x86_64, aarch64)

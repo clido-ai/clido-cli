@@ -121,7 +121,6 @@ mod tests {
             false,
             Vec::new(),
             clido_core::ModelPrefs::default(),
-            std::collections::HashMap::new(),
             "default".to_string(),
             Arc::new(AtomicBool::new(false)),
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -1433,18 +1432,6 @@ mod tests {
             has_picker || has_info,
             "'/sessions' should open picker or show info"
         );
-    }
-
-    #[test]
-    fn e2e_role_add_and_list() {
-        let mut app = make_test_app();
-        // Add a role
-        execute_slash(&mut app, "/role add fast gpt-4o-mini");
-        let has_confirm = app.messages.iter().any(|l| match l {
-            ChatLine::Info(s) => s.contains("fast"),
-            _ => false,
-        });
-        assert!(has_confirm, "role add should confirm with role name");
     }
 
     #[test]

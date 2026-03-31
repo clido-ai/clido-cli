@@ -1213,7 +1213,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         // Rebuild known_models with updated favorites.
                         let (pricing, _) = clido_core::load_pricing();
                         app.known_models =
-                            build_model_list(&pricing, &app.config_roles, &app.model_prefs);
+                            build_model_list(&pricing, &app.model_prefs);
                         picker.models = app.known_models.clone();
                         picker.clamp();
                     }
@@ -1353,37 +1353,6 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             _ => {
                 if let Some(picker) = &mut app.profile_picker {
-                    picker.picker.handle_key(event);
-                }
-            }
-        }
-        return;
-    }
-
-    // ── Role picker (modal) ───────────────────────────────────────────────────
-    if app.role_picker.is_some() {
-        match event.code {
-            Enter => {
-                if let Some(picker) = app.role_picker.take() {
-                    if let Some((role_name, model_id)) = picker.picker.selected_item() {
-                        let model_id = model_id.clone();
-                        let role_name = role_name.clone();
-                        app.model = model_id.clone();
-                        let _ = app.channels.model_switch_tx.send(model_id.clone());
-                        app.model_prefs.push_recent(&model_id);
-                        app.model_prefs.save();
-                        app.push(ChatLine::Info(format!(
-                            "  ✓ Model: {} (alias: {})",
-                            model_id, role_name
-                        )));
-                    }
-                }
-            }
-            Esc => {
-                app.role_picker = None;
-            }
-            _ => {
-                if let Some(picker) = &mut app.role_picker {
                     picker.picker.handle_key(event);
                 }
             }

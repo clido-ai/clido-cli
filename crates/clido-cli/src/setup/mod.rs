@@ -43,16 +43,12 @@ const SETUP_INPUT_ACCENT: Color = Color::Rgb(150, 200, 255);
 const PROFILE_NAME_PREFIX: &str = "  Profile name: ";
 
 /// Options shown on the sub-agent intro screen.
-const SUBAGENT_OPTIONS: &[(&str, &str)] = &[
+const FAST_PROVIDER_OPTIONS: &[(&str, &str)] = &[
     (
-        "Worker sub-agent",
-        "cheaper model handles file filtering, summarizing, formatting",
+        "Configure fast provider",
+        "cheaper model handles titles, summaries, utility tasks",
     ),
-    (
-        "Worker + Reviewer",
-        "worker for mechanical tasks, reviewer for quality checks",
-    ),
-    ("Skip for now", "can add sub-agents later via /settings"),
+    ("Skip for now", "can add a fast provider later via /profile"),
 ];
 
 // ── TUI entry point ───────────────────────────────────────────────────────────
@@ -269,7 +265,6 @@ pub async fn run_first_run_setup() -> Result<(), anyhow::Error> {
         provider: provider_id.to_string(),
         api_key: std::env::var(env_var).unwrap_or_default(),
         model: String::new(),
-        roles: Vec::new(),
         profile_name: String::new(),
         is_new_profile: false,
         saved_api_keys: Vec::new(),
@@ -304,7 +299,6 @@ pub async fn run_create_profile(initial_name: Option<String>) -> Result<(), anyh
         provider: String::new(),
         api_key: String::new(),
         model: String::new(),
-        roles: Vec::new(),
         profile_name: initial_name.clone().unwrap_or_default(),
         is_new_profile: initial_name.is_none(), // show ProfileName step if no name given
         saved_api_keys,
@@ -392,7 +386,6 @@ pub async fn run_edit_profile(
         provider: entry.provider.clone(),
         api_key,
         model: entry.model.clone(),
-        roles: Vec::new(),
         profile_name: name.clone(),
         is_new_profile: false,
         saved_api_keys,
@@ -722,127 +715,74 @@ mod tests {
     }
 
     #[test]
-    fn build_toml_agents_with_worker_configured() {
+    fn build_toml_with_fast_provider_configured() {
         let mut s = SetupState::new();
         s.provider = 1; // Anthropic (main)
         s.model = "claude-sonnet-4-5".to_string();
         s.credential = "sk-ant-main-key".to_string();
-        s.configure_worker = true;
-        s.worker_provider = 2; // OpenAI
-        s.worker_model = "gpt-4o-mini".to_string();
-        s.worker_credential = "sk-openai-worker-key".to_string();
+        s.configure_fast = true;
+        s.fast_provider_idx = 2; // OpenAI
+        s.fast_model = "gpt-4o-mini".to_string();
+        s.fast_credential = "sk-openai-fast-key".to_string();
         let toml = build_toml(&s);
         assert!(
-            toml.contains("[agents.worker]"),
-            "agents.worker section missing"
+            toml.contains("[profile.default.fast]"),
+            "fast provider section missing"
         );
         assert!(
             toml.contains("provider = \"openai\""),
-            "worker provider missing"
+            "fast provider missing"
         );
         assert!(
             toml.contains("model = \"gpt-4o-mini\""),
-            "worker model missing"
-        );
-        assert!(
-            !toml.contains("api_key ="),
-            "api_key must not appear in config.toml"
-        );
-        assert!(
-            !toml.contains("api_key_env"),
-            "worker must not use api_key_env"
+            "fast model missing"
         );
     }
 
     #[test]
-    fn build_toml_agents_with_reviewer_configured() {
-        let mut s = SetupState::new();
-        s.provider = 0; // OpenRouter (main)
-        s.model = "anthropic/claude-3-5-sonnet".to_string();
-        s.credential = "sk-or-main-key".to_string();
-        s.configure_reviewer = true;
-        s.reviewer_provider = 1; // Anthropic
-        s.reviewer_model = "claude-opus-4-6".to_string();
-        s.reviewer_credential = "sk-ant-reviewer-key".to_string();
-        let toml = build_toml(&s);
-        assert!(
-            toml.contains("[agents.reviewer]"),
-            "agents.reviewer section missing"
-        );
-        assert!(
-            toml.contains("provider = \"anthropic\""),
-            "reviewer provider missing"
-        );
-        assert!(
-            toml.contains("model = \"claude-opus-4-6\""),
-            "reviewer model missing"
-        );
-        assert!(
-            !toml.contains("api_key ="),
-            "api_key must not appear in config.toml"
-        );
-        assert!(
-            !toml.contains("api_key_env"),
-            "reviewer must not use api_key_env"
-        );
-    }
-
-    #[test]
-    fn build_toml_agents_local_worker_uses_base_url() {
+    fn build_toml_local_fast_provider_uses_base_url() {
         let mut s = SetupState::new();
         s.provider = 1; // Anthropic (main)
         s.model = "claude-sonnet-4-5".to_string();
         s.credential = "sk-ant-key".to_string();
-        s.configure_worker = true;
-        s.worker_provider = 16; // Local
-        s.worker_model = "llama3.2".to_string();
-        s.worker_credential = "http://127.0.0.1:8080".to_string();
+        s.configure_fast = true;
+        s.fast_provider_idx = 16; // Local
+        s.fast_model = "llama3.2".to_string();
+        s.fast_credential = "http://127.0.0.1:8080".to_string();
         let toml = build_toml(&s);
-        assert!(toml.contains("[agents.worker]"));
+        assert!(toml.contains("[profile.default.fast]"));
         assert!(toml.contains("base_url = \"http://127.0.0.1:8080\""));
-        // The [agents.worker] section should not have api_key or api_key_env
-        let worker_section = &toml[toml.find("[agents.worker]").unwrap()..];
+        let fast_section = &toml[toml.find("[profile.default.fast]").unwrap()..];
         assert!(
-            !worker_section.contains("api_key"),
-            "local worker should not have api_key"
-        );
-        assert!(
-            !worker_section.contains("api_key_env"),
-            "local worker should not have api_key_env"
+            !fast_section.contains("api_key"),
+            "local fast provider should not have api_key"
         );
     }
 
     #[test]
-    fn build_toml_agents_main_no_credential_no_key_line() {
-        // When credential is empty, [agents.main] should not have an api_key line.
+    fn build_toml_no_credential_no_key_line() {
         let mut s = SetupState::new();
         s.provider = 1; // Anthropic
         s.model = "claude-sonnet-4-5".to_string();
         s.credential.clear();
         let toml = build_toml(&s);
-        // [agents.main] should exist but without api_key line
-        assert!(toml.contains("[agents.main]"));
-        let agents_section = &toml[toml.find("[agents.main]").unwrap()..];
+        assert!(toml.contains("[profile.default]"));
         assert!(
-            !agents_section.contains("api_key ="),
-            "agents.main should not have api_key when credential is empty"
+            !toml.contains("api_key ="),
+            "should not have api_key when credential is empty"
         );
     }
 
     #[test]
-    fn build_toml_no_worker_no_reviewer_by_default() {
+    fn build_toml_no_fast_provider_by_default() {
         let mut s = SetupState::new();
         s.provider = 1;
         s.model = "claude-sonnet-4-5".to_string();
         s.credential = "sk-ant-key".to_string();
         let toml = build_toml(&s);
         assert!(
-            !toml.contains("[agents.worker]"),
-            "worker section should not appear when not configured"
-        );
-        assert!(
-            !toml.contains("[agents.reviewer]"),
-            "reviewer section should not appear when not configured"
+            !toml.contains("[profile.default.fast]"),
+            "fast provider section should not appear when not configured"
         );
     }
 

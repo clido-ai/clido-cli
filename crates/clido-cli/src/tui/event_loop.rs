@@ -1017,22 +1017,16 @@ pub(super) async fn agent_task(
 
 // ── Model list builder ────────────────────────────────────────────────────────
 
-/// Build the full sorted model list from the pricing table, roles config, and user prefs.
+/// Build the full sorted model list from the pricing table and user prefs.
 /// Order: favorites → recent → rest (alphabetical by id within each group).
 pub(super) fn build_model_list(
     pricing: &clido_core::PricingTable,
-    roles: &std::collections::HashMap<String, String>,
     prefs: &clido_core::ModelPrefs,
 ) -> Vec<ModelEntry> {
     use std::collections::HashMap;
 
-    // Invert roles map: model_id → role name (use first role found if multiple).
+    // Build role map from user prefs.
     let mut model_to_role: HashMap<String, String> = HashMap::new();
-    for (role, model_id) in roles {
-        model_to_role
-            .entry(model_id.clone())
-            .or_insert_with(|| role.clone());
-    }
     for (role, model_id) in &prefs.roles {
         model_to_role
             .entry(model_id.clone())
@@ -1376,15 +1370,14 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     let plan_dry_run = cli.plan_dry_run;
 
     // Build model list from already-loaded config + pricing (no extra disk I/O needed).
-    let (config_roles, known_models, current_profile) = {
-        let roles = std::collections::HashMap::new();
+    let (known_models, current_profile) = {
         let profile = cli
             .profile
             .clone()
             .or_else(|| loaded_config.as_ref().map(|c| c.default_profile.clone()))
             .unwrap_or_else(|| "default".to_string());
-        let models = build_model_list(&pricing_table, &roles, &model_prefs);
-        (roles, models, profile)
+        let models = build_model_list(&pricing_table, &model_prefs);
+        (models, profile)
     };
 
     let mut app = App::new(
@@ -1405,7 +1398,6 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         plan_dry_run,
         known_models,
         model_prefs,
-        config_roles,
         current_profile,
         reviewer_enabled,
         runtime.todo_store.clone(),
@@ -1624,12 +1616,10 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
                 .as_ref()
                 .map(resolve_display_api_key)
                 .unwrap_or_default();
-            let roles: Vec<(String, String)> = Vec::new();
             crate::setup::SetupPreFill {
                 provider: app.provider.clone(),
                 api_key,
                 model: app.model.clone(),
-                roles,
                 profile_name: String::new(),
                 is_new_profile: false,
                 saved_api_keys: Vec::new(),
@@ -1807,11 +1797,6 @@ pub(super) async fn event_loop(
                                             for _ in 0..3 { pp.picker.move_down(); }
                                         }
                                     }
-                                    FocusTarget::RolePicker => {
-                                        if let Some(rp) = app.role_picker.as_mut() {
-                                            for _ in 0..3 { rp.picker.move_down(); }
-                                        }
-                                    }
                                     _ => scroll_down(app, 3),
                                 }
                             }
@@ -1833,11 +1818,6 @@ pub(super) async fn event_loop(
                                     FocusTarget::ProfilePicker => {
                                         if let Some(pp) = app.profile_picker.as_mut() {
                                             for _ in 0..3 { pp.picker.move_up(); }
-                                        }
-                                    }
-                                    FocusTarget::RolePicker => {
-                                        if let Some(rp) = app.role_picker.as_mut() {
-                                            for _ in 0..3 { rp.picker.move_up(); }
                                         }
                                     }
                                     _ => scroll_up(app, 3),

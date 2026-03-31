@@ -54,16 +54,12 @@ pub(super) struct App {
     pub(super) model_picker: Option<ModelPickerState>,
     /// Profile picker popup state (Some = popup visible).
     pub(super) profile_picker: Option<ProfilePickerState>,
-    /// Role picker popup state (Some = popup visible).
-    pub(super) role_picker: Option<RolePickerState>,
     /// In-TUI profile overview/editor overlay (Some = visible).
     pub(super) profile_overlay: Option<ProfileOverlayState>,
     /// All known models (built at startup from pricing table + profiles).
     pub(super) known_models: Vec<ModelEntry>,
     /// User model preferences: favorites, recency, role assignments.
     pub(super) model_prefs: clido_core::ModelPrefs,
-    /// Role map from config (name → model ID). Merged with model_prefs.roles at use time.
-    pub(super) config_roles: std::collections::HashMap<String, String>,
     /// Signal to cancel the current agent run (force send).
     pub(super) cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Selected option in the permission popup (0=once, 1=session, 2=workdir, 3=deny, 4=deny+feedback).
@@ -182,7 +178,6 @@ impl App {
         plan_dry_run: bool,
         known_models: Vec<ModelEntry>,
         model_prefs: clido_core::ModelPrefs,
-        config_roles: std::collections::HashMap<String, String>,
         current_profile: String,
         reviewer_enabled: Arc<AtomicBool>,
         todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
@@ -216,11 +211,9 @@ impl App {
             session_picker: None,
             model_picker: None,
             profile_picker: None,
-            role_picker: None,
             profile_overlay: None,
             known_models,
             model_prefs,
-            config_roles,
             cancel,
             perm_selected: 0,
             perm_feedback_input: None,
@@ -315,8 +308,6 @@ impl App {
             FocusTarget::SessionPicker
         } else if self.profile_picker.is_some() {
             FocusTarget::ProfilePicker
-        } else if self.role_picker.is_some() {
-            FocusTarget::RolePicker
         } else if self.pending_perm.is_some() {
             FocusTarget::Permission
         } else {

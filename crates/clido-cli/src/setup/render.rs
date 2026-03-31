@@ -12,9 +12,9 @@ use ratatui::{
 
 use clido_providers::registry::PROVIDER_REGISTRY;
 
-use super::types::{ModelOption, RoleEditField, SetupState, SetupStep};
+use super::types::{ModelOption, SetupState, SetupStep};
 
-use super::{anonymize_key, PROFILE_NAME_PREFIX, SETUP_INPUT_ACCENT, SUBAGENT_OPTIONS};
+use super::{anonymize_key, FAST_PROVIDER_OPTIONS, PROFILE_NAME_PREFIX, SETUP_INPUT_ACCENT};
 
 // ── TUI rendering ─────────────────────────────────────────────────────────────
 
@@ -39,16 +39,11 @@ pub(super) fn draw_setup(f: &mut Frame, s: &SetupState) {
         }
         SetupStep::FetchingModels => "main agent — fetching models…",
         SetupStep::Model => "main agent — choose model",
-        SetupStep::SubAgentIntro => "sub-agents — optional",
-        SetupStep::WorkerProvider => "worker agent — choose provider",
-        SetupStep::WorkerCredential => "worker agent — enter API key",
-        SetupStep::FetchingWorkerModels => "worker agent — fetching models…",
-        SetupStep::WorkerModel => "worker agent — choose model",
-        SetupStep::ReviewerProvider => "reviewer agent — choose provider",
-        SetupStep::ReviewerCredential => "reviewer agent — enter API key",
-        SetupStep::FetchingReviewerModels => "reviewer agent — fetching models…",
-        SetupStep::ReviewerModel => "reviewer agent — choose model",
-        SetupStep::Roles => "configure roles  (optional)",
+        SetupStep::FastProviderIntro => "fast provider — optional",
+        SetupStep::FastProvider => "fast provider — choose provider",
+        SetupStep::FastCredential => "fast provider — enter API key",
+        SetupStep::FetchingFastModels => "fast provider — fetching models…",
+        SetupStep::FastModel => "fast provider — choose model",
     };
     f.render_widget(
         Paragraph::new(Line::from(vec![
@@ -73,19 +68,17 @@ pub(super) fn draw_setup(f: &mut Frame, s: &SetupState) {
         SetupStep::Credential => draw_credential(f, body, s),
         SetupStep::FetchingModels => draw_fetching(f, body),
         SetupStep::Model => draw_model(f, body, s),
-        SetupStep::SubAgentIntro => draw_subagent_intro(f, body, s),
-        SetupStep::WorkerProvider | SetupStep::ReviewerProvider => {
-            draw_subagent_provider(f, body, s, s.step == SetupStep::ReviewerProvider)
+        SetupStep::FastProviderIntro => draw_fast_intro(f, body, s),
+        SetupStep::FastProvider => {
+            draw_subagent_provider(f, body, s)
         }
-        SetupStep::WorkerCredential | SetupStep::ReviewerCredential => {
-            draw_subagent_credential(f, body, s, s.step == SetupStep::ReviewerCredential)
+        SetupStep::FastCredential => {
+            draw_subagent_credential(f, body, s)
         }
-        SetupStep::FetchingWorkerModels | SetupStep::FetchingReviewerModels => {
+        SetupStep::FetchingFastModels => {
             draw_fetching(f, body)
         }
-        SetupStep::WorkerModel => draw_worker_model(f, body, s),
-        SetupStep::ReviewerModel => draw_reviewer_model(f, body, s),
-        SetupStep::Roles => draw_roles(f, body, s),
+        SetupStep::FastModel => draw_fast_model(f, body, s),
     }
 
     // Hint / error line
@@ -117,29 +110,22 @@ pub(super) fn draw_setup(f: &mut Frame, s: &SetupState) {
                     "  Enter confirm   ←→ edit   Esc back   Ctrl+C cancel"
                 }
             }
-            SetupStep::FetchingModels | SetupStep::FetchingWorkerModels | SetupStep::FetchingReviewerModels => "",
+            SetupStep::FetchingModels | SetupStep::FetchingFastModels => "",
             SetupStep::Model if s.model_list_mode() => {
                 "  ↑↓ navigate   Enter select   type to search   Backspace erase   Esc back   Ctrl+C cancel"
             }
-            SetupStep::SubAgentIntro => {
+            SetupStep::FastProviderIntro => {
                 "  ↑↓ navigate   Enter select   Esc back   Ctrl+C cancel"
             }
-            SetupStep::WorkerProvider | SetupStep::ReviewerProvider => {
-                "  ↑↓ navigate   Enter select   Esc skip this sub-agent   Ctrl+C cancel"
+            SetupStep::FastProvider => {
+                "  ↑↓ navigate   Enter select   Esc skip   Ctrl+C cancel"
             }
-            SetupStep::WorkerCredential | SetupStep::ReviewerCredential => {
-                "  Enter confirm   ←→ edit   Esc skip sub-agent   Ctrl+C cancel"
+            SetupStep::FastCredential => {
+                "  Enter confirm   ←→ edit   Esc skip   Ctrl+C cancel"
             }
-            SetupStep::WorkerModel if s.worker_model_list_mode() => {
+            SetupStep::FastModel if s.fast_model_list_mode() => {
                 "  ↑↓ navigate   Enter select   type to search   Backspace erase   Esc back   Ctrl+C cancel"
             }
-            SetupStep::ReviewerModel if s.reviewer_model_list_mode() => {
-                "  ↑↓ navigate   Enter select   type to search   Backspace erase   Esc back   Ctrl+C cancel"
-            }
-            SetupStep::Roles if s.role_edit_field == RoleEditField::None => {
-                "  ↑↓ navigate   Enter edit/select   n new role   d delete   Tab finish   Ctrl+C cancel"
-            }
-            SetupStep::Roles => "  Enter confirm   Backspace edit   Esc cancel edit   Ctrl+C cancel",
             _ => "  Enter confirm   Backspace edit   Esc back   Ctrl+C cancel",
         };
         f.render_widget(
@@ -644,15 +630,15 @@ fn draw_text_input(
     f.set_cursor_position((area.x + 2 + cc, area.y + 1));
 }
 
-fn draw_subagent_intro(f: &mut Frame, area: Rect, s: &SetupState) {
+fn draw_fast_intro(f: &mut Frame, area: Rect, s: &SetupState) {
     let mut lines = vec![
         Line::raw(""),
         Line::from(vec![Span::styled(
-            "  Sub-agents route mechanical tasks to a smaller, cheaper model — reducing cost.",
+            "  A fast provider routes utility tasks (titles, summaries) to a cheaper model.",
             Style::default().fg(Color::Gray),
         )]),
         Line::from(vec![Span::styled(
-            "  The main agent handles routing automatically; you never think about it.",
+            "  This reduces request usage on your main provider. Routing is automatic.",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
@@ -660,8 +646,8 @@ fn draw_subagent_intro(f: &mut Frame, area: Rect, s: &SetupState) {
         Line::raw(""),
     ];
 
-    for (i, (name, desc)) in SUBAGENT_OPTIONS.iter().enumerate() {
-        let selected = i == s.subagent_intro_cursor;
+    for (i, (name, desc)) in FAST_PROVIDER_OPTIONS.iter().enumerate() {
+        let selected = i == s.fast_intro_cursor;
         lines.push(if selected {
             Line::from(vec![
                 Span::styled(
@@ -697,34 +683,29 @@ fn draw_subagent_intro(f: &mut Frame, area: Rect, s: &SetupState) {
     lines.push(Line::raw(""));
 
     let block = Block::default()
-        .title(" Sub-Agents  (optional) ")
+        .title(" Fast Provider  (optional) ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
     f.render_widget(Paragraph::new(lines).block(block), area);
 }
 
-fn draw_subagent_provider(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: bool) {
+fn draw_subagent_provider(f: &mut Frame, area: Rect, s: &SetupState) {
     let [title_area, body_area] =
         Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(area);
 
-    let agent_name = if is_reviewer {
-        "Reviewer agent"
-    } else {
-        "Worker agent"
-    };
     f.render_widget(
         Paragraph::new(vec![
             Line::raw(""),
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    agent_name,
+                    "Fast provider",
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    "  (optional — cheaper model for mechanical tasks)",
+                    "  (cheaper model for utility tasks)",
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
@@ -734,11 +715,7 @@ fn draw_subagent_provider(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer
         title_area,
     );
 
-    let picker = if is_reviewer {
-        &s.reviewer_provider_picker
-    } else {
-        &s.worker_provider_picker
-    };
+    let picker = &s.fast_provider_picker;
     let mut lines = vec![Line::raw("")];
     for (i, entry) in picker.items().iter().enumerate() {
         let def = &PROVIDER_REGISTRY[entry.0];
@@ -780,13 +757,13 @@ fn draw_subagent_provider(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer
     }
     lines.push(Line::raw(""));
     let block = Block::default()
-        .title(format!(" {} — Provider ", agent_name))
+        .title(" Fast Provider — Provider ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
     f.render_widget(Paragraph::new(lines).block(block), body_area);
 }
 
-fn draw_subagent_credential(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: bool) {
+fn draw_subagent_credential(f: &mut Frame, area: Rect, s: &SetupState) {
     let [info_area, input_area, _] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(3),
@@ -794,22 +771,13 @@ fn draw_subagent_credential(f: &mut Frame, area: Rect, s: &SetupState, is_review
     ])
     .areas(area);
 
-    let agent_name = if is_reviewer {
-        "Reviewer agent"
-    } else {
-        "Worker agent"
-    };
-    let prov_idx = if is_reviewer {
-        s.reviewer_provider
-    } else {
-        s.worker_provider
-    };
+    let prov_idx = s.fast_provider_idx;
     let pname = PROVIDER_REGISTRY[prov_idx].name;
     f.render_widget(
         Paragraph::new(vec![
             Line::raw(""),
             Line::from(vec![
-                Span::raw(format!("  {} — Provider: ", agent_name)),
+                Span::raw("  Fast provider — Provider: "),
                 Span::styled(
                     pname.to_string(),
                     Style::default()
@@ -852,33 +820,11 @@ fn draw_subagent_credential(f: &mut Frame, area: Rect, s: &SetupState, is_review
     }
 }
 
-fn draw_worker_model(f: &mut Frame, area: Rect, s: &SetupState) {
-    draw_subagent_model(f, area, s, false);
-}
-
-fn draw_reviewer_model(f: &mut Frame, area: Rect, s: &SetupState) {
-    draw_subagent_model(f, area, s, true);
-}
-
-fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: bool) {
-    let agent_name = if is_reviewer {
-        "Reviewer agent"
-    } else {
-        "Worker agent"
-    };
-    let prov_idx = if is_reviewer {
-        s.reviewer_provider
-    } else {
-        s.worker_provider
-    };
+fn draw_fast_model(f: &mut Frame, area: Rect, s: &SetupState) {
+    let prov_idx = s.fast_provider_idx;
     let pname = PROVIDER_REGISTRY[prov_idx].name;
-    let list_mode = if is_reviewer {
-        s.reviewer_model_list_mode()
-    } else {
-        s.worker_model_list_mode()
-    };
 
-    if list_mode {
+    if s.fast_model_list_mode() {
         let [info_area, search_area, list_area] = Layout::vertical([
             Constraint::Length(2),
             Constraint::Length(3),
@@ -888,7 +834,7 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
 
         f.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::raw(format!("  {} — Provider: ", agent_name)),
+                Span::raw("  Fast provider — Provider: "),
                 Span::styled(
                     pname,
                     Style::default()
@@ -899,11 +845,7 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
             info_area,
         );
 
-        let picker = if is_reviewer {
-            &s.reviewer_model_picker
-        } else {
-            &s.worker_model_picker
-        };
+        let picker = &s.fast_model_picker;
         let filter_text = &picker.filter.text;
         let search_block = Block::default()
             .title(" Search ")
@@ -1013,7 +955,7 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
         }
         lines.push(Line::raw(""));
         let block = Block::default()
-            .title(format!(" {} — Model ", agent_name))
+            .title(" Fast Provider — Model ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan));
         f.render_widget(Paragraph::new(lines).block(block), list_area);
@@ -1022,7 +964,7 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
             Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(area);
         f.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::raw(format!("  {} — Provider: ", agent_name)),
+                Span::raw("  Fast provider — Provider: "),
                 Span::styled(
                     pname,
                     Style::default()
@@ -1040,154 +982,5 @@ fn draw_subagent_model(f: &mut Frame, area: Rect, s: &SetupState, is_reviewer: b
             s.text_input.cursor,
             false,
         );
-    }
-}
-
-pub(super) fn draw_roles(f: &mut Frame, area: Rect, s: &SetupState) {
-    let [info_area, list_area] =
-        Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(area);
-
-    // Info bar
-    f.render_widget(
-        Paragraph::new(vec![
-            Line::raw(""),
-            Line::from(vec![
-                Span::styled("  Model: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    s.model.clone(),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    "   |   assign shortcuts like  fast → haiku  smart → opus",
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::DIM),
-                ),
-            ]),
-        ]),
-        info_area,
-    );
-
-    let mut lines = vec![Line::raw("")];
-
-    // Existing roles
-    for (i, (name, model)) in s.roles.iter().enumerate() {
-        let selected = i == s.role_cursor && s.role_edit_field == RoleEditField::None;
-        let editing_name = matches!(&s.role_edit_field, RoleEditField::Name(idx) if *idx == i);
-        let editing_model = matches!(&s.role_edit_field, RoleEditField::Model(idx) if *idx == i);
-
-        let name_style = if editing_name || selected {
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        let model_style = if editing_model || selected {
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-
-        let mark = if selected || editing_name || editing_model {
-            Span::styled(
-                " ▶ ",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::raw("   ")
-        };
-
-        let display_name = if editing_name {
-            format!("{:<12}", s.role_input)
-        } else {
-            format!("{:<12}", name)
-        };
-        let display_model = if editing_model {
-            s.role_input.clone()
-        } else {
-            model.clone()
-        };
-
-        lines.push(Line::from(vec![
-            mark,
-            Span::styled(display_name, name_style),
-            Span::styled("  →  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(display_model, model_style),
-        ]));
-    }
-
-    // "New role" row
-    if matches!(&s.role_edit_field, RoleEditField::Name(idx) if *idx == usize::MAX) {
-        lines.push(Line::from(vec![
-            Span::styled(
-                " ▶ ",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{}_", s.role_input),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-    }
-
-    // "Done" row
-    let on_done = s.role_cursor >= s.roles.len() && s.role_edit_field == RoleEditField::None;
-    lines.push(Line::raw(""));
-    lines.push(if on_done {
-        Line::from(vec![
-            Span::styled(
-                " ▶ ",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Done  (Tab or Enter)",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ])
-    } else {
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled("Done  (Tab)", Style::default().fg(Color::DarkGray)),
-        ])
-    });
-
-    lines.push(Line::raw(""));
-    let block = Block::default()
-        .title(" Roles  (optional) ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
-    f.render_widget(Paragraph::new(lines).block(block), list_area);
-
-    // Position cursor when editing a role name
-    if let RoleEditField::Name(idx) = &s.role_edit_field {
-        if *idx == usize::MAX {
-            let row = list_area.y + 1 + 1 + s.roles.len() as u16;
-            let col = list_area.x + 3 + s.role_input.chars().count() as u16;
-            f.set_cursor_position((col, row));
-        }
-    }
-    // Position cursor when editing a role model
-    if let RoleEditField::Model(idx) = &s.role_edit_field {
-        if *idx < s.roles.len() {
-            // Approximate cursor position: border(1) + blank(1) + row(idx+1) + 1
-            let row = list_area.y + 1 + 1 + (*idx as u16 + 1);
-            let col = list_area.x + 3 + 14 + 3 + s.role_input.chars().count() as u16;
-            f.set_cursor_position((col, row));
-        }
     }
 }

@@ -21,7 +21,7 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
     let provider = PROVIDER_REGISTRY[s.provider].id;
 
     if let Some(pname) = profile_name {
-        // ── Profile mode: generate only [profile.<name>] and sub-agent blocks ──
+        // ── Profile mode: generate only [profile.<name>] and fast provider block ──
         let main_key_line = if s.is_local() {
             let base_url = if s.credential.is_empty() {
                 "http://localhost:11434"
@@ -48,56 +48,28 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
                 pname, provider, s.model, main_key_line
             )
         };
-        if s.configure_worker && !s.worker_model.is_empty() {
-            let worker_prov = PROVIDER_REGISTRY[s.worker_provider].id;
-            let is_local_worker = PROVIDER_REGISTRY[s.worker_provider].is_local;
-            let worker_key_line = if is_local_worker {
-                let base_url = if s.worker_credential.is_empty() {
+        if s.configure_fast && !s.fast_model.is_empty() {
+            let fast_prov = PROVIDER_REGISTRY[s.fast_provider_idx].id;
+            let is_local_fast = PROVIDER_REGISTRY[s.fast_provider_idx].is_local;
+            let fast_key_line = if is_local_fast {
+                let base_url = if s.fast_credential.is_empty() {
                     "http://localhost:11434"
                 } else {
-                    s.worker_credential.as_str()
+                    s.fast_credential.as_str()
                 };
                 format!("base_url = \"{}\"\n", base_url)
             } else {
                 String::new()
             };
             out.push_str(&format!(
-                "\n[profile.{}.worker]\nprovider = \"{}\"\nmodel = \"{}\"\n{}",
-                pname, worker_prov, s.worker_model, worker_key_line
-            ));
-        }
-        if s.configure_reviewer && !s.reviewer_model.is_empty() {
-            let reviewer_prov = PROVIDER_REGISTRY[s.reviewer_provider].id;
-            let is_local_reviewer = PROVIDER_REGISTRY[s.reviewer_provider].is_local;
-            let reviewer_key_line = if is_local_reviewer {
-                let base_url = if s.reviewer_credential.is_empty() {
-                    "http://localhost:11434"
-                } else {
-                    s.reviewer_credential.as_str()
-                };
-                format!("base_url = \"{}\"\n", base_url)
-            } else {
-                String::new()
-            };
-            out.push_str(&format!(
-                "\n[profile.{}.reviewer]\nprovider = \"{}\"\nmodel = \"{}\"\n{}",
-                pname, reviewer_prov, s.reviewer_model, reviewer_key_line
+                "\n[profile.{}.fast]\nprovider = \"{}\"\nmodel = \"{}\"\n{}",
+                pname, fast_prov, s.fast_model, fast_key_line
             ));
         }
         return out;
     }
 
     // ── Full config mode (first-run / /init) ──────────────────────────────────
-    let roles_toml = if s.roles.is_empty() {
-        String::new()
-    } else {
-        let mut t = "\n[roles]\n".to_string();
-        for (name, model) in &s.roles {
-            t.push_str(&format!("{} = \"{}\"\n", name, model));
-        }
-        t
-    };
-
     let profile_toml = if s.is_local() {
         let base_url = if s.credential.is_empty() {
             "http://localhost:11434"
@@ -105,72 +77,38 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
             s.credential.as_str()
         };
         format!(
-            "default_profile = \"default\"\n\n[profile.default]\nprovider = \"local\"\nmodel = \"{}\"\nbase_url = \"{}\"\n{}",
-            s.model, base_url, roles_toml
+            "default_profile = \"default\"\n\n[profile.default]\nprovider = \"local\"\nmodel = \"{}\"\nbase_url = \"{}\"\n",
+            s.model, base_url
         )
     } else {
         format!(
-            "default_profile = \"default\"\n\n[profile.default]\nprovider = \"{}\"\nmodel = \"{}\"\n# API keys are stored in the credentials file (same directory as this file).\n{}",
-            provider, s.model, roles_toml
+            "default_profile = \"default\"\n\n[profile.default]\nprovider = \"{}\"\nmodel = \"{}\"\n# API keys are stored in the credentials file (same directory as this file).\n",
+            provider, s.model
         )
     };
 
-    // Build [agents] section
-    let main_key_line = if s.is_local() {
-        let base_url = if s.credential.is_empty() {
-            "http://localhost:11434"
+    let fast_toml = if s.configure_fast && !s.fast_model.is_empty() {
+        let fast_prov = PROVIDER_REGISTRY[s.fast_provider_idx].id;
+        let is_local_fast = PROVIDER_REGISTRY[s.fast_provider_idx].is_local;
+        let fast_key_line = if is_local_fast {
+            let base_url = if s.fast_credential.is_empty() {
+                "http://localhost:11434"
+            } else {
+                s.fast_credential.as_str()
+            };
+            format!("base_url = \"{}\"\n", base_url)
         } else {
-            s.credential.as_str()
+            String::new()
         };
-        format!("base_url = \"{}\"\n", base_url)
+        format!(
+            "\n[profile.default.fast]\nprovider = \"{}\"\nmodel = \"{}\"\n{}",
+            fast_prov, s.fast_model, fast_key_line
+        )
     } else {
         String::new()
     };
 
-    let mut agents_toml = format!(
-        "\n[agents.main]\nprovider = \"{}\"\nmodel = \"{}\"\n{}",
-        provider, s.model, main_key_line
-    );
-
-    if s.configure_worker && !s.worker_model.is_empty() {
-        let worker_prov = PROVIDER_REGISTRY[s.worker_provider].id;
-        let is_local_worker = PROVIDER_REGISTRY[s.worker_provider].is_local;
-        let worker_key_line = if is_local_worker {
-            let base_url = if s.worker_credential.is_empty() {
-                "http://localhost:11434"
-            } else {
-                s.worker_credential.as_str()
-            };
-            format!("base_url = \"{}\"\n", base_url)
-        } else {
-            String::new()
-        };
-        agents_toml.push_str(&format!(
-            "\n[agents.worker]\nprovider = \"{}\"\nmodel = \"{}\"\n{}",
-            worker_prov, s.worker_model, worker_key_line
-        ));
-    }
-
-    if s.configure_reviewer && !s.reviewer_model.is_empty() {
-        let reviewer_prov = PROVIDER_REGISTRY[s.reviewer_provider].id;
-        let is_local_reviewer = PROVIDER_REGISTRY[s.reviewer_provider].is_local;
-        let reviewer_key_line = if is_local_reviewer {
-            let base_url = if s.reviewer_credential.is_empty() {
-                "http://localhost:11434"
-            } else {
-                s.reviewer_credential.as_str()
-            };
-            format!("base_url = \"{}\"\n", base_url)
-        } else {
-            String::new()
-        };
-        agents_toml.push_str(&format!(
-            "\n[agents.reviewer]\nprovider = \"{}\"\nmodel = \"{}\"\n{}",
-            reviewer_prov, s.reviewer_model, reviewer_key_line
-        ));
-    }
-
-    format!("{}{}", profile_toml, agents_toml)
+    format!("{}{}", profile_toml, fast_toml)
 }
 
 // ── Credentials file helpers ──────────────────────────────────────────────────
@@ -213,7 +151,7 @@ pub(super) fn write_credentials_file(
 }
 
 /// Collect all non-empty, non-local API key credentials from a setup state.
-/// Returns `(provider_id, key)` pairs for main, worker, and reviewer agents.
+/// Returns `(provider_id, key)` pairs for main and fast provider agents.
 pub(super) fn collect_credentials_from_state(s: &SetupState) -> Vec<(String, String)> {
     let mut creds: Vec<(String, String)> = Vec::new();
     if !s.is_local() && !s.credential.is_empty() {
@@ -222,21 +160,12 @@ pub(super) fn collect_credentials_from_state(s: &SetupState) -> Vec<(String, Str
             s.credential.clone(),
         ));
     }
-    if s.configure_worker && !s.worker_model.is_empty() {
-        let is_local_worker = PROVIDER_REGISTRY[s.worker_provider].is_local;
-        if !is_local_worker && !s.worker_credential.is_empty() {
+    if s.configure_fast && !s.fast_model.is_empty() {
+        let is_local_fast = PROVIDER_REGISTRY[s.fast_provider_idx].is_local;
+        if !is_local_fast && !s.fast_credential.is_empty() {
             creds.push((
-                PROVIDER_REGISTRY[s.worker_provider].id.to_string(),
-                s.worker_credential.clone(),
-            ));
-        }
-    }
-    if s.configure_reviewer && !s.reviewer_model.is_empty() {
-        let is_local_reviewer = PROVIDER_REGISTRY[s.reviewer_provider].is_local;
-        if !is_local_reviewer && !s.reviewer_credential.is_empty() {
-            creds.push((
-                PROVIDER_REGISTRY[s.reviewer_provider].id.to_string(),
-                s.reviewer_credential.clone(),
+                PROVIDER_REGISTRY[s.fast_provider_idx].id.to_string(),
+                s.fast_credential.clone(),
             ));
         }
     }
@@ -258,25 +187,25 @@ pub(super) fn state_to_profile_entry(s: &SetupState) -> clido_core::ProfileEntry
     };
 
     // Build fast provider config if the user opted to configure one.
-    let fast = if s.configure_worker && !s.worker_model.is_empty() {
-        let fast_prov = PROVIDER_REGISTRY[s.worker_provider].id;
-        let is_local = PROVIDER_REGISTRY[s.worker_provider].is_local;
+    let fast = if s.configure_fast && !s.fast_model.is_empty() {
+        let fast_prov = PROVIDER_REGISTRY[s.fast_provider_idx].id;
+        let is_local = PROVIDER_REGISTRY[s.fast_provider_idx].is_local;
         let (f_key, f_url) = if is_local {
-            let url = if s.worker_credential.is_empty() {
+            let url = if s.fast_credential.is_empty() {
                 Some("http://localhost:11434".to_string())
             } else {
-                Some(s.worker_credential.clone())
+                Some(s.fast_credential.clone())
             };
             (None, url)
         } else {
             (
-                Some(s.worker_credential.clone()).filter(|k| !k.is_empty()),
+                Some(s.fast_credential.clone()).filter(|k| !k.is_empty()),
                 None,
             )
         };
         Some(clido_core::FastProviderConfig {
             provider: fast_prov.to_string(),
-            model: s.worker_model.clone(),
+            model: s.fast_model.clone(),
             api_key: f_key,
             api_key_env: None,
             base_url: f_url,

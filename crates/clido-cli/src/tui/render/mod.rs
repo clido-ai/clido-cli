@@ -569,8 +569,6 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Some("Sessions".into())
         } else if app.profile_picker.is_some() {
             Some("Profiles".into())
-        } else if app.role_picker.is_some() {
-            Some("Roles".into())
         } else {
             None
         };
@@ -1038,64 +1036,6 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block_with_hint(&title, hint, Color::Cyan)),
-            popup_rect,
-        );
-    }
-
-    // ── Role picker popup ─────────────────────────────────────────────────────
-    if let Some(ref picker) = app.role_picker {
-        const VISIBLE: usize = 10;
-        let filtered: Vec<(usize, &(String, String))> = picker.picker.filtered_items().collect();
-        let n_rows = filtered.len().min(VISIBLE) as u16;
-        let popup_h = (n_rows + 5).min(area.height.saturating_sub(4)).max(5);
-        let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
-        let inner_w = popup_rect.width.saturating_sub(4) as usize;
-
-        let mut content: Vec<Line<'static>> = Vec::new();
-        if !picker.picker.filter.text.is_empty() {
-            content.push(filter_indicator_line(&picker.picker.filter.text));
-        }
-        content.push(Line::from(Span::styled(
-            format!("  {:<16}  {}", "role", "model"),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
-        )));
-        content.push(Line::raw(""));
-
-        let end = (picker.picker.scroll_offset + VISIBLE).min(filtered.len());
-        for (di, (_orig_idx, (role, model))) in filtered[picker.picker.scroll_offset..end]
-            .iter()
-            .enumerate()
-        {
-            let selected = picker.picker.scroll_offset + di == picker.picker.selected;
-            let bg = if selected {
-                TUI_SELECTION_BG
-            } else {
-                Color::Reset
-            };
-            let fg = if selected { Color::White } else { Color::Gray };
-            let marker = if selected { "▶" } else { " " };
-            let model_display: String = model.chars().take(inner_w.saturating_sub(20)).collect();
-            content.push(Line::from(Span::styled(
-                format!("{} {:<16}  {}", marker, role, model_display),
-                Style::default().fg(fg).bg(bg),
-            )));
-        }
-
-        let above = picker.picker.scroll_offset;
-        let below = filtered
-            .len()
-            .saturating_sub(picker.picker.scroll_offset + VISIBLE);
-        if let Some(line) = scroll_indicator_line(above, below) {
-            content.push(line);
-        }
-
-        let title = format!(" Roles — {} ", filtered.len());
-        let hint = " ↑↓ navigate · Enter switch model · type to filter · Esc close ";
-        frame.render_widget(Clear, popup_rect);
-        frame.render_widget(
-            Paragraph::new(content).block(modal_block_with_hint(&title, hint, Color::Yellow)),
             popup_rect,
         );
     }

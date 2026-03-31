@@ -889,7 +889,6 @@ mod tests {
         assert!(FocusTarget::ModelPicker.is_modal());
         assert!(FocusTarget::SessionPicker.is_modal());
         assert!(FocusTarget::ProfilePicker.is_modal());
-        assert!(FocusTarget::RolePicker.is_modal());
         assert!(FocusTarget::Permission.is_modal());
     }
 }

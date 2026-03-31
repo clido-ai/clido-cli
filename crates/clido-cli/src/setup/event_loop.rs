@@ -7,11 +7,11 @@ use clido_providers::registry::PROVIDER_REGISTRY;
 
 use super::render::draw_setup;
 use super::types::{
-    make_model_picker, ModelOption, RoleEditField, SetupOutcome, SetupPreFill, SetupState,
+    make_model_picker, ModelOption, SetupOutcome, SetupPreFill, SetupState,
     SetupStep,
 };
 
-use super::SUBAGENT_OPTIONS;
+use super::FAST_PROVIDER_OPTIONS;
 
 pub(super) fn setup_event_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
@@ -60,49 +60,26 @@ pub(super) fn setup_event_loop(
             continue;
         }
 
-        // Fetch worker models.
-        if s.worker_needs_fetch {
-            s.worker_needs_fetch = false;
-            let provider_id = PROVIDER_REGISTRY[s.worker_provider].id;
-            let is_local_worker = PROVIDER_REGISTRY[s.worker_provider].is_local;
-            let (api_key, base_url): (&str, Option<&str>) = if is_local_worker {
-                ("", Some(s.worker_credential.as_str()))
+        // Fetch fast provider models.
+        if s.fast_needs_fetch {
+            s.fast_needs_fetch = false;
+            let provider_id = PROVIDER_REGISTRY[s.fast_provider_idx].id;
+            let is_local_fast = PROVIDER_REGISTRY[s.fast_provider_idx].is_local;
+            let (api_key, base_url): (&str, Option<&str>) = if is_local_fast {
+                ("", Some(s.fast_credential.as_str()))
             } else {
-                (s.worker_credential.as_str(), None)
+                (s.fast_credential.as_str(), None)
             };
             let handle = tokio::runtime::Handle::current();
-            s.worker_fetched_models = handle.block_on(clido_providers::fetch_provider_models(
+            s.fast_fetched_models = handle.block_on(clido_providers::fetch_provider_models(
                 provider_id,
                 api_key,
                 base_url,
             ));
-            s.worker_custom_model = s.worker_fetched_models.is_empty();
-            s.worker_model_picker = make_model_picker(&s.worker_fetched_models);
+            s.fast_custom_model = s.fast_fetched_models.is_empty();
+            s.fast_model_picker = make_model_picker(&s.fast_fetched_models);
             s.clear_typed_input();
-            s.step = SetupStep::WorkerModel;
-            continue;
-        }
-
-        // Fetch reviewer models.
-        if s.reviewer_needs_fetch {
-            s.reviewer_needs_fetch = false;
-            let provider_id = PROVIDER_REGISTRY[s.reviewer_provider].id;
-            let is_local_reviewer = PROVIDER_REGISTRY[s.reviewer_provider].is_local;
-            let (api_key, base_url): (&str, Option<&str>) = if is_local_reviewer {
-                ("", Some(s.reviewer_credential.as_str()))
-            } else {
-                (s.reviewer_credential.as_str(), None)
-            };
-            let handle = tokio::runtime::Handle::current();
-            s.reviewer_fetched_models = handle.block_on(clido_providers::fetch_provider_models(
-                provider_id,
-                api_key,
-                base_url,
-            ));
-            s.reviewer_custom_model = s.reviewer_fetched_models.is_empty();
-            s.reviewer_model_picker = make_model_picker(&s.reviewer_fetched_models);
-            s.clear_typed_input();
-            s.step = SetupStep::ReviewerModel;
+            s.step = SetupStep::FastModel;
             continue;
         }
 
@@ -285,7 +262,7 @@ pub(super) fn setup_event_loop(
                                     ));
                                 } else {
                                     s.model = entry.id.clone();
-                                    s.step = SetupStep::SubAgentIntro;
+                                    s.step = SetupStep::FastProviderIntro;
                                 }
                             }
                             None => {}
@@ -314,7 +291,7 @@ pub(super) fn setup_event_loop(
                             s.error = Some("Model ID required — type a model name".into());
                         } else {
                             s.model = s.text_input.text.clone();
-                            s.step = SetupStep::SubAgentIntro;
+                            s.step = SetupStep::FastProviderIntro;
                         }
                     }
                     KeyCode::Backspace => {
@@ -353,40 +330,29 @@ pub(super) fn setup_event_loop(
                     _ => {}
                 },
 
-                // ── Sub-agent intro ───────────────────────────────────────
-                SetupStep::SubAgentIntro => match key.code {
+                // ── Fast provider intro ───────────────────────────────────
+                SetupStep::FastProviderIntro => match key.code {
                     KeyCode::Up => {
-                        if s.subagent_intro_cursor > 0 {
-                            s.subagent_intro_cursor -= 1;
+                        if s.fast_intro_cursor > 0 {
+                            s.fast_intro_cursor -= 1;
                         }
                     }
                     KeyCode::Down => {
-                        if s.subagent_intro_cursor < SUBAGENT_OPTIONS.len() - 1 {
-                            s.subagent_intro_cursor += 1;
+                        if s.fast_intro_cursor < FAST_PROVIDER_OPTIONS.len() - 1 {
+                            s.fast_intro_cursor += 1;
                         }
                     }
-                    KeyCode::Enter => match s.subagent_intro_cursor {
+                    KeyCode::Enter => match s.fast_intro_cursor {
                         0 => {
-                            // Worker only
-                            s.configure_worker = true;
-                            s.configure_reviewer = false;
-                            s.worker_provider = s.provider;
-                            s.worker_provider_picker.selected = s.provider;
-                            s.step = SetupStep::WorkerProvider;
-                        }
-                        1 => {
-                            // Worker + Reviewer
-                            s.configure_worker = true;
-                            s.configure_reviewer = true;
-                            s.worker_provider = s.provider;
-                            s.worker_provider_picker.selected = s.provider;
-                            s.step = SetupStep::WorkerProvider;
+                            // Configure fast provider
+                            s.configure_fast = true;
+                            s.fast_provider_idx = s.provider;
+                            s.fast_provider_picker.selected = s.provider;
+                            s.step = SetupStep::FastProvider;
                         }
                         _ => {
                             // Skip
-                            s.step = SetupStep::Roles;
-                            s.role_cursor = 0;
-                            s.role_edit_field = RoleEditField::None;
+                            return Ok(SetupOutcome::Finished(Box::new(s)));
                         }
                     },
                     KeyCode::Esc => {
@@ -396,48 +362,45 @@ pub(super) fn setup_event_loop(
                     _ => {}
                 },
 
-                // ── Worker provider ───────────────────────────────────────
-                SetupStep::WorkerProvider => match key.code {
+                // ── Fast provider selection ───────────────────────────────
+                SetupStep::FastProvider => match key.code {
                     KeyCode::Enter => {
-                        s.worker_provider = s.worker_provider_picker.selected;
-                        if s.worker_provider == s.provider {
+                        s.fast_provider_idx = s.fast_provider_picker.selected;
+                        if s.fast_provider_idx == s.provider {
                             // Same provider as main — reuse credential
-                            s.worker_credential = s.credential.clone();
-                            s.worker_needs_fetch = true;
-                            s.step = SetupStep::FetchingWorkerModels;
+                            s.fast_credential = s.credential.clone();
+                            s.fast_needs_fetch = true;
+                            s.step = SetupStep::FetchingFastModels;
                         } else {
                             s.clear_typed_input();
-                            s.step = SetupStep::WorkerCredential;
+                            s.step = SetupStep::FastCredential;
                         }
                     }
                     KeyCode::Esc => {
-                        s.configure_worker = false;
-                        s.configure_reviewer = false;
-                        s.step = SetupStep::Roles;
-                        s.role_cursor = 0;
-                        s.role_edit_field = RoleEditField::None;
+                        s.configure_fast = false;
+                        return Ok(SetupOutcome::Finished(Box::new(s)));
                     }
                     _ => {
-                        s.worker_provider_picker.handle_key(key);
+                        s.fast_provider_picker.handle_key(key);
                     }
                 },
 
-                // ── Worker credential ─────────────────────────────────────
-                SetupStep::WorkerCredential => match key.code {
+                // ── Fast credential ───────────────────────────────────────
+                SetupStep::FastCredential => match key.code {
                     KeyCode::Enter => {
                         if s.text_input.text.is_empty() {
-                            if PROVIDER_REGISTRY[s.worker_provider].is_local {
-                                s.worker_credential = "http://localhost:11434".to_string();
+                            if PROVIDER_REGISTRY[s.fast_provider_idx].is_local {
+                                s.fast_credential = "http://localhost:11434".to_string();
                             } else {
                                 s.error = Some("API key required. Press Esc to skip.".into());
                                 continue;
                             }
                         } else {
-                            s.worker_credential = s.text_input.text.clone();
+                            s.fast_credential = s.text_input.text.clone();
                         }
-                        s.worker_needs_fetch = true;
+                        s.fast_needs_fetch = true;
                         s.clear_typed_input();
-                        s.step = SetupStep::FetchingWorkerModels;
+                        s.step = SetupStep::FetchingFastModels;
                     }
                     KeyCode::Backspace => {
                         s.text_input.delete_back();
@@ -458,11 +421,8 @@ pub(super) fn setup_event_loop(
                         s.text_input.end();
                     }
                     KeyCode::Esc => {
-                        s.configure_worker = false;
-                        s.configure_reviewer = false;
-                        s.step = SetupStep::Roles;
-                        s.role_cursor = 0;
-                        s.role_edit_field = RoleEditField::None;
+                        s.configure_fast = false;
+                        return Ok(SetupOutcome::Finished(Box::new(s)));
                     }
                     KeyCode::Char(c) => {
                         s.text_input.insert_char(c);
@@ -470,18 +430,18 @@ pub(super) fn setup_event_loop(
                     _ => {}
                 },
 
-                // ── FetchingWorkerModels (handled in fetch block above) ────
-                SetupStep::FetchingWorkerModels => {}
+                // ── FetchingFastModels (handled in fetch block above) ─────
+                SetupStep::FetchingFastModels => {}
 
-                // ── Worker model list ─────────────────────────────────────
-                SetupStep::WorkerModel if s.worker_model_list_mode() => {
+                // ── Fast model list ───────────────────────────────────────
+                SetupStep::FastModel if s.fast_model_list_mode() => {
                     let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
                     let visible_rows = (term_h as usize).saturating_sub(9).max(1);
-                    s.worker_model_picker.visible_rows = visible_rows;
+                    s.fast_model_picker.visible_rows = visible_rows;
                     match key.code {
-                        KeyCode::Enter => match s.worker_model_picker.selected_item() {
+                        KeyCode::Enter => match s.fast_model_picker.selected_item() {
                             Some(ModelOption::Custom) => {
-                                s.worker_custom_model = true;
+                                s.fast_custom_model = true;
                                 s.clear_typed_input();
                             }
                             Some(ModelOption::Entry(entry)) => {
@@ -491,361 +451,69 @@ pub(super) fn setup_event_loop(
                                         entry.id
                                     ));
                                 } else {
-                                    s.worker_model = entry.id.clone();
-                                    if s.configure_reviewer {
-                                        s.reviewer_provider = s.provider;
-                                        s.reviewer_provider_picker.selected = s.provider;
-                                        s.step = SetupStep::ReviewerProvider;
-                                    } else {
-                                        s.step = SetupStep::Roles;
-                                        s.role_cursor = 0;
-                                        s.role_edit_field = RoleEditField::None;
-                                    }
-                                }
-                            }
-                            None => {}
-                        },
-                        KeyCode::Esc => {
-                            if !s.worker_model_picker.filter.text.is_empty() {
-                                s.worker_model_picker.filter.clear();
-                                s.worker_model_picker.apply_filter();
-                                s.worker_model_picker.home();
-                            } else {
-                                s.step = SetupStep::WorkerProvider;
-                            }
-                        }
-                        _ => {
-                            s.worker_model_picker.handle_key(key);
-                        }
-                    }
-                }
-
-                // ── Worker model text input ───────────────────────────────
-                SetupStep::WorkerModel => match key.code {
-                    KeyCode::Enter => {
-                        if s.text_input.text.is_empty() {
-                            s.error = Some("Model ID required — type a model name".into());
-                        } else {
-                            s.worker_model = s.text_input.text.clone();
-                            s.clear_typed_input();
-                            if s.configure_reviewer {
-                                s.reviewer_provider = s.provider;
-                                s.step = SetupStep::ReviewerProvider;
-                            } else {
-                                s.step = SetupStep::Roles;
-                                s.role_cursor = 0;
-                                s.role_edit_field = RoleEditField::None;
-                            }
-                        }
-                    }
-                    KeyCode::Backspace => {
-                        s.text_input.delete_back();
-                    }
-                    KeyCode::Delete => {
-                        s.text_input.delete_forward();
-                    }
-                    KeyCode::Left => {
-                        s.text_input.cursor_left();
-                    }
-                    KeyCode::Right => {
-                        s.text_input.cursor_right();
-                    }
-                    KeyCode::Home => {
-                        s.text_input.home();
-                    }
-                    KeyCode::End => {
-                        s.text_input.end();
-                    }
-                    KeyCode::Esc => {
-                        if !s.worker_fetched_models.is_empty() {
-                            s.worker_custom_model = false;
-                            s.clear_typed_input();
-                        } else {
-                            s.step = SetupStep::WorkerProvider;
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        s.text_input.insert_char(c);
-                    }
-                    _ => {}
-                },
-
-                // ── Reviewer provider ─────────────────────────────────────
-                SetupStep::ReviewerProvider => match key.code {
-                    KeyCode::Enter => {
-                        s.reviewer_provider = s.reviewer_provider_picker.selected;
-                        if s.reviewer_provider == s.provider {
-                            s.reviewer_credential = s.credential.clone();
-                            s.reviewer_needs_fetch = true;
-                            s.step = SetupStep::FetchingReviewerModels;
-                        } else {
-                            s.clear_typed_input();
-                            s.step = SetupStep::ReviewerCredential;
-                        }
-                    }
-                    KeyCode::Esc => {
-                        s.configure_reviewer = false;
-                        s.step = SetupStep::Roles;
-                        s.role_cursor = 0;
-                        s.role_edit_field = RoleEditField::None;
-                    }
-                    _ => {
-                        s.reviewer_provider_picker.handle_key(key);
-                    }
-                },
-
-                // ── Reviewer credential ───────────────────────────────────
-                SetupStep::ReviewerCredential => match key.code {
-                    KeyCode::Enter => {
-                        if s.text_input.text.is_empty() {
-                            if PROVIDER_REGISTRY[s.reviewer_provider].is_local {
-                                s.reviewer_credential = "http://localhost:11434".to_string();
-                            } else {
-                                s.error = Some("API key required. Press Esc to skip.".into());
-                                continue;
-                            }
-                        } else {
-                            s.reviewer_credential = s.text_input.text.clone();
-                        }
-                        s.reviewer_needs_fetch = true;
-                        s.clear_typed_input();
-                        s.step = SetupStep::FetchingReviewerModels;
-                    }
-                    KeyCode::Backspace => {
-                        s.text_input.delete_back();
-                    }
-                    KeyCode::Delete => {
-                        s.text_input.delete_forward();
-                    }
-                    KeyCode::Left => {
-                        s.text_input.cursor_left();
-                    }
-                    KeyCode::Right => {
-                        s.text_input.cursor_right();
-                    }
-                    KeyCode::Home => {
-                        s.text_input.home();
-                    }
-                    KeyCode::End => {
-                        s.text_input.end();
-                    }
-                    KeyCode::Esc => {
-                        s.configure_reviewer = false;
-                        s.step = SetupStep::Roles;
-                        s.role_cursor = 0;
-                        s.role_edit_field = RoleEditField::None;
-                    }
-                    KeyCode::Char(c) => {
-                        s.text_input.insert_char(c);
-                    }
-                    _ => {}
-                },
-
-                // ── FetchingReviewerModels (handled in fetch block above) ──
-                SetupStep::FetchingReviewerModels => {}
-
-                // ── Reviewer model list ───────────────────────────────────
-                SetupStep::ReviewerModel if s.reviewer_model_list_mode() => {
-                    let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
-                    let visible_rows = (term_h as usize).saturating_sub(9).max(1);
-                    s.reviewer_model_picker.visible_rows = visible_rows;
-                    match key.code {
-                        KeyCode::Enter => match s.reviewer_model_picker.selected_item() {
-                            Some(ModelOption::Custom) => {
-                                s.reviewer_custom_model = true;
-                                s.clear_typed_input();
-                            }
-                            Some(ModelOption::Entry(entry)) => {
-                                if !entry.available {
-                                    s.error = Some(format!(
-                                        "{} has no endpoints — pick a different model",
-                                        entry.id
-                                    ));
-                                } else {
-                                    s.reviewer_model = entry.id.clone();
-                                    s.step = SetupStep::Roles;
-                                    s.role_cursor = 0;
-                                    s.role_edit_field = RoleEditField::None;
-                                }
-                            }
-                            None => {}
-                        },
-                        KeyCode::Esc => {
-                            if !s.reviewer_model_picker.filter.text.is_empty() {
-                                s.reviewer_model_picker.filter.clear();
-                                s.reviewer_model_picker.apply_filter();
-                                s.reviewer_model_picker.home();
-                            } else {
-                                s.step = SetupStep::ReviewerProvider;
-                            }
-                        }
-                        _ => {
-                            s.reviewer_model_picker.handle_key(key);
-                        }
-                    }
-                }
-
-                // ── Reviewer model text input ─────────────────────────────
-                SetupStep::ReviewerModel => match key.code {
-                    KeyCode::Enter => {
-                        if s.text_input.text.is_empty() {
-                            s.error = Some("Model ID required — type a model name".into());
-                        } else {
-                            s.reviewer_model = s.text_input.text.clone();
-                            s.clear_typed_input();
-                            s.step = SetupStep::Roles;
-                            s.role_cursor = 0;
-                            s.role_edit_field = RoleEditField::None;
-                        }
-                    }
-                    KeyCode::Backspace => {
-                        s.text_input.delete_back();
-                    }
-                    KeyCode::Delete => {
-                        s.text_input.delete_forward();
-                    }
-                    KeyCode::Left => {
-                        s.text_input.cursor_left();
-                    }
-                    KeyCode::Right => {
-                        s.text_input.cursor_right();
-                    }
-                    KeyCode::Home => {
-                        s.text_input.home();
-                    }
-                    KeyCode::End => {
-                        s.text_input.end();
-                    }
-                    KeyCode::Esc => {
-                        if !s.reviewer_fetched_models.is_empty() {
-                            s.reviewer_custom_model = false;
-                            s.clear_typed_input();
-                        } else {
-                            s.step = SetupStep::ReviewerProvider;
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        s.text_input.insert_char(c);
-                    }
-                    _ => {}
-                },
-
-                // ── Roles configuration ───────────────────────────────────
-                SetupStep::Roles => {
-                    match &s.role_edit_field {
-                        RoleEditField::None => match key.code {
-                            // Tab or Ctrl+Enter: finish setup
-                            KeyCode::Tab | KeyCode::BackTab => {
-                                return Ok(SetupOutcome::Finished(Box::new(s)));
-                            }
-                            // Enter on a row: begin editing the model for that role
-                            KeyCode::Enter => {
-                                if s.role_cursor < s.roles.len() {
-                                    let model = s.roles[s.role_cursor].1.clone();
-                                    s.role_input = model;
-                                    s.role_edit_field = RoleEditField::Model(s.role_cursor);
-                                } else {
-                                    // Cursor on "Done" row
+                                    s.fast_model = entry.id.clone();
                                     return Ok(SetupOutcome::Finished(Box::new(s)));
                                 }
                             }
-                            KeyCode::Up => {
-                                if s.role_cursor > 0 {
-                                    s.role_cursor -= 1;
-                                }
-                            }
-                            KeyCode::Down => {
-                                // roles.len() = "Done" row index
-                                if s.role_cursor < s.roles.len() {
-                                    s.role_cursor += 1;
-                                }
-                            }
-                            // 'n': add a new role
-                            KeyCode::Char('n') => {
-                                s.role_input.clear();
-                                s.role_edit_field = RoleEditField::Name(usize::MAX);
-                            }
-                            // 'd': delete selected role
-                            KeyCode::Char('d') => {
-                                if s.role_cursor < s.roles.len() {
-                                    s.roles.remove(s.role_cursor);
-                                    if s.role_cursor > 0 && s.role_cursor >= s.roles.len() {
-                                        s.role_cursor -= 1;
-                                    }
-                                }
-                            }
-                            KeyCode::Esc => {
-                                // Back to model selection (keep chosen model)
-                                s.step = SetupStep::Model;
-                                if !s.custom_model {
-                                    s.model_picker.filter.clear();
-                                    s.model_picker.apply_filter();
-                                    s.model_picker.home();
-                                }
-                            }
-                            _ => {}
+                            None => {}
                         },
-                        RoleEditField::Name(_) => match key.code {
-                            KeyCode::Enter => {
-                                let name = s.role_input.trim().to_string();
-                                if name.is_empty() {
-                                    s.role_edit_field = RoleEditField::None;
-                                } else {
-                                    // Move to editing the model for this new role
-                                    s.roles.push((name, String::new()));
-                                    let idx = s.roles.len() - 1;
-                                    s.role_cursor = idx;
-                                    s.role_input.clear();
-                                    s.role_edit_field = RoleEditField::Model(idx);
-                                }
+                        KeyCode::Esc => {
+                            if !s.fast_model_picker.filter.text.is_empty() {
+                                s.fast_model_picker.filter.clear();
+                                s.fast_model_picker.apply_filter();
+                                s.fast_model_picker.home();
+                            } else {
+                                s.step = SetupStep::FastProvider;
                             }
-                            KeyCode::Backspace => {
-                                s.role_input.pop();
-                            }
-                            KeyCode::Esc => {
-                                s.role_edit_field = RoleEditField::None;
-                                s.role_input.clear();
-                            }
-                            KeyCode::Char(c) => {
-                                s.role_input.push(c);
-                            }
-                            _ => {}
-                        },
-                        RoleEditField::Model(idx) => {
-                            let idx = *idx;
-                            match key.code {
-                                KeyCode::Enter => {
-                                    let model = s.role_input.trim().to_string();
-                                    if model.is_empty() {
-                                        // Remove the role if no model given
-                                        if idx < s.roles.len() {
-                                            s.roles.remove(idx);
-                                        }
-                                    } else if idx < s.roles.len() {
-                                        s.roles[idx].1 = model;
-                                    }
-                                    s.role_edit_field = RoleEditField::None;
-                                    s.role_input.clear();
-                                }
-                                KeyCode::Backspace => {
-                                    s.role_input.pop();
-                                }
-                                KeyCode::Esc => {
-                                    // Cancel edit — remove if model is still empty
-                                    if idx < s.roles.len() && s.roles[idx].1.is_empty() {
-                                        s.roles.remove(idx);
-                                    }
-                                    s.role_edit_field = RoleEditField::None;
-                                    s.role_input.clear();
-                                }
-                                KeyCode::Char(c) => {
-                                    s.role_input.push(c);
-                                }
-                                _ => {}
-                            }
+                        }
+                        _ => {
+                            s.fast_model_picker.handle_key(key);
                         }
                     }
                 }
+
+                // ── Fast model text input ─────────────────────────────────
+                SetupStep::FastModel => match key.code {
+                    KeyCode::Enter => {
+                        if s.text_input.text.is_empty() {
+                            s.error = Some("Model ID required — type a model name".into());
+                        } else {
+                            s.fast_model = s.text_input.text.clone();
+                            s.clear_typed_input();
+                            return Ok(SetupOutcome::Finished(Box::new(s)));
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        s.text_input.delete_back();
+                    }
+                    KeyCode::Delete => {
+                        s.text_input.delete_forward();
+                    }
+                    KeyCode::Left => {
+                        s.text_input.cursor_left();
+                    }
+                    KeyCode::Right => {
+                        s.text_input.cursor_right();
+                    }
+                    KeyCode::Home => {
+                        s.text_input.home();
+                    }
+                    KeyCode::End => {
+                        s.text_input.end();
+                    }
+                    KeyCode::Esc => {
+                        if !s.fast_fetched_models.is_empty() {
+                            s.fast_custom_model = false;
+                            s.clear_typed_input();
+                        } else {
+                            s.step = SetupStep::FastProvider;
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        s.text_input.insert_char(c);
+                    }
+                    _ => {}
+                },
             }
         }
     }

@@ -197,11 +197,7 @@ pub(super) fn cmd_keys(app: &mut App) {
 }
 
 pub(super) fn cmd_fast(app: &mut App) {
-    let new_model = app
-        .config_roles
-        .get("fast")
-        .cloned()
-        .unwrap_or_else(|| "claude-haiku-4-5-20251001".to_string());
+    let new_model = "claude-haiku-4-5-20251001".to_string();
     app.model = new_model.clone();
     let _ = app.channels.model_switch_tx.send(new_model.clone());
     app.model_prefs.push_recent(&new_model);
@@ -210,11 +206,7 @@ pub(super) fn cmd_fast(app: &mut App) {
 }
 
 pub(super) fn cmd_smart(app: &mut App) {
-    let new_model = app
-        .config_roles
-        .get("reasoning")
-        .cloned()
-        .unwrap_or_else(|| "claude-opus-4-6".to_string());
+    let new_model = "claude-opus-4-6".to_string();
     app.model = new_model.clone();
     let _ = app.channels.model_switch_tx.send(new_model.clone());
     app.model_prefs.push_recent(&new_model);
@@ -273,121 +265,13 @@ pub(super) fn cmd_models(app: &mut App) {
     });
 }
 
-pub(super) fn cmd_role(app: &mut App, cmd: &str) {
-    let role = cmd.trim_start_matches("/role").trim();
-    if role.is_empty() || role == "list" {
-        // No name given or "/role list" → open interactive role picker.
-        let mut roles: Vec<(String, String)> = app
-            .config_roles
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        roles.sort_by(|a, b| a.0.cmp(&b.0));
-        if roles.is_empty() {
-            app.push(ChatLine::Info(
-                "  No roles configured — use /role add <name> <model> to create one".into(),
-            ));
-            app.push(ChatLine::Info(
-                "  Roles let you quickly switch between models  (e.g. fast, smart, review)".into(),
-            ));
-        } else {
-            app.role_picker = Some(RolePickerState {
-                picker: ListPicker::new(roles, 10),
-            });
-        }
-    } else if role.starts_with("add ") {
-        let args = role.trim_start_matches("add ").trim();
-        let parts: Vec<&str> = args.splitn(2, ' ').collect();
-        if parts.len() < 2 || parts[1].trim().is_empty() {
-            app.push(ChatLine::Info(
-                "  usage: /role add <name> <model_id>".into(),
-            ));
-        } else {
-            let name = parts[0].trim().to_string();
-            let model = parts[1].trim().to_string();
-            app.config_roles.insert(name.clone(), model.clone());
-            let config_path = clido_core::global_config_path()
-                .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
-            let roles_vec: Vec<(String, String)> = app
-                .config_roles
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            match save_roles_to_config(&config_path, &roles_vec) {
-                Ok(()) => {
-                    let (pricing, _) = clido_core::load_pricing();
-                    app.known_models =
-                        build_model_list(&pricing, &app.config_roles, &app.model_prefs);
-                    app.push(ChatLine::Info(format!(
-                        "  role '{name}' → {model}  (saved)"
-                    )));
-                }
-                Err(e) => {
-                    app.config_roles.remove(&name);
-                    app.push(ChatLine::Info(format!("  ✗ failed to save role: {e}")));
-                }
-            }
-        }
-    } else if role.starts_with("delete ") || role.starts_with("remove ") {
-        let name = role
-            .trim_start_matches("delete ")
-            .trim_start_matches("remove ")
-            .trim();
-        if name.is_empty() {
-            app.push(ChatLine::Info("  usage: /role delete <name>".into()));
-        } else if app.config_roles.remove(name).is_some() {
-            let config_path = clido_core::global_config_path()
-                .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
-            let roles_vec: Vec<(String, String)> = app
-                .config_roles
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            match save_roles_to_config(&config_path, &roles_vec) {
-                Ok(()) => {
-                    let (pricing, _) = clido_core::load_pricing();
-                    app.known_models =
-                        build_model_list(&pricing, &app.config_roles, &app.model_prefs);
-                    app.push(ChatLine::Info(format!("  role '{name}' deleted")));
-                }
-                Err(e) => {
-                    app.push(ChatLine::Info(format!("  ✗ failed to save: {e}")));
-                }
-            }
-        } else {
-            app.push(ChatLine::Info(format!("  role '{name}' not found")));
-        }
-    } else {
-        // Resolve: look up in config_roles.
-        let model_id = app.config_roles.get(role).cloned();
-        match model_id {
-            Some(id) => {
-                app.model = id.clone();
-                let _ = app.channels.model_switch_tx.send(id.clone());
-                app.model_prefs.push_recent(&id);
-                app.model_prefs.save();
-                app.push(ChatLine::Info(format!(
-                    "  role '{}' → model switched to {}",
-                    role, id
-                )));
-            }
-            None => {
-                app.push(ChatLine::Info(format!(
-                    "  role '{}' not found — use /role to list, /role add <name> <model> to create",
-                    role
-                )));
-            }
-        }
-    }
-}
-
 pub(super) fn cmd_fav(app: &mut App) {
     let model_id = app.model.clone();
     app.model_prefs.toggle_favorite(&model_id);
     app.model_prefs.save();
     // Rebuild model list with updated favorites.
     let (pricing, _) = clido_core::load_pricing();
-    app.known_models = build_model_list(&pricing, &app.config_roles, &app.model_prefs);
+    app.known_models = build_model_list(&pricing, &app.model_prefs);
     let is_fav = app.model_prefs.is_favorite(&model_id);
     let icon = if is_fav { "★" } else { "☆" };
     app.push(ChatLine::Info(format!(
@@ -1622,11 +1506,6 @@ pub(super) fn cmd_configure(app: &mut App, cmd: &str) {
             compaction-threshold = 0.75    # compress context when 75% full\n\
             max-context-tokens   = 100000  # optional hard cap on context size\n\
             \n\
-            [roles]\n\
-            fast      = \"claude-haiku-4-5-20251001\"  # /fast role\n\
-            reasoning = \"claude-opus-4-6\"            # /smart role\n\
-            # any extra role name = \"model-id\"       # /role <name>\n\
-            \n\
             [index]\n\
             exclude-patterns = [\"*.lock\", \"vendor/**\"]\n\
             include-ignored  = false\n\
@@ -1708,7 +1587,6 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
         "/smart" => cmd_smart(app),
         _ if cmd == "/model" || cmd.starts_with("/model ") => cmd_model(app, cmd),
         "/models" => cmd_models(app),
-        _ if cmd == "/role" || cmd.starts_with("/role ") => cmd_role(app, cmd),
         "/fav" => cmd_fav(app),
         _ if cmd == "/reviewer" || cmd.starts_with("/reviewer ") => cmd_reviewer(app, cmd),
         "/session" => match &app.current_session_id {

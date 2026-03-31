@@ -412,108 +412,76 @@ fn parse_anthropic_sse(
     byte_stream: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>> + Send + 'static,
 ) -> impl futures::Stream<Item = Result<StreamEvent>> + Send {
     use futures::channel::mpsc;
-    use futures::SinkExt;
-    use futures::StreamExt;
 
-    let (mut tx, rx) = mpsc::unbounded::<Result<StreamEvent>>();
+    /// Per-stream state for assembling Anthropic SSE events.
+    struct AnthropicSseState {
+        event_type: String,
+        data_buf: String,
+        /// index → tool_use_id
+        index_to_id: std::collections::HashMap<u64, String>,
+    }
 
-    tokio::spawn(async move {
-        let mut line_buf = String::new();
-        let mut event_type = String::new();
-        let mut data_buf = String::new();
-        // index → tool_use_id (needed because content_block_delta only carries index)
-        let mut index_to_id: std::collections::HashMap<u64, String> =
-            std::collections::HashMap::new();
-        // If no bytes arrive for this long, treat it as a stall and abort.
-        const STREAM_CHUNK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
-
-        let mut stream = std::pin::pin!(byte_stream);
-        loop {
-            let chunk = match tokio::time::timeout(STREAM_CHUNK_TIMEOUT, stream.next()).await {
-                Ok(Some(chunk)) => chunk,
-                Ok(None) => break, // stream ended naturally
-                Err(_elapsed) => {
-                    let _ = tx
-                        .send(Err(ClidoError::Provider(
-                            "streaming stalled — no data received for 90 seconds".to_string(),
-                        )))
-                        .await;
-                    return;
-                }
-            };
-            let bytes = match chunk {
-                Ok(b) => b,
-                Err(e) => {
-                    let err: Result<StreamEvent> = Err(ClidoError::Provider(e.to_string()));
-                    let _ = tx.send(err).await;
-                    return;
-                }
-            };
-
-            // Append chunk bytes to the line buffer and process complete lines.
-            line_buf.push_str(&String::from_utf8_lossy(&bytes));
-
-            loop {
-                let Some(pos) = line_buf.find('\n') else {
-                    break;
-                };
-                let line = line_buf[..pos].trim_end_matches('\r').to_string();
-                line_buf = line_buf[pos + 1..].to_string();
-
-                if line.is_empty() {
-                    // Blank line = end of SSE event; process event + data.
-                    if !data_buf.is_empty() {
-                        // Handle Anthropic streaming error events (rate limit, overload, etc.)
-                        if event_type == "error" {
-                            let msg = if let Ok(json) =
-                                serde_json::from_str::<serde_json::Value>(&data_buf)
-                            {
-                                let err_type = json["error"]["type"].as_str().unwrap_or("unknown");
-                                let err_msg =
-                                    json["error"]["message"].as_str().unwrap_or(&data_buf);
-                                if err_type == "rate_limit_error" || err_type == "overloaded_error"
-                                {
-                                    let _ = tx
-                                        .send(Err(ClidoError::RateLimited {
-                                            message: format!("streaming {}: {}", err_type, err_msg),
-                                            retry_after_secs: None,
-                                            is_subscription_limit: false,
-                                        }))
-                                        .await;
-                                    return;
-                                }
-                                format!("streaming error ({}): {}", err_type, err_msg)
-                            } else {
-                                format!("streaming error: {}", data_buf)
-                            };
-                            let _ = tx.send(Err(ClidoError::Provider(msg))).await;
-                            return;
+    fn process_line(
+        line: &str,
+        tx: &mut mpsc::UnboundedSender<Result<StreamEvent>>,
+        state: &mut AnthropicSseState,
+    ) -> bool {
+        if line.is_empty() {
+            // Blank line = end of SSE event; process event + data.
+            if !state.data_buf.is_empty() {
+                if state.event_type == "error" {
+                    let msg = if let Ok(json) =
+                        serde_json::from_str::<serde_json::Value>(&state.data_buf)
+                    {
+                        let err_type = json["error"]["type"].as_str().unwrap_or("unknown");
+                        let err_msg =
+                            json["error"]["message"].as_str().unwrap_or(&state.data_buf);
+                        if err_type == "rate_limit_error" || err_type == "overloaded_error" {
+                            let _ = tx.unbounded_send(Err(ClidoError::RateLimited {
+                                message: format!("streaming {}: {}", err_type, err_msg),
+                                retry_after_secs: None,
+                                is_subscription_limit: false,
+                            }));
+                            return false;
                         }
-                        if let Some(events) =
-                            decode_anthropic_event(&event_type, &data_buf, &mut index_to_id)
-                        {
-                            for ev in events {
-                                if tx.send(Ok(ev)).await.is_err() {
-                                    return; // receiver dropped
-                                }
-                            }
+                        format!("streaming error ({}): {}", err_type, err_msg)
+                    } else {
+                        format!("streaming error: {}", state.data_buf)
+                    };
+                    let _ = tx.unbounded_send(Err(ClidoError::Provider(msg)));
+                    return false;
+                }
+                if let Some(events) = decode_anthropic_event(
+                    &state.event_type,
+                    &state.data_buf,
+                    &mut state.index_to_id,
+                ) {
+                    for ev in events {
+                        if tx.unbounded_send(Ok(ev)).is_err() {
+                            return false; // receiver dropped
                         }
                     }
-                    event_type.clear();
-                    data_buf.clear();
-                } else if let Some(rest) = line.strip_prefix("event:") {
-                    event_type = rest.trim().to_string();
-                } else if let Some(rest) = line.strip_prefix("data:") {
-                    if !data_buf.is_empty() {
-                        data_buf.push('\n');
-                    }
-                    data_buf.push_str(rest.trim());
                 }
             }
+            state.event_type.clear();
+            state.data_buf.clear();
+        } else if let Some(rest) = line.strip_prefix("event:") {
+            state.event_type = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("data:") {
+            if !state.data_buf.is_empty() {
+                state.data_buf.push('\n');
+            }
+            state.data_buf.push_str(rest.trim());
         }
-    });
+        true
+    }
 
-    rx
+    let state = AnthropicSseState {
+        event_type: String::new(),
+        data_buf: String::new(),
+        index_to_id: std::collections::HashMap::new(),
+    };
+    crate::sse::parse_sse_stream(byte_stream, state, process_line)
 }
 
 /// Decode one Anthropic SSE event into zero or more `StreamEvent` values.
@@ -999,7 +967,7 @@ mod tests {
 
     #[test]
     fn anthropic_provider_new() {
-        let p = AnthropicProvider::new("sk-ant-fake".to_string(), "claude-3-haiku".to_string());
+        let p = AnthropicProvider::new("sk-ant-fake", "claude-3-haiku");
         // Just assert it constructs without panic.
         let _ = p;
     }

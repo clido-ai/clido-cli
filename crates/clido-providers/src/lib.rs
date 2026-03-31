@@ -10,6 +10,7 @@ pub mod openai;
 pub mod provider;
 pub mod registry;
 pub mod retry;
+pub(crate) mod sse;
 
 pub use anthropic::AnthropicProvider;
 pub use fallback::FallbackProvider;

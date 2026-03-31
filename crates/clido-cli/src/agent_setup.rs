@@ -410,7 +410,9 @@ fn build_provider_from_slot(
         slot.user_agent.clone(),
     )
     .map_err(|e| format!("build sub-agent provider: {e}"))
-}(has_worker: bool, has_reviewer: bool) -> String {
+}
+
+fn build_routing_instructions(has_worker: bool, has_reviewer: bool) -> String {
     let mut lines = vec!["## Sub-Agent Routing".to_string(), String::new()];
     if has_worker {
         lines.push(

@@ -266,7 +266,7 @@ pub(super) async fn agent_task(
     let mut setup = match setup_result {
         Ok(s) => s,
         Err(e) => {
-            if event_tx.send(AgentEvent::Err(e.to_string())).is_err() {
+            if event_tx.send(AgentEvent::Err(format!("{e}"))).is_err() {
                 return;
             }
             return;
@@ -313,7 +313,7 @@ pub(super) async fn agent_task(
     let mut writer = match writer_result {
         Ok(w) => w,
         Err(e) => {
-            if event_tx.send(AgentEvent::Err(e.to_string())).is_err() {
+            if event_tx.send(AgentEvent::Err(format!("{e}"))).is_err() {
                 return;
             }
             return;
@@ -874,7 +874,7 @@ pub(super) async fn agent_task(
                                 }
                                 Err(e) => {
                                     session_exit = "error";
-                                    if event_tx.send(AgentEvent::Err(e.to_string())).is_err() {
+                                    if event_tx.send(AgentEvent::Err(format!("{e}"))).is_err() {
                                         return;
                                     }
                                 }
@@ -924,7 +924,7 @@ pub(super) async fn agent_task(
                     }
                     Err(e) => {
                         session_exit = "error";
-                        if event_tx.send(AgentEvent::Err(e.to_string())).is_err() {
+                        if event_tx.send(AgentEvent::Err(format!("{e}"))).is_err() {
                             return;
                         }
                     }

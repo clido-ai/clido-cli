@@ -153,6 +153,8 @@ pub fn make_provider(
     )
     .map_err(|e| format!("build provider: {e}"))
 }
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

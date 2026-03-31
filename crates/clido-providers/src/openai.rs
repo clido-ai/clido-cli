@@ -856,161 +856,119 @@ fn parse_openai_sse(
     byte_stream: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>> + Send + 'static,
 ) -> impl futures::Stream<Item = Result<StreamEvent>> + Send {
     use futures::channel::mpsc;
-    use futures::SinkExt;
-    use futures::StreamExt;
 
-    let (mut tx, rx) = mpsc::unbounded::<Result<StreamEvent>>();
+    /// Per-stream state for assembling OpenAI tool-call deltas.
+    struct OpenAISseState {
+        /// tool_call index → (id, name, partial_json)
+        tool_calls: std::collections::HashMap<u64, (String, String, String)>,
+    }
 
-    tokio::spawn(async move {
-        let mut line_buf = String::new();
-        // tool_call index → (id, name, partial_json) for assembling tool use blocks
-        let mut tool_calls: std::collections::HashMap<u64, (String, String, String)> =
-            std::collections::HashMap::new();
-        // If no bytes arrive for this long, treat it as a stall and abort.
-        const STREAM_CHUNK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+    fn process_line(
+        line: &str,
+        tx: &mut mpsc::UnboundedSender<Result<StreamEvent>>,
+        state: &mut OpenAISseState,
+    ) -> bool {
+        let Some(data) = line.strip_prefix("data:") else {
+            return true;
+        };
+        let data = data.trim();
+        if data == "[DONE]" {
+            for (id, _, _) in state.tool_calls.values() {
+                let _ = tx.unbounded_send(Ok(StreamEvent::ToolUseEnd { id: id.clone() }));
+            }
+            return false;
+        }
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
+            return true;
+        };
 
-        let mut stream = std::pin::pin!(byte_stream);
-        loop {
-            let chunk = match tokio::time::timeout(STREAM_CHUNK_TIMEOUT, stream.next()).await {
-                Ok(Some(chunk)) => chunk,
-                Ok(None) => break, // stream ended naturally
-                Err(_elapsed) => {
-                    let _ = tx
-                        .send(Err(ClidoError::Provider(
-                            "streaming stalled — no data received for 90 seconds".to_string(),
-                        )))
-                        .await;
-                    return;
-                }
+        // Usage chunk (stream_options.include_usage)
+        if let Some(usage_obj) = json.get("usage").filter(|u| !u.is_null()) {
+            let usage = Usage {
+                input_tokens: usage_obj["prompt_tokens"].as_u64().unwrap_or(0),
+                output_tokens: usage_obj["completion_tokens"].as_u64().unwrap_or(0),
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             };
-            let bytes = match chunk {
-                Ok(b) => b,
-                Err(e) => {
-                    let err: Result<StreamEvent> = Err(ClidoError::Provider(e.to_string()));
-                    let _ = tx.send(err).await;
-                    return;
-                }
+            let stop_reason = match json["choices"]
+                .as_array()
+                .and_then(|c| c.first())
+                .and_then(|c| c["finish_reason"].as_str())
+            {
+                Some("tool_calls") => StopReason::ToolUse,
+                Some("length") => StopReason::MaxTokens,
+                Some("stop_sequence") => StopReason::StopSequence,
+                _ => StopReason::EndTurn,
             };
+            let _ = tx.unbounded_send(Ok(StreamEvent::MessageDelta { stop_reason, usage }));
+            return true;
+        }
 
-            line_buf.push_str(&String::from_utf8_lossy(&bytes));
+        let Some(choices) = json["choices"].as_array() else {
+            return true;
+        };
+        let Some(choice) = choices.first() else {
+            return true;
+        };
+        let delta = &choice["delta"];
 
-            loop {
-                let Some(pos) = line_buf.find('\n') else {
-                    break;
-                };
-                let line = line_buf[..pos].trim_end_matches('\r').to_string();
-                line_buf = line_buf[pos + 1..].to_string();
+        // Text content delta
+        if let Some(text) = delta["content"].as_str() {
+            if !text.is_empty() {
+                let _ = tx.unbounded_send(Ok(StreamEvent::TextDelta(text.to_string())));
+            }
+        }
 
-                let Some(data) = line.strip_prefix("data:") else {
-                    continue;
-                };
-                let data = data.trim();
-                if data == "[DONE]" {
-                    // Flush any accumulated tool calls as ToolUseEnd events.
-                    for (id, _, _) in tool_calls.values() {
-                        let _ = tx
-                            .send(Ok(StreamEvent::ToolUseEnd { id: id.clone() }))
-                            .await;
-                    }
-                    return;
-                }
-                let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
-                    continue;
-                };
-
-                // Usage chunk (stream_options.include_usage)
-                if let Some(usage_obj) = json.get("usage").filter(|u| !u.is_null()) {
-                    let usage = Usage {
-                        input_tokens: usage_obj["prompt_tokens"].as_u64().unwrap_or(0),
-                        output_tokens: usage_obj["completion_tokens"].as_u64().unwrap_or(0),
-                        cache_creation_input_tokens: None,
-                        cache_read_input_tokens: None,
-                    };
-                    let stop_reason = match json["choices"]
-                        .as_array()
-                        .and_then(|c| c.first())
-                        .and_then(|c| c["finish_reason"].as_str())
-                    {
-                        Some("tool_calls") => StopReason::ToolUse,
-                        Some("length") => StopReason::MaxTokens,
-                        Some("stop_sequence") => StopReason::StopSequence,
-                        _ => StopReason::EndTurn,
-                    };
-                    let _ = tx
-                        .send(Ok(StreamEvent::MessageDelta { stop_reason, usage }))
-                        .await;
-                    continue;
-                }
-
-                let Some(choices) = json["choices"].as_array() else {
-                    continue;
-                };
-                let Some(choice) = choices.first() else {
-                    continue;
-                };
-                let delta = &choice["delta"];
-
-                // Text content delta
-                if let Some(text) = delta["content"].as_str() {
-                    if !text.is_empty() {
-                        let _ = tx.send(Ok(StreamEvent::TextDelta(text.to_string()))).await;
+        // Tool call deltas
+        if let Some(tc_arr) = delta["tool_calls"].as_array() {
+            for tc in tc_arr {
+                let idx = tc["index"].as_u64().unwrap_or(0);
+                let entry = state
+                    .tool_calls
+                    .entry(idx)
+                    .or_insert_with(|| (String::new(), String::new(), String::new()));
+                if let Some(id) = tc["id"].as_str() {
+                    if entry.0.is_empty() {
+                        entry.0 = id.to_string();
                     }
                 }
-
-                // Tool call deltas
-                if let Some(tc_arr) = delta["tool_calls"].as_array() {
-                    for tc in tc_arr {
-                        let idx = tc["index"].as_u64().unwrap_or(0);
-                        let entry = tool_calls
-                            .entry(idx)
-                            .or_insert_with(|| (String::new(), String::new(), String::new()));
-                        // First chunk for this index carries id and function.name
-                        if let Some(id) = tc["id"].as_str() {
-                            if entry.0.is_empty() {
-                                entry.0 = id.to_string();
-                            }
-                        }
-                        if let Some(name) = tc["function"]["name"].as_str() {
-                            if entry.1.is_empty() {
-                                entry.1 = name.to_string();
-                                let _ = tx
-                                    .send(Ok(StreamEvent::ToolUseStart {
-                                        id: entry.0.clone(),
-                                        name: name.to_string(),
-                                    }))
-                                    .await;
-                            }
-                        }
-                        if let Some(partial) = tc["function"]["arguments"].as_str() {
-                            entry.2.push_str(partial);
-                            if !partial.is_empty() {
-                                let _ = tx
-                                    .send(Ok(StreamEvent::ToolUseDelta {
-                                        id: entry.0.clone(),
-                                        partial_json: partial.to_string(),
-                                    }))
-                                    .await;
-                            }
-                        }
+                if let Some(name) = tc["function"]["name"].as_str() {
+                    if entry.1.is_empty() {
+                        entry.1 = name.to_string();
+                        let _ = tx.unbounded_send(Ok(StreamEvent::ToolUseStart {
+                            id: entry.0.clone(),
+                            name: name.to_string(),
+                        }));
                     }
                 }
-
-                // Emit finish event
-                if let Some(reason) = choice["finish_reason"].as_str() {
-                    if !reason.is_empty() && reason != "null" {
-                        for (id, _, _) in tool_calls.values() {
-                            let _ = tx
-                                .send(Ok(StreamEvent::ToolUseEnd { id: id.clone() }))
-                                .await;
-                        }
-                        tool_calls.clear();
+                if let Some(partial) = tc["function"]["arguments"].as_str() {
+                    entry.2.push_str(partial);
+                    if !partial.is_empty() {
+                        let _ = tx.unbounded_send(Ok(StreamEvent::ToolUseDelta {
+                            id: entry.0.clone(),
+                            partial_json: partial.to_string(),
+                        }));
                     }
                 }
             }
         }
-    });
 
-    rx
+        // Emit finish event
+        if let Some(reason) = choice["finish_reason"].as_str() {
+            if !reason.is_empty() && reason != "null" {
+                for (id, _, _) in state.tool_calls.values() {
+                    let _ = tx.unbounded_send(Ok(StreamEvent::ToolUseEnd { id: id.clone() }));
+                }
+                state.tool_calls.clear();
+            }
+        }
+        true
+    }
+
+    let state = OpenAISseState {
+        tool_calls: std::collections::HashMap::new(),
+    };
+    crate::sse::parse_sse_stream(byte_stream, state, process_line)
 }
 
 #[cfg(test)]
@@ -1158,9 +1116,9 @@ mod tests {
     #[test]
     fn request_url_strips_trailing_slash() {
         let p = OpenAICompatProvider::new(
-            "key".into(),
-            "model".into(),
-            "https://example.com/v1/".into(),
+            "key",
+            "model",
+            "https://example.com/v1/",
             vec![],
         );
         assert_eq!(p.request_url(), "https://example.com/v1/chat/completions");
@@ -1169,9 +1127,9 @@ mod tests {
     #[test]
     fn request_url_no_trailing_slash() {
         let p = OpenAICompatProvider::new(
-            "key".into(),
-            "model".into(),
-            "https://example.com/v1".into(),
+            "key",
+            "model",
+            "https://example.com/v1",
             vec![],
         );
         assert_eq!(p.request_url(), "https://example.com/v1/chat/completions");
@@ -1181,7 +1139,7 @@ mod tests {
 
     #[test]
     fn new_openrouter_uses_openrouter_url() {
-        let p = OpenAICompatProvider::new_openrouter("sk-or-key".into(), "model".into());
+        let p = OpenAICompatProvider::new_openrouter("sk-or-key", "model");
         assert!(p.request_url().contains("openrouter.ai"));
     }
 

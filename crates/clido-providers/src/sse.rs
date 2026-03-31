@@ -129,9 +129,8 @@ mod tests {
 
     #[tokio::test]
     async fn parse_sse_stream_stops_on_false() {
-        let chunks: Vec<reqwest::Result<bytes::Bytes>> = vec![
-            Ok(bytes::Bytes::from("line1\nline2\nline3\n")),
-        ];
+        let chunks: Vec<reqwest::Result<bytes::Bytes>> =
+            vec![Ok(bytes::Bytes::from("line1\nline2\nline3\n"))];
         let byte_stream = stream::iter(chunks);
 
         let out = parse_sse_stream(byte_stream, 0u32, |_line, tx, count| {

@@ -1223,21 +1223,19 @@ impl AgentLoop {
 
             // Budget hard stop
             self.check_budget_exceeded()?;
-                // Budget warnings at 50%, 80%, 90% of limit
-                if let (Some(limit), Some(ref e)) =
-                    (self.config.max_budget_usd, &self.emit)
-                {
-                    let pct_used = (self.cumulative_cost_usd / limit * 100.0).floor() as u8;
-                    for &threshold_pct in BUDGET_WARNING_PCTS {
-                        if pct_used >= threshold_pct
-                            && !self.budget_warned_pcts.contains(&threshold_pct)
-                        {
-                            self.budget_warned_pcts.push(threshold_pct);
-                            e.on_budget_warning(threshold_pct, self.cumulative_cost_usd, limit)
-                                .await;
-                        }
+            // Budget warnings at 50%, 80%, 90% of limit
+            if let (Some(limit), Some(ref e)) = (self.config.max_budget_usd, &self.emit) {
+                let pct_used = (self.cumulative_cost_usd / limit * 100.0).floor() as u8;
+                for &threshold_pct in BUDGET_WARNING_PCTS {
+                    if pct_used >= threshold_pct
+                        && !self.budget_warned_pcts.contains(&threshold_pct)
+                    {
+                        self.budget_warned_pcts.push(threshold_pct);
+                        e.on_budget_warning(threshold_pct, self.cumulative_cost_usd, limit)
+                            .await;
                     }
                 }
+            }
 
             debug!(
                 "turn {} stop_reason={:?} usage={}/{}",

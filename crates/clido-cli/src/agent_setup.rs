@@ -356,7 +356,8 @@ impl AgentSetup {
     /// Convenience wrapper that loads config and pricing from disk.
     /// Prefer `build_with_preloaded` when the caller already has these.
     pub fn build(cli: &Cli, workspace_root: &Path) -> Result<Self, anyhow::Error> {
-        let loaded = load_config(workspace_root).map_err(|e| CliError::Usage(format!("load config: {e}")))?;
+        let loaded = load_config(workspace_root)
+            .map_err(|e| CliError::Usage(format!("load config: {e}")))?;
         let (pricing_table, _) = load_pricing();
         Self::build_with_preloaded(
             cli,

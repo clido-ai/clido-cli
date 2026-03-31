@@ -12,9 +12,7 @@ use ratatui::{
 
 use clido_providers::registry::PROVIDER_REGISTRY;
 
-use super::types::{
-    ModelOption, RoleEditField, SetupState, SetupStep,
-};
+use super::types::{ModelOption, RoleEditField, SetupState, SetupStep};
 
 use super::{anonymize_key, PROFILE_NAME_PREFIX, SETUP_INPUT_ACCENT, SUBAGENT_OPTIONS};
 

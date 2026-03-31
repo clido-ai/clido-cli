@@ -58,7 +58,12 @@ impl ReadCache {
     /// Insert a file's content into the cache.
     ///
     /// If the cache is full the least-recently-used entry is evicted first.
-    pub fn insert(&self, path: PathBuf, content_hash: impl Into<String>, content: impl Into<String>) {
+    pub fn insert(
+        &self,
+        path: PathBuf,
+        content_hash: impl Into<String>,
+        content: impl Into<String>,
+    ) {
         let mut inner = self.inner.lock().unwrap();
         inner.gen += 1;
         let gen = inner.gen;

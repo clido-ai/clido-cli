@@ -108,7 +108,10 @@ mod tests {
 
     #[test]
     fn subscription_limit_keyword_subscription() {
-        assert!(is_subscription_limit(None, "upgrade your subscription plan"));
+        assert!(is_subscription_limit(
+            None,
+            "upgrade your subscription plan"
+        ));
     }
 
     #[test]
@@ -123,7 +126,10 @@ mod tests {
 
     #[test]
     fn subscription_limit_false_low_retry_after_no_keywords() {
-        assert!(!is_subscription_limit(Some(60), "rate limited, please retry"));
+        assert!(!is_subscription_limit(
+            Some(60),
+            "rate limited, please retry"
+        ));
     }
 
     #[test]

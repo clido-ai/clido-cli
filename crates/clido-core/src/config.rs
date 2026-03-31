@@ -588,7 +588,10 @@ mod tests {
             reason: Some("sensitive area".to_string()),
         }];
         let result = evaluate_rules(&rules, "secrets/key.pem");
-        assert_eq!(result, Some((RuleAction::Deny, Some("sensitive area".to_string()))));
+        assert_eq!(
+            result,
+            Some((RuleAction::Deny, Some("sensitive area".to_string())))
+        );
     }
 
     #[test]

@@ -1108,23 +1108,13 @@ mod tests {
 
     #[test]
     fn request_url_strips_trailing_slash() {
-        let p = OpenAICompatProvider::new(
-            "key",
-            "model",
-            "https://example.com/v1/",
-            vec![],
-        );
+        let p = OpenAICompatProvider::new("key", "model", "https://example.com/v1/", vec![]);
         assert_eq!(p.request_url(), "https://example.com/v1/chat/completions");
     }
 
     #[test]
     fn request_url_no_trailing_slash() {
-        let p = OpenAICompatProvider::new(
-            "key",
-            "model",
-            "https://example.com/v1",
-            vec![],
-        );
+        let p = OpenAICompatProvider::new("key", "model", "https://example.com/v1", vec![]);
         assert_eq!(p.request_url(), "https://example.com/v1/chat/completions");
     }
 

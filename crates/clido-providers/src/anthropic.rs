@@ -431,8 +431,7 @@ fn parse_anthropic_sse(
                         serde_json::from_str::<serde_json::Value>(&state.data_buf)
                     {
                         let err_type = json["error"]["type"].as_str().unwrap_or("unknown");
-                        let err_msg =
-                            json["error"]["message"].as_str().unwrap_or(&state.data_buf);
+                        let err_msg = json["error"]["message"].as_str().unwrap_or(&state.data_buf);
                         if err_type == "rate_limit_error" || err_type == "overloaded_error" {
                             let _ = tx.unbounded_send(Err(ClidoError::RateLimited {
                                 message: format!("streaming {}: {}", err_type, err_msg),

@@ -154,6 +154,36 @@ nav {
 }
 .install-banner button:hover { background: rgba(150,200,255,0.15); border-color: rgba(150,200,255,0.3); color: var(--brand); }
 
+/* Install banner inside workflow steps - same styling but no max-width constraint */
+.wf-step .install-banner {
+  max-width: none;
+  margin: 0.75rem 0 0 0;
+  width: 100%;
+}
+
+.wf-step .install-banner code {
+  min-width: 0;
+  flex: 1;
+}
+
+/* Mobile: workflow install banner */
+@media (max-width: 640px) {
+  .wf-step .install-banner {
+    margin: 0.5rem 0 0 0;
+    padding: 0.5rem 0.75rem;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .wf-step .install-banner code {
+    font-size: 0.65rem;
+    min-width: 0;
+  }
+  .wf-step .install-banner button {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.7rem;
+  }
+}
+
 /* ── Sections ──────────────────────────────────────────────────────────── */
 .section-break { max-width: 900px; margin: 0 auto 4rem; padding: 0 2rem; text-align: center; }
 .section-break hr { border: none; height: 1px; background: linear-gradient(90deg, transparent, rgba(150,200,255,0.12), transparent); }
@@ -164,24 +194,66 @@ nav {
 }
 
 /* ── Features ──────────────────────────────────────────────────────────── */
-.features { max-width: 960px; margin: 0 auto 4rem; padding: 0 2rem; }
-.feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
-.feature-card {
-  border-radius: 12px; padding: 1.5rem; transition: all 0.25s;
+.features { max-width: 860px; margin: 0 auto 4rem; padding: 0 2rem; }
+.features .section-heading { margin-bottom: 2rem; }
+
+.feature-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
 }
-.feature-card:hover { border-color: rgba(150,200,255,0.15); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
-.feature-icon {
-  width: 36px; height: 36px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 8px; margin-bottom: 1rem; font-size: 1.1rem;
-  background: rgba(150,200,255,0.06); border: 1px solid rgba(150,200,255,0.08);
+
+.feat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1.4rem 1.25rem 1.1rem;
+  border: 1px solid rgba(150,200,255,0.08);
+  border-radius: 10px;
+  transition: background 0.18s, border-color 0.18s;
 }
-.feature-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.4rem; }
-.feature-card p { font-size: 0.85rem; color: var(--text-muted); line-height: 1.55; }
-.feature-card code {
+.feat:hover {
+  background: rgba(150,200,255,0.025);
+  border-color: rgba(150,200,255,0.14);
+}
+
+.feat-tag {
+  position: absolute;
+  top: 0;
+  left: 1rem;
+  transform: translateY(-50%);
+  background: var(--page-bg);
+  padding: 0.15rem 0.4rem;
   font-family: 'SF Mono', 'Fira Code', monospace;
-  background: rgba(150,200,255,0.06); padding: 0.1rem 0.35rem;
-  border-radius: 3px; font-size: 0.8rem; color: var(--soft);
+  font-size: 0.68rem;
+  color: var(--ac);
+  border: 1px solid var(--ac);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.feat-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.2rem;
+}
+.feat-body {
+  font-size: 0.81rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.feat-body code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  background: rgba(150,200,255,0.06);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.77rem;
+  color: var(--soft);
+}
+
+@media (max-width: 600px) {
+  .feature-list { grid-template-columns: 1fr; }
 }
 
 /* ── Workflow ──────────────────────────────────────────────────────────── */
@@ -191,7 +263,7 @@ nav {
   content: ''; position: absolute; left: 19px; top: 36px; bottom: 12px;
   width: 1px; background: linear-gradient(180deg, var(--brand), rgba(150,200,255,0.1));
 }
-.wf-step { display: flex; gap: 1.25rem; align-items: flex-start; padding: 0.75rem 0; }
+.wf-step { display: flex; gap: 1.25rem; align-items: flex-start; padding: 0.75rem 0; min-width: 0; }
 .wf-num {
   flex-shrink: 0; width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
@@ -201,13 +273,57 @@ nav {
   color: var(--brand); font-size: 0.9rem; font-weight: 700;
   font-family: 'SF Mono', monospace; z-index: 1;
 }
-.wf-content { padding-top: 6px; }
+.wf-content { 
+  padding-top: 6px; 
+  min-width: 0;
+  flex: 1;
+}
 .wf-content h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem; }
 .wf-content p { font-size: 0.9rem; color: var(--text-muted); line-height: 1.5; }
 .wf-content code {
   font-family: 'SF Mono', 'Fira Code', monospace;
   background: rgba(150,200,255,0.06); padding: 0.12rem 0.4rem;
   border-radius: 4px; font-size: 0.82rem; color: var(--soft);
+}
+
+.wf-code {
+  margin-top: 0.75rem;
+  background: rgba(22,27,34,0.8);
+  border: 1px solid rgba(150,200,255,0.1);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.wf-code code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.75rem;
+  color: var(--soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+  display: block;
+}
+
+.wf-code button {
+  background: rgba(150,200,255,0.08);
+  border: 1px solid rgba(150,200,255,0.12);
+  color: var(--text-muted);
+  padding: 0.3rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+  flex-shrink: 0;
 }
 
 /* ── Footer ────────────────────────────────────────────────────────────── */
@@ -220,11 +336,50 @@ footer a { color: var(--text-muted); }
 footer a:hover { color: var(--text); }
 
 /* ── Responsive ────────────────────────────────────────────────────────── */
-@media (max-width: 768px) { .feature-grid { grid-template-columns: 1fr; } }
+@media (max-width: 768px) {
+  .wf-code {
+    flex-direction: row;
+    padding: 0.6rem 0.75rem;
+  }
+  .wf-code code {
+    font-size: 0.7rem;
+  }
+}
 @media (max-width: 640px) {
   .hero { padding: 6rem 1.25rem 2rem; }
   .hero h1 { font-size: 2.5rem; }
+  .hero .tagline { font-size: 1.1rem; }
   nav { padding: 0 1rem; }
-  .nav-links a:not(.nav-cta) { display: none; }
-  .feature-grid { grid-template-columns: 1fr; }
+  .install-banner {
+    margin: 0 1rem 2rem;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: stretch;
+  }
+  .install-banner code {
+    font-size: 0.7rem;
+  }
+  .workflow-steps::before { left: 15px; }
+  .wf-step { gap: 0.75rem; }
+  .wf-num { 
+    width: 32px; 
+    height: 32px; 
+    font-size: 0.8rem;
+  }
+  .wf-content h3 { font-size: 0.95rem; }
+  .wf-content p { font-size: 0.85rem; }
+  .wf-code {
+    padding: 0.4rem 0.5rem;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+  .wf-code code {
+    font-size: 0.6rem;
+  }
+  .wf-code button {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.65rem;
+  }
+  .section-heading { font-size: 1.25rem; }
+  footer { padding: 2rem 1rem; }
 }

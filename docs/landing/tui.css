@@ -210,10 +210,6 @@
   60%  { content: '⠦'; } 70%  { content: '⠧'; } 80%  { content: '⠇'; } 90%  { content: '⠏'; }
 }
 
-/* ── Responsive ── */
-@media (max-width: 640px) {
-  .wp { min-width: 0; max-width: 100%; margin: 0 8px; }
-  .tui { font-size: 11px; }
-  .tui-hint { display: none; }
-  .macos-title { display: none; }
-}
+/* ── Responsive ──
+   The terminal window scales uniformly via transform: scale() (see scaleTerminal() in index.html).
+   No per-breakpoint font/size overrides needed — everything inside scales 1:1. */

@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>clido — AI coding agent for your terminal</title>
+
+<!-- Favicon — inline SVG, no file needed -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0e14'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='22' font-weight='700' fill='%2396C8FF' text-anchor='middle'%3E%3B%3C/text%3E%3C/svg%3E">
+
+<!-- SEO & social -->
+<meta name="description" content="clido is an open-source AI coding agent for your terminal. Persistent sessions, full tool access, multi-provider. One binary.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="clido — AI coding agent for your terminal">
+<meta property="og:description" content="Persistent sessions. Full tool access. Anthropic, OpenAI, Kimi, Gemini, xAI, Ollama. One binary.">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="clido — AI coding agent for your terminal">
+<meta name="twitter:description" content="Persistent sessions. Full tool access. Multi-provider. One binary.">
+
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="tui.css">
 <link rel="stylesheet" href="carousel.css">
@@ -16,8 +29,6 @@
     <span class="text">cli</span><span class="semi">;</span><span class="text">do</span>
   </span>
   <div class="nav-links">
-    <a href="/guide/introduction">Docs</a>
-    <a href="/guide/quick-start">Quick Start</a>
     <a href="https://github.com/0xKurt/clido" class="nav-cta">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       GitHub
@@ -40,7 +51,7 @@
     <span class="pill">Ollama</span>
   </div>
   <div class="hero-actions">
-    <a href="/guide/quick-start" class="btn btn-primary">Get Started</a>
+    <a href="#three-steps" class="btn btn-primary">Get Started</a>
     <a href="https://github.com/0xKurt/clido" class="btn btn-secondary">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:0.6"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       GitHub
@@ -57,13 +68,15 @@
 <!-- ═══════════════════════════════════════════════════════════════════════
      ANIMATED TUI CAROUSEL — 12 scenes showing every major feature
      ═══════════════════════════════════════════════════════════════════════ -->
-<section style="max-width:900px; margin:0 auto 2rem; padding:0 1.5rem">
-  <div class="macos-window">
-    <div class="macos-titlebar">
+<section class="carousel-section">
+  <div class="terminal-wrapper">
+  <div class="terminal-aspect">
+    <div class="macos-window">
+      <div class="macos-titlebar">
       <div class="macos-btn close"></div>
       <div class="macos-btn min"></div>
       <div class="macos-btn max"></div>
-      <div class="macos-title">clido — zsh — 96×32</div>
+      <div class="macos-title">clido</div>
     </div>
     <div class="tui carousel" id="carousel">
 
@@ -123,8 +136,8 @@
   <div class="tui-queue"></div>
   <div class="tui-hint"><span class="hk">&nbsp;&nbsp;Enter</span><span class="hl">&nbsp;send&nbsp;&nbsp;</span><span class="hk">↑↓</span><span class="hl">&nbsp;history</span></div>
   <div class="tui-iw"><div class="tui-in">
-    <div class="tui-it">Ask anything&nbsp;&nbsp;(Enter=send&nbsp;&nbsp;Shift+Enter=newline&nbsp;&nbsp;/help=commands)</div>
-    <div class="tui-ib"><span class="tw">add pagination to the /api/users endpoint</span><span class="cursor"></span></div>
+    <div class="tui-it">Ask anything</div>
+    <div class="tui-ib" style="overflow:hidden;white-space:nowrap"><span class="tw">add pagination to the /api/users endpoint<span class="cursor"></span></span></div>
   </div></div>
 </div>
 
@@ -151,9 +164,8 @@
   </div>
   <div class="tui-queue"></div>
   <div class="tui-hint"><span class="hk">&nbsp;&nbsp;Enter</span><span class="hl">&nbsp;send&nbsp;&nbsp;</span><span class="hk">Ctrl+Enter</span><span class="hl">&nbsp;interrupt</span></div>
-  <div class="tui-iw"><div class="tui-in thinking">
-    <div class="tui-it"><span class="spinner"></span>&nbsp;thinking… 3s&nbsp;&nbsp;(type a follow-up to queue, Ctrl+Enter to interrupt)</div>
-    <div class="tui-ib"><span class="cursor"></span></div>
+  <div class="tui-iw"><div class="tui-in thinking" style="min-height:34px;flex-direction:row;align-items:center">
+    <div class="tui-ib"><span class="spinner"></span>&nbsp;thinking… 3s&nbsp;&nbsp;<span style="color:var(--term-dim);opacity:0.6">· Ctrl+Enter to interrupt</span></div>
   </div></div>
 </div>
 
@@ -274,9 +286,8 @@
     <div class="st-line rv rv8"><span style="color:var(--term-cyan);opacity:0.6">&nbsp;&nbsp;▶&nbsp;</span><span class="st-done">executing enhanced plan…</span></div>
   </div>
   <div class="tui-hint"><span class="hk">&nbsp;&nbsp;Enter</span><span class="hl">&nbsp;send&nbsp;&nbsp;</span><span class="hk">Ctrl+Enter</span><span class="hl">&nbsp;interrupt</span></div>
-  <div class="tui-iw"><div class="tui-in thinking">
-    <div class="tui-it"><span class="spinner"></span>&nbsp;thinking… 2s&nbsp;&nbsp;(type a follow-up to queue, Ctrl+Enter to interrupt)</div>
-    <div class="tui-ib"><span class="cursor"></span></div>
+  <div class="tui-iw"><div class="tui-in thinking" style="min-height:34px;flex-direction:row;align-items:center">
+    <div class="tui-ib"><span class="spinner"></span>&nbsp;thinking… 2s&nbsp;&nbsp;<span style="color:var(--term-dim);opacity:0.6">· Ctrl+Enter to interrupt</span></div>
   </div></div>
 </div>
 
@@ -503,16 +514,16 @@
 
     </div><!-- /carousel -->
   </div><!-- /macos-window -->
+  </div><!-- /terminal-aspect -->
+  </div><!-- /terminal-wrapper -->
 
   <!-- Carousel controls -->
   <div class="carousel-controls">
-    <div class="carousel-nav">
-      <button onclick="prevScene()" aria-label="Previous">‹</button>
-      <button onclick="nextScene()" aria-label="Next">›</button>
-    </div>
+    <button class="carousel-btn" onclick="prevScene()" aria-label="Previous">‹</button>
     <div class="carousel-dots" id="dots"></div>
-    <div class="carousel-caption" id="caption"></div>
+    <button class="carousel-btn" onclick="nextScene()" aria-label="Next">›</button>
   </div>
+  <div class="carousel-caption" id="caption"></div>
 </section>
 
 <div class="section-break"><hr></div>
@@ -520,43 +531,42 @@
 <!-- ═══ Features ══════════════════════════════════════════════════════════ -->
 <section class="features">
   <h2 class="section-heading">What you get</h2>
-  <p class="section-sub">A terminal agent that reads, writes, runs, and iterates on your code.</p>
-  <div class="feature-grid">
-    <div class="feature-card glass">
-      <div class="feature-icon">🛠️</div>
-      <h3>Reads, writes, runs</h3>
-      <p>Built-in Bash, Read, Write, Glob, Grep. The agent navigates your codebase, edits files, runs tests, and iterates until the task is done.</p>
+  <div class="feature-list">
+    <div class="feat" style="--ac:var(--term-cyan)">
+      <div class="feat-tag">tools</div>
+      <div class="feat-title">Full tool access</div>
+      <div class="feat-body">Bash, Read, Write, Glob, Grep built in. The agent navigates, edits, runs tests, and iterates.</div>
     </div>
-    <div class="feature-card glass">
-      <div class="feature-icon">🧠</div>
-      <h3>Persistent memory</h3>
-      <p>Sessions stored as JSONL. Resume with <code>--continue</code>. Long-term SQLite memory surfaces relevant context from past conversations.</p>
+    <div class="feat" style="--ac:var(--term-cyan)">
+      <div class="feat-tag">memory</div>
+      <div class="feat-title">Persistent sessions</div>
+      <div class="feat-body">JSONL storage. Resume any conversation with <code>--continue</code>. SQLite long-term memory.</div>
     </div>
-    <div class="feature-card glass">
-      <div class="feature-icon">🔌</div>
-      <h3>Any provider, any model</h3>
-      <p>Anthropic, OpenAI, OpenRouter, Kimi, Gemini, xAI, Ollama. Switch at runtime. Define profiles for different tasks.</p>
+    <div class="feat" style="--ac:var(--term-green)">
+      <div class="feat-tag">providers</div>
+      <div class="feat-title">Any provider, any model</div>
+      <div class="feat-body">Anthropic, OpenAI, Kimi, Gemini, xAI, Ollama. Switch at runtime. Profiles per task.</div>
     </div>
-    <div class="feature-card glass">
-      <div class="feature-icon">⚡</div>
-      <h3>Two-tier routing</h3>
-      <p>Use a fast model for tool calls and a capable model for reasoning. Cut cost without cutting quality. Configurable per profile.</p>
+    <div class="feat" style="--ac:var(--term-green)">
+      <div class="feat-tag">routing</div>
+      <div class="feat-title">Two-tier routing</div>
+      <div class="feat-body">Fast model for tool calls, capable model for reasoning. Lower cost, same quality.</div>
     </div>
-    <div class="feature-card glass">
-      <div class="feature-icon">🔧</div>
-      <h3>MCP tool servers</h3>
-      <p>Connect any Model Context Protocol server over stdio. External tools appear natively to the agent alongside built-in tools.</p>
+    <div class="feat" style="--ac:var(--magenta)">
+      <div class="feat-tag">mcp</div>
+      <div class="feat-title">MCP tool servers</div>
+      <div class="feat-body">Any MCP server over stdio. External tools appear natively alongside built-ins.</div>
     </div>
-    <div class="feature-card glass">
-      <div class="feature-icon">📋</div>
-      <h3>YAML workflows</h3>
-      <p>Multi-step agent pipelines. Dynamic parameters, parallel steps, retry policies, pre-flight checks. Reproducible automation.</p>
+    <div class="feat" style="--ac:var(--magenta)">
+      <div class="feat-tag">workflows</div>
+      <div class="feat-title">YAML workflows</div>
+      <div class="feat-body">Multi-step pipelines, parallel steps, retry policies, pre-flight checks.</div>
     </div>
   </div>
 </section>
 
 <!-- ═══ Workflow ══════════════════════════════════════════════════════════ -->
-<section class="workflow">
+<section id="three-steps" class="workflow">
   <h2 class="section-heading">Three steps</h2>
   <p class="section-sub" style="margin-bottom:2rem">Install → configure → use. No package managers, no runtimes.</p>
   <div class="workflow-steps">
@@ -564,7 +574,11 @@
       <div class="wf-num">1</div>
       <div class="wf-content">
         <h3>Install the binary</h3>
-        <p>One command. Downloads a prebuilt binary for your platform. macOS (arm64, x86) and Linux (x86, arm64).</p>
+        <p>One command. Downloads a prebuilt binary for your platform.</p>
+        <div class="install-banner">
+          <code>curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh</code>
+          <button onclick="navigator.clipboard.writeText('curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+        </div>
       </div>
     </div>
     <div class="wf-step">
@@ -590,24 +604,45 @@
     <span class="mono" style="color:var(--title-text);font-weight:700">cli<span style="color:var(--brand)">;</span>do</span>
     &nbsp;·&nbsp; Open source
   </p>
-  <p>
-    <a href="https://github.com/0xKurt/clido">GitHub</a>
-    &nbsp;&nbsp;·&nbsp;&nbsp;
-    <a href="/guide/introduction">Documentation</a>
-    &nbsp;&nbsp;·&nbsp;&nbsp;
-    <a href="/guide/quick-start">Quick Start</a>
-  </p>
+  <p><a href="https://github.com/0xKurt/clido">GitHub</a></p>
 </footer>
 
 <!-- ═══ Carousel JS ══════════════════════════════════════════════════════ -->
 <script>
+// Scale the terminal window so everything inside shrinks proportionally on mobile.
+// The window is designed at 900px; we compute scale = available / 900 and apply
+// transform: scale() so fonts, borders, and padding all shrink at the same ratio.
+(function() {
+  var aspect = document.querySelector('.terminal-aspect');
+  var win    = aspect && aspect.querySelector('.macos-window');
+
+  function scaleTerminal() {
+    if (!win) return;
+    // Reset first so offsetHeight reflects natural size
+    win.style.transform = '';
+    aspect.style.height  = '';
+
+    var available = aspect.clientWidth;
+    var scale = Math.min(1, available / 900);
+
+    if (scale < 1) {
+      win.style.transform = 'scale(' + scale + ')';
+      aspect.style.height  = (win.offsetHeight * scale) + 'px';
+    }
+  }
+
+  scaleTerminal();
+  window.addEventListener('resize', scaleTerminal);
+})();
+
 (function() {
   const scenes = document.querySelectorAll('#carousel .scene');
   const dotsEl = document.getElementById('dots');
   const captionEl = document.getElementById('caption');
   let current = 0;
   let timer;
-  const INTERVAL = 4000;
+  const INTERVAL = 5000; // 5 seconds per scene
+  const FIRST_INTERVAL = 4000; // First scene slightly shorter since it's static
 
   // Build dots
   scenes.forEach((_, i) => {
@@ -630,7 +665,9 @@
 
   function resetTimer() {
     clearInterval(timer);
-    timer = setInterval(() => goTo(current + 1), INTERVAL);
+    // Use shorter interval for first scene since it has less animation
+    const interval = current === 0 ? FIRST_INTERVAL : INTERVAL;
+    timer = setInterval(() => goTo(current + 1), interval);
   }
 
   window.nextScene = () => goTo(current + 1);
@@ -643,13 +680,13 @@
   });
 
   // Pause on hover
-  const carousel = document.querySelector('.macos-window');
+  const carousel = document.querySelector('.terminal-wrapper');
   carousel.addEventListener('mouseenter', () => clearInterval(timer));
   carousel.addEventListener('mouseleave', resetTimer);
 
   // Init
   captionEl.textContent = scenes[0].dataset.caption || '';
-  timer = setInterval(() => goTo(current + 1), INTERVAL);
+  timer = setInterval(() => goTo(current + 1), FIRST_INTERVAL);
 })();
 </script>
 

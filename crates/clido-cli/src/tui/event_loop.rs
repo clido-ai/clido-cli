@@ -1745,8 +1745,8 @@ pub(super) async fn event_loop(
                     Some(Ok(Event::Resize(_, _))) => {
                         // Force a clean redraw after terminal resize to avoid stale cells.
                         // Preserve scroll ratio so user doesn't lose their place.
-                        let ratio = if app.max_scroll > 0 && !app.following {
-                            Some(app.scroll as f64 / app.max_scroll as f64)
+                        let ratio = if app.layout.max_scroll > 0 && !app.following {
+                            Some(app.scroll as f64 / app.layout.max_scroll as f64)
                         } else {
                             None
                         };

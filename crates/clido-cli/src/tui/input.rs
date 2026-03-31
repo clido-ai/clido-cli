@@ -12,7 +12,7 @@ use super::*;
 
 pub(super) fn scroll_up(app: &mut App, lines: u32) {
     if app.following {
-        app.scroll = app.max_scroll;
+        app.scroll = app.layout.max_scroll;
     }
     app.scroll = app.scroll.saturating_sub(lines);
     app.following = false;
@@ -20,8 +20,8 @@ pub(super) fn scroll_up(app: &mut App, lines: u32) {
 
 pub(super) fn scroll_down(app: &mut App, lines: u32) {
     let new_scroll = app.scroll.saturating_add(lines);
-    if new_scroll >= app.max_scroll {
-        app.scroll = app.max_scroll;
+    if new_scroll >= app.layout.max_scroll {
+        app.scroll = app.layout.max_scroll;
         app.following = true;
     } else {
         app.scroll = new_scroll;

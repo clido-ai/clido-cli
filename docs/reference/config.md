@@ -246,7 +246,7 @@ fast      = "claude-haiku-4-5-20251001"
 reasoning = "claude-opus-4-6"
 ```
 
-User-level role overrides and model favorites/recency are stored in `~/.config/clido/model_prefs.json` and managed through the TUI (`/fav`, `/role`, `/models`).
+User-level model favorites/recency are stored in `~/.config/clido/model_prefs.json` and managed through the TUI (`/fav`, `/models`).
 
 ## `permission_mode` values
 

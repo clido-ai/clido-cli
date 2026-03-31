@@ -2290,6 +2290,68 @@ mod tests {
         assert_eq!(result, "simple response");
     }
 
+    // ── fast provider fallback chain ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn complete_simple_fast_uses_fast_provider() {
+        let main = Arc::new(MockProvider::new("main response"));
+        let fast = Arc::new(MockProvider::new("fast response"));
+        let mut fast_cfg = mock_config();
+        fast_cfg.model = "fast-model".to_string();
+        let agent = AgentLoop::new(main, empty_registry(), mock_config(), None)
+            .with_fast_provider(Some(fast), Some(fast_cfg));
+        let result = agent.complete_simple_fast("test").await.unwrap();
+        assert_eq!(result, "fast response");
+    }
+
+    #[tokio::test]
+    async fn complete_simple_fast_falls_back_to_main() {
+        let main = Arc::new(MockProvider::new("main response"));
+        let agent = AgentLoop::new(main, empty_registry(), mock_config(), None);
+        // No fast provider configured — should use main.
+        let result = agent.complete_simple_fast("test").await.unwrap();
+        assert_eq!(result, "main response");
+    }
+
+    #[tokio::test]
+    async fn complete_simple_fast_with_usage_returns_tokens() {
+        let fast = Arc::new(MockProvider::new("fast"));
+        let main = Arc::new(MockProvider::new("main"));
+        let agent = AgentLoop::new(main, empty_registry(), mock_config(), None)
+            .with_fast_provider(Some(fast), Some(mock_config()));
+        let (text, usage) = agent
+            .complete_simple_fast_with_usage("prompt")
+            .await
+            .unwrap();
+        assert_eq!(text, "fast");
+        assert!(usage.input_tokens > 0);
+        assert!(usage.output_tokens > 0);
+    }
+
+    #[tokio::test]
+    async fn complete_with_system_fast_uses_fast_provider() {
+        let main = Arc::new(MockProvider::new("main"));
+        let fast = Arc::new(MockProvider::new("enhanced prompt"));
+        let agent = AgentLoop::new(main, empty_registry(), mock_config(), None)
+            .with_fast_provider(Some(fast), Some(mock_config()));
+        let result = agent
+            .complete_with_system_fast("You are a prompt enhancer", "make this better")
+            .await
+            .unwrap();
+        assert_eq!(result, "enhanced prompt");
+    }
+
+    #[test]
+    fn with_fast_provider_none_leaves_fallback() {
+        let main = Arc::new(MockProvider::new("main"));
+        let agent = AgentLoop::new(main.clone(), empty_registry(), mock_config(), None)
+            .with_fast_provider(None, None);
+        // fast_provider is None — utility_provider will return main.
+        // We can't call utility_provider directly (private), but complete_simple_fast
+        // exercises the same path.  Just verify construction succeeds.
+        assert_eq!(agent.current_model(), "mock");
+    }
+
     // ── run_next_turn ──────────────────────────────────────────────────────
 
     #[tokio::test]

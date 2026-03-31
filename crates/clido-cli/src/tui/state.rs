@@ -42,6 +42,30 @@ impl FocusTarget {
     }
 }
 
+// ── Layout info ───────────────────────────────────────────────────────────────
+
+/// Layout metrics computed during render and consumed by input/event handlers.
+/// Avoids the need for render to mutate App state for these values.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LayoutInfo {
+    /// Screen-Y bounds of the chat area (top, bottom).
+    pub(crate) chat_area_y: (u16, u16),
+    /// Width of the chat area in columns.
+    pub(crate) chat_area_width: u16,
+    /// Maximum scroll offset for the chat content (total_lines − visible_lines).
+    pub(crate) max_scroll: u32,
+}
+
+impl Default for LayoutInfo {
+    fn default() -> Self {
+        Self {
+            chat_area_y: (0, 0),
+            chat_area_width: 120,
+            max_scroll: 0,
+        }
+    }
+}
+
 // ── Session statistics ────────────────────────────────────────────────────────
 
 /// Accumulated token/cost counters for the current TUI session.

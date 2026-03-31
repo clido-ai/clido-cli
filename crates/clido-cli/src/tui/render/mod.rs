@@ -219,8 +219,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Chat ──
     // Store chat area bounds for mouse selection handlers.
-    app.chat_area_y = (chat_area.y, chat_area.y + chat_area.height);
-    app.chat_area_width = chat_area.width;
+    app.layout.chat_area_y = (chat_area.y, chat_area.y + chat_area.height);
+    app.layout.chat_area_width = chat_area.width;
 
     if is_welcome_only(app) {
         render_welcome(frame, app, chat_area);
@@ -231,7 +231,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let total_height = para.line_count(chat_area.width) as u32;
         let max_scroll = total_height.saturating_sub(chat_area.height as u32);
         // Store for use in handle_key (Up/PageUp need the current max_scroll).
-        app.max_scroll = max_scroll;
+        app.layout.max_scroll = max_scroll;
         // If a resize just occurred, restore scroll to the saved ratio.
         if let Some(ratio) = app.pending_scroll_ratio.take() {
             app.scroll = ((ratio * max_scroll as f64).round() as u32).min(max_scroll);
@@ -574,8 +574,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Span::styled(" copy text  ", hint_dim),
         ]);
         // Scroll position indicator when not following.
-        if app.max_scroll > 0 && !app.following {
-            let pct = (app.scroll * 100 / app.max_scroll).min(100);
+        if app.layout.max_scroll > 0 && !app.following {
+            let pct = (app.scroll * 100 / app.layout.max_scroll).min(100);
             hint_spans.push(Span::styled(
                 format!("  ↑ {}%", pct),
                 Style::default()
@@ -589,7 +589,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // ── "↓ new messages" scroll indicator ──
-    if !app.following && app.max_scroll > app.scroll {
+    if !app.following && app.layout.max_scroll > app.scroll {
         let unread_hint = Span::styled(
             "  ↓ new messages  PgDn ",
             Style::default()

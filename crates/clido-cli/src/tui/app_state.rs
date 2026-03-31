@@ -22,16 +22,12 @@ pub(super) struct App {
     pub(super) text_input: TextInput,
     /// Current scroll offset (logical lines from top). Updated by handle_key; clamped in render.
     pub(super) scroll: u32,
-    /// Max scroll as computed during the last render — used by handle_key to scroll up correctly.
-    pub(super) max_scroll: u32,
     pub(super) following: bool,
     /// If set after a terminal resize, restore scroll to this ratio of max_scroll on next render.
     pub(super) pending_scroll_ratio: Option<f64>,
 
-    /// The screen-Y bounds of the chat area (set during render so mouse handlers can use it).
-    pub(super) chat_area_y: (u16, u16),
-    /// The width of the chat area in columns (set during render).
-    pub(super) chat_area_width: u16,
+    /// Layout metrics computed during render; consumed by input/event handlers.
+    pub(super) layout: super::state::LayoutInfo,
     /// Whether crossterm mouse capture is currently enabled.  When off the terminal
     /// handles native text selection; when on the app receives mouse events for
     /// scrolling inside overlays/pickers.
@@ -191,11 +187,9 @@ impl App {
             status_log: std::collections::VecDeque::new(),
             text_input: TextInput::new(),
             scroll: 0,
-            max_scroll: 0,
             following: true,
             pending_scroll_ratio: None,
-            chat_area_y: (0, 0),
-            chat_area_width: 120,
+            layout: super::state::LayoutInfo::default(),
             mouse_captured: false,
             busy: false,
             spinner_tick: 0,

@@ -30,6 +30,7 @@ pub struct AgentSetup {
     pub ask_user: Option<Arc<dyn AskUser>>,
     pub pricing_table: PricingTable,
     /// Shared todo list written by the agent's TodoWrite tool.
+    /// Shared todo list written by the agent's TodoWrite tool.
     #[allow(dead_code)]
     pub todo_store: TodoStore,
     /// Optional fast/cheap provider for utility tasks (summarization, title, commit, sub-agents).

@@ -486,7 +486,7 @@ context_window = 32000
     #[test]
     fn pricing_table_get_returns_none_for_missing_model() {
         let table = PricingTable::default();
-        assert!(table.models.get("nonexistent").is_none());
+        assert!(!table.models.contains_key("nonexistent"));
     }
 
     #[test]

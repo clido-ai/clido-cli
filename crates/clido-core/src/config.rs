@@ -256,9 +256,11 @@ pub struct ProviderConfig {
     pub model: String,
 }
 
-/// Configuration for a single agent slot (main, worker, or reviewer).
+/// Configuration for the optional fast/cheap provider used for utility tasks
+/// (summarization, title generation, commit messages, sub-agent work).
+/// Parsed from `[profiles.<name>.fast]` in config.toml.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentSlotConfig {
+pub struct FastProviderConfig {
     pub provider: String,
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -267,57 +269,8 @@ pub struct AgentSlotConfig {
     pub api_key_env: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
-    /// HTTP User-Agent override for API requests. Defaults to `"clido/<version>"`.
-    /// Some providers restrict access by User-Agent — set this to a compatible client
-    /// string such as `"RooCode/3.0.0"` to gain access.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
-}
-
-/// Tiered agents config: main (required for use), worker + reviewer (optional, fall back to main).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AgentsConfig {
-    pub main: Option<AgentSlotConfig>,
-    pub worker: Option<AgentSlotConfig>,
-    pub reviewer: Option<AgentSlotConfig>,
-}
-
-/// Named role → model ID mapping (from `[roles]` in config.toml).
-/// Built-in roles: fast, reasoning, critic, planner. Arbitrary user-defined roles are allowed.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct RolesConfig {
-    /// Model for the "fast" role (e.g. a cheaper/quicker model).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fast: Option<String>,
-    /// Model for the "reasoning" role (e.g. a thinking/extended model).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<String>,
-    /// Model for the "critic" role.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub critic: Option<String>,
-    /// Model for the "planner" role.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub planner: Option<String>,
-    /// Fallback model when the primary provider fails.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fallback: Option<String>,
-    /// Arbitrary user-defined roles. Key is role name, value is model ID.
-    #[serde(flatten)]
-    pub extra: std::collections::HashMap<String, String>,
-}
-
-impl RolesConfig {
-    /// Look up a model ID for a named role. Checks built-in fields first, then extra.
-    pub fn resolve(&self, role: &str) -> Option<&str> {
-        match role {
-            "fast" => self.fast.as_deref(),
-            "reasoning" | "smart" => self.reasoning.as_deref(),
-            "critic" => self.critic.as_deref(),
-            "planner" => self.planner.as_deref(),
-            "fallback" => self.fallback.as_deref(),
-            other => self.extra.get(other).map(|s| s.as_str()),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -430,42 +383,6 @@ mod tests {
         assert_eq!(v2, ProviderType::KimiCode);
         let v3: ProviderType = serde_json::from_str("\"anthropic\"").unwrap();
         assert_eq!(v3, ProviderType::Anthropic);
-    }
-
-    // ── RolesConfig::resolve ─────────────────────────────────────────────────
-
-    #[test]
-    fn roles_config_resolve_builtins() {
-        let roles = RolesConfig {
-            fast: Some("gpt-4o-mini".to_string()),
-            reasoning: Some("o3".to_string()),
-            critic: Some("claude-opus-4".to_string()),
-            planner: Some("gemini-pro".to_string()),
-            fallback: None,
-            extra: Default::default(),
-        };
-        assert_eq!(roles.resolve("fast"), Some("gpt-4o-mini"));
-        assert_eq!(roles.resolve("reasoning"), Some("o3"));
-        assert_eq!(roles.resolve("smart"), Some("o3")); // alias
-        assert_eq!(roles.resolve("critic"), Some("claude-opus-4"));
-        assert_eq!(roles.resolve("planner"), Some("gemini-pro"));
-    }
-
-    #[test]
-    fn roles_config_resolve_extra_and_missing() {
-        let mut extra = std::collections::HashMap::new();
-        extra.insert("custom".to_string(), "my-model".to_string());
-        let roles = RolesConfig {
-            fast: None,
-            reasoning: None,
-            critic: None,
-            planner: None,
-            fallback: None,
-            extra,
-        };
-        assert_eq!(roles.resolve("custom"), Some("my-model"));
-        assert!(roles.resolve("fast").is_none());
-        assert!(roles.resolve("nonexistent").is_none());
     }
 
     #[test]

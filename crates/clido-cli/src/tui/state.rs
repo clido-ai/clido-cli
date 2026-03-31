@@ -355,10 +355,8 @@ pub(crate) enum ProfileEditField {
     ApiKey,
     Model,
     BaseUrl,
-    WorkerProvider,
-    WorkerModel,
-    ReviewerProvider,
-    ReviewerModel,
+    FastProvider,
+    FastModel,
 }
 
 /// Screen mode for the profile overlay.
@@ -394,12 +392,9 @@ pub(crate) struct ProfileOverlayState {
     pub(crate) api_key: String,
     pub(crate) model: String,
     pub(crate) base_url: String,
-    /// Sub-agent fields — worker (all optional; empty = not configured).
-    pub(crate) worker_provider: String,
-    pub(crate) worker_model: String,
-    /// Sub-agent fields — reviewer (all optional; empty = not configured).
-    pub(crate) reviewer_provider: String,
-    pub(crate) reviewer_model: String,
+    /// Fast/utility provider (optional; empty = not configured).
+    pub(crate) fast_provider: String,
+    pub(crate) fast_model: String,
     /// Current cursor row in overview mode (0-based index into PROFILE_FIELDS).
     pub(crate) cursor: usize,
     /// Current overlay mode.
@@ -427,12 +422,9 @@ pub(crate) const PROFILE_FIELDS: &[(&str, &str)] = &[
     ("api_key", "API Key"),
     ("model", "Model"),
     ("base_url", "Custom Endpoint (optional)"),
-    ("__section__", "── Worker Sub-agent (optional) ──"),
-    ("worker_provider", "Worker Provider"),
-    ("worker_model", "Worker Model"),
-    ("__section__", "── Reviewer Sub-agent (optional) ──"),
-    ("reviewer_provider", "Reviewer Provider"),
-    ("reviewer_model", "Reviewer Model"),
+    ("__section__", "── Fast/Utility Provider (optional) ──"),
+    ("fast_provider", "Fast Provider"),
+    ("fast_model", "Fast Model"),
 ];
 
 impl ProfileOverlayState {
@@ -452,25 +444,15 @@ impl ProfileOverlayState {
                     .and_then(|e| std::env::var(e).ok())
             })
             .unwrap_or_default();
-        let worker_provider = entry
-            .worker
+        let fast_provider = entry
+            .fast
             .as_ref()
-            .map(|w| w.provider.clone())
+            .map(|f| f.provider.clone())
             .unwrap_or_default();
-        let worker_model = entry
-            .worker
+        let fast_model = entry
+            .fast
             .as_ref()
-            .map(|w| w.model.clone())
-            .unwrap_or_default();
-        let reviewer_provider = entry
-            .reviewer
-            .as_ref()
-            .map(|r| r.provider.clone())
-            .unwrap_or_default();
-        let reviewer_model = entry
-            .reviewer
-            .as_ref()
-            .map(|r| r.model.clone())
+            .map(|f| f.model.clone())
             .unwrap_or_default();
         Self {
             name,
@@ -478,10 +460,8 @@ impl ProfileOverlayState {
             api_key,
             model: entry.model.clone(),
             base_url: entry.base_url.clone().unwrap_or_default(),
-            worker_provider,
-            worker_model,
-            reviewer_provider,
-            reviewer_model,
+            fast_provider,
+            fast_model,
             cursor: 0,
             mode: ProfileOverlayMode::Overview,
             input: String::new(),
@@ -502,10 +482,8 @@ impl ProfileOverlayState {
             api_key: String::new(),
             model: String::new(),
             base_url: String::new(),
-            worker_provider: String::new(),
-            worker_model: String::new(),
-            reviewer_provider: String::new(),
-            reviewer_model: String::new(),
+            fast_provider: String::new(),
+            fast_model: String::new(),
             cursor: 0,
             mode: ProfileOverlayMode::Creating {
                 step: ProfileCreateStep::Name,
@@ -527,10 +505,8 @@ impl ProfileOverlayState {
             ProfileEditField::ApiKey => self.api_key.clone(),
             ProfileEditField::Model => self.model.clone(),
             ProfileEditField::BaseUrl => self.base_url.clone(),
-            ProfileEditField::WorkerProvider => self.worker_provider.clone(),
-            ProfileEditField::WorkerModel => self.worker_model.clone(),
-            ProfileEditField::ReviewerProvider => self.reviewer_provider.clone(),
-            ProfileEditField::ReviewerModel => self.reviewer_model.clone(),
+            ProfileEditField::FastProvider => self.fast_provider.clone(),
+            ProfileEditField::FastModel => self.fast_model.clone(),
             ProfileEditField::None => String::new(),
         }
     }
@@ -543,26 +519,22 @@ impl ProfileOverlayState {
             1 => ProfileEditField::ApiKey,
             2 => ProfileEditField::Model,
             3 => ProfileEditField::BaseUrl,
-            4 => ProfileEditField::WorkerProvider,
-            5 => ProfileEditField::WorkerModel,
-            6 => ProfileEditField::ReviewerProvider,
-            7 => ProfileEditField::ReviewerModel,
+            4 => ProfileEditField::FastProvider,
+            5 => ProfileEditField::FastModel,
             _ => ProfileEditField::None,
         }
     }
 
     /// Total number of editable cursor positions.
     pub(crate) fn field_count() -> usize {
-        8
+        6
     }
 
     /// Start editing the field at `cursor`.
     pub(crate) fn begin_edit(&mut self, known_models: &[ModelEntry]) {
         let field = self.cursor_field();
         match field {
-            ProfileEditField::Provider
-            | ProfileEditField::WorkerProvider
-            | ProfileEditField::ReviewerProvider => {
+            ProfileEditField::Provider | ProfileEditField::FastProvider => {
                 let current = self.field_value(&field);
                 self.provider_picker = ProviderPickerState::new();
                 let indices = self.provider_picker.filtered();
@@ -574,13 +546,10 @@ impl ProfileOverlayState {
                 }
                 self.mode = ProfileOverlayMode::PickingProvider { for_field: field };
             }
-            ProfileEditField::Model
-            | ProfileEditField::WorkerModel
-            | ProfileEditField::ReviewerModel => {
+            ProfileEditField::Model | ProfileEditField::FastModel => {
                 let current = self.field_value(&field);
                 let provider = match field {
-                    ProfileEditField::WorkerModel => self.worker_provider.clone(),
-                    ProfileEditField::ReviewerModel => self.reviewer_provider.clone(),
+                    ProfileEditField::FastModel => self.fast_provider.clone(),
                     _ => self.provider.clone(),
                 };
                 let mut picker = ModelPickerState {
@@ -613,16 +582,10 @@ impl ProfileOverlayState {
                 ProfileEditField::ApiKey => self.api_key = self.input.trim().to_string(),
                 ProfileEditField::Model => self.model = self.input.trim().to_string(),
                 ProfileEditField::BaseUrl => self.base_url = self.input.trim().to_string(),
-                ProfileEditField::WorkerProvider => {
-                    self.worker_provider = self.input.trim().to_string()
+                ProfileEditField::FastProvider => {
+                    self.fast_provider = self.input.trim().to_string()
                 }
-                ProfileEditField::WorkerModel => self.worker_model = self.input.trim().to_string(),
-                ProfileEditField::ReviewerProvider => {
-                    self.reviewer_provider = self.input.trim().to_string()
-                }
-                ProfileEditField::ReviewerModel => {
-                    self.reviewer_model = self.input.trim().to_string()
-                }
+                ProfileEditField::FastModel => self.fast_model = self.input.trim().to_string(),
                 ProfileEditField::None => {}
             }
         }
@@ -643,8 +606,7 @@ impl ProfileOverlayState {
             if let Some(id) = self.provider_picker.selected_id() {
                 match for_field {
                     ProfileEditField::Provider => self.provider = id.to_string(),
-                    ProfileEditField::WorkerProvider => self.worker_provider = id.to_string(),
-                    ProfileEditField::ReviewerProvider => self.reviewer_provider = id.to_string(),
+                    ProfileEditField::FastProvider => self.fast_provider = id.to_string(),
                     _ => {}
                 }
             }
@@ -661,8 +623,7 @@ impl ProfileOverlayState {
                     let id = m.id.clone();
                     match for_field {
                         ProfileEditField::Model => self.model = id,
-                        ProfileEditField::WorkerModel => self.worker_model = id,
-                        ProfileEditField::ReviewerModel => self.reviewer_model = id,
+                        ProfileEditField::FastModel => self.fast_model = id,
                         _ => {}
                     }
                 }
@@ -684,23 +645,11 @@ impl ProfileOverlayState {
         } else {
             Some(self.api_key.clone())
         };
-        // Build optional sub-agent configs — only if at least a provider is set.
-        let worker = if !self.worker_provider.is_empty() && !self.worker_model.is_empty() {
-            Some(clido_core::AgentSlotConfig {
-                provider: self.worker_provider.clone(),
-                model: self.worker_model.clone(),
-                api_key: None,
-                api_key_env: None,
-                base_url: None,
-                user_agent: None,
-            })
-        } else {
-            None
-        };
-        let reviewer = if !self.reviewer_provider.is_empty() && !self.reviewer_model.is_empty() {
-            Some(clido_core::AgentSlotConfig {
-                provider: self.reviewer_provider.clone(),
-                model: self.reviewer_model.clone(),
+        // Build optional fast provider config.
+        let fast = if !self.fast_provider.is_empty() && !self.fast_model.is_empty() {
+            Some(clido_core::FastProviderConfig {
+                provider: self.fast_provider.clone(),
+                model: self.fast_model.clone(),
                 api_key: None,
                 api_key_env: None,
                 base_url: None,
@@ -716,8 +665,7 @@ impl ProfileOverlayState {
             api_key_env: None,
             base_url,
             user_agent: None,
-            worker,
-            reviewer,
+            fast,
         };
         match clido_core::upsert_profile_in_config(&self.config_path, &self.name, &entry) {
             Ok(()) => {

@@ -62,12 +62,9 @@ fn run_profiles_list() -> Result<(), anyhow::Error> {
             println!("{} {}  {}", marker, name, model_display);
         }
 
-        // Show sub-agent slots if configured
-        if let Some(ref w) = entry.worker {
-            println!("     worker    {} / {}", w.provider, w.model);
-        }
-        if let Some(ref r) = entry.reviewer {
-            println!("     reviewer  {} / {}", r.provider, r.model);
+        // Show fast provider if configured
+        if let Some(ref f) = entry.fast {
+            println!("     fast      {} / {}", f.provider, f.model);
         }
     }
     println!();

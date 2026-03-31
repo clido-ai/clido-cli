@@ -8,10 +8,6 @@ use ratatui::text::Line;
 
 use crate::image_input::ImageAttachment;
 use crate::overlay::OverlayStack;
-use crate::prompt_enhance::{
-    load_prompt_mode, load_rules, project_rules_path, save_rules, EnhancementCtx, PromptMode,
-    PromptRules,
-};
 use crate::repl::expand_at_file_refs;
 use crate::text_input::TextInput;
 
@@ -114,8 +110,7 @@ pub(super) struct App {
     /// Set to true during crash recovery so the ResumedSession event preserves
     /// the current TUI messages instead of clearing and replaying them.
     pub(super) recovering: bool,
-    /// True when an explicit reviewer slot is configured in config.toml.
-    /// Controls whether the reviewer badge and /reviewer command are shown.
+    /// Reviewer is always available (sub-agents always registered).
     pub(super) reviewer_configured: bool,
     /// Timestamp of when the current agent turn was submitted; used to compute elapsed time.
     pub(super) turn_start: Option<std::time::Instant>,
@@ -139,12 +134,12 @@ pub(super) struct App {
     pub(super) todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
     /// Track whether we have already shown the empty-input hint this session.
     pub(super) empty_input_hint_shown: bool,
-    /// Current prompt enhancement mode (auto / off).
-    pub(super) prompt_mode: PromptMode,
-    /// Active prompt rules (global + project, merged).
-    pub(super) prompt_rules: PromptRules,
-    /// When Some, holds an enhanced preview that /prompt-preview is waiting to display.
-    pub(super) prompt_preview_text: Option<String>,
+    /// Pending `/enhance` request — set by cmd_enhance, consumed by event_loop.
+    pub(super) pending_enhance: Option<String>,
+    /// Utility (fast) provider for background tasks like `/enhance`.
+    pub(super) utility_provider: Arc<dyn clido_providers::ModelProvider>,
+    /// Model name for the utility provider.
+    pub(super) utility_model: String,
     /// Max budget for the session (from config), shown in header.
     pub(super) max_budget_usd: Option<f64>,
 
@@ -190,10 +185,11 @@ impl App {
         config_roles: std::collections::HashMap<String, String>,
         current_profile: String,
         reviewer_enabled: Arc<AtomicBool>,
-        reviewer_configured: bool,
         todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
         api_key: String,
         base_url: Option<String>,
+        utility_provider: Arc<dyn clido_providers::ModelProvider>,
+        utility_model: String,
     ) -> Self {
         let budget = clido_core::load_config(&workspace_root)
             .ok()
@@ -249,7 +245,7 @@ impl App {
             notify_enabled,
             reviewer_enabled,
             recovering: false,
-            reviewer_configured,
+            reviewer_configured: true,
             turn_start: None,
             per_turn_prev_model: None,
             pending_image: None,
@@ -259,9 +255,9 @@ impl App {
             plan_dry_run,
             todo_store,
             empty_input_hint_shown: false,
-            prompt_mode: PromptMode::Auto,
-            prompt_rules: PromptRules::default(),
-            prompt_preview_text: None,
+            pending_enhance: None,
+            utility_provider,
+            utility_model,
             max_budget_usd: budget,
             rate_limit_resume_at: None,
             rate_limit_cancelled: false,
@@ -272,8 +268,6 @@ impl App {
             render_cache_msg_count: 0,
             toasts: Vec::new(),
         };
-        app.prompt_mode = load_prompt_mode(&app.workspace_root);
-        app.prompt_rules = load_rules(&app.workspace_root);
         app.messages.push(ChatLine::WelcomeSplash);
         app
     }
@@ -392,55 +386,9 @@ impl App {
         }
         if is_known_slash_cmd(&trimmed) {
             execute_slash(self, &trimmed);
-        } else if let Some(send_text) = self.maybe_enhance_prompt(trimmed) {
-            self.send_now(send_text);
+        } else {
+            self.send_now(trimmed);
         }
-    }
-
-    /// Apply prompt enhancement if mode is Auto.  Shows a dim indicator when the
-    /// prompt is modified.  When preview mode is active (`prompt_preview_text` is Some),
-    /// displays the enhanced prompt without sending and returns None.
-    pub(super) fn maybe_enhance_prompt(&mut self, raw: String) -> Option<String> {
-        let ctx = EnhancementCtx {
-            mode: self.prompt_mode,
-            rules: &self.prompt_rules,
-        };
-        let (enhanced, was_modified) = crate::prompt_enhance::enhance_prompt(&raw, &ctx);
-
-        // Preview mode: show the enhanced text, don't send.
-        if self.prompt_preview_text.is_some() {
-            self.prompt_preview_text = None;
-            self.push(ChatLine::Info("".into()));
-            if was_modified {
-                self.push(ChatLine::Section("Enhanced Prompt Preview".into()));
-            } else {
-                self.push(ChatLine::Section("Prompt Preview (no changes)".into()));
-            }
-            for line in enhanced.lines() {
-                self.push(ChatLine::Info(format!("  {line}")));
-            }
-            if !was_modified {
-                if self.prompt_rules.active_rules().is_empty() {
-                    self.push(ChatLine::Info(
-                        "  (No active rules — use /prompt-rules add <text> to create one)".into(),
-                    ));
-                } else if !crate::prompt_enhance::looks_like_coding_task(&raw) {
-                    self.push(ChatLine::Info(
-                        "  (Prompt looks informational — rules only apply to coding tasks)".into(),
-                    ));
-                }
-            }
-            self.push(ChatLine::Info("".into()));
-            self.push(ChatLine::Info(
-                "  — preview only, not sent.  Type message again to send.".into(),
-            ));
-            return None;
-        }
-
-        if was_modified {
-            self.push(ChatLine::Info("  ✦ Prompt enhanced".into()));
-        }
-        Some(enhanced)
     }
 
     /// After the agent is idle, drain the FIFO queue: slash commands run in order until one
@@ -614,21 +562,6 @@ impl App {
             }
         }
         self.last_executed_step_num = None;
-        // Rule evolution: observe the completed user turn for learnable patterns.
-        if let Some(user_text) = self.last_user_text().map(|s| s.to_string()) {
-            let promoted = self.prompt_rules.observe_turn(&user_text);
-            if !promoted.is_empty() {
-                // Persist the updated rules to the project rules file (silently).
-                let rules_path = project_rules_path(&self.workspace_root);
-                let _ = save_rules(&rules_path, &self.prompt_rules);
-                for phrase in &promoted {
-                    self.push(ChatLine::Info(format!(
-                        "  ✦ Learned rule: \"{}\"  (use /prompt-rules to view)",
-                        phrase
-                    )));
-                }
-            }
-        }
         if self.plan.awaiting_plan_response {
             self.plan.awaiting_plan_response = false;
             if let Some(text) = self.last_assistant_text().map(|s| s.to_string()) {
@@ -659,13 +592,6 @@ impl App {
     pub(super) fn last_assistant_text(&self) -> Option<&str> {
         self.messages.iter().rev().find_map(|line| match line {
             ChatLine::Assistant(text) if !text.trim().is_empty() => Some(text.as_str()),
-            _ => None,
-        })
-    }
-
-    pub(super) fn last_user_text(&self) -> Option<&str> {
-        self.messages.iter().rev().find_map(|line| match line {
-            ChatLine::User(text) if !text.trim().is_empty() => Some(text.as_str()),
             _ => None,
         })
     }

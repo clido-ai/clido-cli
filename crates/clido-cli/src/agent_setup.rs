@@ -6,7 +6,7 @@ use clido_core::{
     agent_config_from_loaded, load_config, load_pricing, AgentConfig, LoadedConfig, PermissionMode,
     PricingTable,
 };
-use clido_providers::{FallbackProvider, RetryProvider};
+use clido_providers::RetryProvider;
 use clido_tools::{default_registry_with_todo_store, McpTool, TodoItem, ToolRegistry};
 use std::io::{self, IsTerminal};
 use std::path::Path;
@@ -30,10 +30,11 @@ pub struct AgentSetup {
     /// Shared todo list written by the agent's TodoWrite tool.
     #[allow(dead_code)]
     pub todo_store: TodoStore,
-    /// Fast/cheap model name from [roles] config, for utility tasks.
-    pub fast_model: Option<String>,
-    /// Reasoning/smart model name from [roles] config, for architect→editor planning.
-    pub reasoning_model: Option<String>,
+    /// Optional fast/cheap provider for utility tasks (summarization, title, commit, sub-agents).
+    /// Built from `[profiles.<name>.fast]` config section. If None, main provider is used.
+    pub fast_provider: Option<Arc<dyn clido_providers::ModelProvider>>,
+    /// Config (model name, etc) for the fast provider. Only meaningful when fast_provider is Some.
+    pub fast_config: Option<AgentConfig>,
 }
 
 impl AgentSetup {
@@ -68,8 +69,6 @@ impl AgentSetup {
         reviewer_enabled: Arc<AtomicBool>,
         external_todo_store: Option<TodoStore>,
     ) -> Result<Self, anyhow::Error> {
-        let fast_model = loaded.roles.fast.clone();
-        let reasoning_model = loaded.roles.reasoning.clone();
         let profile_name = cli
             .profile
             .as_deref()
@@ -212,84 +211,61 @@ impl AgentSetup {
         )
         .map_err(|e| CliError::Usage(e.to_string()))?;
 
-        // Override with [agents.main] if present (newer config format).
-        let provider = if let Some(main_slot) = &loaded.agents.main {
-            let new_provider = build_provider_from_slot(main_slot).map_err(CliError::Usage)?;
-            config.model = main_slot.model.clone();
-            new_provider
+        // Build fast/utility provider from [profiles.<name>.fast] if configured.
+        let (fast_provider, fast_config) = if let Some(ref fast_cfg) = profile.fast {
+            match build_fast_provider(fast_cfg) {
+                Ok(fp) => {
+                    let mut fc = config.clone();
+                    fc.model = fast_cfg.model.clone();
+                    fc.system_prompt = None;
+                    (Some(fp), Some(fc))
+                }
+                Err(e) => {
+                    eprintln!("Warning: fast provider failed to build: {e}");
+                    (None, None)
+                }
+            }
         } else {
-            provider
+            (None, None)
         };
 
-        // Build worker/reviewer providers from explicit slots only.
-        // Per-profile slots take priority over global [agents.worker]/[agents.reviewer].
-        // We intentionally do NOT fall back to [agents.main] — sub-agents must be
-        // explicitly configured so the user knows they're paying for an extra model.
-        let explicit_worker_slot: Option<&clido_core::AgentSlotConfig> = loaded
-            .profiles
-            .get(profile_name)
-            .and_then(|p| p.worker.as_ref())
-            .or(loaded.agents.worker.as_ref());
+        // Worker/reviewer sub-agents use fast provider (or main if fast not configured).
+        let sub_provider: Arc<dyn clido_providers::ModelProvider> = fast_provider
+            .clone()
+            .unwrap_or_else(|| Arc::clone(&provider));
+        let sub_model = profile
+            .fast
+            .as_ref()
+            .map(|f| f.model.clone())
+            .unwrap_or_else(|| config.model.clone());
 
-        let worker_provider: Option<Arc<dyn clido_providers::ModelProvider>> = explicit_worker_slot
-            .and_then(|slot| {
-                build_provider_from_slot(slot)
-                    .map_err(|e| eprintln!("Warning: worker provider failed to build: {}", e))
-                    .ok()
-            });
-
-        let explicit_reviewer_slot: Option<&clido_core::AgentSlotConfig> = loaded
-            .profiles
-            .get(profile_name)
-            .and_then(|p| p.reviewer.as_ref())
-            .or(loaded.agents.reviewer.as_ref());
-
-        let reviewer_provider: Option<Arc<dyn clido_providers::ModelProvider>> =
-            explicit_reviewer_slot.and_then(|slot| {
-                build_provider_from_slot(slot)
-                    .map_err(|e| eprintln!("Warning: reviewer provider failed to build: {}", e))
-                    .ok()
-            });
-
-        // has_* tracks whether the tool was actually registered (not just configured).
-        let has_worker = worker_provider.is_some();
-        let has_reviewer = reviewer_provider.is_some();
-
-        // Register sub-agent tools.
-        // Sub-agents get a stripped config: no system_prompt (their task framing comes from
-        // the prompt passed in spawn_tools.rs), and a sane max_turns cap so a stuck sub-agent
-        // doesn't run forever. Everything else (model, budget, parallelism) is inherited.
-        if let Some(ref wp) = worker_provider {
+        {
             let mut worker_config = config.clone();
             worker_config.system_prompt = None;
             worker_config.max_turns = worker_config.max_turns.min(20);
-            if let Some(ws) = explicit_worker_slot {
-                worker_config.model = ws.model.clone();
-            }
+            worker_config.model = sub_model.clone();
             registry.register(SpawnWorkerTool::new(
-                wp.clone(),
+                sub_provider.clone(),
                 worker_config,
                 workspace_root.to_path_buf(),
             ));
         }
-        if let Some(ref rp) = reviewer_provider {
+        {
             let mut reviewer_config = config.clone();
             reviewer_config.system_prompt = None;
             reviewer_config.max_turns = reviewer_config.max_turns.min(10);
-            if let Some(rs) = explicit_reviewer_slot {
-                reviewer_config.model = rs.model.clone();
-            }
+            reviewer_config.model = sub_model;
             registry.register(SpawnReviewerTool::new(
-                rp.clone(),
+                sub_provider,
                 reviewer_config,
                 workspace_root.to_path_buf(),
                 reviewer_enabled.clone(),
             ));
         }
 
-        // Inject sub-agent routing instructions when at least one sub-agent is active.
-        if has_worker || has_reviewer {
-            let routing = build_routing_instructions(has_worker, has_reviewer);
+        // Inject sub-agent routing instructions.
+        {
+            let routing = build_routing_instructions(true, true);
             if let Some(ref mut sp) = config.system_prompt {
                 *sp = format!("{}\n\n{}", sp, routing);
             }
@@ -334,13 +310,6 @@ impl AgentSetup {
         // Wrap provider with retry logic for transient failures.
         let provider = RetryProvider::wrap(provider);
 
-        // Wrap with fallback provider if configured.
-        let provider = if let Some(ref fallback_model) = loaded.roles.fallback {
-            FallbackProvider::wrap(provider.clone(), provider.clone(), fallback_model.clone())
-        } else {
-            provider
-        };
-
         Ok(AgentSetup {
             provider,
             registry,
@@ -348,8 +317,8 @@ impl AgentSetup {
             ask_user,
             pricing_table,
             todo_store,
-            fast_model,
-            reasoning_model,
+            fast_provider,
+            fast_config,
         })
     }
 
@@ -369,20 +338,19 @@ impl AgentSetup {
     }
 }
 
-fn build_provider_from_slot(
-    slot: &clido_core::AgentSlotConfig,
+fn build_fast_provider(
+    cfg: &clido_core::FastProviderConfig,
 ) -> Result<Arc<dyn clido_providers::ModelProvider>, String> {
-    let api_key = slot
+    let api_key = cfg
         .api_key
         .clone()
         .or_else(|| {
-            slot.api_key_env
+            cfg.api_key_env
                 .as_ref()
                 .and_then(|e| std::env::var(e).ok().filter(|v| !v.is_empty()))
         })
         .or_else(|| {
-            // Fall back to provider's conventional env var
-            let env_var = default_api_key_env(&slot.provider);
+            let env_var = default_api_key_env(&cfg.provider);
             if env_var.is_empty() {
                 None
             } else {
@@ -390,7 +358,6 @@ fn build_provider_from_slot(
             }
         })
         .or_else(|| {
-            // Fall back to credentials file
             let config_dir = if let Ok(p) = std::env::var("CLIDO_CONFIG") {
                 std::path::Path::new(&p).parent().map(|p| p.to_path_buf())
             } else {
@@ -399,18 +366,27 @@ fn build_provider_from_slot(
             };
             config_dir
                 .map(|dir| load_credentials(&dir))
-                .and_then(|creds| creds.get(slot.provider.as_str()).cloned())
+                .and_then(|creds| creds.get(cfg.provider.as_str()).cloned())
                 .filter(|v| !v.is_empty())
         })
         .unwrap_or_default();
     clido_providers::build_provider_with_ua(
-        &slot.provider,
+        &cfg.provider,
         api_key,
-        slot.model.clone(),
-        slot.base_url.as_deref(),
-        slot.user_agent.clone(),
+        cfg.model.clone(),
+        cfg.base_url.as_deref(),
+        cfg.user_agent.clone(),
     )
-    .map_err(|e| format!("build sub-agent provider: {e}"))
+    .map_err(|e| format!("build fast provider: {e}"))
+}
+
+/// Public wrapper: build a fast (utility) provider from a [`FastProviderConfig`].
+/// Used by the TUI event loop to create a provider for `/enhance` and similar
+/// background tasks that don't go through the agent.
+pub fn build_tui_fast_provider(
+    cfg: &clido_core::FastProviderConfig,
+) -> Result<Arc<dyn clido_providers::ModelProvider>, String> {
+    build_fast_provider(cfg)
 }
 
 fn build_routing_instructions(has_worker: bool, has_reviewer: bool) -> String {

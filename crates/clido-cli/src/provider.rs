@@ -177,8 +177,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         assert!(make_provider("default", &profile, None, None).is_ok());
     }
@@ -192,8 +191,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         assert!(make_provider("default", &profile, None, None).is_ok());
     }
@@ -246,8 +244,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         let result = make_provider("default", &profile, None, None);
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
@@ -262,8 +259,7 @@ mod tests {
             api_key_env: None,
             base_url: Some("http://localhost:11434".to_string()),
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         let result = make_provider("default", &profile, None, None);
         assert!(result.is_ok(), "local provider should not need API key");
@@ -280,8 +276,7 @@ mod tests {
             api_key_env: Some("CLIDO_TEST_NONEXISTENT_KEY_XYZ".to_string()),
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         // Ensure env var is not set
         env::remove_var("CLIDO_TEST_NONEXISTENT_KEY_XYZ");
@@ -300,8 +295,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         let result = make_provider("default", &profile, None, Some("gpt-4o"));
         assert!(result.is_ok());
@@ -316,8 +310,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         // Override to local (no key needed)
         let result = make_provider("default", &profile, Some("local"), None);
@@ -333,8 +326,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         let result = make_provider("default", &profile, None, None);
         assert!(result.is_ok());
@@ -349,8 +341,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         let result = make_provider("default", &profile, None, None);
         assert!(result.is_ok());

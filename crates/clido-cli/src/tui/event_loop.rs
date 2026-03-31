@@ -332,18 +332,21 @@ pub(super) async fn agent_task(
 
     let planner_mode = cli.planner;
     let context_max_tokens = setup.config.max_context_tokens.unwrap_or(200_000) as u64;
-    // Capture values for async title generation before setup is moved.
-    let title_provider = setup.provider.clone();
-    let title_fast_model = setup
-        .fast_model
+    // Capture the utility (fast) provider for async title generation.
+    let title_provider = setup
+        .fast_provider
         .clone()
+        .unwrap_or_else(|| setup.provider.clone());
+    let title_model = setup
+        .fast_config
+        .as_ref()
+        .map(|c| c.model.clone())
         .unwrap_or_else(|| setup.config.model.clone());
     let git_workspace = workspace_root.clone();
     let git_context_fn: Box<dyn Fn() -> Option<String> + Send + Sync> =
         Box::new(move || GitContext::discover(&git_workspace).map(|ctx| ctx.to_prompt_section()));
     let mut agent = AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
-        .with_fast_model(setup.fast_model)
-        .with_reasoning_model(setup.reasoning_model)
+        .with_fast_provider(setup.fast_provider, setup.fast_config)
         .with_emitter(emitter)
         .with_planner(planner_mode)
         .with_git_context_fn(git_context_fn);
@@ -755,7 +758,7 @@ pub(super) async fn agent_task(
                             let title_prompt = prompt.clone();
                             let title_tx = event_tx.clone();
                             let tp = title_provider.clone();
-                            let tm = title_fast_model.clone();
+                            let tm = title_model.clone();
                             let mut title_writer =
                                 clido_storage::SessionWriter::append(&workspace_root, &session_id)
                                     .ok();
@@ -1272,6 +1275,42 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         }
     };
 
+    // Build utility (fast) provider for TUI-initiated background tasks (/enhance, etc.).
+    // Falls back to the main provider if no fast provider is configured.
+    let (tui_utility_provider, tui_utility_model) = {
+        let profile_name = cli.profile.as_deref().unwrap_or_else(|| {
+            loaded_config
+                .as_ref()
+                .map(|c| c.default_profile.as_str())
+                .unwrap_or("default")
+        });
+        let fast_cfg = loaded_config
+            .as_ref()
+            .and_then(|c| c.get_profile(profile_name).ok())
+            .and_then(|p| p.fast.clone());
+        let main_fallback = || -> (Arc<dyn clido_providers::ModelProvider>, String) {
+            let p = clido_providers::build_provider(
+                &provider,
+                api_key.clone(),
+                model.clone(),
+                base_url.as_deref(),
+            )
+            .unwrap_or_else(|e| panic!("cannot build main provider for TUI: {e}"));
+            (p, model.clone())
+        };
+        if let Some(ref cfg) = fast_cfg {
+            match crate::agent_setup::build_tui_fast_provider(cfg) {
+                Ok(p) => (p, cfg.model.clone()),
+                Err(e) => {
+                    tracing::warn!("fast provider build failed, falling back to main: {e}");
+                    main_fallback()
+                }
+            }
+        } else {
+            main_fallback()
+        }
+    };
+
     // Resolve notify setting: CLI flags take priority over config.
     let notify_enabled = if cli.no_notify {
         false
@@ -1288,12 +1327,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     let image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
 
-    // Reviewer toggle: shared between App (TUI control) and SpawnReviewerTool (enforcement).
-    // Derive initial state from config: enabled by default if reviewer is configured.
-    let reviewer_configured = loaded_config
-        .as_ref()
-        .map(|c| c.agents.reviewer.is_some())
-        .unwrap_or(false);
+    // Reviewer is always available (sub-agents always registered now).
     let reviewer_enabled = Arc::new(AtomicBool::new(true));
     let mut runtime = start_agent_runtime(
         cli.clone(),
@@ -1343,10 +1377,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
 
     // Build model list from already-loaded config + pricing (no extra disk I/O needed).
     let (config_roles, known_models, current_profile) = {
-        let roles = loaded_config
-            .as_ref()
-            .map(|c| c.roles.as_map())
-            .unwrap_or_default();
+        let roles = std::collections::HashMap::new();
         let profile = cli
             .profile
             .clone()
@@ -1377,10 +1408,11 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         config_roles,
         current_profile,
         reviewer_enabled,
-        reviewer_configured,
         runtime.todo_store.clone(),
         api_key.clone(),
         base_url.clone(),
+        tui_utility_provider,
+        tui_utility_model,
     );
     // Kick off a live model-list fetch from the provider API immediately at startup.
     // Results arrive as AgentEvent::ModelsLoaded and update app.known_models.
@@ -1592,14 +1624,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
                 .as_ref()
                 .map(resolve_display_api_key)
                 .unwrap_or_default();
-            let roles: Vec<(String, String)> = loaded
-                .as_ref()
-                .map(|c| {
-                    let mut v: Vec<(String, String)> = c.roles.as_map().into_iter().collect();
-                    v.sort_by(|a, b| a.0.cmp(&b.0));
-                    v
-                })
-                .unwrap_or_default();
+            let roles: Vec<(String, String)> = Vec::new();
             crate::setup::SetupPreFill {
                 provider: app.provider.clone(),
                 api_key,
@@ -2154,6 +2179,15 @@ pub(super) async fn event_loop(
                     Some(AgentEvent::TitleGenerated(title)) => {
                         app.session_title = Some(title);
                     }
+                    Some(AgentEvent::EnhancedPrompt(enhanced)) => {
+                        app.push(ChatLine::Section("Enhanced Prompt".into()));
+                        for line in enhanced.lines() {
+                            app.push(ChatLine::Info(format!("  {line}")));
+                        }
+                        app.push(ChatLine::Info("".into()));
+                        // Submit the enhanced prompt to the agent.
+                        app.send_now(enhanced);
+                    }
                     None => {
                         return Ok(EventLoopExit::Recover(
                             "agent event channel closed unexpectedly".to_string(),
@@ -2177,6 +2211,53 @@ pub(super) async fn event_loop(
                     ));
                 }
             }
+        }
+
+        // ── Spawn /enhance task if pending ─────────────────────────────
+        if let Some(raw_prompt) = app.pending_enhance.take() {
+            let enhance_tx = app.channels.fetch_tx.clone();
+            let ep = app.utility_provider.clone();
+            let em = app.utility_model.clone();
+            tokio::spawn(async move {
+                let system = crate::prompt_enhance::build_system_prompt(None);
+                let msgs = vec![clido_core::Message {
+                    role: clido_core::Role::User,
+                    content: vec![clido_core::ContentBlock::Text { text: raw_prompt }],
+                }];
+                let cfg = clido_core::AgentConfig {
+                    model: em,
+                    max_turns: 1,
+                    system_prompt: Some(system),
+                    ..Default::default()
+                };
+                match ep.complete(&msgs, &[], &cfg).await {
+                    Ok(resp) => {
+                        let enhanced = resp
+                            .content
+                            .iter()
+                            .find_map(|b| {
+                                if let clido_core::ContentBlock::Text { text } = b {
+                                    Some(text.trim().to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or_default();
+                        if !enhanced.is_empty() {
+                            let _ = enhance_tx.send(AgentEvent::EnhancedPrompt(enhanced));
+                        } else {
+                            let _ = enhance_tx.send(AgentEvent::Err(
+                                "Enhancement returned empty response".into(),
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = enhance_tx.send(AgentEvent::Err(format!(
+                            "Enhancement failed: {e} — sending original prompt"
+                        )));
+                    }
+                }
+            });
         }
 
         if app.quit {

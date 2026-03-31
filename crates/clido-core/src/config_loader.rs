@@ -35,12 +35,10 @@ pub struct ProfileEntry {
     /// a compatible client string such as `"RooCode/3.0.0"` to gain access.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
-    /// Per-profile worker sub-agent slot. Overrides global [agents.worker].
+    /// Optional fast/cheap provider for utility tasks (summarization, title, commit, sub-agents).
+    /// If not set, the main provider is used for everything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker: Option<crate::config::AgentSlotConfig>,
-    /// Per-profile reviewer sub-agent slot. Overrides global [agents.reviewer].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reviewer: Option<crate::config::AgentSlotConfig>,
+    pub fast: Option<crate::config::FastProviderConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -147,61 +145,16 @@ pub struct WorkflowsSection {
     pub directory: String,
 }
 
-/// Maps role names to model IDs. Built-in roles: fast, reasoning, critic, planner.
-/// Arbitrary extra roles can be added freely.
-///
-/// Example in config.toml:
-/// ```toml
-/// [roles]
-/// fast      = "claude-haiku-4-5-20251001"
-/// reasoning = "claude-opus-4-6"
-/// critic    = "claude-opus-4-6"
-/// planner   = "claude-sonnet-4-6"
-/// ```
+/// Legacy `[roles]` section — kept only for backwards-compatible parsing.
+/// Ignored at runtime; use `[profiles.<name>.fast]` instead.
 #[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "kebab-case")]
 pub struct RolesSection {
-    /// Fast, cheap model for quick tasks.
     #[serde(default)]
     pub fast: Option<String>,
-    /// High-quality reasoning model.
     #[serde(default)]
     pub reasoning: Option<String>,
-    /// Evaluation / critique model.
-    #[serde(default)]
-    pub critic: Option<String>,
-    /// Task decomposition / planning model.
-    #[serde(default)]
-    pub planner: Option<String>,
-    /// Fallback model when the primary provider fails.
-    #[serde(default)]
-    pub fallback: Option<String>,
-    /// Arbitrary user-defined roles.
     #[serde(flatten)]
     pub extra: HashMap<String, String>,
-}
-
-impl RolesSection {
-    /// Return all roles as a flat map of name → model ID.
-    pub fn as_map(&self) -> HashMap<String, String> {
-        let mut map = self.extra.clone();
-        if let Some(m) = &self.fast {
-            map.insert("fast".into(), m.clone());
-        }
-        if let Some(m) = &self.reasoning {
-            map.insert("reasoning".into(), m.clone());
-        }
-        if let Some(m) = &self.critic {
-            map.insert("critic".into(), m.clone());
-        }
-        if let Some(m) = &self.planner {
-            map.insert("planner".into(), m.clone());
-        }
-        if let Some(m) = &self.fallback {
-            map.insert("fallback".into(), m.clone());
-        }
-        map
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -241,8 +194,6 @@ pub struct ConfigFile {
     pub index: IndexSection,
     #[serde(default)]
     pub roles: RolesSection,
-    #[serde(default)]
-    pub agents: crate::config::AgentsConfig,
 }
 
 fn default_default_profile() -> String {
@@ -260,46 +211,9 @@ pub struct LoadedConfig {
     pub workflows: WorkflowsSection,
     pub hooks: HooksConfig,
     pub index: IndexSection,
-    pub roles: RolesSection,
-    pub agents: crate::config::AgentsConfig,
 }
 
 impl LoadedConfig {
-    /// Resolve the effective provider/model for an agent slot.
-    /// Falls back: agents.main → profile.default
-    pub fn effective_slot(&self, role: &str) -> Option<&crate::config::AgentSlotConfig> {
-        match role {
-            "worker" => self.agents.worker.as_ref().or(self.agents.main.as_ref()),
-            "reviewer" => self.agents.reviewer.as_ref().or(self.agents.main.as_ref()),
-            _ => self.agents.main.as_ref(),
-        }
-    }
-
-    /// Resolve the effective slot for a named profile's role.
-    /// Per-profile slots take priority over global [agents.*] slots.
-    pub fn effective_slot_for_profile(
-        &self,
-        role: &str,
-        profile_name: &str,
-    ) -> Option<&crate::config::AgentSlotConfig> {
-        if let Some(profile) = self.profiles.get(profile_name) {
-            match role {
-                "worker" => {
-                    if let Some(ref w) = profile.worker {
-                        return Some(w);
-                    }
-                }
-                "reviewer" => {
-                    if let Some(ref r) = profile.reviewer {
-                        return Some(r);
-                    }
-                }
-                _ => {}
-            }
-        }
-        self.effective_slot(role)
-    }
-
     /// Resolve profile by name. Returns error if profile not found or provider unknown.
     pub fn get_profile(&self, name: &str) -> Result<&ProfileEntry> {
         self.profiles.get(name).ok_or_else(|| {
@@ -466,11 +380,6 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
         },
         include_ignored: later.index.include_ignored || base.index.include_ignored,
     };
-    let agents = crate::config::AgentsConfig {
-        main: later.agents.main.or(base.agents.main),
-        worker: later.agents.worker.or(base.agents.worker),
-        reviewer: later.agents.reviewer.or(base.agents.reviewer),
-    };
     ConfigFile {
         default_profile,
         profile,
@@ -481,7 +390,6 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
         hooks,
         index,
         roles: later.roles,
-        agents,
     }
 }
 
@@ -497,7 +405,6 @@ pub fn load_config(cwd: &Path) -> Result<LoadedConfig> {
         hooks: HooksConfig::default(),
         index: IndexSection::default(),
         roles: RolesSection::default(),
-        agents: crate::config::AgentsConfig::default(),
     };
 
     if let Some(path) = global_config_path() {
@@ -526,8 +433,6 @@ pub fn load_config(cwd: &Path) -> Result<LoadedConfig> {
         workflows: merged.workflows,
         hooks: merged.hooks,
         index: merged.index,
-        roles: merged.roles,
-        agents: merged.agents,
     })
 }
 
@@ -785,39 +690,6 @@ mod tests {
     }
 
     #[test]
-    fn roles_section_as_map_includes_all_roles() {
-        let mut r = RolesSection {
-            fast: Some("fast-model".to_string()),
-            reasoning: Some("reasoning-model".to_string()),
-            critic: Some("critic-model".to_string()),
-            planner: Some("planner-model".to_string()),
-            ..Default::default()
-        };
-        r.extra
-            .insert("custom".to_string(), "custom-model".to_string());
-
-        let map = r.as_map();
-        assert_eq!(map.get("fast").map(|s| s.as_str()), Some("fast-model"));
-        assert_eq!(
-            map.get("reasoning").map(|s| s.as_str()),
-            Some("reasoning-model")
-        );
-        assert_eq!(map.get("critic").map(|s| s.as_str()), Some("critic-model"));
-        assert_eq!(
-            map.get("planner").map(|s| s.as_str()),
-            Some("planner-model")
-        );
-        assert_eq!(map.get("custom").map(|s| s.as_str()), Some("custom-model"));
-    }
-
-    #[test]
-    fn roles_section_as_map_empty_when_all_none() {
-        let r = RolesSection::default();
-        let map = r.as_map();
-        assert!(map.is_empty());
-    }
-
-    #[test]
     fn get_profile_returns_error_for_missing_profile() {
         let loaded = LoadedConfig {
             default_profile: "default".to_string(),
@@ -828,8 +700,6 @@ mod tests {
             workflows: WorkflowsSection::default(),
             hooks: crate::config::HooksConfig::default(),
             index: IndexSection::default(),
-            roles: RolesSection::default(),
-            agents: crate::config::AgentsConfig::default(),
         };
         let result = loaded.get_profile("nonexistent");
         assert!(result.is_err());
@@ -1026,272 +896,6 @@ max-turns = 100
         assert!(msg.contains("Failed to read config"), "got: {}", msg);
     }
 
-    // ── AgentSlotConfig / AgentsConfig deserialization ────────────────────
-
-    #[test]
-    fn agent_slot_config_roundtrips_toml() {
-        use crate::config::AgentSlotConfig;
-        let slot = AgentSlotConfig {
-            provider: "anthropic".to_string(),
-            model: "claude-opus-4-6".to_string(),
-            api_key: Some("sk-ant-test".to_string()),
-            api_key_env: None,
-            base_url: None,
-            user_agent: None,
-        };
-        let serialized = toml::to_string(&slot).unwrap();
-        let deserialized: AgentSlotConfig = toml::from_str(&serialized).unwrap();
-        assert_eq!(deserialized.provider, "anthropic");
-        assert_eq!(deserialized.model, "claude-opus-4-6");
-        assert_eq!(deserialized.api_key.as_deref(), Some("sk-ant-test"));
-    }
-
-    #[test]
-    fn agents_config_default_has_no_slots() {
-        use crate::config::AgentsConfig;
-        let cfg = AgentsConfig::default();
-        assert!(cfg.main.is_none());
-        assert!(cfg.worker.is_none());
-        assert!(cfg.reviewer.is_none());
-    }
-
-    #[test]
-    fn agents_config_parsed_from_toml() {
-        let toml_str = r#"
-[agents.main]
-provider = "anthropic"
-model = "claude-sonnet-4-5"
-api_key = "sk-ant-main"
-
-[agents.worker]
-provider = "openai"
-model = "gpt-4o-mini"
-api_key = "sk-openai-worker"
-"#;
-        let cf: ConfigFile = toml::from_str(toml_str).unwrap();
-        let main = cf.agents.main.expect("main slot should be present");
-        assert_eq!(main.provider, "anthropic");
-        assert_eq!(main.model, "claude-sonnet-4-5");
-        assert_eq!(main.api_key.as_deref(), Some("sk-ant-main"));
-        let worker = cf.agents.worker.expect("worker slot should be present");
-        assert_eq!(worker.provider, "openai");
-        assert!(cf.agents.reviewer.is_none());
-    }
-
-    // ── effective_slot ────────────────────────────────────────────────────
-
-    fn make_loaded_with_agents(
-        main: Option<crate::config::AgentSlotConfig>,
-        worker: Option<crate::config::AgentSlotConfig>,
-        reviewer: Option<crate::config::AgentSlotConfig>,
-    ) -> LoadedConfig {
-        let mut profiles = std::collections::HashMap::new();
-        profiles.insert(
-            "default".to_string(),
-            crate::ProfileEntry {
-                provider: "anthropic".to_string(),
-                model: "claude-sonnet-4-5".to_string(),
-                api_key: Some("sk-ant".to_string()),
-                api_key_env: None,
-                base_url: None,
-                user_agent: None,
-                worker: None,
-                reviewer: None,
-            },
-        );
-        LoadedConfig {
-            default_profile: "default".to_string(),
-            profiles,
-            agent: AgentSection::default(),
-            tools: ToolsSection::default(),
-            context: ContextSection::default(),
-            workflows: WorkflowsSection::default(),
-            hooks: crate::config::HooksConfig::default(),
-            index: IndexSection::default(),
-            roles: RolesSection::default(),
-            agents: crate::config::AgentsConfig {
-                main,
-                worker,
-                reviewer,
-            },
-        }
-    }
-
-    fn make_slot(provider: &str, model: &str) -> crate::config::AgentSlotConfig {
-        crate::config::AgentSlotConfig {
-            provider: provider.to_string(),
-            model: model.to_string(),
-            api_key: None,
-            api_key_env: None,
-            base_url: None,
-            user_agent: None,
-        }
-    }
-
-    #[test]
-    fn effective_slot_main_returns_main_when_set() {
-        let loaded =
-            make_loaded_with_agents(Some(make_slot("anthropic", "claude-opus-4-6")), None, None);
-        let slot = loaded
-            .effective_slot("main")
-            .expect("should have main slot");
-        assert_eq!(slot.model, "claude-opus-4-6");
-    }
-
-    #[test]
-    fn effective_slot_worker_returns_worker_when_set() {
-        let loaded = make_loaded_with_agents(
-            Some(make_slot("anthropic", "main-model")),
-            Some(make_slot("openai", "worker-model")),
-            None,
-        );
-        let slot = loaded
-            .effective_slot("worker")
-            .expect("should have worker slot");
-        assert_eq!(slot.model, "worker-model");
-    }
-
-    #[test]
-    fn effective_slot_worker_falls_back_to_main() {
-        let loaded =
-            make_loaded_with_agents(Some(make_slot("anthropic", "main-model")), None, None);
-        // No worker → falls back to main
-        let slot = loaded
-            .effective_slot("worker")
-            .expect("should fall back to main");
-        assert_eq!(slot.model, "main-model");
-    }
-
-    #[test]
-    fn effective_slot_reviewer_returns_reviewer_when_set() {
-        let loaded = make_loaded_with_agents(
-            Some(make_slot("anthropic", "main-model")),
-            None,
-            Some(make_slot("anthropic", "reviewer-model")),
-        );
-        let slot = loaded
-            .effective_slot("reviewer")
-            .expect("should have reviewer slot");
-        assert_eq!(slot.model, "reviewer-model");
-    }
-
-    #[test]
-    fn effective_slot_reviewer_falls_back_to_main() {
-        let loaded =
-            make_loaded_with_agents(Some(make_slot("anthropic", "main-model")), None, None);
-        let slot = loaded
-            .effective_slot("reviewer")
-            .expect("should fall back to main");
-        assert_eq!(slot.model, "main-model");
-    }
-
-    #[test]
-    fn effective_slot_returns_none_when_no_main_configured() {
-        let loaded = make_loaded_with_agents(None, None, None);
-        assert!(loaded.effective_slot("main").is_none());
-        assert!(loaded.effective_slot("worker").is_none());
-        assert!(loaded.effective_slot("reviewer").is_none());
-    }
-
-    #[test]
-    fn effective_slot_unknown_role_returns_main() {
-        let loaded =
-            make_loaded_with_agents(Some(make_slot("anthropic", "main-model")), None, None);
-        let slot = loaded
-            .effective_slot("unknown_role")
-            .expect("unknown role returns main");
-        assert_eq!(slot.model, "main-model");
-    }
-
-    // ── effective_slot_for_profile ────────────────────────────────────────
-
-    fn make_profile_entry_with_worker(
-        worker: Option<crate::config::AgentSlotConfig>,
-        reviewer: Option<crate::config::AgentSlotConfig>,
-    ) -> crate::ProfileEntry {
-        crate::ProfileEntry {
-            provider: "anthropic".to_string(),
-            model: "main-model".to_string(),
-            api_key: None,
-            api_key_env: None,
-            base_url: None,
-            user_agent: None,
-            worker,
-            reviewer,
-        }
-    }
-
-    #[test]
-    fn effective_slot_for_profile_per_profile_worker_overrides_global() {
-        let mut profiles = std::collections::HashMap::new();
-        let per_profile_worker = make_slot("openai", "per-profile-worker");
-        profiles.insert(
-            "work".to_string(),
-            make_profile_entry_with_worker(Some(per_profile_worker), None),
-        );
-        let loaded = LoadedConfig {
-            default_profile: "work".to_string(),
-            profiles,
-            agent: AgentSection::default(),
-            tools: ToolsSection::default(),
-            context: ContextSection::default(),
-            workflows: WorkflowsSection::default(),
-            hooks: crate::config::HooksConfig::default(),
-            index: IndexSection::default(),
-            roles: RolesSection::default(),
-            agents: crate::config::AgentsConfig {
-                main: Some(make_slot("anthropic", "global-main")),
-                worker: Some(make_slot("anthropic", "global-worker")),
-                reviewer: None,
-            },
-        };
-        // Per-profile worker takes priority over global worker
-        let slot = loaded.effective_slot_for_profile("worker", "work").unwrap();
-        assert_eq!(slot.model, "per-profile-worker");
-    }
-
-    #[test]
-    fn effective_slot_for_profile_falls_back_to_global_when_no_per_profile_slot() {
-        let mut profiles = std::collections::HashMap::new();
-        profiles.insert(
-            "work".to_string(),
-            make_profile_entry_with_worker(None, None),
-        );
-        let loaded = LoadedConfig {
-            default_profile: "work".to_string(),
-            profiles,
-            agent: AgentSection::default(),
-            tools: ToolsSection::default(),
-            context: ContextSection::default(),
-            workflows: WorkflowsSection::default(),
-            hooks: crate::config::HooksConfig::default(),
-            index: IndexSection::default(),
-            roles: RolesSection::default(),
-            agents: crate::config::AgentsConfig {
-                main: Some(make_slot("anthropic", "global-main")),
-                worker: Some(make_slot("anthropic", "global-worker")),
-                reviewer: None,
-            },
-        };
-        // No per-profile worker → falls back to global worker
-        let slot = loaded.effective_slot_for_profile("worker", "work").unwrap();
-        assert_eq!(slot.model, "global-worker");
-    }
-
-    #[test]
-    fn effective_slot_for_profile_unknown_profile_falls_back_to_global() {
-        let loaded = make_loaded_with_agents(
-            Some(make_slot("anthropic", "global-main")),
-            Some(make_slot("anthropic", "global-worker")),
-            None,
-        );
-        // "nonexistent" profile → falls back to global worker
-        let slot = loaded
-            .effective_slot_for_profile("worker", "nonexistent")
-            .unwrap();
-        assert_eq!(slot.model, "global-worker");
-    }
-
     // ── switch_active_profile ─────────────────────────────────────────────
 
     #[test]
@@ -1360,8 +964,7 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         upsert_profile_in_config(&cfg_path, "work", &entry).unwrap();
         let src = std::fs::read_to_string(&cfg_path).unwrap();
@@ -1388,8 +991,7 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         upsert_profile_in_config(&cfg_path, "default", &entry).unwrap();
         let src = std::fs::read_to_string(&cfg_path).unwrap();
@@ -1397,10 +999,10 @@ api_key = "sk-openai-worker"
         assert_eq!(cf.profile["default"].model, "new-model");
     }
 
-    // ── ProfileEntry with worker/reviewer serialization ───────────────────
+    // ── ProfileEntry with fast provider serialization ─────────────────
 
     #[test]
-    fn profile_entry_with_worker_toml_roundtrip() {
+    fn profile_entry_with_fast_toml_roundtrip() {
         let entry = crate::ProfileEntry {
             provider: "anthropic".to_string(),
             model: "claude-opus-4-6".to_string(),
@@ -1408,26 +1010,25 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: Some(crate::config::AgentSlotConfig {
-                provider: "openai".to_string(),
-                model: "gpt-4o-mini".to_string(),
-                api_key: Some("sk-openai".to_string()),
+            fast: Some(crate::config::FastProviderConfig {
+                provider: "openrouter".to_string(),
+                model: "google/gemini-2.0-flash".to_string(),
+                api_key: Some("sk-or-test".to_string()),
                 api_key_env: None,
                 base_url: None,
                 user_agent: None,
             }),
-            reviewer: None,
         };
         let serialized = toml::to_string(&entry).unwrap();
         let deserialized: crate::ProfileEntry = toml::from_str(&serialized).unwrap();
         assert_eq!(deserialized.model, "claude-opus-4-6");
-        let w = deserialized.worker.expect("worker should round-trip");
-        assert_eq!(w.provider, "openai");
-        assert_eq!(w.model, "gpt-4o-mini");
+        let f = deserialized.fast.expect("fast should round-trip");
+        assert_eq!(f.provider, "openrouter");
+        assert_eq!(f.model, "google/gemini-2.0-flash");
     }
 
     #[test]
-    fn profile_entry_without_worker_serializes_cleanly() {
+    fn profile_entry_without_fast_serializes_cleanly() {
         let entry = crate::ProfileEntry {
             provider: "anthropic".to_string(),
             model: "m".to_string(),
@@ -1435,21 +1036,10 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         let s = toml::to_string(&entry).unwrap();
-        // Optional None fields should not appear in the serialized output
-        assert!(
-            !s.contains("worker"),
-            "worker=None should not appear: {}",
-            s
-        );
-        assert!(
-            !s.contains("reviewer"),
-            "reviewer=None should not appear: {}",
-            s
-        );
+        assert!(!s.contains("fast"), "fast=None should not appear: {}", s);
         assert!(
             !s.contains("api_key_env"),
             "api_key_env=None should not appear: {}",
@@ -1508,8 +1098,7 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         upsert_profile_in_config(&cfg, "kimi-profile", &entry).unwrap();
         let content = std::fs::read_to_string(&cfg).unwrap();
@@ -1528,8 +1117,7 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         upsert_profile_in_config(&cfg, "coding", &entry).unwrap();
         let content = std::fs::read_to_string(&cfg).unwrap();
@@ -1555,8 +1143,7 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         upsert_profile_in_config(&cfg_path, "fresh", &entry).unwrap();
         assert!(cfg_path.exists());
@@ -1586,8 +1173,7 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         upsert_profile_in_config(&cfg_path, "gamma", &entry).unwrap();
         let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
@@ -1617,8 +1203,7 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         upsert_profile_in_config(&cfg_path, "default", &updated).unwrap();
         let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
@@ -1638,8 +1223,7 @@ api_key = "sk-openai-worker"
             api_key_env: Some("OPENAI_API_KEY".to_string()),
             base_url: Some("https://custom.endpoint.com".to_string()),
             user_agent: Some("CustomAgent/1.0".to_string()),
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         upsert_profile_in_config(&cfg_path, "custom", &entry).unwrap();
         let cf: ConfigFile = toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
@@ -1885,8 +1469,7 @@ api_key = "sk-openai-worker"
                 api_key_env: None,
                 base_url: None,
                 user_agent: None,
-                worker: None,
-                reviewer: None,
+                fast: None,
             },
         );
         let loaded = LoadedConfig {
@@ -1904,8 +1487,6 @@ api_key = "sk-openai-worker"
             workflows: WorkflowsSection::default(),
             hooks: HooksConfig::default(),
             index: IndexSection::default(),
-            roles: RolesSection::default(),
-            agents: crate::config::AgentsConfig::default(),
         };
         // Override only max_turns via CLI
         let cfg = agent_config_from_loaded(
@@ -1939,8 +1520,7 @@ api_key = "sk-openai-worker"
                 api_key_env: None,
                 base_url: None,
                 user_agent: None,
-                worker: None,
-                reviewer: None,
+                fast: None,
             },
         );
         let loaded = LoadedConfig {
@@ -1964,8 +1544,6 @@ api_key = "sk-openai-worker"
             workflows: WorkflowsSection::default(),
             hooks: HooksConfig::default(),
             index: IndexSection::default(),
-            roles: RolesSection::default(),
-            agents: crate::config::AgentsConfig::default(),
         };
         let cfg = agent_config_from_loaded(
             &loaded, "default", None, None, None, None, None, false, None,
@@ -1993,8 +1571,7 @@ api_key = "sk-openai-worker"
                 api_key_env: None,
                 base_url: None,
                 user_agent: None,
-                worker: None,
-                reviewer: None,
+                fast: None,
             },
         );
         let loaded = LoadedConfig {
@@ -2009,8 +1586,6 @@ api_key = "sk-openai-worker"
             workflows: WorkflowsSection::default(),
             hooks: HooksConfig::default(),
             index: IndexSection::default(),
-            roles: RolesSection::default(),
-            agents: crate::config::AgentsConfig::default(),
         };
         let cfg =
             agent_config_from_loaded(&loaded, "default", None, None, None, None, None, true, None)
@@ -2030,8 +1605,7 @@ api_key = "sk-openai-worker"
                 api_key_env: None,
                 base_url: None,
                 user_agent: None,
-                worker: None,
-                reviewer: None,
+                fast: None,
             },
         );
         let loaded = LoadedConfig {
@@ -2046,8 +1620,6 @@ api_key = "sk-openai-worker"
             workflows: WorkflowsSection::default(),
             hooks: HooksConfig::default(),
             index: IndexSection::default(),
-            roles: RolesSection::default(),
-            agents: crate::config::AgentsConfig::default(),
         };
         let cfg = agent_config_from_loaded(
             &loaded, "default", None, None, None, None, None, false, None,
@@ -2073,8 +1645,7 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         upsert_profile_in_config(&cfg_path, "myprofile", &entry).unwrap();
         // Point CLIDO_CONFIG away so only the project config is found
@@ -2099,8 +1670,7 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         upsert_profile_in_config(&cfg_path, "alpha", &entry_a).unwrap();
         // Add second profile
@@ -2111,8 +1681,7 @@ api_key = "sk-openai-worker"
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         upsert_profile_in_config(&cfg_path, "beta", &entry_b).unwrap();
         // Switch default to beta

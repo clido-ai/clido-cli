@@ -192,12 +192,11 @@ pub struct AgentLoop {
     /// returned string (if any) is injected as a `<git_context>` addendum to the
     /// system prompt on every call to `run()` / `run_with_extra_blocks()`.
     git_context_fn: Option<Box<dyn Fn() -> Option<String> + Send + Sync>>,
-    /// Optional fast/cheap model name for utility tasks (titles, commits, summaries).
-    fast_model: Option<String>,
-    /// Optional reasoning/smart model name for architect→editor planning.
-    /// When set, complex prompts are first analyzed by this model to produce a plan,
-    /// which is then injected as context for the main (editor) model.
-    reasoning_model: Option<String>,
+    /// Optional fast/cheap provider for utility tasks (titles, commits, summaries, sub-agents).
+    /// When set, utility calls go through this provider instead of the main one.
+    fast_provider: Option<Arc<dyn ModelProvider>>,
+    /// Config for the fast provider (model name, etc). Only meaningful if fast_provider is Some.
+    fast_agent_config: Option<AgentConfig>,
     /// Count of consecutive turns with tool errors (resets on success).
     consecutive_tool_errors: usize,
     /// Whether we've already created a pre-edit checkpoint this session.
@@ -234,8 +233,8 @@ impl AgentLoop {
             doom_monitor: VecDeque::new(),
             budget_warned_pcts: Vec::new(),
             git_context_fn: None,
-            fast_model: None,
-            reasoning_model: None,
+            fast_provider: None,
+            fast_agent_config: None,
             consecutive_tool_errors: 0,
             checkpoint_created: false,
         }
@@ -247,17 +246,15 @@ impl AgentLoop {
         self
     }
 
-    /// Set the fast model for utility tasks (from [roles] fast config).
-    pub fn with_fast_model(mut self, model: Option<String>) -> Self {
-        self.fast_model = model;
-        self
-    }
-
-    /// Set the reasoning model for architect→editor pipeline (from [roles] reasoning config).
-    /// When set, complex user prompts are first analyzed by this model to produce a plan,
-    /// which is injected as context for the main model.
-    pub fn with_reasoning_model(mut self, model: Option<String>) -> Self {
-        self.reasoning_model = model;
+    /// Set a fast/cheap provider for utility tasks (summarization, title, commit, sub-agents).
+    /// If not set, the main provider handles everything.
+    pub fn with_fast_provider(
+        mut self,
+        provider: Option<Arc<dyn ModelProvider>>,
+        config: Option<AgentConfig>,
+    ) -> Self {
+        self.fast_provider = provider;
+        self.fast_agent_config = config;
         self
     }
 
@@ -292,8 +289,8 @@ impl AgentLoop {
             doom_monitor: VecDeque::new(),
             budget_warned_pcts: Vec::new(),
             git_context_fn: None,
-            fast_model: None,
-            reasoning_model: None,
+            fast_provider: None,
+            fast_agent_config: None,
             consecutive_tool_errors: 0,
             checkpoint_created: false,
         }
@@ -352,14 +349,14 @@ impl AgentLoop {
         Ok(())
     }
 
-    fn fast_config(&self) -> AgentConfig {
-        if let Some(ref fast) = self.fast_model {
-            AgentConfig {
-                model: fast.clone(),
-                ..self.config.clone()
-            }
+    /// Return the provider + config to use for utility tasks (summarization, title, planning).
+    /// If a fast provider is configured, uses that; otherwise falls back to the main provider.
+    /// Returns owned `Arc` so the caller can borrow other fields of `self` mutably.
+    fn utility_provider(&self) -> (Arc<dyn ModelProvider>, AgentConfig) {
+        if let (Some(ref fp), Some(ref fc)) = (&self.fast_provider, &self.fast_agent_config) {
+            (fp.clone(), fc.clone())
         } else {
-            self.config.clone()
+            (self.provider.clone(), self.config.clone())
         }
     }
 
@@ -451,13 +448,13 @@ impl AgentLoop {
             .max_context_tokens
             .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
         // Pass threshold=0 to force compaction unconditionally.
-        let summarize_config = self.fast_config();
+        let (util_provider, summarize_config) = self.utility_provider();
         let compacted = compact_with_summary(
             &self.history,
             sys_tokens,
             max_ctx,
             0.0,
-            self.provider.as_ref(),
+            util_provider.as_ref(),
             &summarize_config,
         )
         .await?;
@@ -516,15 +513,11 @@ impl AgentLoop {
                 text: prompt.to_string(),
             }],
         }];
-        let config = if let Some(ref fast) = self.fast_model {
-            AgentConfig {
-                model: fast.clone(),
-                ..self.config.clone()
-            }
-        } else {
-            self.config.clone()
-        };
-        let response = self.provider.complete(&messages, &[], &config).await?;
+        let (util_provider, config) = self.utility_provider();
+        let response = util_provider
+            .as_ref()
+            .complete(&messages, &[], &config)
+            .await?;
         let text = response
             .content
             .iter()
@@ -539,16 +532,44 @@ impl AgentLoop {
         Ok((text, response.usage))
     }
 
-    /// Use the reasoning model (architect) to generate a plan for complex prompts.
-    /// Returns None if no reasoning model is configured or if the prompt is too simple.
+    /// Send a user prompt to the utility provider with a custom system prompt.
+    /// Used for prompt enhancement and other utility tasks that need steering.
+    pub async fn complete_with_system_fast(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> clido_core::Result<String> {
+        let messages = vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: user_prompt.to_string(),
+            }],
+        }];
+        let (util_provider, mut config) = self.utility_provider();
+        config.system_prompt = Some(system_prompt.to_string());
+        let response = util_provider
+            .as_ref()
+            .complete(&messages, &[], &config)
+            .await?;
+        let text = response
+            .content
+            .iter()
+            .find_map(|b| {
+                if let ContentBlock::Text { text } = b {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+        Ok(text)
+    }
+
+    /// Use the fast/utility provider to generate a plan for complex prompts.
+    /// Returns None if the prompt is too simple or planning fails.
     async fn architect_plan(&self, user_input: &str) -> Option<String> {
-        planning::architect_plan(
-            self.reasoning_model.as_deref(),
-            user_input,
-            &self.config,
-            self.provider.as_ref(),
-        )
-        .await
+        let (util_provider, util_config) = self.utility_provider();
+        planning::architect_plan(user_input, &util_config, util_provider.as_ref()).await
     }
 
     /// Continue from existing history (resume). Does not push a new user message; runs the loop until EndTurn or max_turns.
@@ -598,11 +619,11 @@ impl AgentLoop {
                 let current = sys_tok + estimate_tokens_messages(&self.history);
                 let proactive_limit = ((max_tok as f64) * PROACTIVE_SUMMARIZE_THRESHOLD) as u32;
                 if current > proactive_limit {
-                    let fast_cfg = self.fast_config();
+                    let (util_prov, util_cfg) = self.utility_provider();
                     let count = context::proactive_summarize_pairs(
                         &mut self.history,
-                        self.provider.as_ref(),
-                        &fast_cfg,
+                        util_prov.as_ref(),
+                        &util_cfg,
                         8, // preserve last 8 messages
                     )
                     .await;
@@ -626,13 +647,13 @@ impl AgentLoop {
                 .config
                 .compaction_threshold
                 .unwrap_or(DEFAULT_COMPACTION_THRESHOLD);
-            let summarize_config = self.fast_config();
+            let (util_prov, summarize_config) = self.utility_provider();
             let to_send = compact_with_summary(
                 &self.history,
                 system_tokens,
                 max_ctx,
                 threshold,
-                self.provider.as_ref(),
+                util_prov.as_ref(),
                 &summarize_config,
             )
             .await?;
@@ -1162,11 +1183,11 @@ impl AgentLoop {
                 let current = sys_tok + estimate_tokens_messages(&self.history);
                 let proactive_limit = ((max_tok as f64) * PROACTIVE_SUMMARIZE_THRESHOLD) as u32;
                 if current > proactive_limit {
-                    let fast_cfg = self.fast_config();
+                    let (util_prov, util_cfg) = self.utility_provider();
                     let count = context::proactive_summarize_pairs(
                         &mut self.history,
-                        self.provider.as_ref(),
-                        &fast_cfg,
+                        util_prov.as_ref(),
+                        &util_cfg,
                         8, // preserve last 8 messages
                     )
                     .await;
@@ -1190,13 +1211,13 @@ impl AgentLoop {
                 .config
                 .compaction_threshold
                 .unwrap_or(DEFAULT_COMPACTION_THRESHOLD);
-            let summarize_config = self.fast_config();
+            let (util_prov, summarize_config) = self.utility_provider();
             let to_send = compact_with_summary(
                 &self.history,
                 system_tokens,
                 max_ctx,
                 threshold,
-                self.provider.as_ref(),
+                util_prov.as_ref(),
                 &summarize_config,
             )
             .await?;

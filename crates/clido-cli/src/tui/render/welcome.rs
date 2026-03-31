@@ -56,11 +56,8 @@ pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    // Prompt enhancement mode
-    let prompt_span = match app.prompt_mode {
-        PromptMode::Auto => Span::styled("prompt ✦ auto", dim_green),
-        PromptMode::Off => Span::styled("prompt off", muted),
-    };
+    // Prompt enhancement hint
+    let prompt_span = Span::styled("/enhance", muted);
 
     let content: Vec<Line<'static>> = vec![
         Line::raw(""),

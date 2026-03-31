@@ -14,9 +14,8 @@ pub struct ModelPrefs {
     /// Most recently used model IDs (newest first, max 10).
     #[serde(default)]
     pub recent: Vec<String>,
-    /// Role → model ID overrides (e.g. "fast" → "claude-haiku-4-5-20251001").
-    /// These override the `[roles]` section from config.toml.
-    #[serde(default)]
+    /// Legacy field — kept for backwards-compatible deserialization.
+    #[serde(default, skip_serializing)]
     pub roles: HashMap<String, String>,
 }
 
@@ -60,11 +59,6 @@ impl ModelPrefs {
         self.recent.retain(|m| m != model_id);
         self.recent.insert(0, model_id.to_string());
         self.recent.truncate(Self::MAX_RECENT);
-    }
-
-    /// Resolve a role name to a model ID. Returns `None` if the role has no assignment.
-    pub fn resolve_role<'a>(&'a self, role: &str) -> Option<&'a str> {
-        self.roles.get(role).map(|s| s.as_str())
     }
 
     /// Check if a model is favorited.
@@ -149,20 +143,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_role_returns_assigned_model() {
-        let mut p = ModelPrefs::default();
-        p.roles
-            .insert("fast".to_string(), "claude-haiku".to_string());
-        assert_eq!(p.resolve_role("fast"), Some("claude-haiku"));
-    }
-
-    #[test]
-    fn resolve_role_returns_none_for_unassigned() {
-        let p = ModelPrefs::default();
-        assert_eq!(p.resolve_role("fast"), None);
-    }
-
-    #[test]
     fn is_favorite_returns_false_for_unknown() {
         let p = ModelPrefs::default();
         assert!(!p.is_favorite("not-a-model"));
@@ -179,7 +159,8 @@ mod tests {
         let p2: ModelPrefs = serde_json::from_str(&json).unwrap();
         assert_eq!(p2.favorites, p.favorites);
         assert_eq!(p2.recent, p.recent);
-        assert_eq!(p2.roles, p.roles);
+        // roles is skip_serializing (legacy) — does not round-trip
+        assert!(p2.roles.is_empty());
     }
 
     // ── load/save smoke tests ──────────────────────────────────────────────
@@ -211,7 +192,8 @@ mod tests {
         let loaded: ModelPrefs = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.favorites, p.favorites);
         assert_eq!(loaded.recent, p.recent);
-        assert_eq!(loaded.roles["fast"], "haiku");
+        // roles is skip_serializing (legacy) — does not round-trip
+        assert!(loaded.roles.is_empty());
     }
 
     #[test]

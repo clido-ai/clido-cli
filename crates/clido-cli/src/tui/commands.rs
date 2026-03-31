@@ -3,10 +3,6 @@ use clido_memory::MemoryStore;
 
 use crate::list_picker::ListPicker;
 use crate::overlay::{ErrorOverlay, OverlayKind, ReadOnlyOverlay};
-use crate::prompt_enhance::{
-    project_rules_path, project_settings_path, save_prompt_mode, save_rules, PromptMode,
-    PromptRules, RuleEntry,
-};
 
 use super::*;
 
@@ -362,12 +358,8 @@ pub(super) fn cmd_role(app: &mut App, cmd: &str) {
             app.push(ChatLine::Info(format!("  role '{name}' not found")));
         }
     } else {
-        // Resolve: prefs override config.
-        let model_id = app
-            .model_prefs
-            .resolve_role(role)
-            .map(|s| s.to_string())
-            .or_else(|| app.config_roles.get(role).cloned());
+        // Resolve: look up in config_roles.
+        let model_id = app.config_roles.get(role).cloned();
         match model_id {
             Some(id) => {
                 app.model = id.clone();
@@ -1237,23 +1229,14 @@ pub(super) fn cmd_index(app: &mut App) {
 }
 
 pub(super) fn cmd_rules(app: &mut App) {
-    let active = app.prompt_rules.active_rules();
-    let mut overlay_content: Vec<(String, String)> = Vec::new();
-    if active.is_empty() {
-        overlay_content.push((
-            "  No active rules.".to_string(),
-            "Use /prompt-rules add <text> to define prompt enhancement rules.".to_string(),
-        ));
-    } else {
-        for rule in active {
-            overlay_content.push((rule.id.clone(), rule.text.clone()));
-        }
-    }
-    app.overlay_stack
-        .push(OverlayKind::ReadOnly(ReadOnlyOverlay::new(
-            "Active Rules",
-            overlay_content,
-        )));
+    app.push(ChatLine::Info("".into()));
+    app.push(ChatLine::Info(
+        "  Prompt rules have been replaced by /enhance. Use /enhance <prompt> to get".into(),
+    ));
+    app.push(ChatLine::Info(
+        "  an AI-structured version of your prompt before sending.".into(),
+    ));
+    app.push(ChatLine::Info("".into()));
 }
 
 pub(super) fn cmd_image(app: &mut App, cmd: &str) {
@@ -1284,35 +1267,28 @@ pub(super) fn cmd_agents(app: &mut App) {
     match clido_core::load_config(&app.workspace_root) {
         Err(e) => app.push(ChatLine::Info(format!("  ✗ Could not load config: {}", e))),
         Ok(loaded) => {
+            let profile = loaded.profiles.get(&loaded.default_profile);
             app.push(ChatLine::Info("  Agent configuration:".into()));
-            if let Some(main) = &loaded.agents.main {
+            if let Some(p) = profile {
                 app.push(ChatLine::Info(format!(
                     "  main      {} / {}",
-                    main.provider, main.model
+                    p.provider, p.model
                 )));
-            } else {
-                app.push(ChatLine::Info(
-                    "  main      (using [profile.default])".into(),
-                ));
+                if let Some(ref fast) = p.fast {
+                    app.push(ChatLine::Info(format!(
+                        "  fast      {} / {}",
+                        fast.provider, fast.model
+                    )));
+                } else {
+                    app.push(ChatLine::Info(
+                        "  fast      not set  (uses main provider)".into(),
+                    ));
+                }
             }
-            if let Some(worker) = &loaded.agents.worker {
-                app.push(ChatLine::Info(format!(
-                    "  worker    {} / {}",
-                    worker.provider, worker.model
-                )));
-            } else {
-                app.push(ChatLine::Info(
-                    "  worker    not set  (uses main agent)".into(),
-                ));
-            }
-            if let Some(reviewer) = &loaded.agents.reviewer {
-                app.push(ChatLine::Info(format!(
-                    "  reviewer  {} / {}",
-                    reviewer.provider, reviewer.model
-                )));
-            } else {
-                app.push(ChatLine::Info("  reviewer  not set  (disabled)".into()));
-            }
+            app.push(ChatLine::Info(
+                "  Worker and reviewer sub-agents use the fast provider (or main if not set)."
+                    .into(),
+            ));
             app.push(ChatLine::Info("  Run /init to reconfigure.".into()));
         }
     }
@@ -1333,16 +1309,10 @@ pub(super) fn cmd_profiles(app: &mut App) {
                     "  {} {}  {} / {}",
                     marker, name, entry.provider, entry.model
                 )));
-                if let Some(ref w) = entry.worker {
+                if let Some(ref f) = entry.fast {
                     app.push(ChatLine::Info(format!(
-                        "       worker    {} / {}",
-                        w.provider, w.model
-                    )));
-                }
-                if let Some(ref r) = entry.reviewer {
-                    app.push(ChatLine::Info(format!(
-                        "       reviewer  {} / {}",
-                        r.provider, r.model
+                        "       fast      {} / {}",
+                        f.provider, f.model
                     )));
                 }
             }
@@ -1474,38 +1444,14 @@ pub(super) fn cmd_config(app: &mut App) {
                 for name in names {
                     let p = &loaded.profiles[name];
                     let marker = if name == active { "▶" } else { " " };
-                    let worker_s = if let Some(ref w) = p.worker {
-                        format!("  worker: {}/{}", w.provider, w.model)
-                    } else {
-                        String::new()
-                    };
-                    let reviewer_s = if let Some(ref r) = p.reviewer {
-                        format!("  reviewer: {}/{}", r.provider, r.model)
+                    let fast_s = if let Some(ref f) = p.fast {
+                        format!("  fast: {}/{}", f.provider, f.model)
                     } else {
                         String::new()
                     };
                     app.push(ChatLine::Info(format!(
-                        "  {} {:<14}  {}/{}{}{}",
-                        marker, name, p.provider, p.model, worker_s, reviewer_s
-                    )));
-                }
-            }
-
-            // Roles.
-            let roles_map = loaded.roles.as_map();
-            if !roles_map.is_empty() {
-                app.push(ChatLine::Info("".into()));
-                app.push(ChatLine::Section("Roles".into()));
-                app.push(ChatLine::Info(
-                    "  (use /role <name> to switch, /fast = fast role, /smart = reasoning role)"
-                        .into(),
-                ));
-                let mut role_names: Vec<&String> = roles_map.keys().collect();
-                role_names.sort();
-                for name in role_names {
-                    app.push(ChatLine::Info(format!(
-                        "  {:<14}  {}",
-                        name, roles_map[name]
+                        "  {} {:<14}  {}/{}{}",
+                        marker, name, p.provider, p.model, fast_s
                     )));
                 }
             }
@@ -1581,44 +1527,12 @@ pub(super) fn cmd_config(app: &mut App) {
                 app.push(ChatLine::Info(usage_str));
             }
 
-            // Agent slots (global).
-            let agents = &loaded.agents;
-            if agents.main.is_some() || agents.worker.is_some() || agents.reviewer.is_some() {
-                app.push(ChatLine::Info("".into()));
-                app.push(ChatLine::Section("Agent Slots (global)".into()));
-                if let Some(ref m) = agents.main {
-                    app.push(ChatLine::Info(format!(
-                        "  main      {}/{}",
-                        m.provider, m.model
-                    )));
-                }
-                if let Some(ref w) = agents.worker {
-                    app.push(ChatLine::Info(format!(
-                        "  worker    {}/{}",
-                        w.provider, w.model
-                    )));
-                }
-                if let Some(ref r) = agents.reviewer {
-                    app.push(ChatLine::Info(format!(
-                        "  reviewer  {}/{}",
-                        r.provider, r.model
-                    )));
-                }
-            }
-
-            // Config file path.
+            // Prompt Enhancement.
             app.push(ChatLine::Info("".into()));
             app.push(ChatLine::Section("Prompt Enhancement".into()));
-            let mode_str = match app.prompt_mode {
-                PromptMode::Auto => "auto (✦ active)",
-                PromptMode::Off => "off",
-            };
-            app.push(ChatLine::Info(format!("  mode              {}", mode_str)));
-            let active_count = app.prompt_rules.active_rules().len();
-            app.push(ChatLine::Info(format!(
-                "  active rules      {} (use /prompt-rules list to view)",
-                active_count
-            )));
+            app.push(ChatLine::Info(
+                "  Use /enhance <prompt> to structure prompts via AI".into(),
+            ));
 
             app.push(ChatLine::Info("".into()));
             app.push(ChatLine::Info(format!(
@@ -1755,151 +1669,28 @@ pub(super) fn cmd_init(app: &mut App) {
     }
 }
 
-pub(super) fn cmd_prompt_mode(app: &mut App, cmd: &str) {
-    let arg = cmd.trim_start_matches("/prompt-mode").trim();
-    match arg {
-        "auto" => {
-            app.prompt_mode = PromptMode::Auto;
-            let path = project_settings_path(&app.workspace_root);
-            if let Err(e) = save_prompt_mode(&path, PromptMode::Auto) {
-                app.push(ChatLine::Info(format!("  ⚠ Could not save: {e}")));
-            }
-            app.push(ChatLine::Info(
-                "  ✓ Prompt enhancement: auto — prompts will be enhanced automatically".into(),
-            ));
-        }
-        "off" => {
-            app.prompt_mode = PromptMode::Off;
-            let path = project_settings_path(&app.workspace_root);
-            if let Err(e) = save_prompt_mode(&path, PromptMode::Off) {
-                app.push(ChatLine::Info(format!("  ⚠ Could not save: {e}")));
-            }
-            app.push(ChatLine::Info(
-                "  ✓ Prompt enhancement: off — raw input sent unchanged".into(),
-            ));
-        }
-        "" | "status" => {
-            let n_active = app.prompt_rules.active_rules().len();
-            let n_total = app.prompt_rules.rules.len();
-            app.push(ChatLine::Info("".into()));
-            app.push(ChatLine::Section("Prompt Enhancement".into()));
-            app.push(ChatLine::Info(format!(
-                "  mode     {}",
-                app.prompt_mode.as_str()
-            )));
-            app.push(ChatLine::Info(format!(
-                "  rules    {n_active} active / {n_total} total"
-            )));
-            app.push(ChatLine::Info("".into()));
-            app.push(ChatLine::Info(
-                "  /prompt-mode auto      enable automatic enhancement".into(),
-            ));
-            app.push(ChatLine::Info(
-                "  /prompt-mode off       send raw input unchanged".into(),
-            ));
-            app.push(ChatLine::Info(
-                "  /prompt-rules          view and manage rules".into(),
-            ));
-            app.push(ChatLine::Info(
-                "  /prompt-preview        preview enhanced prompt before sending".into(),
-            ));
-            app.push(ChatLine::Info("".into()));
-        }
-        _ => {
-            app.push(ChatLine::Info(
-                "  Usage: /prompt-mode [auto|off|status]".into(),
-            ));
-        }
+/// `/enhance <prompt>` — send the prompt to the utility provider for enhancement,
+/// then submit the enhanced version to the main agent.
+pub(super) fn cmd_enhance(app: &mut App, cmd: &str) {
+    let raw = cmd.trim_start_matches("/enhance").trim();
+    if raw.is_empty() {
+        app.push(ChatLine::Info("".into()));
+        app.push(ChatLine::Section("Prompt Enhancement".into()));
+        app.push(ChatLine::Info("  Usage: /enhance <your prompt>".into()));
+        app.push(ChatLine::Info("".into()));
+        app.push(ChatLine::Info(
+            "  Sends your prompt to the utility provider for intelligent".into(),
+        ));
+        app.push(ChatLine::Info(
+            "  structuring, then submits the enhanced version to the main agent.".into(),
+        ));
+        app.push(ChatLine::Info("".into()));
+        return;
     }
-}
-
-pub(super) fn cmd_prompt_rules(app: &mut App, cmd: &str) {
-    let arg = cmd.trim_start_matches("/prompt-rules").trim();
-    if arg.is_empty() || arg == "list" {
-        // Collect before any mutable borrows.
-        let (active_lines, total): (Vec<String>, usize) = {
-            let active = app.prompt_rules.active_rules();
-            let total = app.prompt_rules.rules.len();
-            let lines: Vec<String> = active
-                .iter()
-                .map(|r| {
-                    let badge = if r.source == "inferred" {
-                        "inferred"
-                    } else {
-                        "manual"
-                    };
-                    format!("  [{}]  {}  ({})", r.id, r.text, badge)
-                })
-                .collect();
-            (lines, total)
-        };
-        app.push(ChatLine::Info("".into()));
-        app.push(ChatLine::Section("Prompt Rules".into()));
-        if active_lines.is_empty() {
-            app.push(ChatLine::Info(
-                "  No active rules.  Use /prompt-rules add <text> to add one.".into(),
-            ));
-            if total > 0 {
-                app.push(ChatLine::Info(format!(
-                    "  ({total} rules below confidence threshold — not yet applied)"
-                )));
-            }
-        } else {
-            for line in active_lines {
-                app.push(ChatLine::Info(line));
-            }
-        }
-        app.push(ChatLine::Info("".into()));
-        app.push(ChatLine::Info(
-            "  /prompt-rules add <text>     add a new rule".into(),
-        ));
-        app.push(ChatLine::Info(
-            "  /prompt-rules remove <id>    remove a rule by id".into(),
-        ));
-        app.push(ChatLine::Info(
-            "  /prompt-rules reset          clear all rules".into(),
-        ));
-        app.push(ChatLine::Info("".into()));
-    } else if let Some(text) = arg.strip_prefix("add ") {
-        let text = text.trim();
-        if text.is_empty() {
-            app.push(ChatLine::Info(
-                "  Usage: /prompt-rules add <rule text>".into(),
-            ));
-        } else {
-            let id = text
-                .to_lowercase()
-                .split_whitespace()
-                .take(4)
-                .collect::<Vec<_>>()
-                .join("-");
-            let rule = RuleEntry::new_manual(id, text);
-            app.prompt_rules.upsert(rule);
-            let path = project_rules_path(&app.workspace_root);
-            if let Err(e) = save_rules(&path, &app.prompt_rules) {
-                app.push(ChatLine::Info(format!("  ⚠ Could not save rules: {e}")));
-            }
-            app.push(ChatLine::Info(format!("  ✓ Rule added: \"{text}\"")));
-        }
-    } else if let Some(id) = arg.strip_prefix("remove ") {
-        let id = id.trim();
-        if app.prompt_rules.remove(id) {
-            let path = project_rules_path(&app.workspace_root);
-            let _ = save_rules(&path, &app.prompt_rules);
-            app.push(ChatLine::Info(format!("  ✓ Rule removed: {id}")));
-        } else {
-            app.push(ChatLine::Info(format!("  ✗ No rule with id: {id}")));
-        }
-    } else if arg == "reset" {
-        app.prompt_rules = PromptRules::default();
-        let path = project_rules_path(&app.workspace_root);
-        let _ = save_rules(&path, &app.prompt_rules);
-        app.push(ChatLine::Info("  ✓ All rules cleared".into()));
-    } else {
-        app.push(ChatLine::Info(
-            "  Usage: /prompt-rules [list|add <text>|remove <id>|reset]".into(),
-        ));
-    }
+    // Queue: show "enhancing…" then send via channel so event_loop can await the async call.
+    app.push(ChatLine::Info("  ✦ Enhancing prompt…".into()));
+    // Store the raw prompt — event_loop will pick it up and call the LLM.
+    app.pending_enhance = Some(raw.to_string());
 }
 
 pub(super) fn execute_slash(app: &mut App, cmd: &str) {
@@ -1992,18 +1783,7 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
         "/init" => cmd_init(app),
 
         // ── Prompt Enhancement ──────────────────────────────────────────────
-        _ if cmd == "/prompt-mode" || cmd.starts_with("/prompt-mode ") => cmd_prompt_mode(app, cmd),
-
-        "/prompt-preview" => {
-            app.prompt_preview_text = Some(String::new());
-            app.push(ChatLine::Info(
-                "  ✦ Preview mode — next message will be shown enhanced but not sent. Press Enter to send or Esc to cancel.".into(),
-            ));
-        }
-
-        _ if cmd == "/prompt-rules" || cmd.starts_with("/prompt-rules ") => {
-            cmd_prompt_rules(app, cmd)
-        }
+        _ if cmd == "/enhance" || cmd.starts_with("/enhance ") => cmd_enhance(app, cmd),
 
         _ => {}
     }

@@ -26,7 +26,7 @@ pub async fn run_doctor() -> Result<(), anyhow::Error> {
     check_session_dir(&cwd, use_color, &mut mandatory);
     check_pricing(use_color, &mut warnings);
     check_rules_files(&cwd, use_color, &mut warnings);
-    check_agents_config(&loaded, use_color, &mut warnings);
+    check_fast_provider(&loaded, use_color, &mut warnings);
 
     if !mandatory.is_empty() {
         for m in &mandatory {
@@ -262,54 +262,24 @@ fn check_rules_files(cwd: &std::path::Path, use_color: bool, warnings: &mut Vec<
     }
 }
 
-fn check_agents_config(
+fn check_fast_provider(
     loaded: &clido_core::LoadedConfig,
     use_color: bool,
-    warnings: &mut Vec<String>,
+    _warnings: &mut Vec<String>,
 ) {
-    let slots = [
-        ("main", loaded.agents.main.as_ref()),
-        ("worker", loaded.agents.worker.as_ref()),
-        ("reviewer", loaded.agents.reviewer.as_ref()),
-    ];
-    let mut any_configured = false;
-    for (role, slot) in &slots {
-        let Some(slot) = slot else { continue };
-        any_configured = true;
-        // Verify the API key is reachable for non-local providers.
-        if slot.provider == "local" {
+    let profile = loaded.profiles.get(&loaded.default_profile);
+    if let Some(entry) = profile {
+        if let Some(ref fast) = entry.fast {
             print_ok(
                 use_color,
-                &format!("agents.{}: local provider ({})", role, slot.model),
-            );
-            continue;
-        }
-        let key_available = slot.api_key.is_some()
-            || slot
-                .api_key_env
-                .as_deref()
-                .map(|e| env::var(e).is_ok())
-                .unwrap_or(false);
-        if key_available {
-            print_ok(
-                use_color,
-                &format!(
-                    "agents.{}: {} / {} — API key OK",
-                    role, slot.provider, slot.model
-                ),
+                &format!("fast provider: {} / {}", fast.provider, fast.model),
             );
         } else {
-            warnings.push(format!(
-                "agents.{}: no API key configured for provider '{}' (set api_key or api_key_env in [agents.{}]).",
-                role, slot.provider, role
-            ));
+            print_info(
+                use_color,
+                "fast provider: not configured (utility tasks use main provider)",
+            );
         }
-    }
-    if !any_configured {
-        print_info(
-            use_color,
-            "agents: no sub-agent slots configured (run /init to set up worker/reviewer)",
-        );
     }
 }
 
@@ -343,8 +313,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         }
     }
 

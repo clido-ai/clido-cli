@@ -103,10 +103,8 @@ pub(crate) fn render_profile_overview(
                 1 => ProfileEditField::ApiKey,
                 2 => ProfileEditField::Model,
                 3 => ProfileEditField::BaseUrl,
-                4 => ProfileEditField::WorkerProvider,
-                5 => ProfileEditField::WorkerModel,
-                6 => ProfileEditField::ReviewerProvider,
-                7 => ProfileEditField::ReviewerModel,
+                4 => ProfileEditField::FastProvider,
+                5 => ProfileEditField::FastModel,
                 _ => ProfileEditField::None,
             };
             *f == expected
@@ -141,10 +139,8 @@ pub(crate) fn render_profile_overview(
                 1 => st.masked_api_key(),
                 2 => st.model.clone(),
                 3 => st.base_url.clone(),
-                4 => st.worker_provider.clone(),
-                5 => st.worker_model.clone(),
-                6 => st.reviewer_provider.clone(),
-                7 => st.reviewer_model.clone(),
+                4 => st.fast_provider.clone(),
+                5 => st.fast_model.clone(),
                 _ => String::new(),
             };
             if raw.is_empty() {

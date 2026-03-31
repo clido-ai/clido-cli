@@ -257,10 +257,11 @@ pub(super) fn state_to_profile_entry(s: &SetupState) -> clido_core::ProfileEntry
         (Some(s.credential.clone()).filter(|k| !k.is_empty()), None)
     };
 
-    let worker = if s.configure_worker && !s.worker_model.is_empty() {
-        let worker_prov = PROVIDER_REGISTRY[s.worker_provider].id;
-        let is_local_worker = PROVIDER_REGISTRY[s.worker_provider].is_local;
-        let (w_key, w_url) = if is_local_worker {
+    // Build fast provider config if the user opted to configure one.
+    let fast = if s.configure_worker && !s.worker_model.is_empty() {
+        let fast_prov = PROVIDER_REGISTRY[s.worker_provider].id;
+        let is_local = PROVIDER_REGISTRY[s.worker_provider].is_local;
+        let (f_key, f_url) = if is_local {
             let url = if s.worker_credential.is_empty() {
                 Some("http://localhost:11434".to_string())
             } else {
@@ -273,40 +274,12 @@ pub(super) fn state_to_profile_entry(s: &SetupState) -> clido_core::ProfileEntry
                 None,
             )
         };
-        Some(clido_core::AgentSlotConfig {
-            provider: worker_prov.to_string(),
+        Some(clido_core::FastProviderConfig {
+            provider: fast_prov.to_string(),
             model: s.worker_model.clone(),
-            api_key: w_key,
+            api_key: f_key,
             api_key_env: None,
-            base_url: w_url,
-            user_agent: None,
-        })
-    } else {
-        None
-    };
-
-    let reviewer = if s.configure_reviewer && !s.reviewer_model.is_empty() {
-        let reviewer_prov = PROVIDER_REGISTRY[s.reviewer_provider].id;
-        let is_local_reviewer = PROVIDER_REGISTRY[s.reviewer_provider].is_local;
-        let (r_key, r_url) = if is_local_reviewer {
-            let url = if s.reviewer_credential.is_empty() {
-                Some("http://localhost:11434".to_string())
-            } else {
-                Some(s.reviewer_credential.clone())
-            };
-            (None, url)
-        } else {
-            (
-                Some(s.reviewer_credential.clone()).filter(|k| !k.is_empty()),
-                None,
-            )
-        };
-        Some(clido_core::AgentSlotConfig {
-            provider: reviewer_prov.to_string(),
-            model: s.reviewer_model.clone(),
-            api_key: r_key,
-            api_key_env: None,
-            base_url: r_url,
+            base_url: f_url,
             user_agent: None,
         })
     } else {
@@ -320,7 +293,6 @@ pub(super) fn state_to_profile_entry(s: &SetupState) -> clido_core::ProfileEntry
         api_key_env: None,
         base_url,
         user_agent: None,
-        worker,
-        reviewer,
+        fast,
     }
 }

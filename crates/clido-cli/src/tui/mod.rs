@@ -63,8 +63,6 @@ use tokio::sync::{mpsc, oneshot};
 #[allow(unused_imports)]
 use crate::overlay::{ErrorOverlay, OverlayKind};
 #[allow(unused_imports)]
-use crate::prompt_enhance::PromptMode;
-#[allow(unused_imports)]
 use clido_agent::{AskUser, PermGrant as AgentPermGrant, PermRequest as AgentPermRequest};
 
 pub(super) const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -126,10 +124,17 @@ mod tests {
             std::collections::HashMap::new(),
             "default".to_string(),
             Arc::new(AtomicBool::new(false)),
-            false,
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             String::new(),
             None,
+            clido_providers::build_provider(
+                "openrouter",
+                String::new(),
+                "test-model".to_string(),
+                None,
+            )
+            .expect("test provider"),
+            "test-model".to_string(),
         )
     }
 
@@ -824,8 +829,7 @@ mod tests {
             api_key_env: None,
             base_url: Some("https://custom.api.example.com".into()),
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         let ov = ProfileOverlayState::for_edit(
             "myprofile".into(),
@@ -864,8 +868,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         let mut ov = ProfileOverlayState::for_edit(
             "p".into(),
@@ -900,8 +903,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         let mut ov = ProfileOverlayState::for_edit(
             "p".into(),
@@ -938,8 +940,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         let mut ov = ProfileOverlayState::for_edit(
             "p".into(),
@@ -965,8 +966,7 @@ mod tests {
             api_key_env: None,
             base_url: None,
             user_agent: None,
-            worker: None,
-            reviewer: None,
+            fast: None,
         };
         let ov = ProfileOverlayState::for_edit(
             "p".into(),
@@ -1612,130 +1612,5 @@ mod tests {
             filtered[0].id.contains("claude"),
             "filtered model should be claude"
         );
-    }
-
-    // ── Prompt preview tests ──────────────────────────────────────────────────
-
-    #[test]
-    fn prompt_preview_shows_enhanced_text() {
-        let mut app = make_test_app();
-        // Add a rule so enhancement actually modifies the prompt
-        app.prompt_rules
-            .upsert(crate::prompt_enhance::RuleEntry::new_manual(
-                "no-unwrap",
-                "Avoid .unwrap() in all new code",
-            ));
-        app.prompt_mode = crate::prompt_enhance::PromptMode::Auto;
-
-        // Enable preview mode
-        app.prompt_preview_text = Some(String::new());
-
-        // Simulate typing a coding task prompt
-        let result = app.maybe_enhance_prompt("fix the login bug".to_string());
-
-        // Should return None (preview mode doesn't send)
-        assert!(result.is_none(), "preview mode should return None");
-
-        // Should have added preview messages
-        let has_preview_header = app.messages.iter().any(|l| match l {
-            ChatLine::Section(s) => s.contains("Enhanced Prompt Preview"),
-            _ => false,
-        });
-        assert!(has_preview_header, "should show preview header");
-
-        // Should show the enhanced prompt (with rule appended)
-        let has_rule_text = app.messages.iter().any(|l| match l {
-            ChatLine::Info(s) => s.contains("Avoid .unwrap()"),
-            _ => false,
-        });
-        assert!(has_rule_text, "should show the enhanced prompt with rule");
-
-        // Preview mode should be reset
-        assert!(
-            app.prompt_preview_text.is_none(),
-            "preview mode should be reset"
-        );
-    }
-
-    #[test]
-    fn prompt_preview_without_rules_shows_original() {
-        let mut app = make_test_app();
-        // No rules configured
-        app.prompt_rules = crate::prompt_enhance::PromptRules::default();
-        app.prompt_mode = crate::prompt_enhance::PromptMode::Auto;
-
-        // Enable preview mode
-        app.prompt_preview_text = Some(String::new());
-
-        // Simulate typing a coding task prompt
-        let result = app.maybe_enhance_prompt("fix the login bug".to_string());
-
-        // Should return None (preview mode doesn't send)
-        assert!(result.is_none(), "preview mode should return None");
-
-        // Should have added preview messages with "no changes" header since no rules
-        let has_preview_header = app.messages.iter().any(|l| match l {
-            ChatLine::Section(s) => s.contains("Prompt Preview (no changes)"),
-            _ => false,
-        });
-        assert!(
-            has_preview_header,
-            "should show 'no changes' preview header"
-        );
-
-        // Should show the original prompt (no rules to apply)
-        let has_original = app.messages.iter().any(|l| match l {
-            ChatLine::Info(s) => s.contains("fix the login bug"),
-            _ => false,
-        });
-        assert!(
-            has_original,
-            "should show the original prompt when no rules"
-        );
-
-        // Should show helpful hint about adding rules
-        let has_hint = app.messages.iter().any(|l| match l {
-            ChatLine::Info(s) => s.contains("No active rules"),
-            _ => false,
-        });
-        assert!(has_hint, "should show hint about adding rules");
-    }
-
-    #[test]
-    fn prompt_preview_informational_prompt_shows_hint() {
-        let mut app = make_test_app();
-        // Has rules but prompt looks informational (question)
-        app.prompt_rules
-            .upsert(crate::prompt_enhance::RuleEntry::new_manual(
-                "no-unwrap",
-                "Avoid .unwrap() in all new code",
-            ));
-        app.prompt_mode = crate::prompt_enhance::PromptMode::Auto;
-
-        // Enable preview mode
-        app.prompt_preview_text = Some(String::new());
-
-        // Simulate typing a question (informational, not a coding task)
-        let result = app.maybe_enhance_prompt("what is the login bug?".to_string());
-
-        // Should return None (preview mode doesn't send)
-        assert!(result.is_none(), "preview mode should return None");
-
-        // Should have "no changes" header since it's informational
-        let has_preview_header = app.messages.iter().any(|l| match l {
-            ChatLine::Section(s) => s.contains("Prompt Preview (no changes)"),
-            _ => false,
-        });
-        assert!(
-            has_preview_header,
-            "should show 'no changes' preview header"
-        );
-
-        // Should show hint about informational prompts
-        let has_hint = app.messages.iter().any(|l| match l {
-            ChatLine::Info(s) => s.contains("looks informational"),
-            _ => false,
-        });
-        assert!(has_hint, "should show hint about informational prompts");
     }
 }

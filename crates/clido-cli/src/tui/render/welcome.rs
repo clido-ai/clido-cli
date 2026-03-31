@@ -56,8 +56,12 @@ pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    // Prompt enhancement hint
-    let prompt_span = Span::styled("/enhance", muted);
+    // Fast/utility provider status
+    let fast_span = if app.utility_model != app.model {
+        Span::styled(format!("fast {}", app.utility_model), dim_green)
+    } else {
+        Span::styled("fast ·", muted)
+    };
 
     let content: Vec<Line<'static>> = vec![
         Line::raw(""),
@@ -82,7 +86,7 @@ pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("  ·  ".to_string(), muted),
             budget_span,
             Span::styled("  ·  ".to_string(), muted),
-            prompt_span,
+            fast_span,
         ]),
         Line::raw(""),
         Line::from(Span::styled(

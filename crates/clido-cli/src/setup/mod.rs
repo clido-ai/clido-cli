@@ -693,16 +693,16 @@ mod tests {
     // ── build_toml agents section tests ────────────────────────────────────
 
     #[test]
-    fn build_toml_agents_main_uses_api_key_not_env() {
-        // Regression: [agents.main] must store api_key = "..." not api_key_env = "..."
+    fn build_toml_profile_does_not_embed_api_key() {
+        // Regression: [profile.default] must NOT store api_key inline (goes to credentials file)
         let mut s = SetupState::new();
         s.provider = 1; // Anthropic
         s.model = "claude-sonnet-4-5".to_string();
         s.credential = "sk-ant-secret-key".to_string();
         let toml = build_toml(&s);
         assert!(
-            toml.contains("[agents.main]"),
-            "agents.main section missing"
+            toml.contains("[profile.default]"),
+            "profile.default section missing"
         );
         assert!(
             !toml.contains("api_key ="),
@@ -710,7 +710,7 @@ mod tests {
         );
         assert!(
             !toml.contains("api_key_env"),
-            "agents.main must not use api_key_env when credential is known"
+            "profile must not use api_key_env when credential is known"
         );
     }
 

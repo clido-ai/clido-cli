@@ -195,12 +195,22 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     let input_line_count = app.text_input.text.matches('\n').count() + 1;
     let input_h = (input_line_count as u16 + 2).min(12);
     let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
+    // Queue area: 1 line if empty, up to 7 lines if many items (header + 5 items + "more")
+    let queue_h = if app.queued.is_empty() {
+        if app.current_step.is_some() {
+            1
+        } else {
+            0
+        }
+    } else {
+        (1 + app.queued.len().min(5) + 1).min(7) as u16
+    };
     let [header_area, chat_area, status_area, queue_area, hint_area, input_area] =
         Layout::vertical([
             Constraint::Length(header_h),
             Constraint::Min(0),
             Constraint::Length(status_h),
-            Constraint::Length(1),
+            Constraint::Length(queue_h),
             Constraint::Length(hint_h),
             Constraint::Length(input_h),
         ])
@@ -310,16 +320,22 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Queue strip ──
     {
-        let queue_line = if !app.queued.is_empty() {
-            // Build a list of truncated first lines from each queued item
-            let max_items = 3; // Show up to 3 items
-            let item_width = 45; // Width per item
-            let mut items: Vec<String> = Vec::new();
+        let queue_lines: Vec<Line> = if !app.queued.is_empty() {
+            let mut lines = Vec::new();
+            // Header line with count
+            lines.push(Line::from(vec![Span::styled(
+                format!("  ↻ {} queued", app.queued.len()),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::DIM),
+            )]));
 
-            for (_, item) in app.queued.iter().enumerate().take(max_items) {
-                // Get first line only
+            // Each queued item on its own line
+            let max_items = 5; // Show up to 5 items (more since each is on its own line)
+            let item_width = 70; // Wider since it's the full line width
+
+            for (idx, item) in app.queued.iter().enumerate().take(max_items) {
                 let first_line = item.lines().next().unwrap_or(item.as_str());
-                // Truncate
                 let truncated = if first_line.chars().count() > item_width {
                     format!(
                         "{}…",
@@ -328,38 +344,30 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 } else {
                     first_line.to_string()
                 };
-                // Add indicator for multiline items
                 let has_more = item.lines().count() > 1;
                 let suffix = if has_more { "…" } else { "" };
-                items.push(format!("\"{}{}\"", truncated, suffix));
-            }
 
-            let more_count = app.queued.len().saturating_sub(max_items);
-            let more_text = if more_count > 0 {
-                format!(" +{} more", more_count)
-            } else {
-                String::new()
-            };
-
-            let label = format!("  ↻ {} queued  ", app.queued.len());
-            let items_text = items.join("  ");
-
-            Line::from(vec![
-                Span::styled(
-                    label,
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::DIM),
-                ),
-                Span::styled(
-                    format!("{}{}", items_text, more_text),
+                lines.push(Line::from(vec![Span::styled(
+                    format!("    {}. \"{}{}\"", idx + 1, truncated, suffix),
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
-                ),
-            ])
+                )]));
+            }
+
+            let more_count = app.queued.len().saturating_sub(max_items);
+            if more_count > 0 {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("    ... and {} more", more_count),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
+                )]));
+            }
+
+            lines
         } else if let Some(ref step) = app.current_step {
-            Line::from(vec![
+            vec![Line::from(vec![
                 Span::styled(
                     "  ▶ ",
                     Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
@@ -370,11 +378,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
                 ),
-            ])
+            ])]
         } else {
-            Line::raw("")
+            vec![Line::raw("")]
         };
-        frame.render_widget(Paragraph::new(queue_line), queue_area);
+        frame.render_widget(Paragraph::new(queue_lines), queue_area);
     }
 
     // ── Input box (always rendered, even when permission popup is showing) ──

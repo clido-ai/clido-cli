@@ -1555,12 +1555,12 @@ mod tests {
         let before = app.messages.len();
         assert!(before > 0);
         execute_slash(&mut app, "/clear");
-        // /clear resets to WelcomeBrand + info message
+        // /clear resets to WelcomeBrand + new session message
         let has_clear_msg = app.messages.iter().any(|l| match l {
-            ChatLine::Info(s) => s.contains("cleared"),
+            ChatLine::Info(s) => s.contains("New session started") || s.contains("cleared"),
             _ => false,
         });
-        assert!(has_clear_msg, "/clear should show cleared message");
+        assert!(has_clear_msg, "/clear should show new session message");
     }
 
     #[test]

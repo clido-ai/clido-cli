@@ -36,6 +36,8 @@ pub(super) struct App {
     pub(super) channels: AgentChannels,
     /// Inputs queued while agent was busy — drained FIFO when agent finishes.
     pub(super) queued: VecDeque<String>,
+    /// Index for cycling through queued items with Up arrow (None = not in queue nav mode).
+    pub(super) queue_nav_idx: Option<usize>,
     /// Session picker popup state (Some = popup visible).
     pub(super) session_picker: Option<SessionPickerState>,
     /// Model picker popup state (Some = popup visible).
@@ -105,6 +107,12 @@ pub(super) struct App {
     /// Shared state: image to attach to the next prompt.  Written by the TUI on send,
     /// drained by agent_task before calling run/run_next_turn.
     pub(super) image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>>,
+    /// Copy mode state: which message indices are selected.
+    pub(super) copy_mode: bool,
+    /// Copy mode cursor position (message index).
+    pub(super) copy_cursor: usize,
+    /// Selected message indices for copy mode.
+    pub(super) copy_selection: Vec<usize>,
 
     /// Whether we're in plan dry-run mode (show editor but never execute).
     pub(super) plan_dry_run: bool,
@@ -192,6 +200,7 @@ impl App {
             overlay_stack: OverlayStack::new(),
             channels,
             queued: VecDeque::new(),
+            queue_nav_idx: None,
             session_picker: None,
             model_picker: None,
             profile_picker: None,
@@ -227,6 +236,9 @@ impl App {
             per_turn_prev_model: None,
             pending_image: None,
             image_state,
+            copy_mode: false,
+            copy_cursor: 0,
+            copy_selection: Vec::new(),
             current_step: None,
             last_executed_step_num: None,
             plan_dry_run,
@@ -426,6 +438,7 @@ impl App {
     }
 
     /// Normal Enter: send if idle, queue if busy.
+    /// If editing a queued item (via arrow-up navigation), remove it from queue.
     pub(super) fn submit(&mut self) {
         if self.pending_perm.is_some() {
             return;
@@ -448,6 +461,28 @@ impl App {
             self.text_input.cursor = 0;
             return;
         }
+
+        // Check if we're editing a queued item - remove it from queue
+        if let Some(idx) = self.queue_nav_idx.take() {
+            if idx < self.queued.len() {
+                // If the text changed, we need to find and remove the original
+                // If text is same as original, remove it; if different, user edited it
+                self.queued.remove(idx);
+            }
+        }
+
+        // /stop command bypasses queue and executes immediately
+        if text == "/stop" {
+            if self.busy {
+                self.stop_only();
+            } else {
+                self.push(ChatLine::Info("  ✗ No active run to stop".into()));
+            }
+            self.text_input.text.clear();
+            self.text_input.cursor = 0;
+            return;
+        }
+
         if self.busy {
             // Enqueue for after the current run finishes (FIFO).
             self.queued.push_back(text);

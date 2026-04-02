@@ -104,7 +104,8 @@ pub(crate) fn render_profile_overview(
                 2 => ProfileEditField::Model,
                 3 => ProfileEditField::BaseUrl,
                 4 => ProfileEditField::FastProvider,
-                5 => ProfileEditField::FastModel,
+                5 => ProfileEditField::FastApiKey,
+                6 => ProfileEditField::FastModel,
                 _ => ProfileEditField::None,
             };
             *f == expected
@@ -120,7 +121,7 @@ pub(crate) fn render_profile_overview(
         line_count += 1;
 
         // Value row
-        let display_value = if *key == "api_key" {
+        let display_value = if *key == "api_key" || *key == "fast_api_key" {
             if is_editing {
                 let len = st.input.len();
                 if len == 0 {
@@ -128,8 +129,10 @@ pub(crate) fn render_profile_overview(
                 } else {
                     format!("{} ({} chars)", "•".repeat(len.min(30)), len)
                 }
-            } else {
+            } else if *key == "api_key" {
                 st.masked_api_key()
+            } else {
+                st.masked_fast_api_key()
             }
         } else if is_editing {
             st.input.clone()
@@ -140,7 +143,8 @@ pub(crate) fn render_profile_overview(
                 2 => st.model.clone(),
                 3 => st.base_url.clone(),
                 4 => st.fast_provider.clone(),
-                5 => st.fast_model.clone(),
+                5 => st.masked_fast_api_key(),
+                6 => st.fast_model.clone(),
                 _ => String::new(),
             };
             if raw.is_empty() {

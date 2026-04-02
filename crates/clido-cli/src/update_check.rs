@@ -133,8 +133,7 @@ async fn download_and_replace(url: &str) -> Result<(), String> {
         .await
         .map_err(|e| format!("read failed: {e}"))?;
 
-    let current_exe =
-        std::env::current_exe().map_err(|e| format!("can't locate binary: {e}"))?;
+    let current_exe = std::env::current_exe().map_err(|e| format!("can't locate binary: {e}"))?;
     // Write to a sibling temp file, then rename (atomic on same filesystem).
     let tmp = current_exe.with_extension("new");
 

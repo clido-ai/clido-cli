@@ -86,7 +86,9 @@ pub(crate) enum AgentEvent {
     /// Emitted when `/enhance` completes — carries the enhanced prompt to submit.
     EnhancedPrompt(String),
     /// Emitted by the background update check when a newer release is available.
-    UpdateAvailable { version: String },
+    UpdateAvailable {
+        version: String,
+    },
     /// Progress/result message from the `/update` command's async install task.
     UpdateStatus(String),
 }

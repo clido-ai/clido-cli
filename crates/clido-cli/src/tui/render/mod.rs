@@ -311,18 +311,39 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     // ── Queue strip ──
     {
         let queue_line = if !app.queued.is_empty() {
-            let n = app.queued.len();
-            let first = app.queued.front().unwrap();
-            let preview = if first.chars().count() > 50 {
-                format!("{}…", first.chars().take(50).collect::<String>())
+            // Build a list of truncated first lines from each queued item
+            let max_items = 3; // Show up to 3 items
+            let item_width = 45; // Width per item
+            let mut items: Vec<String> = Vec::new();
+
+            for (_, item) in app.queued.iter().enumerate().take(max_items) {
+                // Get first line only
+                let first_line = item.lines().next().unwrap_or(item.as_str());
+                // Truncate
+                let truncated = if first_line.chars().count() > item_width {
+                    format!(
+                        "{}…",
+                        first_line.chars().take(item_width).collect::<String>()
+                    )
+                } else {
+                    first_line.to_string()
+                };
+                // Add indicator for multiline items
+                let has_more = item.lines().count() > 1;
+                let suffix = if has_more { "…" } else { "" };
+                items.push(format!("\"{}{}\"", truncated, suffix));
+            }
+
+            let more_count = app.queued.len().saturating_sub(max_items);
+            let more_text = if more_count > 0 {
+                format!(" +{} more", more_count)
             } else {
-                first.clone()
+                String::new()
             };
-            let label = if n == 1 {
-                "  ↻ 1 queued  ".to_string()
-            } else {
-                format!("  ↻ {} queued  ", n)
-            };
+
+            let label = format!("  ↻ {} queued  ", app.queued.len());
+            let items_text = items.join("  ");
+
             Line::from(vec![
                 Span::styled(
                     label,
@@ -331,7 +352,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                         .add_modifier(Modifier::DIM),
                 ),
                 Span::styled(
-                    format!("\"{}\"", preview),
+                    format!("{}{}", items_text, more_text),
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
@@ -580,8 +601,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Span::styled(" quit  ", hint_dim),
             Span::styled("Ctrl+L", Style::default().fg(Color::DarkGray)),
             Span::styled(" refresh  ", hint_dim),
-            Span::styled("Shift+select", Style::default().fg(Color::DarkGray)),
-            Span::styled(" copy text  ", hint_dim),
+            Span::styled("Ctrl+Shift+C", Style::default().fg(Color::DarkGray)),
+            Span::styled(" copy mode  ", hint_dim),
         ]);
         // Scroll position indicator when not following.
         if app.layout.max_scroll > 0 && !app.following {

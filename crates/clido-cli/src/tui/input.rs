@@ -1553,6 +1553,82 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         app.selected_cmd = None;
     }
 
+    // ── Copy Mode: handle keys first ─────────────────────────────────────
+    if app.copy_mode {
+        match (event.modifiers, event.code) {
+            (Km::NONE, Esc) => {
+                app.copy_mode = false;
+                app.copy_selection.clear();
+                return;
+            }
+            (Km::NONE, Enter) => {
+                // Copy selected lines to clipboard
+                if !app.copy_selection.is_empty() {
+                    let mut text = String::new();
+                    for idx in &app.copy_selection {
+                        if let Some(line) = app.messages.get(*idx) {
+                            let line_text = match line {
+                                ChatLine::User(t) => format!("You: {}\n", t),
+                                ChatLine::Assistant(t) => format!("Assistant: {}\n", t),
+                                ChatLine::Info(t) => format!("{}\n", t),
+                                _ => String::new(),
+                            };
+                            text.push_str(&line_text);
+                        }
+                    }
+                    if !text.is_empty() {
+                        match copy_to_clipboard(&text) {
+                            Ok(()) => {
+                                app.push_toast(
+                                    format!("Copied {} lines", app.copy_selection.len()),
+                                    Color::Green,
+                                    std::time::Duration::from_secs(2),
+                                );
+                            }
+                            Err(e) => {
+                                app.push_toast(
+                                    format!("Copy failed: {}", e),
+                                    Color::Red,
+                                    std::time::Duration::from_secs(3),
+                                );
+                            }
+                        }
+                    }
+                }
+                app.copy_mode = false;
+                app.copy_selection.clear();
+                return;
+            }
+            (Km::NONE, Up) => {
+                if app.copy_cursor > 0 {
+                    app.copy_cursor -= 1;
+                }
+                return;
+            }
+            (Km::NONE, Down) => {
+                if app.copy_cursor + 1 < app.messages.len() {
+                    app.copy_cursor += 1;
+                }
+                return;
+            }
+            (Km::NONE, Char(' ')) => {
+                // Toggle selection at cursor
+                if let Some(pos) = app
+                    .copy_selection
+                    .iter()
+                    .position(|&x| x == app.copy_cursor)
+                {
+                    app.copy_selection.remove(pos);
+                } else {
+                    app.copy_selection.push(app.copy_cursor);
+                    app.copy_selection.sort();
+                }
+                return;
+            }
+            _ => {}
+        }
+    }
+
     match (event.modifiers, event.code) {
         // Esc: cancel rate-limit auto-resume if pending, otherwise clear input.
         (_, Esc) => {
@@ -1571,6 +1647,19 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         }
         // Ctrl+Enter: interrupt current run and send immediately.
         (Km::CONTROL, Enter) => app.force_send(),
+        // Ctrl+Shift+C: toggle copy mode for selecting chat lines.
+        (Km::CONTROL | Km::SHIFT, Char('c')) => {
+            app.copy_mode = !app.copy_mode;
+            if app.copy_mode {
+                app.copy_cursor = app.messages.len().saturating_sub(1);
+                app.copy_selection.clear();
+                app.push_toast(
+                    "Copy mode: ↑↓ navigate · Space select · Enter copy · Esc cancel".to_string(),
+                    Color::Yellow,
+                    std::time::Duration::from_secs(5),
+                );
+            }
+        }
         // Shift+Enter: insert a newline without sending (multiline input).
         (Km::SHIFT, Enter) => {
             let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor);
@@ -1648,11 +1737,31 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         }
         (_, Home) => app.text_input.cursor = 0,
         (_, End) => app.text_input.cursor = app.text_input.text.chars().count(),
-        // ── Up: multiline cursor movement OR input history ─────────────────
+        // ── Up: queue nav OR multiline cursor movement OR input history ────
         // Chat scrolling is separate (PageUp/PageDown/mouse wheel only).
         (_, Up)
             if app.pending_perm.is_none() && slash_completions(&app.text_input.text).is_empty() =>
         {
+            // First: cycle through queued items (newest first) before history
+            if !app.queued.is_empty() && app.text_input.history_idx.is_none() {
+                let queue_len = app.queued.len();
+                let new_idx = match app.queue_nav_idx {
+                    None => queue_len - 1,    // Start with newest (back of queue)
+                    Some(0) => queue_len - 1, // Wrap around to newest
+                    Some(i) => i - 1,         // Move to older item
+                };
+                app.queue_nav_idx = Some(new_idx);
+                // Get the queue item (convert from nav index to queue position)
+                let queue_pos = new_idx;
+                if let Some(item) = app.queued.get(queue_pos) {
+                    app.text_input.history_draft = app.text_input.text.clone();
+                    app.text_input.text = item.clone();
+                    app.text_input.cursor = 0; // Reset cursor to start
+                    app.selected_cmd = None;
+                    return;
+                }
+            }
+
             if app.text_input.text.contains('\n') && app.text_input.history_idx.is_none() {
                 if let Some(new_cursor) =
                     move_cursor_line_up(&app.text_input.text, app.text_input.cursor)
@@ -1663,6 +1772,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             // Navigate input history (works with empty input or when already browsing).
             if !app.text_input.history.is_empty() {
+                // Clear queue nav when switching to history
+                app.queue_nav_idx = None;
                 let new_idx = match app.text_input.history_idx {
                     None => {
                         app.text_input.history_draft = app.text_input.text.clone();
@@ -1673,14 +1784,36 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 };
                 app.text_input.history_idx = Some(new_idx);
                 app.text_input.text = app.text_input.history[new_idx].clone();
-                app.text_input.cursor = app.text_input.text.chars().count();
+                // Reset cursor to start of prompt for better UX
+                app.text_input.cursor = 0;
                 app.selected_cmd = None;
             }
         }
-        // ── Down: multiline cursor movement OR input history ──────────────
+        // ── Down: queue nav OR multiline cursor movement OR input history ─
         (_, Down)
             if app.pending_perm.is_none() && slash_completions(&app.text_input.text).is_empty() =>
         {
+            // Handle queue navigation (moving forward through queue)
+            if let Some(idx) = app.queue_nav_idx {
+                let queue_len = app.queued.len();
+                if idx + 1 >= queue_len {
+                    // Exhausted queue, return to draft and switch to history
+                    app.queue_nav_idx = None;
+                    app.text_input.text = app.text_input.history_draft.clone();
+                    app.text_input.cursor = 0;
+                    app.selected_cmd = None;
+                } else {
+                    let new_idx = idx + 1;
+                    app.queue_nav_idx = Some(new_idx);
+                    if let Some(item) = app.queued.get(new_idx) {
+                        app.text_input.text = item.clone();
+                        app.text_input.cursor = 0;
+                        app.selected_cmd = None;
+                    }
+                }
+                return;
+            }
+
             if app.text_input.text.contains('\n') && app.text_input.history_idx.is_none() {
                 if let Some(new_cursor) =
                     move_cursor_line_down(&app.text_input.text, app.text_input.cursor)
@@ -1694,13 +1827,13 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 if i + 1 >= app.text_input.history.len() {
                     app.text_input.history_idx = None;
                     app.text_input.text = app.text_input.history_draft.clone();
-                    app.text_input.cursor = app.text_input.text.chars().count();
+                    app.text_input.cursor = 0;
                     app.selected_cmd = None;
                 } else {
                     let new_idx = i + 1;
                     app.text_input.history_idx = Some(new_idx);
                     app.text_input.text = app.text_input.history[new_idx].clone();
-                    app.text_input.cursor = app.text_input.text.chars().count();
+                    app.text_input.cursor = 0;
                     app.selected_cmd = None;
                 }
             }

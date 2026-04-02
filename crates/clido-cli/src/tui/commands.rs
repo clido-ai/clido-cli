@@ -1586,14 +1586,16 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
                     app.messages.push(ChatLine::WelcomeBrand);
                     app.current_session_id = Some(new_session_id.clone());
                     app.session_title = None; // Reset title for new session
-                    app.push(ChatLine::Info(
-                        format!("  ✦ New session started (id: {}...)", short_id)
-                    ));
+                    app.push(ChatLine::Info(format!(
+                        "  ✦ New session started (id: {}...)",
+                        short_id
+                    )));
                 }
                 Err(e) => {
-                    app.push(ChatLine::Info(
-                        format!("  ✗ Failed to create new session: {}", e)
-                    ));
+                    app.push(ChatLine::Info(format!(
+                        "  ✗ Failed to create new session: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -1682,7 +1684,9 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
         // ── Update ──────────────────────────────────────────────────────────
         "/update" => {
             use crate::update_check::spawn_do_update;
-            app.push(ChatLine::Info("  ↻ Checking for updates and downloading…".into()));
+            app.push(ChatLine::Info(
+                "  ↻ Checking for updates and downloading…".into(),
+            ));
             spawn_do_update(None, app.channels.fetch_tx.clone());
         }
 

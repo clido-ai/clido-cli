@@ -403,6 +403,7 @@ pub(crate) enum ProfileEditField {
     Model,
     BaseUrl,
     FastProvider,
+    FastApiKey,
     FastModel,
 }
 
@@ -441,6 +442,7 @@ pub(crate) struct ProfileOverlayState {
     pub(crate) base_url: String,
     /// Fast/utility provider (optional; empty = not configured).
     pub(crate) fast_provider: String,
+    pub(crate) fast_api_key: String,
     pub(crate) fast_model: String,
     /// Current cursor row in overview mode (0-based index into PROFILE_FIELDS).
     pub(crate) cursor: usize,
@@ -471,6 +473,7 @@ pub(crate) const PROFILE_FIELDS: &[(&str, &str)] = &[
     ("base_url", "Custom Endpoint (optional)"),
     ("__section__", "── Fast/Utility Provider (optional) ──"),
     ("fast_provider", "Fast Provider"),
+    ("fast_api_key", "Fast API Key"),
     ("fast_model", "Fast Model"),
 ];
 
@@ -496,6 +499,15 @@ impl ProfileOverlayState {
             .as_ref()
             .map(|f| f.provider.clone())
             .unwrap_or_default();
+        let fast_api_key = entry
+            .fast
+            .as_ref()
+            .and_then(|f| {
+                f.api_key
+                    .clone()
+                    .or_else(|| f.api_key_env.as_ref().and_then(|e| std::env::var(e).ok()))
+            })
+            .unwrap_or_default();
         let fast_model = entry
             .fast
             .as_ref()
@@ -508,6 +520,7 @@ impl ProfileOverlayState {
             model: entry.model.clone(),
             base_url: entry.base_url.clone().unwrap_or_default(),
             fast_provider,
+            fast_api_key,
             fast_model,
             cursor: 0,
             mode: ProfileOverlayMode::Overview,
@@ -530,6 +543,7 @@ impl ProfileOverlayState {
             model: String::new(),
             base_url: String::new(),
             fast_provider: String::new(),
+            fast_api_key: String::new(),
             fast_model: String::new(),
             cursor: 0,
             mode: ProfileOverlayMode::Creating {
@@ -553,13 +567,14 @@ impl ProfileOverlayState {
             ProfileEditField::Model => self.model.clone(),
             ProfileEditField::BaseUrl => self.base_url.clone(),
             ProfileEditField::FastProvider => self.fast_provider.clone(),
+            ProfileEditField::FastApiKey => self.fast_api_key.clone(),
             ProfileEditField::FastModel => self.fast_model.clone(),
             ProfileEditField::None => String::new(),
         }
     }
 
     /// The `ProfileEditField` corresponding to cursor row.
-    /// cursor 0-3 = main agent fields; 4-5 = worker; 6-7 = reviewer.
+    /// cursor 0-3 = main agent fields; 4-6 = fast provider fields.
     pub(crate) fn cursor_field(&self) -> ProfileEditField {
         match self.cursor {
             0 => ProfileEditField::Provider,
@@ -567,14 +582,15 @@ impl ProfileOverlayState {
             2 => ProfileEditField::Model,
             3 => ProfileEditField::BaseUrl,
             4 => ProfileEditField::FastProvider,
-            5 => ProfileEditField::FastModel,
+            5 => ProfileEditField::FastApiKey,
+            6 => ProfileEditField::FastModel,
             _ => ProfileEditField::None,
         }
     }
 
     /// Total number of editable cursor positions.
     pub(crate) fn field_count() -> usize {
-        6
+        7
     }
 
     /// Start editing the field at `cursor`.
@@ -632,6 +648,7 @@ impl ProfileOverlayState {
                 ProfileEditField::FastProvider => {
                     self.fast_provider = self.input.trim().to_string()
                 }
+                ProfileEditField::FastApiKey => self.fast_api_key = self.input.trim().to_string(),
                 ProfileEditField::FastModel => self.fast_model = self.input.trim().to_string(),
                 ProfileEditField::None => {}
             }
@@ -655,6 +672,33 @@ impl ProfileOverlayState {
                     ProfileEditField::Provider => self.provider = id.to_string(),
                     ProfileEditField::FastProvider => self.fast_provider = id.to_string(),
                     _ => {}
+                }
+
+                // Check if this provider typically needs an API key
+                let needs_key = matches!(
+                    id,
+                    "openai" | "anthropic" | "openrouter" | "mistral" | "alibabacloud"
+                );
+
+                // Get current key for this provider scope
+                let has_key = match for_field {
+                    ProfileEditField::Provider => !self.api_key.is_empty(),
+                    ProfileEditField::FastProvider => !self.fast_api_key.is_empty(),
+                    _ => true,
+                };
+
+                if needs_key && !has_key {
+                    // Prompt for API key before returning to overview
+                    self.provider_picker = ProviderPickerState::new();
+                    let target_field = match for_field {
+                        ProfileEditField::Provider => ProfileEditField::ApiKey,
+                        ProfileEditField::FastProvider => ProfileEditField::FastApiKey,
+                        _ => ProfileEditField::ApiKey,
+                    };
+                    self.input.clear();
+                    self.input_cursor = 0;
+                    self.mode = ProfileOverlayMode::EditField(target_field);
+                    return;
                 }
             }
         }
@@ -693,11 +737,16 @@ impl ProfileOverlayState {
             Some(self.api_key.clone())
         };
         // Build optional fast provider config.
+        let fast_api_key_opt = if self.fast_api_key.is_empty() {
+            None
+        } else {
+            Some(self.fast_api_key.clone())
+        };
         let fast = if !self.fast_provider.is_empty() && !self.fast_model.is_empty() {
             Some(clido_core::FastProviderConfig {
                 provider: self.fast_provider.clone(),
                 model: self.fast_model.clone(),
-                api_key: None,
+                api_key: fast_api_key_opt,
                 api_key_env: None,
                 base_url: None,
                 user_agent: None,
@@ -727,6 +776,11 @@ impl ProfileOverlayState {
     /// Masked API key for display (shows last 4 chars).
     pub(crate) fn masked_api_key(&self) -> String {
         crate::setup::anonymize_key(&self.api_key)
+    }
+
+    /// Masked fast API key for display (shows last 4 chars).
+    pub(crate) fn masked_fast_api_key(&self) -> String {
+        crate::setup::anonymize_key(&self.fast_api_key)
     }
 }
 

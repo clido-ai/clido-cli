@@ -7,10 +7,7 @@ use clido_agent::AgentLoop;
 use clido_core::ClidoError;
 use clido_storage::SessionWriter;
 use crossterm::{
-    event::{
-        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, EventStream, MouseEventKind,
-    },
+    event::{Event, EventStream, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -1250,7 +1247,10 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let _ = execute!(std::io::stderr(), DisableMouseCapture, LeaveAlternateScreen);
+        // Reset terminal: disable mouse tracking, bracketed paste, show cursor
+        let reset_seq = b"\x1b[?1002l\x1b[?1003l\x1b[?2004l\x1b[?25h\x1b[0m";
+        let _ = std::io::stderr().write_all(reset_seq);
+        let _ = execute!(std::io::stderr(), LeaveAlternateScreen);
         #[cfg(unix)]
         unsafe {
             let mut t: libc::termios = std::mem::zeroed();
@@ -1271,7 +1271,21 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
 
     enable_raw_mode()?;
     let mut out = stdout();
-    execute!(out, EnterAlternateScreen, EnableBracketedPaste, EnableMouseCapture)?;
+
+    // Flush any pending input to clear garbage (e.g., ^[[201~ from bracketed paste)
+    #[cfg(unix)]
+    unsafe {
+        libc::tcflush(0, libc::TCIFLUSH);
+    }
+
+    // Reset terminal state: disable mouse tracking (1002, 1003) and bracketed paste (2004)
+    // before enabling our own settings. This ensures clean state on startup.
+    out.write_all(b"\x1b[?1002l\x1b[?1003l\x1b[?2004l")?;
+    out.flush()?;
+
+    // Note: We intentionally do NOT enable bracketed paste or mouse capture
+    // to avoid escape sequence leakage and allow native terminal text selection.
+    execute!(out, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
 
@@ -1475,12 +1489,10 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     runtime.agent_handle.abort();
 
     let _ = disable_raw_mode();
-    let _ = execute!(
-        terminal.backend_mut(),
-        DisableMouseCapture,
-        DisableBracketedPaste,
-        LeaveAlternateScreen
-    );
+    // Reset terminal: disable mouse tracking, bracketed paste, show cursor, reset colors
+    let reset_seq = b"\x1b[?1002l\x1b[?1003l\x1b[?2004l\x1b[?25h\x1b[0m";
+    let _ = terminal.backend_mut().write_all(reset_seq);
+    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
 
     // Handle /profile <name> switch request.
     if let Some(profile_name) = app.wants_profile_switch.take() {

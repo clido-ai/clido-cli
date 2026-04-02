@@ -3,7 +3,8 @@
 use std::time::Duration;
 
 /// Default total request timeout (connect + send + body read).
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+/// 7 minutes allows for large code generation while not hanging forever.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(420);
 
 /// Default TCP connect timeout.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);

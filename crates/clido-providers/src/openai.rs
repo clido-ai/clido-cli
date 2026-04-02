@@ -255,6 +255,8 @@ impl OpenAICompatProvider {
         let mut rate_limit_attempts = 0u32;
         let mut server_error_attempts = 0u32;
         let mut network_attempts = 0u32;
+        let mut timeout_attempts = 0u32;
+        const MAX_TIMEOUT_ATTEMPTS: u32 = 2;
         let url = self.request_url();
         loop {
             let mut req = self
@@ -268,6 +270,23 @@ impl OpenAICompatProvider {
             let res = match req.json(&body).send().await {
                 Ok(r) => r,
                 Err(e) => {
+                    // Handle timeouts separately with their own retry logic
+                    if e.is_timeout() {
+                        timeout_attempts += 1;
+                        if timeout_attempts < MAX_TIMEOUT_ATTEMPTS {
+                            warn!(
+                                "Request timeout (attempt {}/{}), retrying immediately...",
+                                timeout_attempts, MAX_TIMEOUT_ATTEMPTS
+                            );
+                            // No delay for timeouts - just retry immediately
+                            continue;
+                        }
+                        return Err(ClidoError::Provider(format!(
+                            "Request timed out after {} attempts ({}s each). The API may be experiencing issues.",
+                            MAX_TIMEOUT_ATTEMPTS, 420
+                        )));
+                    }
+
                     network_attempts += 1;
                     if network_attempts < MAX_NETWORK_ATTEMPTS {
                         let delay = network_backoff_secs(network_attempts);
@@ -281,9 +300,7 @@ impl OpenAICompatProvider {
                     return Err(ClidoError::Provider(format!(
                         "Connection failed after {} attempts: {}",
                         MAX_NETWORK_ATTEMPTS,
-                        if e.is_timeout() {
-                            "request timed out".to_string()
-                        } else if e.is_connect() {
+                        if e.is_connect() {
                             "could not connect — check your internet connection".to_string()
                         } else {
                             e.to_string()

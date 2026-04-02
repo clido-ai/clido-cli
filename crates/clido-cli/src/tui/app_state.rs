@@ -107,12 +107,6 @@ pub(super) struct App {
     /// Shared state: image to attach to the next prompt.  Written by the TUI on send,
     /// drained by agent_task before calling run/run_next_turn.
     pub(super) image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>>,
-    /// Copy mode state: which message indices are selected.
-    pub(super) copy_mode: bool,
-    /// Copy mode cursor position (message index).
-    pub(super) copy_cursor: usize,
-    /// Selected message indices for copy mode.
-    pub(super) copy_selection: Vec<usize>,
 
     /// Whether we're in plan dry-run mode (show editor but never execute).
     pub(super) plan_dry_run: bool,
@@ -236,9 +230,6 @@ impl App {
             per_turn_prev_model: None,
             pending_image: None,
             image_state,
-            copy_mode: false,
-            copy_cursor: 0,
-            copy_selection: Vec::new(),
             current_step: None,
             last_executed_step_num: None,
             plan_dry_run,
@@ -510,7 +501,9 @@ impl App {
             self.queued.push_front(text);
             self.text_input.text.clear();
             self.text_input.cursor = 0;
-            self.push(ChatLine::Info("  ↻ Interrupted — sending next".into()));
+            self.push(ChatLine::Info(
+                "  ↻ Interrupt requested — will send after current response completes".into(),
+            ));
         } else {
             self.dispatch_user_input(text);
         }

@@ -105,6 +105,8 @@ impl AnthropicProvider {
         let mut rate_limit_attempts = 0u32;
         let mut server_error_attempts = 0u32;
         let mut network_attempts = 0u32;
+        let mut timeout_attempts = 0u32;
+        const MAX_TIMEOUT_ATTEMPTS: u32 = 2;
 
         loop {
             let res = self
@@ -121,7 +123,24 @@ impl AnthropicProvider {
             let res = match res {
                 Ok(r) => r,
                 Err(e) => {
-                    // Network / connection / timeout error — retry a few times.
+                    // Handle timeouts separately with their own retry logic
+                    if e.is_timeout() {
+                        timeout_attempts += 1;
+                        if timeout_attempts < MAX_TIMEOUT_ATTEMPTS {
+                            warn!(
+                                "Request timeout (attempt {}/{}), retrying immediately...",
+                                timeout_attempts, MAX_TIMEOUT_ATTEMPTS
+                            );
+                            // No delay for timeouts - just retry immediately
+                            continue;
+                        }
+                        return Err(ClidoError::Provider(format!(
+                            "Request timed out after {} attempts ({}s each). The API may be experiencing issues.",
+                            MAX_TIMEOUT_ATTEMPTS, 420
+                        )));
+                    }
+
+                    // Network / connection error — retry a few times.
                     network_attempts += 1;
                     if network_attempts < MAX_NETWORK_ATTEMPTS {
                         let delay_secs = network_backoff_secs(network_attempts);

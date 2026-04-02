@@ -1899,6 +1899,7 @@ pub(super) async fn event_loop(
                     }
                     Some(AgentEvent::Interrupted) => {
                         last_agent_activity = std::time::Instant::now();
+                        app.push(ChatLine::Info("  ↻ Interrupted — processing next item".into()));
                         // Revert per-turn model override on interruption too.
                         if let Some(prev) = app.per_turn_prev_model.take() {
                             app.model = prev.clone();

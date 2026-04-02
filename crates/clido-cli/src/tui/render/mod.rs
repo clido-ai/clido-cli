@@ -601,8 +601,6 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Span::styled(" quit  ", hint_dim),
             Span::styled("Ctrl+L", Style::default().fg(Color::DarkGray)),
             Span::styled(" refresh  ", hint_dim),
-            Span::styled("Ctrl+Shift+C", Style::default().fg(Color::DarkGray)),
-            Span::styled(" copy mode  ", hint_dim),
         ]);
         // Scroll position indicator when not following.
         if app.layout.max_scroll > 0 && !app.following {

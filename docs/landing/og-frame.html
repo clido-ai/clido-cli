@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1200">
+<style>
+/* ── OG image frame: 1200×630 ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --soft-accent:  #96C8FF;
+  --border-dark:  #37465F;
+  --title-text:   #D2DCF0;
+  --muted:        #6E7D96;
+  --soft:         #B9C3D7;
+  --dim-green:    #64B478;
+  --dim-yellow:   #C8B45A;
+  --term-bg:      #1a1b26;
+  --term-fg:      #c0caf5;
+  --term-dim:     #565f89;
+  --magenta:      #bb9af7;
+  --term-cyan:    #7dcfff;
+  --term-green:   #9ece6a;
+  --term-red:     #f7768e;
+  --term-yellow:  #e0af68;
+  --page-bg:      #0a0e14;
+  --brand:        #96C8FF;
+}
+
+html, body {
+  width: 1200px;
+  height: 630px;
+  overflow: hidden;
+  background: var(--page-bg);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+}
+
+/* Background glow */
+body::before {
+  content: '';
+  position: fixed; top: -20%; left: -10%;
+  width: 60%; height: 80%;
+  background: radial-gradient(ellipse, rgba(150,200,255,0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+body::after {
+  content: '';
+  position: fixed; bottom: -20%; right: -10%;
+  width: 50%; height: 60%;
+  background: radial-gradient(ellipse, rgba(187,154,247,0.04) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.frame {
+  width: 1200px;
+  height: 630px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 64px;
+  gap: 48px;
+}
+
+/* ── Left: branding ── */
+.left {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.logo {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 52px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--title-text);
+  line-height: 1;
+}
+.logo .semi { color: var(--brand); }
+
+.tagline {
+  font-size: 18px;
+  color: #8b949e;
+  line-height: 1.5;
+  max-width: 300px;
+}
+
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 300px;
+  margin-top: 4px;
+}
+.pill {
+  padding: 4px 10px;
+  background: rgba(150,200,255,0.06);
+  border: 1px solid rgba(150,200,255,0.12);
+  border-radius: 20px;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+/* ── Right: terminal ── */
+.right {
+  flex: 1;
+  max-width: 720px;
+}
+
+.macos-window {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 32px 80px rgba(0,0,0,0.6), 0 0 120px rgba(150,200,255,0.04);
+}
+.macos-titlebar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 16px; background: #2d2d2d; border-bottom: 1px solid #1a1a1a;
+}
+.macos-btn { width: 12px; height: 12px; border-radius: 50%; }
+.macos-btn.close { background: #ff5f57; }
+.macos-btn.min   { background: #febc2e; }
+.macos-btn.max   { background: #28c840; }
+.macos-title {
+  flex: 1; text-align: center; font-size: 13px; color: #888;
+  font-family: -apple-system, sans-serif; margin-right: 52px;
+}
+
+.tui {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  font-size: 13px; line-height: 1.45;
+  background: var(--term-bg); color: var(--term-fg);
+  display: flex; flex-direction: column;
+  height: 400px;
+  user-select: none;
+  overflow: hidden;
+}
+
+.tui-header { padding: 4px 8px; }
+.tui-hline { display: flex; white-space: nowrap; overflow: hidden; }
+.tui-brand { font-weight: 700; }
+.tui-brand .c { color: var(--title-text); }
+.tui-brand .s { color: var(--soft-accent); }
+.tui-dim { color: var(--term-dim); }
+
+.tui-chat {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding: 1rem 0;
+}
+
+.wp {
+  border: 1px solid var(--border-dark); border-radius: 8px;
+  min-width: 420px; max-width: 520px; position: relative;
+}
+.wp-title {
+  position: absolute; top: -1px; left: 12px;
+  transform: translateY(-50%);
+  background: var(--term-bg); padding: 0 6px;
+  font-weight: 700; font-size: 13px;
+}
+.wp-title .c { color: var(--title-text); }
+.wp-title .s { color: var(--soft-accent); }
+.wp-body { padding: 12px 0; }
+.wp-line { padding: 0 20px; height: 20px; display: flex; align-items: center; white-space: nowrap; }
+.wp-line.e { height: 10px; }
+.wm { color: var(--muted); }
+.ws { color: var(--soft); }
+.wsb { color: var(--soft); font-weight: 700; }
+.wg { color: var(--dim-green); }
+.wy { color: var(--dim-yellow); }
+.wa { color: var(--soft-accent); font-weight: 700; }
+.wsp { color: var(--muted); margin: 0 3px; }
+
+.tui-status { padding: 2px 8px; min-height: 32px; }
+.st-line { display: flex; gap: 6px; white-space: nowrap; font-size: 13px; }
+
+.tui-queue { padding: 0 8px; height: 20px; }
+
+.tui-hint {
+  padding: 2px 8px; display: flex; white-space: nowrap; overflow: hidden; font-size: 13px;
+}
+.hk { color: #565f89; }
+.hl { color: #565f89; opacity: 0.65; }
+
+.tui-iw { padding: 4px 8px 8px; }
+.tui-in {
+  border: 1px solid var(--soft-accent);
+  min-height: 42px; display: flex; flex-direction: column; position: relative;
+}
+.tui-it {
+  position: absolute; top: -1px; left: 8px;
+  transform: translateY(-50%);
+  background: var(--term-bg); padding: 0 4px;
+  color: var(--soft-accent); font-size: 13px; white-space: nowrap;
+}
+.tui-ib { padding: 8px 12px; min-height: 20px; }
+.cursor {
+  display: inline-block; width: 7px; height: 15px;
+  background: var(--term-fg);
+  animation: blink 1s step-end infinite;
+  vertical-align: text-bottom;
+}
+@keyframes blink { 50% { opacity: 0; } }
+</style>
+</head>
+<body>
+<div class="frame">
+
+  <!-- Left: brand -->
+  <div class="left">
+    <div class="logo">cli<span class="semi">;</span>do</div>
+    <div class="tagline">An AI coding agent that lives in your terminal.</div>
+    <div class="pills">
+      <span class="pill">Anthropic</span>
+      <span class="pill">OpenAI</span>
+      <span class="pill">Kimi</span>
+      <span class="pill">Gemini</span>
+      <span class="pill">xAI</span>
+      <span class="pill">Ollama</span>
+    </div>
+  </div>
+
+  <!-- Right: terminal -->
+  <div class="right">
+    <div class="macos-window">
+      <div class="macos-titlebar">
+        <div class="macos-btn close"></div>
+        <div class="macos-btn min"></div>
+        <div class="macos-btn max"></div>
+        <div class="macos-title">clido</div>
+      </div>
+      <div class="tui">
+        <div class="tui-header">
+          <div class="tui-hline">
+            <span class="tui-brand"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></span>
+            <span class="tui-dim">&nbsp;&nbsp;v0.1.0&nbsp;&nbsp;anthropic&nbsp;&nbsp;claude-sonnet-4-20250514&nbsp;&nbsp;[default]</span>
+          </div>
+          <div class="tui-hline"><span class="tui-dim">&nbsp;&nbsp;~/projects/my-app</span></div>
+        </div>
+        <div class="tui-chat">
+          <div class="wp">
+            <div class="wp-title"><span class="c">cli</span><span class="s">;</span><span class="c">do</span></div>
+            <div class="wp-body">
+              <div class="wp-line e"></div>
+              <div class="wp-line"><span class="wm">~/projects/my-app</span></div>
+              <div class="wp-line e"></div>
+              <div class="wp-line"><span class="wm">profile&nbsp;&nbsp;</span><span class="wsb">default</span></div>
+              <div class="wp-line"><span class="wm">provider&nbsp;</span><span class="ws">anthropic</span><span class="wsp">&nbsp;&nbsp;·&nbsp;&nbsp;</span><span class="ws">claude-sonnet-4-20250514</span></div>
+              <div class="wp-line"><span class="wg">key ✓</span><span class="wsp">&nbsp;&nbsp;·&nbsp;&nbsp;</span><span class="wy">budget $50.00</span><span class="wsp">&nbsp;&nbsp;·&nbsp;&nbsp;</span><span class="wg">fast gpt-4.1-mini</span></div>
+              <div class="wp-line e"></div>
+              <div class="wp-line"><span class="wa">/help&nbsp;&nbsp;&nbsp;/model&nbsp;&nbsp;&nbsp;/settings&nbsp;&nbsp;&nbsp;/config</span></div>
+              <div class="wp-line"><span class="wm">↑↓=history&nbsp;&nbsp;PgUp/Dn=scroll&nbsp;&nbsp;Ctrl+/=stop</span></div>
+              <div class="wp-line e"></div>
+            </div>
+          </div>
+        </div>
+        <div class="tui-status"><div class="st-line"></div><div class="st-line"></div></div>
+        <div class="tui-queue"></div>
+        <div class="tui-hint">
+          <span class="hk">&nbsp;&nbsp;Enter</span><span class="hl">&nbsp;send&nbsp;&nbsp;</span>
+          <span class="hk">Shift+Enter</span><span class="hl">&nbsp;newline&nbsp;&nbsp;</span>
+          <span class="hk">↑↓</span><span class="hl">&nbsp;history&nbsp;&nbsp;</span>
+          <span class="hk">/help</span><span class="hl">&nbsp;commands</span>
+        </div>
+        <div class="tui-iw"><div class="tui-in">
+          <div class="tui-it">Ask anything</div>
+          <div class="tui-ib"><span class="cursor"></span></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

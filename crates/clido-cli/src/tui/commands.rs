@@ -1003,7 +1003,7 @@ pub(super) fn cmd_ship(app: &mut App, cmd: &str) {
     let msg_instruction = if custom_msg.is_empty() {
         "Generate a commit message from the staged diff: imperative mood, ≤72 chars subject, \
          body only if the change is complex. Append trailer: \
-         `Co-Authored-By: Claude <noreply@clido.dev>`"
+         `Co-Authored-By: Claude <noreply@clido.ai>`"
             .to_string()
     } else {
         format!("Use this commit message verbatim: {custom_msg}")
@@ -1037,7 +1037,7 @@ pub(super) fn cmd_save(app: &mut App, cmd: &str) {
     let msg_instruction = if custom_msg.is_empty() {
         "Generate a commit message from the staged diff: imperative mood, ≤72 chars subject, \
          body only if the change is complex. Append trailer: \
-         `Co-Authored-By: Claude <noreply@clido.dev>`"
+         `Co-Authored-By: Claude <noreply@clido.ai>`"
             .to_string()
     } else {
         format!("Use this commit message verbatim: {custom_msg}")

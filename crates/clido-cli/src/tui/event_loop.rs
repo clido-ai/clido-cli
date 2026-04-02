@@ -418,11 +418,10 @@ pub(super) async fn agent_task(
                 }
             }
             _ = kill_rx.recv() => {
-                // Kill signal received - abort immediately
-                if event_tx.send(AgentEvent::Killed).is_err() {
-                    return;
-                }
-                return;
+                // Kill signal - set cancel flag and let agent finish current tools gracefully
+                // This ensures tool results are added to history before stopping
+                cancel.store(true, Ordering::Relaxed);
+                continue;
             }
         };
 
@@ -1944,16 +1943,7 @@ pub(super) async fn event_loop(
                         }
                         app.on_agent_done();
                     }
-                    Some(AgentEvent::Killed) => {
-                        last_agent_activity = std::time::Instant::now();
-                        app.push(ChatLine::Info("  ✗ Stopped by user".into()));
-                        // Revert per-turn model override on kill too.
-                        if let Some(prev) = app.per_turn_prev_model.take() {
-                            app.model = prev.clone();
-                            let _ = app.channels.model_switch_tx.send(prev);
-                        }
-                        app.on_agent_done();
-                    }
+
                     Some(AgentEvent::Err(msg)) => {
                         last_agent_activity = std::time::Instant::now();
                         // Revert per-turn model override on error too.

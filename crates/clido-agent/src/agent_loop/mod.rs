@@ -1543,6 +1543,21 @@ impl AgentLoop {
                     } else {
                         self.consecutive_tool_errors = 0;
                     }
+
+                    // Check if cancelled after tool execution - if so, add results and exit cleanly
+                    if cancel
+                        .as_ref()
+                        .map(|c| c.load(Ordering::Relaxed))
+                        .unwrap_or(false)
+                    {
+                        // Add tool results to history before returning Interrupted
+                        self.history.push(Message {
+                            role: Role::User,
+                            content: tool_results,
+                        });
+                        return Err(ClidoError::Interrupted);
+                    }
+
                     self.history.push(Message {
                         role: Role::User,
                         content: tool_results,

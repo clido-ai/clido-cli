@@ -17,8 +17,6 @@ pub(crate) enum AgentEvent {
     Thinking(String),
     Response(String),
     Interrupted,
-    /// Agent was force-killed by /stop command.
-    Killed,
     Err(String),
     /// Provider rate limit — carries structured info for special TUI handling.
     RateLimited {

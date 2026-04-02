@@ -417,6 +417,15 @@ pub static COMMANDS: &[SlashCommand] = &[
         takes_args: false,
         requires_idle: false,
     },
+    // ── Update ───────────────────────────────────────────────────
+    SlashCommand {
+        name: "/update",
+        section: "Update",
+        description: "check for updates and install the latest version",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
 ];
 
 // ── Registry helpers ──────────────────────────────────────────────────────────

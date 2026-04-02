@@ -539,6 +539,7 @@ dependencies = [
  "notify-rust",
  "pulldown-cmark",
  "ratatui",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",

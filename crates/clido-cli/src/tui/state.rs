@@ -34,13 +34,7 @@ pub(crate) enum FocusTarget {
     Permission,
 }
 
-impl FocusTarget {
-    /// Whether this target is a modal that should receive scroll events
-    /// instead of the main chat area, and block text selection.
-    pub(crate) fn is_modal(self) -> bool {
-        !matches!(self, FocusTarget::ChatInput)
-    }
-}
+impl FocusTarget {}
 
 // ── Layout info ───────────────────────────────────────────────────────────────
 

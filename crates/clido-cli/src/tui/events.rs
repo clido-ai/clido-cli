@@ -2,7 +2,7 @@ use clido_planner::Plan;
 
 // ── Agent → TUI events ────────────────────────────────────────────────────────
 
-pub(super) enum AgentEvent {
+pub(crate) enum AgentEvent {
     ToolStart {
         tool_use_id: String,
         name: String,
@@ -85,4 +85,8 @@ pub(super) enum AgentEvent {
     TitleGenerated(String),
     /// Emitted when `/enhance` completes — carries the enhanced prompt to submit.
     EnhancedPrompt(String),
+    /// Emitted by the background update check when a newer release is available.
+    UpdateAvailable { version: String },
+    /// Progress/result message from the `/update` command's async install task.
+    UpdateStatus(String),
 }

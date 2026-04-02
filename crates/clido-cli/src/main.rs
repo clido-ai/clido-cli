@@ -35,6 +35,7 @@ mod stats;
 pub(crate) mod text_input;
 mod tui;
 mod ui;
+mod update_check;
 mod workflow;
 
 use clap::{CommandFactory, Parser};

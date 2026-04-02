@@ -80,6 +80,16 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         ),
         Span::styled(format!("  [{}]", app.current_profile), dim),
     ];
+    // Show session ID (shortened) if available
+    if let Some(ref session_id) = app.current_session_id {
+        let short_id = &session_id[..session_id.len().min(8)];
+        hline1.push(Span::styled(
+            format!("  #{} ", short_id),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ));
+    }
     if let Some(ref title) = app.session_title {
         hline1.push(Span::styled(
             format!("  — {}", title),

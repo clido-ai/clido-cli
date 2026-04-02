@@ -1575,11 +1575,27 @@ pub(super) fn cmd_enhance(app: &mut App, cmd: &str) {
 pub(super) fn execute_slash(app: &mut App, cmd: &str) {
     match cmd {
         "/clear" => {
-            app.messages.clear();
-            app.messages.push(ChatLine::WelcomeBrand);
-            app.push(ChatLine::Info(
-                "  Conversation cleared — new session started".into(),
-            ));
+            // Generate a new session ID and create a new session file
+            let new_session_id = uuid::Uuid::new_v4().to_string();
+            let short_id = &new_session_id[..8];
+
+            // Create the new session in storage
+            match clido_storage::SessionWriter::create(&app.workspace_root, &new_session_id) {
+                Ok(_writer) => {
+                    app.messages.clear();
+                    app.messages.push(ChatLine::WelcomeBrand);
+                    app.current_session_id = Some(new_session_id.clone());
+                    app.session_title = None; // Reset title for new session
+                    app.push(ChatLine::Info(
+                        format!("  ✦ New session started (id: {}...)", short_id)
+                    ));
+                }
+                Err(e) => {
+                    app.push(ChatLine::Info(
+                        format!("  ✗ Failed to create new session: {}", e)
+                    ));
+                }
+            }
         }
         "/help" => cmd_help(app),
         "/keys" => cmd_keys(app),
@@ -1662,6 +1678,13 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
 
         // ── Prompt Enhancement ──────────────────────────────────────────────
         _ if cmd == "/enhance" || cmd.starts_with("/enhance ") => cmd_enhance(app, cmd),
+
+        // ── Update ──────────────────────────────────────────────────────────
+        "/update" => {
+            use crate::update_check::spawn_do_update;
+            app.push(ChatLine::Info("  ↻ Checking for updates and downloading…".into()));
+            spawn_do_update(None, app.channels.fetch_tx.clone());
+        }
 
         _ => {}
     }

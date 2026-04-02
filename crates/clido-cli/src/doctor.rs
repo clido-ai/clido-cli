@@ -71,12 +71,7 @@ fn check_api_key(
         .api_key_env
         .as_deref()
         .unwrap_or_else(|| default_api_key_env(&profile.provider));
-    if env::var(api_key_env).is_err() {
-        mandatory.push(format!(
-            "API key not set for profile '{}' (set {}).",
-            profile_name, api_key_env
-        ));
-    } else {
+    if env::var(api_key_env).is_ok() {
         print_ok(
             use_color,
             &format!(
@@ -84,7 +79,27 @@ fn check_api_key(
                 api_key_env, profile_name
             ),
         );
+        return;
     }
+    // Mirror make_provider() resolution: also check the credentials file.
+    let from_creds = crate::provider::default_config_dir()
+        .map(|dir| crate::provider::load_credentials(&dir))
+        .and_then(|creds| creds.get(profile.provider.as_str()).cloned())
+        .filter(|v| !v.is_empty());
+    if from_creds.is_some() {
+        print_ok(
+            use_color,
+            &format!(
+                "API key for profile '{}' found in credentials file",
+                profile_name
+            ),
+        );
+        return;
+    }
+    mandatory.push(format!(
+        "API key not set for profile '{}' (set {}).",
+        profile_name, api_key_env
+    ));
 }
 
 fn check_session_dir(cwd: &std::path::Path, use_color: bool, mandatory: &mut Vec<String>) {

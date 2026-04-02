@@ -28,11 +28,6 @@ pub(super) struct App {
 
     /// Layout metrics computed during render; consumed by input/event handlers.
     pub(super) layout: super::state::LayoutInfo,
-    /// Whether crossterm mouse capture is currently enabled.  When off the terminal
-    /// handles native text selection; when on the app receives mouse events for
-    /// scrolling inside overlays/pickers.
-    pub(super) mouse_captured: bool,
-
     pub(super) busy: bool,
     pub(super) spinner_tick: usize,
     pub(super) pending_perm: Option<PendingPerm>,
@@ -190,7 +185,7 @@ impl App {
             following: true,
             pending_scroll_ratio: None,
             layout: super::state::LayoutInfo::default(),
-            mouse_captured: false,
+
             busy: false,
             spinner_tick: 0,
             pending_perm: None,
@@ -380,6 +375,9 @@ impl App {
 
     /// Execute a slash command or send chat to the agent (single user line).
     pub(super) fn dispatch_user_input(&mut self, text: String) {
+        self.text_input.text.clear();
+        self.text_input.cursor = 0;
+        self.text_input.history_idx = None;
         let trimmed = text.trim().to_string();
         if trimmed.is_empty() {
             // Silently ignore — no feedback needed; user pressed Enter on blank input.

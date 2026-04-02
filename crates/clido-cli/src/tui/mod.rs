@@ -3,7 +3,7 @@
 mod app_state;
 mod commands;
 mod event_loop;
-mod events;
+pub mod events;
 mod input;
 mod permissions;
 mod render;

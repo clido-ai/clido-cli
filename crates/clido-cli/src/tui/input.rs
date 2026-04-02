@@ -1524,10 +1524,21 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             (_, Enter) => {
                 if let Some(idx) = app.selected_cmd {
                     let cmd = completions[idx].0.to_string();
-                    app.text_input.text.clear();
-                    app.text_input.cursor = 0;
                     app.selected_cmd = None;
-                    execute_slash(app, &cmd);
+                    let needs_arg = crate::command_registry::COMMANDS
+                        .iter()
+                        .find(|c| c.name == cmd)
+                        .map(|c| c.takes_args)
+                        .unwrap_or(false);
+                    if needs_arg {
+                        // Populate input with the command + space so user can type the argument.
+                        app.text_input.text = format!("{} ", cmd);
+                        app.text_input.cursor = app.text_input.text.chars().count();
+                    } else {
+                        app.text_input.text.clear();
+                        app.text_input.cursor = 0;
+                        execute_slash(app, &cmd);
+                    }
                     return;
                 }
                 // No item selected → fall through to normal Enter handling.

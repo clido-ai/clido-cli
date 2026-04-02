@@ -1271,9 +1271,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
 
     enable_raw_mode()?;
     let mut out = stdout();
-    // Start without mouse capture so the terminal handles native text selection.
-    // Mouse capture is toggled on dynamically when modals/pickers open.
-    execute!(out, EnterAlternateScreen, EnableBracketedPaste)?;
+    execute!(out, EnterAlternateScreen, EnableBracketedPaste, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
 
@@ -1327,6 +1325,10 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         );
         app.models_loading = true;
     }
+
+    // Spawn background update check (non-blocking, rate-limited to once per 24h).
+    // Results arrive as AgentEvent::UpdateAvailable if a newer version exists.
+    crate::update_check::spawn_update_check(runtime.fetch_tx.clone(), false);
     let mut recovery_attempts: u8 = 0;
     let result = loop {
         match event_loop(
@@ -2104,6 +2106,16 @@ pub(super) async fn event_loop(
                         // Submit the enhanced prompt to the agent.
                         app.send_now(enhanced);
                     }
+                    Some(AgentEvent::UpdateAvailable { version }) => {
+                        app.push(ChatLine::Info(format!(
+                            "  ↻ Update available: v{} (current: v{}). Run /update to install.",
+                            version,
+                            env!("CARGO_PKG_VERSION")
+                        )));
+                    }
+                    Some(AgentEvent::UpdateStatus(status)) => {
+                        app.push(ChatLine::Info(format!("  {}", status)));
+                    }
                     None => {
                         return Ok(EventLoopExit::Recover(
                             "agent event channel closed unexpectedly".to_string(),
@@ -2129,19 +2141,9 @@ pub(super) async fn event_loop(
             }
         }
 
-        // ── Toggle mouse capture when focus changes ─────────────────────
-        // Modals/pickers need mouse capture for scroll events; the main
-        // chat view gives it up so the terminal handles native selection.
+        // ── Track focus changes (mouse capture stays always-on) ──────────
         let cur_focus = app.focus();
         if cur_focus != prev_focus {
-            let want_capture = cur_focus.is_modal();
-            if want_capture && !app.mouse_captured {
-                let _ = crossterm::execute!(terminal.backend_mut(), EnableMouseCapture);
-                app.mouse_captured = true;
-            } else if !want_capture && app.mouse_captured {
-                let _ = crossterm::execute!(terminal.backend_mut(), DisableMouseCapture);
-                app.mouse_captured = false;
-            }
             prev_focus = cur_focus;
         }
 

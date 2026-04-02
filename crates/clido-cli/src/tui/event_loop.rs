@@ -7,7 +7,10 @@ use clido_agent::AgentLoop;
 use clido_core::ClidoError;
 use clido_storage::SessionWriter;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, MouseEventKind},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, EventStream, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -1265,7 +1268,12 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         // Reset terminal: disable mouse tracking, bracketed paste, show cursor
         let reset_seq = b"\x1b[?1002l\x1b[?1003l\x1b[?2004l\x1b[?25h\x1b[0m";
         let _ = std::io::stderr().write_all(reset_seq);
-        let _ = execute!(std::io::stderr(), LeaveAlternateScreen, DisableMouseCapture);
+        let _ = execute!(
+            std::io::stderr(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            DisableBracketedPaste
+        );
         #[cfg(unix)]
         unsafe {
             let mut t: libc::termios = std::mem::zeroed();
@@ -1298,9 +1306,15 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     out.write_all(b"\x1b[?1002l\x1b[?1003l\x1b[?2004l")?;
     out.flush()?;
 
-    // Enable mouse capture for scrolling. Text selection still works with Shift+drag.
+    // Enable mouse capture for scrolling and bracketed paste for multiline paste support.
+    // Text selection still works with Shift+drag.
     // We properly clean up on exit to avoid escape sequence leakage.
-    execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        out,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    )?;
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
 
@@ -1511,7 +1525,8 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     let _ = execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
-        DisableMouseCapture
+        DisableMouseCapture,
+        DisableBracketedPaste
     );
 
     // Handle /profile <name> switch request.

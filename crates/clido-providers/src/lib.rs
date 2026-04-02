@@ -71,7 +71,14 @@ pub fn build_provider_with_ua(
                 .ok()
                 .filter(|s| !s.is_empty())
         })
-        .unwrap_or_else(|| format!("clido/{}", env!("CARGO_PKG_VERSION")));
+        .unwrap_or_else(|| {
+            // Provider-specific default user agents
+            if provider_name == "kimi-code" {
+                "RooCode/3.0.0".to_string()
+            } else {
+                format!("clido/{}", env!("CARGO_PKG_VERSION"))
+            }
+        });
 
     if let Some(def) = PROVIDER_REGISTRY.iter().find(|d| d.id == provider_name) {
         if def.is_anthropic {

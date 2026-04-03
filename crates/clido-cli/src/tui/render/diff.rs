@@ -352,7 +352,12 @@ mod tests {
     fn unified_fallback_for_narrow() {
         let lines = render_diff(SAMPLE_DIFF, 80);
         // Should use unified format — look for +/- prefixed content.
-        let text: String = lines.iter().flat_map(|l| l.spans.iter()).map(|s| s.content.as_ref()).collect::<Vec<_>>().join("");
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("");
         assert!(text.contains("+"), "expected unified + lines");
         assert!(text.contains("-"), "expected unified - lines");
     }
@@ -361,16 +366,19 @@ mod tests {
     fn side_by_side_for_wide() {
         let lines = render_diff(SAMPLE_DIFF, 140);
         // Should use side-by-side — look for the │ divider.
-        let has_divider = lines.iter().any(|l| {
-            l.spans.iter().any(|s| s.content.contains('│'))
-        });
+        let has_divider = lines
+            .iter()
+            .any(|l| l.spans.iter().any(|s| s.content.contains('│')));
         assert!(has_divider, "expected │ divider in side-by-side view");
     }
 
     #[test]
     fn parse_pairs_modifications() {
         let rows = parse_into_sbs_rows(SAMPLE_DIFF);
-        let modified: Vec<_> = rows.iter().filter(|r| r.kind == RowKind::Modified).collect();
+        let modified: Vec<_> = rows
+            .iter()
+            .filter(|r| r.kind == RowKind::Modified)
+            .collect();
         assert_eq!(modified.len(), 1, "one modified pair expected");
         assert!(modified[0].left_text.contains("hello"));
         assert!(modified[0].right_text.contains("world"));

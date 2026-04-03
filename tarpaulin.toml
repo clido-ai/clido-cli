@@ -1,6 +1,6 @@
 [default]
 exclude-files = [
-    "crates/clido-cli/src/tui.rs",
+    "crates/clido-cli/src/tui/*",
     "crates/clido-cli/src/repl.rs",
     "crates/clido-cli/src/main.rs",
     "crates/clido-cli/src/audit_cmd.rs",
@@ -18,11 +18,11 @@ exclude-files = [
     "crates/clido-cli/src/notify.rs",
     "crates/clido-cli/src/pricing_cmd.rs",
     "crates/clido-tools/src/mcp.rs",
-    # setup.rs is mostly TUI ratatui rendering (draw_setup, draw_provider, draw_model,
+    # setup/ is mostly TUI ratatui rendering (draw_setup, draw_provider, draw_model,
     # draw_credential, draw_text_input, setup_event_loop, run_tui_setup_blocking,
     # run_tui_setup, run_interactive_setup_blocking, write_setup_config) — requires a
     # real terminal / TTY; the pure-logic helpers are already tested via #[cfg(test)].
-    "crates/clido-cli/src/setup.rs",
+    "crates/clido-cli/src/setup/*",
     # profiles.rs dispatches CLI subcommands that invoke interactive setup — requires TTY.
     "crates/clido-cli/src/profiles.rs",
     # registry.rs is pure static data declarations with no executable logic to test.

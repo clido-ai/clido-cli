@@ -752,11 +752,9 @@ impl ProfileOverlayState {
 
         // Save remote API keys to the credentials file.
         if !is_local && !self.api_key.is_empty() {
-            if let Err(e) = crate::setup::upsert_credential(
-                &self.config_path,
-                &self.provider,
-                &self.api_key,
-            ) {
+            if let Err(e) =
+                crate::setup::upsert_credential(&self.config_path, &self.provider, &self.api_key)
+            {
                 self.status = Some(format!("  ✗ Credentials save failed: {e}"));
                 return;
             }

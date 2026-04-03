@@ -11,8 +11,8 @@ Be respectful and constructive. Assume good faith. Disagreements about design ar
 ### 1. Fork and clone
 
 ```bash
-git clone https://github.com/<your-username>/clido.git
-cd clido
+git clone https://github.com/clido-ai/clido-cli.git
+cd clido-cli
 ```
 
 ### 2. Install the toolchain

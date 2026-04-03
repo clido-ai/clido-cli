@@ -71,7 +71,7 @@ impl OpenAICompatProvider {
         let extra_headers = vec![
             (
                 "HTTP-Referer".to_string(),
-                "https://github.com/clido".to_string(),
+                "https://github.com/clido-ai/clido-cli".to_string(),
             ),
             ("X-Title".to_string(), "Clido".to_string()),
         ];

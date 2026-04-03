@@ -14,7 +14,7 @@ hero:
       link: /guide/quick-start
     - theme: alt
       text: GitHub
-      link: https://github.com/kurtbuilds/clido
+      link: https://github.com/clido-ai/clido-cli
 
 features:
   - icon: 🖥️

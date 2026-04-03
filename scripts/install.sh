@@ -1,8 +1,8 @@
 #!/bin/sh
-# Clido installer — https://github.com/0xkurt/clido
+# Clido installer — https://github.com/clido-ai/clido-cli
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/clido-ai/clido-cli/master/scripts/install.sh | sh
 #
 # Options (via env vars):
 #   CLIDO_VERSION   Install a specific version (e.g. "v0.1.0"). Default: latest.
@@ -12,7 +12,7 @@
 
 set -e
 
-REPO="0xkurt/clido"
+REPO="clido-ai/clido-cli"
 BINARY="clido"
 DEFAULT_DIR="${HOME}/.local/bin"
 

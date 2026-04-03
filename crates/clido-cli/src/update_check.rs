@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 
 use crate::tui::events::AgentEvent;
 
-const GITHUB_REPO: &str = "0xkurt/clido";
+const GITHUB_REPO: &str = "clido-ai/clido-cli";
 /// Only hit the GitHub API once per 24 hours.
 const CHECK_INTERVAL_SECS: u64 = 86400;
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -7,8 +7,8 @@ Get up and running with clido in about five minutes.
 Build and install from source:
 
 ```bash
-git clone https://github.com/kurtbuilds/clido.git
-cd clido
+git clone https://github.com/clido-ai/clido-cli.git
+cd clido-cli
 cargo install --path crates/clido-cli
 ```
 

@@ -3,7 +3,7 @@
 ## Quick install (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/clido-ai/clido-cli/master/scripts/install.sh | sh
 ```
 
 This detects your OS and architecture, downloads the latest release binary, and installs it to `~/.local/bin`.
@@ -12,10 +12,10 @@ This detects your OS and architecture, downloads the latest release binary, and 
 
 ```bash
 # Install a specific version
-CLIDO_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh
+CLIDO_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/clido-ai/clido-cli/master/scripts/install.sh | sh
 
 # Install to a custom directory
-CLIDO_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh
+CLIDO_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/clido-ai/clido-cli/master/scripts/install.sh | sh
 ```
 
 **Supported platforms:** macOS (arm64, x86_64), Linux (x86_64, aarch64)
@@ -25,8 +25,8 @@ CLIDO_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/0xkurt/cli
 Requires Rust 1.94+ ([rustup.rs](https://rustup.rs/)).
 
 ```bash
-git clone https://github.com/0xkurt/clido.git
-cd clido
+git clone https://github.com/clido-ai/clido-cli.git
+cd clido-cli
 cargo install --path crates/clido-cli --locked
 ```
 
@@ -110,7 +110,7 @@ man clido
 Pull the latest changes and reinstall:
 
 ```bash
-cd clido
+cd clido-cli
 git pull
 cargo install --path crates/clido-cli --force
 ```

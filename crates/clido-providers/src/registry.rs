@@ -55,7 +55,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         api_key_env: "OPENROUTER_API_KEY",
         default_model: "anthropic/claude-sonnet-4-5",
         extra_headers: &[
-            ("HTTP-Referer", "https://github.com/clido"),
+            ("HTTP-Referer", "https://github.com/clido-ai/clido-cli"),
             ("X-Title", "Clido"),
         ],
         is_local: false,

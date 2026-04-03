@@ -18,13 +18,13 @@ Planned capabilities include: core agent loop with tools, sessions, context and 
 ## Installation
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/0xkurt/clido/master/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/clido-ai/clido-cli/master/scripts/install.sh | sh
 ```
 
 Or build from source (requires [Rust 1.94+](https://rustup.rs)):
 
 ```sh
-git clone https://github.com/0xkurt/clido.git && cd clido
+git clone https://github.com/clido-ai/clido-cli.git && cd clido-cli
 cargo install --path crates/clido-cli --locked
 ```
 

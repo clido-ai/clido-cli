@@ -837,6 +837,7 @@ mod tests {
             "myprofile".into(),
             &entry,
             std::path::PathBuf::from("/tmp/test-config.toml"),
+            &Default::default(),
         );
         assert_eq!(ov.name, "myprofile");
         assert_eq!(ov.provider, "anthropic");
@@ -850,7 +851,7 @@ mod tests {
 
     #[test]
     fn profile_overlay_for_create_starts_in_create_mode() {
-        let ov = ProfileOverlayState::for_create(std::path::PathBuf::from("/tmp/test.toml"));
+        let ov = ProfileOverlayState::for_create(std::path::PathBuf::from("/tmp/test.toml"), &Default::default());
         assert!(ov.is_new);
         assert_eq!(
             ov.mode,

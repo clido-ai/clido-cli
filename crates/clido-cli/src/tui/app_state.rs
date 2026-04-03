@@ -67,6 +67,29 @@ impl Selection {
     }
 }
 
+// ── Selection column helpers ──────────────────────────────────────────────────
+
+/// Display-cell column (terminal position) → character index in `line`.
+/// Each wide character advances the display position by its Unicode width.
+fn display_col_to_char_idx(line: &str, target_col: usize) -> usize {
+    let mut display_col = 0usize;
+    for (i, ch) in line.char_indices() {
+        if display_col >= target_col {
+            return i;
+        }
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        display_col += w;
+    }
+    line.len()
+}
+
+/// Total display width of a line in terminal cells.
+fn line_display_width(line: &str) -> usize {
+    line.chars()
+        .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+        .sum()
+}
+
 pub(super) struct App {
     pub(super) messages: Vec<ChatLine>,
     /// Live activity log shown in the status strip (last 2 entries).
@@ -801,24 +824,45 @@ impl App {
     /// Selection coordinates live in rendered-line space (the same indices
     /// used by `apply_selection_highlight`), so we read directly from
     /// `rendered_line_texts` which is populated each render tick.
+    /// Get selected text from the rendered line snapshot.
+    ///
+    /// Selection coordinates are in **display-cell space** (terminal column
+    /// positions).  This method converts display columns → character indices
+    /// per-line so multi-byte and wide characters are handled correctly.
     pub(super) fn get_selected_text(&self) -> String {
         if !self.selection.active {
             return String::new();
         }
 
+        let mut lines = &self.rendered_line_texts[..];
+        let total_lines = lines.len();
+        if total_lines == 0 {
+            return String::new();
+        }
+
         let (sr, sc, er, ec) = self.selection.bounds();
-        let lines = &self.rendered_line_texts;
+        // Clamp to actual line count.
+        let sr: usize = sr.min(total_lines.saturating_sub(1));
+        let er: usize = er.min(total_lines.saturating_sub(1));
+        if sr >= total_lines {
+            return String::new();
+        }
+
         let mut result = String::new();
 
         for row in sr..=er {
-            let line = match lines.get(row) {
+            let line: &str = match lines.get(row) {
                 Some(l) => l.as_str(),
                 None => continue,
             };
-            // Work in chars so multi-byte text is handled correctly.
+            // Convert display-cell column → character index.
+            let start_col = display_col_to_char_idx(line, sc);
+            let end_col = display_col_to_char_idx(
+                line,
+                if row == er { ec + 1 } else { line_display_width(line) },
+            );
+
             let chars: Vec<char> = line.chars().collect();
-            let start_col = if row == sr { sc } else { 0 };
-            let end_col = if row == er { ec + 1 } else { chars.len() };
             let start = start_col.min(chars.len());
             let end = end_col.min(chars.len());
 

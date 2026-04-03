@@ -858,6 +858,10 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                             picker.clamp();
                         }
                     }
+                    ProfileCreateStep::ApiKey if c == 'k' && !st.saved_keys.is_empty() => {
+                        st.mode = ProfileOverlayMode::PickingSavedKey;
+                        st.status = None;
+                    }
                     _ => {
                         let b = char_byte_pos_tui(&st.input, st.input_cursor);
                         st.input.insert(b, c);
@@ -1019,6 +1023,60 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
             }
             _ => {}
         },
+
+        // ── PickingSavedKey: choose a saved API key ─────────────────────────
+        ProfileOverlayMode::PickingSavedKey => {
+            match event.code {
+                Esc => {
+                    st.mode =
+                        ProfileOverlayMode::Creating { step: ProfileCreateStep::ApiKey };
+                    st.status = None;
+                }
+                Enter => {
+                    // Select first (currently highlighted) saved key
+                    if let Some(offer) = st.saved_keys.first() {
+                        // Key is already in the offer — we need the real key from the source profile
+                        let all_profiles = clido_core::load_config(&app.workspace_root)
+                            .map(|c| c.profiles)
+                            .unwrap_or_default();
+                        if let Some(src_entry) = all_profiles.get(&offer.source_profile) {
+                            let real_key =
+                                crate::setup::read_credential(&st.config_path, &offer.provider_id)
+                                    .or_else(|| {
+                                        src_entry.api_key_env.as_ref().and_then(|e| {
+                                            std::env::var(e).ok()
+                                        })
+                                    })
+                                    .or_else(|| src_entry.api_key.clone())
+                                    .unwrap_or_default();
+                            if !real_key.is_empty() {
+                                st.api_key = real_key;
+                                // Trigger a live model fetch for this provider + key
+                                spawn_model_fetch(
+                                    st.provider.clone(),
+                                    st.api_key.clone(),
+                                    if st.base_url.is_empty() {
+                                        None
+                                    } else {
+                                        Some(st.base_url.clone())
+                                    },
+                                    app.channels.fetch_tx.clone(),
+                                );
+                                app.models_loading = true;
+                                st.mode = ProfileOverlayMode::Creating {
+                                    step: ProfileCreateStep::Model,
+                                };
+                                st.status = None;
+                            } else {
+                                st.status =
+                                    Some("  ✗ Could not retrieve saved key".into());
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
 
         // ── Overview: navigate fields ──────────────────────────────────────
         ProfileOverlayMode::Overview => {
@@ -1521,7 +1579,10 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.profile_picker = None;
                 let config_path = clido_core::global_config_path()
                     .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
-                app.profile_overlay = Some(ProfileOverlayState::for_create(config_path));
+                let all_profiles = clido_core::load_config(&app.workspace_root)
+                    .map(|c| c.profiles)
+                    .unwrap_or_default();
+                app.profile_overlay = Some(ProfileOverlayState::for_create(config_path, &all_profiles));
             }
             KeyCode::Char('e') => {
                 if let Some(picker) = app.profile_picker.take() {
@@ -1530,10 +1591,14 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         let entry_clone = entry.clone();
                         let config_path = clido_core::global_config_path()
                             .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
+                        let all_profiles = clido_core::load_config(&app.workspace_root)
+                            .map(|c| c.profiles)
+                            .unwrap_or_default();
                         app.profile_overlay = Some(ProfileOverlayState::for_edit(
                             name,
                             &entry_clone,
                             config_path,
+                            &all_profiles,
                         ));
                     }
                 }

@@ -7,6 +7,76 @@ use crate::list_picker::{ListPicker, PickerItem};
 use super::render::parse_plan_from_text;
 use super::{AgentEvent, PermGrant};
 
+// ── Helper functions for profile overlay ──────────────────────────────────────
+
+/// Reuse offer: a key found in another profile that can be reused.
+#[derive(Debug, Clone)]
+pub(crate) struct SavedApiKeyOffer {
+    pub(crate) source_profile: String,
+    pub(crate) provider_id: String,
+}
+
+/// Build saved-key catalog from all profiles, checking credentials file + env + inline key.
+pub(crate) fn build_saved_keys_from_profiles(
+    profiles: &std::collections::HashMap<String, clido_core::ProfileEntry>,
+    config_path: &std::path::Path,
+    exclude: Option<&str>,
+) -> Vec<ProfileSavedKey> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for (name, entry) in profiles {
+        if exclude == Some(name.as_str()) {
+            continue;
+        }
+        // Read from credentials file, env var, then inline (same order as setup/mod.rs)
+        let key = crate::setup::read_credential(config_path, &entry.provider)
+            .or_else(|| {
+                entry.api_key_env.as_ref().and_then(|e| std::env::var(e).ok())
+            })
+            .or_else(|| entry.api_key.clone());
+        let Some(k) = key else { continue; };
+        if k.is_empty() || !seen.insert(k.clone()) {
+            continue;
+        }
+        // Anonymize: show first 4 and last 4 characters.
+        let display = if k.len() <= 12 {
+            format!("{}•••{}", &k[..2.min(k.len())], &k[k.len()-2.min(k.len())..])
+        } else {
+            format!("{}•••{}", &k[..4], &k[k.len()-4..])
+        };
+        out.push(ProfileSavedKey {
+            source_profile: name.clone(),
+            provider_id: entry.provider.clone(),
+            display,
+        });
+    }
+    out
+}
+
+/// Detect which provider has an env var set (mimics first-run setup).
+/// Returns (provider_id, env_var_name).
+fn detect_provider_from_env() -> Option<(&'static str, &'static str)> {
+    let check: [(&str, &str); 11] = [
+        ("anthropic", "ANTHROPIC_API_KEY"),
+        ("openai", "OPENAI_API_KEY"),
+        ("google", "GEMINI_API_KEY"),
+        ("groq", "GROQ_API_KEY"),
+        ("xai", "XAI_API_KEY"),
+        ("deepseek", "DEEPSEEK_API_KEY"),
+        ("openrouter", "OPENROUTER_API_KEY"),
+        ("mistral", "MISTRAL_API_KEY"),
+        ("perplexity", "PERPLEXITY_API_KEY"),
+        ("togetherai", "TOGETHER_API_KEY"),
+        ("fireworks", "FIREWORKS_API_KEY"),
+    ];
+    for (id, var) in check {
+        if std::env::var(var).is_ok_and(|v| !v.is_empty()) {
+            return Some((id, var));
+        }
+    }
+    None
+}
+
 // ── Focus management ──────────────────────────────────────────────────────────
 
 /// Which component currently owns keyboard (and optionally mouse) input.
@@ -433,6 +503,8 @@ pub(crate) enum ProfileOverlayMode {
     PickingModel { for_field: ProfileEditField },
     /// User is creating a new profile, step-by-step.
     Creating { step: ProfileCreateStep },
+    /// Saved API key picker during profile creation.
+    PickingSavedKey,
 }
 
 /// Steps for the in-TUI new profile wizard.
@@ -442,6 +514,15 @@ pub(crate) enum ProfileCreateStep {
     Provider,
     ApiKey,
     Model,
+}
+
+/// A saved API key offered for reuse in the profile overlay.
+#[derive(Debug, Clone)]
+pub(crate) struct ProfileSavedKey {
+    pub(crate) source_profile: String,
+    pub(crate) provider_id: String,
+    /// Anonymized display (first 4 •••• last 4).
+    pub(crate) display: String,
 }
 
 /// In-TUI profile overview/editor overlay — never exits the TUI.
@@ -475,6 +556,8 @@ pub(crate) struct ProfileOverlayState {
     pub(crate) provider_picker: ProviderPickerState,
     /// State for the model picker inside the profile overlay (used in PickingModel mode).
     pub(crate) profile_model_picker: Option<ModelPickerState>,
+    /// Saved keys available for reuse when creating this profile (built from credentials file + env vars of other profiles).
+    pub(crate) saved_keys: Vec<ProfileSavedKey>,
 }
 
 /// Display labels and keys for the editable profile fields (in order).
@@ -496,16 +579,15 @@ impl ProfileOverlayState {
         name: String,
         entry: &clido_core::ProfileEntry,
         config_path: std::path::PathBuf,
+        all_profiles: &std::collections::HashMap<String, clido_core::ProfileEntry>,
     ) -> Self {
-        let api_key = entry
-            .api_key
-            .clone()
-            .or_else(|| {
-                entry
-                    .api_key_env
-                    .as_ref()
-                    .and_then(|e| std::env::var(e).ok())
-            })
+        let env_var = entry
+            .api_key_env
+            .as_deref()
+            .unwrap_or_else(|| crate::provider::default_api_key_env(&entry.provider));
+        let api_key = crate::setup::read_credential(&config_path, &entry.provider)
+            .or_else(|| std::env::var(env_var).ok())
+            .or_else(|| entry.api_key.clone())
             .unwrap_or_default();
         let fast_provider = entry
             .fast
@@ -516,9 +598,13 @@ impl ProfileOverlayState {
             .fast
             .as_ref()
             .and_then(|f| {
-                f.api_key
-                    .clone()
-                    .or_else(|| f.api_key_env.as_ref().and_then(|e| std::env::var(e).ok()))
+                let env = f
+                    .api_key_env
+                    .as_deref()
+                    .unwrap_or_else(|| crate::provider::default_api_key_env(&f.provider));
+                crate::setup::read_credential(&config_path, &f.provider)
+                    .or_else(|| std::env::var(env).ok())
+                    .or_else(|| f.api_key.clone())
             })
             .unwrap_or_default();
         let fast_model = entry
@@ -526,6 +612,9 @@ impl ProfileOverlayState {
             .as_ref()
             .map(|f| f.model.clone())
             .unwrap_or_default();
+
+        let saved_keys = build_saved_keys_from_profiles(all_profiles, &config_path, Some(&name));
+
         Self {
             name,
             provider: entry.provider.clone(),
@@ -544,23 +633,46 @@ impl ProfileOverlayState {
             is_new: false,
             provider_picker: ProviderPickerState::new(),
             profile_model_picker: None,
+            saved_keys,
         }
     }
 
     /// Open a blank state for creating a new profile.
-    pub(crate) fn for_create(config_path: std::path::PathBuf) -> Self {
+    pub(crate) fn for_create(
+        config_path: std::path::PathBuf,
+        all_profiles: &std::collections::HashMap<String, clido_core::ProfileEntry>,
+    ) -> Self {
+        // Check if a provider is pre-detected via env vars (same as first-run)
+        let detected = detect_provider_from_env();
+
+        let api_key = detected
+            .as_ref()
+            .and_then(|(_, env_var)| std::env::var(env_var).ok())
+            .unwrap_or_default();
+
+        let provider = detected.as_ref().map(|(id, _)| id.to_string()).unwrap_or_default();
+
+        let saved_keys = build_saved_keys_from_profiles(all_profiles, &config_path, None);
+
         Self {
             name: String::new(),
-            provider: String::new(),
-            api_key: String::new(),
+            provider: provider.clone(),
+            api_key,
             model: String::new(),
             base_url: String::new(),
             fast_provider: String::new(),
             fast_api_key: String::new(),
             fast_model: String::new(),
             cursor: 0,
-            mode: ProfileOverlayMode::Creating {
-                step: ProfileCreateStep::Name,
+            mode: if provider.is_empty() {
+                ProfileOverlayMode::Creating {
+                    step: ProfileCreateStep::Name,
+                }
+            } else {
+                // Provider detected via env, skip to model selection
+                ProfileOverlayMode::Creating {
+                    step: ProfileCreateStep::Model,
+                }
             },
             input: String::new(),
             input_cursor: 0,
@@ -568,7 +680,8 @@ impl ProfileOverlayState {
             config_path,
             is_new: true,
             provider_picker: ProviderPickerState::new(),
-            profile_model_picker: None,
+            profile_model_picker: if !provider.is_empty() { None } else { None },
+            saved_keys,
         }
     }
 

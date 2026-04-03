@@ -12,6 +12,82 @@ use super::widgets::{popup_above_input, scroll_indicator_line};
 
 // ── Profile overlay renderer ──────────────────────────────────────────────────
 
+/// Progress steps for the creation wizard (ordered).
+const CREATE_STEPS: &[&str] = &["Provider", "API key", "Model"];
+
+fn step_index_for(step: &ProfileCreateStep) -> usize {
+    match step {
+        ProfileCreateStep::Name => 0,
+        ProfileCreateStep::Provider => 1,
+        ProfileCreateStep::ApiKey => 2,
+        ProfileCreateStep::Model => 3,
+    }
+}
+
+/// Render a horizontal progress bar for the creation wizard.
+fn render_progress_bar(
+    frame: &mut Frame,
+    area: Rect,
+    current_step: usize,
+    total_steps: usize,
+    title: &str,
+) {
+    // Progress dots: ● ○ ○ ○
+    let mut dots = Vec::new();
+    for i in 1..=total_steps {
+        let dot = if i <= current_step && current_step < total_steps {
+            "●"
+        } else if i <= current_step {
+            "●"
+        } else {
+            "○"
+        };
+        let style = if i == current_step && i < total_steps {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else if i < current_step {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+        };
+        dots.push(Span::styled(dot, style));
+        if i < total_steps {
+            let sep_style = if i < current_step {
+                Style::default().fg(Color::Green).add_modifier(Modifier::DIM)
+            } else {
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+            };
+            dots.push(Span::styled(" ─ ", sep_style));
+        }
+    }
+
+    let bordered_title = if title.starts_with(' ') {
+        title.to_string()
+    } else {
+        format!(" {}", title)
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            bordered_title.as_str(),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ))),
+        Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        },
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(dots)),
+        Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: 1,
+        },
+    );
+}
+
 pub(crate) fn render_profile_overlay(
     frame: &mut Frame,
     area: Rect,
@@ -23,11 +99,15 @@ pub(crate) fn render_profile_overlay(
     let popup_rect = popup_above_input(input_area, popup_h, popup_w);
     frame.render_widget(Clear, popup_rect);
 
+    // Reserve the first 2 rows of the inner area for the progress bar (creation mode only)
+    let has_progress = matches!(&st.mode, ProfileOverlayMode::Creating { .. });
+    let top_reserve: u16 = if has_progress { 3 } else { 1 };
+
     let inner = Rect {
         x: popup_rect.x + 1,
-        y: popup_rect.y + 1,
+        y: popup_rect.y + top_reserve,
         width: popup_rect.width.saturating_sub(2),
-        height: popup_rect.height.saturating_sub(2),
+        height: popup_rect.height.saturating_sub(2 + top_reserve),
     };
     let [content_area, hint_area] =
         ratatui::layout::Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(inner);
@@ -44,6 +124,9 @@ pub(crate) fn render_profile_overlay(
         }
         ProfileOverlayMode::PickingModel { .. } => {
             render_profile_model_picker(frame, popup_rect, content_area, hint_area, st)
+        }
+        ProfileOverlayMode::PickingSavedKey => {
+            render_profile_saved_key_picker(frame, popup_rect, content_area, hint_area, st)
         }
     }
 }
@@ -206,7 +289,11 @@ pub(crate) fn render_profile_overview(
     if let Some(ref msg) = st.status {
         lines.push(Line::from(Span::styled(
             msg.clone(),
-            Style::default().fg(Color::Green),
+            Style::default().fg(if msg.starts_with("  ✓") {
+                Color::Green
+            } else {
+                Color::Red
+            }),
         )));
     }
 
@@ -239,6 +326,8 @@ pub(crate) fn render_profile_overview(
     }
 }
 
+// ── Creating wizard (full visual overhaul) ────────────────────────────────────
+
 pub(crate) fn render_profile_create(
     frame: &mut Frame,
     popup_rect: Rect,
@@ -247,6 +336,16 @@ pub(crate) fn render_profile_create(
     st: &ProfileOverlayState,
     step: &ProfileCreateStep,
 ) {
+    // Title spans the full popup rect for the progress bar
+    render_progress_bar(
+        frame,
+        popup_rect,
+        step_index_for(step),
+        CREATE_STEPS.len(),
+        " New Profile ",
+    );
+
+    // Special handling for picker steps
     match step {
         ProfileCreateStep::Provider => {
             render_profile_provider_picker(frame, popup_rect, content_area, hint_area, st);
@@ -261,44 +360,99 @@ pub(crate) fn render_profile_create(
 
     frame.render_widget(
         Block::default()
-            .title(" New Profile ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan)),
         popup_rect,
     );
 
-    let (step_num, step_total, step_label, current_value, placeholder) = match step {
+    let (step_label, input_placeholder, hint_text) = match step {
         ProfileCreateStep::Name => (
-            1,
-            4,
-            "Profile name",
-            &st.name,
+            "Name your profile",
             "optional — Enter to auto-generate from provider",
+            "Enter=continue  ·  Type a name  ·  Esc=cancel",
         ),
-        ProfileCreateStep::Provider => (2, 4, "Provider", &st.provider, "select a provider"),
-        ProfileCreateStep::ApiKey => (3, 4, "API key", &st.api_key, "paste your key here"),
-        ProfileCreateStep::Model => (
-            4,
-            4,
-            "Default model",
-            &st.model,
-            "e.g. claude-opus-4-5, gpt-4o",
+        ProfileCreateStep::ApiKey => (
+            "API key",
+            if !st.saved_keys.is_empty() {
+                "paste key, or press k to pick a saved key"
+            } else {
+                "paste your API key here"
+            },
+            if !st.saved_keys.is_empty() {
+                if st.input.is_empty() {
+                    "k=use saved key  ·  Type to enter new key  ·  Enter=next  ·  Esc=cancel"
+                } else {
+                    "k=use saved key  ·  Enter=next  ·  Esc=cancel"
+                }
+            } else {
+                "Type API key  ·  Enter=next  ·  Esc=cancel"
+            },
         ),
+        _ => return,
     };
-    let _ = current_value;
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::raw(""));
+
+    // Step label
     lines.push(Line::from(Span::styled(
-        format!("  Step {step_num} of {step_total} — {step_label}"),
+        format!("  {}", step_label),
         Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::raw(""));
 
-    let display_input = if matches!(step, ProfileCreateStep::ApiKey) && !st.input.is_empty() {
-        // Show masked dots while typing, with a length indicator
+    // --- Saved key offers (ApiKey step only) ---
+    if *step == ProfileCreateStep::ApiKey && !st.saved_keys.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  Saved keys from other profiles:",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        )));
+
+        for (i, offer) in st.saved_keys.iter().enumerate().take(5) {
+            let is_match = st.provider.is_empty()
+                || offer.provider_id == st.provider;
+            if is_match {
+                let key_short = if offer.display.len() > 28 {
+                    format!("{}…", &offer.display[..28])
+                } else {
+                    offer.display.clone()
+                };
+                let arrow = if i == 0 && st.input.is_empty() {
+                    "▶ "
+                } else {
+                    "   "
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("  {}{} {}", arrow, key_short, offer.source_profile),
+                        Style::default()
+                            .fg(if i == 0 && st.input.is_empty() {
+                                Color::Yellow
+                            } else {
+                                Color::Green
+                            })
+                            .add_modifier(if i == 0 && st.input.is_empty() {
+                                Modifier::BOLD
+                            } else {
+                                Modifier::empty()
+                            }),
+                    ),
+                    Span::styled(
+                        format!("  ({})", offer.provider_id),
+                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                    ),
+                ]));
+            }
+        }
+        lines.push(Line::raw(""));
+    }
+
+    // --- Manual input ---
+    let display_input = if *step == ProfileCreateStep::ApiKey && !st.input.is_empty() {
         let len = st.input.len();
         format!("{} ({} chars)", "•".repeat(len.min(30)), len)
     } else {
@@ -307,7 +461,7 @@ pub(crate) fn render_profile_create(
 
     let value_display = if display_input.is_empty() {
         Span::styled(
-            format!("   {placeholder}"),
+            format!("   {input_placeholder}"),
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
@@ -327,28 +481,41 @@ pub(crate) fn render_profile_create(
     ]));
     lines.push(Line::raw(""));
 
-    // Summary of already-entered fields
-    if step_num > 1 {
-        lines.push(Line::from(Span::styled(
-            "  Already entered:",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
-        )));
-        if !st.name.is_empty() {
+    // Already entered summary
+    if matches!(step, ProfileCreateStep::ApiKey) {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(vec![
+            Span::styled("  provider  ", Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
+            Span::styled(st.provider.clone(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        ]));
+    }
+
+    // Env var hint (ApiKey step)
+    if *step == ProfileCreateStep::ApiKey {
+        let env_hint = if !st.provider.is_empty() {
+            let env_var = crate::provider::default_api_key_env(&st.provider);
+            format!(
+                "  tip  →  set {}={env_var} to skip this step next time",
+                "ANTHROPIC_API_KEY" // simplified example
+            );
+            format!(
+                "  tip  →  set {} to auto-detect {} on next start",
+                env_var, st.provider
+            )
+        } else {
+            String::new()
+        };
+        if !env_hint.is_empty() {
             lines.push(Line::from(Span::styled(
-                format!("    name       {}", st.name),
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
-        if !st.provider.is_empty() {
-            lines.push(Line::from(Span::styled(
-                format!("    provider   {}", st.provider),
-                Style::default().fg(Color::DarkGray),
+                env_hint,
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::DIM),
             )));
         }
     }
 
+    // Status message
     if let Some(ref msg) = st.status {
         lines.push(Line::raw(""));
         lines.push(Line::from(Span::styled(
@@ -366,13 +533,9 @@ pub(crate) fn render_profile_create(
         content_area,
     );
 
-    let hint = if matches!(step, ProfileCreateStep::ApiKey) {
-        "Type API key  ·  Enter=next  ·  Esc=cancel"
-    } else {
-        "Type value  ·  Enter=next  ·  Esc=cancel"
-    };
+    // Hint footer
     frame.render_widget(
-        Paragraph::new(hint).style(
+        Paragraph::new(hint_text).style(
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
@@ -380,11 +543,10 @@ pub(crate) fn render_profile_create(
         hint_area,
     );
 
-    // Cursor inside the input line (line index 3 = blank + hint + blank + input)
+    // Cursor
     let cursor_y = content_area.y + 4;
-    let shown_len = if matches!(step, ProfileCreateStep::ApiKey) {
+    let shown_len = if *step == ProfileCreateStep::ApiKey && !st.input.is_empty() {
         let len = st.input.len();
-        // "•" repeated + " (N chars)"
         len.min(30) + format!(" ({} chars)", len).len()
     } else {
         st.input_cursor
@@ -394,6 +556,88 @@ pub(crate) fn render_profile_create(
         frame.set_cursor_position((cursor_x, cursor_y));
     }
 }
+
+// ── Saved key picker ──────────────────────────────────────────────────────────
+
+pub(crate) fn render_profile_saved_key_picker(
+    frame: &mut Frame,
+    popup_rect: Rect,
+    content_area: Rect,
+    hint_area: Rect,
+    st: &ProfileOverlayState,
+) {
+    frame.render_widget(
+        Block::default()
+            .title(" Use Saved API Key ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green)),
+        popup_rect,
+    );
+
+    // Header
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::from(Span::styled(
+            "  Select a key to reuse from another profile:",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        )),
+        Line::raw(""),
+    ];
+
+    // Show saved keys
+    let visible: usize = (content_area.height as usize).saturating_sub(4).max(2);
+    for (i, offer) in st.saved_keys.iter().enumerate() {
+        if i >= visible {
+            break;
+        }
+        let arrow = if i == 0 { "▶ " } else { "   " };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {}{}", arrow, offer.display),
+                Style::default()
+                    .fg(if i == 0 {
+                        Color::Yellow
+                    } else {
+                        Color::Green
+                    })
+                    .add_modifier(if i == 0 { Modifier::BOLD } else { Modifier::empty() }),
+            ),
+            Span::styled(
+                format!("  ({}, profile: {})", offer.provider_id, offer.source_profile,),
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ),
+        ]));
+    }
+
+    if st.saved_keys.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No saved keys available.",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        )));
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        content_area,
+    );
+
+    frame.render_widget(
+        Paragraph::new(
+            "↑↓=navigate  Enter=use selected key  Esc=cancel & return to manual input",
+        )
+        .style(
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ),
+        hint_area,
+    );
+}
+
+// ── Provider picker ───────────────────────────────────────────────────────────
 
 pub(crate) fn render_profile_provider_picker(
     frame: &mut Frame,
@@ -415,28 +659,45 @@ pub(crate) fn render_profile_provider_picker(
     let picker = &st.provider_picker;
     let indices = picker.filtered();
 
-    let mut lines: Vec<Line<'static>> = vec![
-        Line::from(vec![Span::styled(
-            format!("  Filter: {}_", picker.filter),
-            Style::default().fg(Color::White),
-        )]),
-        Line::raw(""),
-    ];
+    // Show "detected" label if env var matched
+    let detected_label = if st.provider.is_empty() {
+        Vec::new()
+    } else {
+        let env_var = crate::provider::default_api_key_env(&st.provider);
+        vec![Line::from(Span::styled(
+            format!("  ✓ {} detected (from {} env var)", st.provider, env_var),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ))]
+    };
+
+    let mut lines: Vec<Line<'static>> = detected_label;
+    lines.push(Line::from(vec![Span::styled(
+        format!("  Filter: {}_", picker.filter),
+        Style::default().fg(Color::White),
+    )]));
+    lines.push(Line::raw(""));
 
     let end = (picker.scroll_offset + visible).min(indices.len());
     for (di, &idx) in indices[picker.scroll_offset..end].iter().enumerate() {
         let abs_pos = picker.scroll_offset + di;
         let selected = abs_pos == picker.selected;
-        let (id, name, needs_key) = KNOWN_PROVIDERS[idx];
+        let (id, name, _needs_key) = KNOWN_PROVIDERS[idx];
+        // Show checkmark if this provider has a key saved
+        let key_marker = if !st.provider.is_empty() && id == st.provider && !st.api_key.is_empty() {
+            " ✓"
+        } else {
+            ""
+        };
         let bg = if selected {
             TUI_SELECTION_BG
         } else {
             Color::Reset
         };
         let fg = if selected { Color::White } else { Color::Gray };
-        let key_hint = if !needs_key { "  (no key needed)" } else { "" };
         lines.push(Line::from(vec![Span::styled(
-            format!("  {:<12}  {}{}", id, name, key_hint),
+            format!("  {:<12}  {}{}", id, name, key_marker),
             Style::default().fg(fg).bg(bg),
         )]));
     }
@@ -461,6 +722,8 @@ pub(crate) fn render_profile_provider_picker(
     );
 }
 
+// ── Model picker ──────────────────────────────────────────────────────────────
+
 pub(crate) fn render_profile_model_picker(
     frame: &mut Frame,
     popup_rect: Rect,
@@ -470,7 +733,7 @@ pub(crate) fn render_profile_model_picker(
 ) {
     frame.render_widget(
         Block::default()
-            .title(" Select Model ")
+            .title(format!(" Select Model (provider: {}) ", st.provider).as_str())
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Magenta)),
         popup_rect,

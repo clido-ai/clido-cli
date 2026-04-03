@@ -287,28 +287,42 @@ pub async fn run_reinit(pre_fill: SetupPreFill) -> Result<(), anyhow::Error> {
 
 /// Create a new named profile via the guided wizard.
 pub async fn run_create_profile(initial_name: Option<String>) -> Result<(), anyhow::Error> {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let saved_api_keys = clido_core::load_config(&cwd)
-        .ok()
+    let config_path = clido_core::global_config_path()
+        .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
+
+    // Load config from global path so we see all profiles and credentials
+    let loaded = clido_core::load_config(&config_path).or_else(|_| clido_core::load_config(&PathBuf::from("."))).ok();
+
+    let saved_api_keys = loaded
+        .as_ref()
         .map(|c| {
             let ex = initial_name
                 .as_deref()
                 .filter(|n| c.profiles.contains_key(*n));
-            build_saved_key_catalog(&c, ex)
+            build_saved_key_catalog(c, &config_path, ex)
         })
         .unwrap_or_default();
 
-    let pre_fill = SetupPreFill {
-        provider: String::new(),
-        api_key: String::new(),
-        model: String::new(),
-        profile_name: initial_name.clone().unwrap_or_default(),
-        is_new_profile: initial_name.is_none(), // show ProfileName step if no name given
-        saved_api_keys,
+    // Detect env vars to pre-select provider (same as first-run)
+    let pre_fill = if let Some((provider_id, env_var)) = detect_provider_from_env() {
+        SetupPreFill {
+            provider: provider_id.to_string(),
+            api_key: std::env::var(env_var).unwrap_or_default(),
+            model: String::new(),
+            profile_name: initial_name.clone().unwrap_or_default(),
+            is_new_profile: initial_name.is_none(),
+            saved_api_keys,
+        }
+    } else {
+        SetupPreFill {
+            provider: String::new(),
+            api_key: String::new(),
+            model: String::new(),
+            profile_name: initial_name.clone().unwrap_or_default(),
+            is_new_profile: initial_name.is_none(), // show ProfileName step if no name given
+            saved_api_keys,
+        }
     };
-
-    let config_path = clido_core::global_config_path()
-        .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
 
     let state = if setup_use_rich_ui() {
         match tokio::task::spawn_blocking(move || run_tui_setup_state_blocking(Some(pre_fill)))
@@ -381,21 +395,25 @@ pub async fn run_edit_profile(
     name: String,
     entry: clido_core::ProfileEntry,
 ) -> Result<(), anyhow::Error> {
-    let api_key = entry
-        .api_key
-        .clone()
+    let config_path = clido_core::global_config_path()
+        .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
+
+    // Resolve the API key from credentials file, env var, then inline (same lookup as `build_saved_key_catalog`)
+    let api_key = crate::setup::read_credential(&config_path, &entry.provider)
         .or_else(|| {
             entry
                 .api_key_env
                 .as_ref()
                 .and_then(|e| std::env::var(e).ok())
         })
+        .or_else(|| entry.api_key.clone())
         .unwrap_or_default();
 
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let saved_api_keys = clido_core::load_config(&cwd)
-        .ok()
-        .map(|c| build_saved_key_catalog(&c, Some(name.as_str())))
+    // Load config from global path so we see all profiles
+    let loaded = clido_core::load_config(&config_path).or_else(|_| clido_core::load_config(&PathBuf::from("."))).ok();
+    let saved_api_keys = loaded
+        .as_ref()
+        .map(|c| build_saved_key_catalog(c, &config_path, Some(name.as_str())))
         .unwrap_or_default();
 
     let pre_fill = SetupPreFill {

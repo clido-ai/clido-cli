@@ -202,11 +202,15 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     let input_line_count = app.text_input.text.matches('\n').count() + 1;
     let input_h = (input_line_count as u16 + 2).min(3);
     let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
-    // Queue area: 1 line if thinking, up to 7 lines if queue shown (header + 5 items + "more")
-    let queue_h = if app.current_step.is_some() {
-        1 // Agent thinking - show step
+    // Queue area shows the current thinking step plus any queued input items
+    // so the user can see exactly what's waiting to be processed.
+    let queue_h = if app.current_step.is_some() && !app.queued.is_empty() {
+        // Thinking + header + items (up to 5)
+        (1 + 1 + app.queued.len().min(5)).min(8) as u16
+    } else if app.current_step.is_some() {
+        1 // Agent thinking - show step only
     } else if !app.queued.is_empty() {
-        (1 + app.queued.len().min(5) + 1).min(7) as u16 // Queue items
+        (1 + app.queued.len().min(5) + 1).min(7) as u16 // header + items
     } else {
         0 // Nothing to show
     };
@@ -324,32 +328,48 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // ── Queue strip ──
-    // Priority: thinking step (when agent active) > queue (when idle) > empty
+    // When the agent is thinking with queued items: show thinking step + queued list.
+    // When idle with queued items: show queued list with count header.
+    // When thinking alone: just the step text.
     {
-        let queue_lines: Vec<Line> = if let Some(ref step) = app.current_step {
-            // Agent is thinking - always show thinking, even if queue has items
-            vec![Line::from(vec![
+        let mut queue_lines: Vec<Line> = Vec::new();
+
+        let has_thinking = app.current_step.is_some();
+        let has_queue = !app.queued.is_empty();
+
+        if has_thinking {
+            queue_lines.push(Line::from(vec![
                 Span::styled(
                     "  ▶ ",
                     Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
                 ),
                 Span::styled(
-                    truncate_chars(step, 80),
+                    truncate_chars(app.current_step.as_ref().unwrap(), 80),
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
                 ),
-            ])]
-        } else if !app.queued.is_empty() {
-            // Agent idle but items queued - show queue
-            let mut lines = Vec::new();
-            // Header line with count
-            lines.push(Line::from(vec![Span::styled(
-                format!("  ↻ {} queued", app.queued.len()),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::DIM),
-            )]));
+            ]));
+        }
+
+        if has_queue {
+            if has_thinking {
+                // Agent is active — compact divider before queued items
+                queue_lines.push(Line::from(Span::styled(
+                    "  ── queued ──",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
+                )));
+            } else {
+                // Agent is idle — full header with count
+                queue_lines.push(Line::from(vec![Span::styled(
+                    format!("  ↻ {} queued", app.queued.len()),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::DIM),
+                )]));
+            }
 
             // Each queued item on its own line
             let max_items = 5;
@@ -368,7 +388,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 let has_more = item.lines().count() > 1;
                 let suffix = if has_more { "…" } else { "" };
 
-                lines.push(Line::from(vec![Span::styled(
+                queue_lines.push(Line::from(vec![Span::styled(
                     format!("    {}. \"{}{}\"", idx + 1, truncated, suffix),
                     Style::default()
                         .fg(Color::DarkGray)
@@ -378,18 +398,19 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
             let more_count = app.queued.len().saturating_sub(max_items);
             if more_count > 0 {
-                lines.push(Line::from(vec![Span::styled(
+                queue_lines.push(Line::from(vec![Span::styled(
                     format!("    ... and {} more", more_count),
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
                 )]));
             }
+        }
 
-            lines
-        } else {
-            vec![Line::raw("")]
-        };
+        if queue_lines.is_empty() {
+            queue_lines.push(Line::raw(""));
+        }
+
         frame.render_widget(Paragraph::new(queue_lines), queue_area);
     }
 

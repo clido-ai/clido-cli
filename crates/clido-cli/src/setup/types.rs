@@ -31,9 +31,11 @@ pub struct SavedApiKeyOffer {
     pub api_key: String,
 }
 
-/// Build reuse offers from profiles with plaintext `api_key` (deduped by key value).
+/// Build reuse offers from profiles by checking credentials file, env vars, and
+/// inline api_key (deduped by key value).
 pub(crate) fn build_saved_key_catalog(
     loaded: &clido_core::LoadedConfig,
+    config_path: &std::path::Path,
     exclude_profile: Option<&str>,
 ) -> Vec<SavedApiKeyOffer> {
     use std::collections::HashSet;
@@ -46,9 +48,19 @@ pub(crate) fn build_saved_key_catalog(
             continue;
         }
         let entry = &loaded.profiles[name];
-        let Some(ref k) = entry.api_key else {
-            continue;
-        };
+
+        // Try credentials file first
+        let api_key = crate::setup::read_credential(config_path, &entry.provider)
+            .or_else(|| {
+                // Fall back to env var
+                entry.api_key_env.as_ref().and_then(|e| std::env::var(e).ok())
+            })
+            .or_else(|| {
+                // Last resort: inline key (legacy)
+                entry.api_key.clone()
+            });
+
+        let Some(k) = api_key else { continue; };
         if k.is_empty() {
             continue;
         }
@@ -58,7 +70,7 @@ pub(crate) fn build_saved_key_catalog(
         out.push(SavedApiKeyOffer {
             source_profile: name.clone(),
             provider_id: entry.provider.clone(),
-            api_key: k.clone(),
+            api_key: k,
         });
     }
     out

@@ -1246,8 +1246,9 @@ pub(super) fn cmd_profile_edit(app: &mut App, cmd: &str) {
                 )));
             }
             Some(entry) => {
+                let all_profiles = loaded.profiles.clone();
                 app.profile_overlay =
-                    Some(ProfileOverlayState::for_edit(name, &entry, config_path));
+                    Some(ProfileOverlayState::for_edit(name, &entry, config_path, &all_profiles));
             }
         },
     }
@@ -1572,14 +1573,15 @@ pub(super) fn cmd_init(app: &mut App) {
         }
         Ok(loaded) => {
             let name = app.current_profile.clone();
+            let all_profiles = loaded.profiles.clone();
             match loaded.profiles.get(&name).cloned() {
                 Some(entry) => {
                     app.profile_overlay =
-                        Some(ProfileOverlayState::for_edit(name, &entry, config_path));
+                        Some(ProfileOverlayState::for_edit(name, &entry, config_path, &all_profiles));
                 }
                 None => {
                     // No matching profile — open a create flow for the default profile
-                    app.profile_overlay = Some(ProfileOverlayState::for_create(config_path));
+                    app.profile_overlay = Some(ProfileOverlayState::for_create(config_path, &all_profiles));
                 }
             }
         }
@@ -2133,7 +2135,10 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
         "/profile new" => {
             let config_path = clido_core::global_config_path()
                 .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
-            app.profile_overlay = Some(ProfileOverlayState::for_create(config_path));
+            let all_profiles = clido_core::load_config(&app.workspace_root)
+                .map(|c| c.profiles)
+                .unwrap_or_default();
+            app.profile_overlay = Some(ProfileOverlayState::for_create(config_path, &all_profiles));
         }
         _ if cmd == "/profile edit" || cmd.starts_with("/profile edit ") => {
             cmd_profile_edit(app, cmd)

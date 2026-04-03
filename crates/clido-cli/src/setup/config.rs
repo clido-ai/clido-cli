@@ -187,6 +187,20 @@ pub(crate) fn upsert_credential(
     write_credentials_file(&creds_path, &existing)
 }
 
+/// Read a single credential from the credentials file for the given provider.
+/// Returns `None` if the file doesn't exist, the provider has no entry, or any
+/// parse error occurs.
+pub(crate) fn read_credential(config_path: &std::path::Path, provider_id: &str) -> Option<String> {
+    let creds_path = credentials_path(config_path);
+    let content = std::fs::read_to_string(&creds_path).ok()?;
+    let table: toml::Value = toml::from_str(&content).ok()?;
+    table
+        .get("keys")
+        .and_then(|v| v.get(provider_id))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
 /// Collect all non-empty, non-local API key credentials from a setup state.
 /// Returns `(provider_id, key)` pairs for main and fast provider agents.
 pub(super) fn collect_credentials_from_state(s: &SetupState) -> Vec<(String, String)> {

@@ -28,6 +28,7 @@ use clido_providers::registry::PROVIDER_REGISTRY;
 pub use types::SetupPreFill;
 use types::{build_saved_key_catalog, SetupOutcome};
 
+pub(crate) use config::read_credential;
 pub(crate) use config::upsert_credential;
 
 use config::{

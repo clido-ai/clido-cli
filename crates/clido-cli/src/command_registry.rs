@@ -411,6 +411,14 @@ pub static COMMANDS: &[SlashCommand] = &[
         requires_idle: false,
     },
     SlashCommand {
+        name: "/profile delete",
+        section: "Project",
+        description: "delete a profile (cannot delete active profile)",
+        usage: Some("/profile delete <name>"),
+        takes_args: true,
+        requires_idle: false,
+    },
+    SlashCommand {
         name: "/check",
         section: "Project",
         description: "run diagnostics on current project",

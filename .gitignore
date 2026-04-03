@@ -7,6 +7,8 @@ doc/
 .DS_Store
 
 # Editors
+.vscode/
+.idea/
 *.swp
 *.swo
 
@@ -28,3 +30,4 @@ dist/
 build/
 *.tsbuildinfo
 .claude/
+.clido/

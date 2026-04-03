@@ -1201,7 +1201,7 @@ pub(super) fn cmd_profiles(app: &mut App) {
                 }
             }
             app.push(ChatLine::Info(
-                "  /profile → pick & switch  |  /profile new → create  |  /profile edit → edit"
+                "  /profile → pick & switch  |  /profile new  |  /profile edit  |  /profile delete <name>"
                     .into(),
             ));
         }
@@ -1276,6 +1276,44 @@ pub(super) fn cmd_profile_switch(app: &mut App, cmd: &str) {
                 app.restart_resume_session = app.current_session_id.clone();
                 app.wants_profile_switch = Some(name.to_string());
                 app.quit = true;
+            }
+        }
+    }
+}
+
+pub(super) fn cmd_profile_delete(app: &mut App, cmd: &str) {
+    let name = cmd.trim_start_matches("/profile delete").trim();
+    if name.is_empty() {
+        app.push(ChatLine::Info("  Usage: /profile delete <name>".into()));
+        return;
+    }
+    match clido_core::load_config(&app.workspace_root) {
+        Err(e) => app.push(ChatLine::Info(format!("  ✗ Could not load config: {e}"))),
+        Ok(loaded) => {
+            if !loaded.profiles.contains_key(name) {
+                app.push(ChatLine::Info(format!(
+                    "  ✗ Profile '{}' not found. Use /profiles to list.",
+                    name
+                )));
+            } else if name == loaded.default_profile {
+                app.push(ChatLine::Info(format!(
+                    "  ✗ Cannot delete the active profile '{}'. Switch to another profile first.",
+                    name
+                )));
+            } else {
+                let config_path = clido_core::global_config_path()
+                    .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
+                match clido_core::delete_profile_from_config(&config_path, name) {
+                    Ok(()) => {
+                        app.push(ChatLine::Info(format!("  ✓ Profile '{}' deleted.", name)));
+                    }
+                    Err(e) => {
+                        app.push(ChatLine::Info(format!(
+                            "  ✗ Failed to delete profile '{}': {e}",
+                            name
+                        )));
+                    }
+                }
             }
         }
     }
@@ -2099,6 +2137,9 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
         }
         _ if cmd == "/profile edit" || cmd.starts_with("/profile edit ") => {
             cmd_profile_edit(app, cmd)
+        }
+        _ if cmd == "/profile delete" || cmd.starts_with("/profile delete ") => {
+            cmd_profile_delete(app, cmd)
         }
         _ if cmd.starts_with("/profile ") => cmd_profile_switch(app, cmd),
         "/settings" => cmd_config(app),

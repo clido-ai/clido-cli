@@ -627,7 +627,29 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                 st.profile_model_picker = Some(picker);
                                 st.input.clear();
                                 st.input_cursor = 0;
-                                let next_step = if needs_key {
+                                // Check credentials file for an existing key for this provider.
+                                let saved_key = if needs_key {
+                                    crate::setup::read_credential(&st.config_path, id)
+                                } else {
+                                    None
+                                };
+                                let next_step = if let Some(key) = saved_key {
+                                    // Pre-fill the key and skip to model selection.
+                                    st.api_key = key.clone();
+                                    // Trigger model fetch with the saved key.
+                                    spawn_model_fetch(
+                                        st.provider.clone(),
+                                        key,
+                                        if st.base_url.is_empty() {
+                                            None
+                                        } else {
+                                            Some(st.base_url.clone())
+                                        },
+                                        app.channels.fetch_tx.clone(),
+                                    );
+                                    app.models_loading = true;
+                                    ProfileCreateStep::Model
+                                } else if needs_key {
                                     ProfileCreateStep::ApiKey
                                 } else {
                                     st.api_key.clear();
@@ -685,11 +707,15 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                     .clone()
                                     .unwrap_or_else(|| format!("  ✓ Profile '{}' created", name));
                                 app.push(ChatLine::Info(msg));
+                                app.profile_overlay = None;
+                                // Auto-switch to the newly created profile.
                                 app.push(ChatLine::Info(format!(
-                                    "  Use /profile {} to switch to it.",
+                                    "  ↻ Switching to profile '{}'…",
                                     name
                                 )));
-                                app.profile_overlay = None;
+                                app.restart_resume_session = app.current_session_id.clone();
+                                app.wants_profile_switch = Some(name);
+                                app.quit = true;
                             } else {
                                 st.status = Some("  ✗ Select a model from the list".into());
                             }

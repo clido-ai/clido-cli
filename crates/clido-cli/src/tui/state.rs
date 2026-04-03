@@ -623,18 +623,9 @@ impl ProfileOverlayState {
                 self.mode = ProfileOverlayMode::PickingProvider { for_field: field };
             }
             ProfileEditField::Model | ProfileEditField::FastModel => {
-                let current = self.field_value(&field);
-                let provider = match field {
-                    ProfileEditField::FastModel => self.fast_provider.clone(),
-                    _ => self.provider.clone(),
-                };
                 let mut picker = ModelPickerState {
                     models: known_models.to_vec(),
-                    filter: if !provider.is_empty() {
-                        provider
-                    } else {
-                        current
-                    },
+                    filter: String::new(),
                     selected: 0,
                     scroll_offset: 0,
                 };
@@ -738,28 +729,61 @@ impl ProfileOverlayState {
     }
 
     /// Persist the current state to the config file and report result.
+    /// API keys for remote providers are saved to the credentials file
+    /// (matching first-run setup behavior) and omitted from config.toml.
     pub(crate) fn save(&mut self) {
+        use clido_providers::PROVIDER_REGISTRY;
+
+        let is_local = PROVIDER_REGISTRY
+            .iter()
+            .find(|d| d.id == self.provider)
+            .map(|d| d.is_local)
+            .unwrap_or(self.provider == "local");
+
+        let is_fast_local = if self.fast_provider.is_empty() {
+            true
+        } else {
+            PROVIDER_REGISTRY
+                .iter()
+                .find(|d| d.id == self.fast_provider)
+                .map(|d| d.is_local)
+                .unwrap_or(self.fast_provider == "local")
+        };
+
+        // Save remote API keys to the credentials file.
+        if !is_local && !self.api_key.is_empty() {
+            if let Err(e) = crate::setup::upsert_credential(
+                &self.config_path,
+                &self.provider,
+                &self.api_key,
+            ) {
+                self.status = Some(format!("  ✗ Credentials save failed: {e}"));
+                return;
+            }
+        }
+        if !is_fast_local && !self.fast_api_key.is_empty() {
+            if let Err(e) = crate::setup::upsert_credential(
+                &self.config_path,
+                &self.fast_provider,
+                &self.fast_api_key,
+            ) {
+                self.status = Some(format!("  ✗ Credentials save failed: {e}"));
+                return;
+            }
+        }
+
         let base_url = if self.base_url.is_empty() {
             None
         } else {
             Some(self.base_url.clone())
         };
-        let api_key_opt = if self.api_key.is_empty() {
-            None
-        } else {
-            Some(self.api_key.clone())
-        };
-        // Build optional fast provider config.
-        let fast_api_key_opt = if self.fast_api_key.is_empty() {
-            None
-        } else {
-            Some(self.fast_api_key.clone())
-        };
+        // API keys for all providers are stored in the credentials file (remote)
+        // or not needed (local). Never put them in config.toml.
         let fast = if !self.fast_provider.is_empty() && !self.fast_model.is_empty() {
             Some(clido_core::FastProviderConfig {
                 provider: self.fast_provider.clone(),
                 model: self.fast_model.clone(),
-                api_key: fast_api_key_opt,
+                api_key: None,
                 api_key_env: None,
                 base_url: None,
                 user_agent: None,
@@ -770,7 +794,7 @@ impl ProfileOverlayState {
         let entry = clido_core::ProfileEntry {
             provider: self.provider.clone(),
             model: self.model.clone(),
-            api_key: api_key_opt,
+            api_key: None,
             api_key_env: None,
             base_url,
             user_agent: None,

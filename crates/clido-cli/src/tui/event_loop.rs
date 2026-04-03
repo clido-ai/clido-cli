@@ -1130,6 +1130,7 @@ pub(super) fn spawn_model_fetch(
     base_url: Option<String>,
     tx: mpsc::UnboundedSender<AgentEvent>,
 ) {
+    let provider_for_event = provider.clone();
     tokio::spawn(async move {
         let base_url_ref = base_url.as_deref();
         let entries =
@@ -1139,7 +1140,10 @@ pub(super) fn spawn_model_fetch(
             .filter(|m| m.available)
             .map(|m| m.id)
             .collect();
-        let _ = tx.send(AgentEvent::ModelsLoaded(ids));
+        let _ = tx.send(AgentEvent::ModelsLoaded {
+            ids,
+            provider: provider_for_event,
+        });
     });
 }
 
@@ -2221,7 +2225,7 @@ pub(super) async fn event_loop(
                             percent, cost, limit
                         )));
                     }
-                    Some(AgentEvent::ModelsLoaded(ids)) => {
+                    Some(AgentEvent::ModelsLoaded { ids, provider }) => {
                         app.models_loading = false;
                         if !ids.is_empty() {
                             // Merge API-fetched model IDs with existing pricing data.
@@ -2233,7 +2237,7 @@ pub(super) async fn event_loop(
                                 if !existing.contains(id) {
                                     app.known_models.push(ModelEntry {
                                         id: id.clone(),
-                                        provider: app.provider.clone(),
+                                        provider: provider.clone(),
                                         input_mtok: 0.0,
                                         output_mtok: 0.0,
                                         context_k: None,
@@ -2247,6 +2251,14 @@ pub(super) async fn event_loop(
                                 let all: Vec<String> =
                                     app.known_models.iter().map(|m| m.id.clone()).collect();
                                 picker.refresh_models(all);
+                            }
+                            // Also refresh the profile overlay model picker if active.
+                            if let Some(overlay) = &mut app.profile_overlay {
+                                if let Some(picker) = &mut overlay.profile_model_picker {
+                                    let all: Vec<String> =
+                                        app.known_models.iter().map(|m| m.id.clone()).collect();
+                                    picker.refresh_models(all);
+                                }
                             }
                         }
                     }

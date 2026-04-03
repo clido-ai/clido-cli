@@ -19,7 +19,7 @@ clido --version
 # clido 0.1.0
 ```
 
-See the [Installation guide](/guide/installation) for prerequisites and platform notes.
+See the [Installation guide](/docs/guide/installation) for prerequisites and platform notes.
 
 ## 2. Run `clido init`
 
@@ -40,7 +40,7 @@ Welcome to clido!
 ? Enter your ANTHROPIC_API_KEY:
   sk-ant-...
 
-? Default model: (claude-3-5-sonnet-20241022)
+? Default model: (claude-sonnet-4-5)
 
 ✓ Config written to ~/.config/clido/config.toml
 ```
@@ -109,7 +109,7 @@ Type your message and press **Enter** to send. The agent will respond in the cha
 | `/help` | Show all slash commands |
 | `q` | Quit (when agent is idle) |
 
-See the [TUI guide](/guide/tui) for the full reference.
+See the [TUI guide](/docs/guide/tui) for the full reference.
 
 ## 5. Verify your setup with `clido doctor`
 
@@ -121,7 +121,7 @@ clido doctor
 ✓ Binary: clido 0.1.0
 ✓ API key: ANTHROPIC_API_KEY is set
 ✓ Config: ~/.config/clido/config.toml
-✓ Default profile: default → anthropic / claude-3-5-sonnet-20241022
+✓ Default profile: default → anthropic / claude-sonnet-4-5
 ✓ Session dir: ~/.local/share/clido/sessions
 ✓ Bash: /bin/bash
 ✓ All checks passed.
@@ -131,8 +131,8 @@ If anything is red, follow the hint printed next to the failing check.
 
 ## What's next?
 
-- [Running Prompts](/guide/running-prompts) — non-TUI usage, flags, output formats
-- [Sessions](/guide/sessions) — resume and manage past conversations
-- [Configuration](/guide/configuration) — providers, profiles, and all config options
-- [TUI Guide](/guide/tui) — slash commands, key bindings, layout
-- [Workflows](/guide/workflows) — declarative multi-step pipelines
+- [Running Prompts](/docs/guide/running-prompts) — non-TUI usage, flags, output formats
+- [Sessions](/docs/guide/sessions) — resume and manage past conversations
+- [Configuration](/docs/guide/configuration) — providers, profiles, and all config options
+- [TUI Guide](/docs/guide/tui) — slash commands, key bindings, layout
+- [Workflows](/docs/guide/workflows) — declarative multi-step pipelines

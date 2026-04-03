@@ -10,7 +10,7 @@ A session is a newline-delimited JSON (JSONL) file stored in:
 ~/.local/share/clido/sessions/<project-hash>/<session-id>.jsonl
 ```
 
-Each line in the file is a typed record: metadata, user messages, assistant messages, tool calls, tool results, and a final result record. See [Session Format](/developer/session-format) for the complete schema.
+Each line in the file is a typed record: metadata, user messages, assistant messages, tool calls, tool results, and a final result record. See [Session Format](/docs/developer/session-format) for the complete schema.
 
 Sessions are created automatically the first time you run a prompt. There is no explicit "new session" command — just start a new conversation.
 
@@ -165,4 +165,4 @@ jq -r 'select(.type == "assistant_message") | .content[] | select(.type == "text
   ~/.local/share/clido/sessions/*/a1b2c3*.jsonl
 ```
 
-See [Session Format](/developer/session-format) for the complete schema with examples.
+See [Session Format](/docs/developer/session-format) for the complete schema with examples.

@@ -243,4 +243,4 @@ fn is_state_changing(tool_name: &str) -> bool {
 
 ## Registering MCP tools
 
-MCP tools are loaded dynamically at runtime and do not need to be registered in `default_registry`. See [MCP Servers](/guide/mcp) for the user-facing guide and `crates/clido-tools/src/mcp.rs` for the implementation.
+MCP tools are loaded dynamically at runtime and do not need to be registered in `default_registry`. See [MCP Servers](/docs/guide/mcp) for the user-facing guide and `crates/clido-tools/src/mcp.rs` for the implementation.

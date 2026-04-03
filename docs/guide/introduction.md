@@ -78,7 +78,7 @@ $ clido
 
 ## Next steps
 
-- [Install clido](/guide/installation) — build from source and verify your setup
-- [Quick Start](/guide/quick-start) — run your first prompt in five minutes
-- [TUI Guide](/guide/tui) — learn the interactive interface
-- [Configuration](/guide/configuration) — set your provider and model
+- [Install clido](/docs/guide/installation) — build from source and verify your setup
+- [Quick Start](/docs/guide/quick-start) — run your first prompt in five minutes
+- [TUI Guide](/docs/guide/tui) — learn the interactive interface
+- [Configuration](/docs/guide/configuration) — set your provider and model

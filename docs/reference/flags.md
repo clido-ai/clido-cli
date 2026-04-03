@@ -42,7 +42,7 @@ Flags can also be set via environment variables — see the `Env` column.
 Override the model name for this invocation. Does not modify `config.toml`.
 
 ```bash
-clido --model claude-3-haiku-20240307 "quick question"
+clido --model claude-haiku-4-5 "quick question"
 ```
 
 ### `--provider`
@@ -95,7 +95,7 @@ Controls how the agent handles state-changing tool calls:
 
 ### `--output-format`
 
-Controls the output format. See [Output Formats](/reference/output-formats).
+Controls the output format. See [Output Formats](/docs/reference/output-formats).
 
 ### `--quiet` / `-q`
 
@@ -115,7 +115,7 @@ Resume a session by its ID (or a unique prefix). Combined with `--resume-ignore-
 
 ### `--mcp-config`
 
-Path to a JSON file describing MCP servers to start. See [MCP Servers](/guide/mcp).
+Path to a JSON file describing MCP servers to start. See [MCP Servers](/docs/guide/mcp).
 
 ### `--sandbox`
 
@@ -123,7 +123,7 @@ Enable sandboxed Bash execution. Uses `sandbox-exec` on macOS and `bwrap` on Lin
 
 ### `--plan` / `--planner`
 
-Enable interactive plan mode. clido calls the LLM once to generate a structured task graph (DAG), then opens a full-screen plan editor in the TUI before executing anything. See [Plan Mode](/guide/planner).
+Enable interactive plan mode. clido calls the LLM once to generate a structured task graph (DAG), then opens a full-screen plan editor in the TUI before executing anything. See [Plan Mode](/docs/guide/planner).
 
 ```bash
 clido --plan "migrate all deprecated API calls to v2"

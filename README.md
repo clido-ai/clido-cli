@@ -32,9 +32,9 @@ cargo install --path crates/clido-cli --locked
 
 On first launch, clido will run an interactive wizard (`clido init`) that:
 
-1. Prompts for your preferred provider (anthropic, openrouter, openai, mistral, minimax, alibabacloud, local)
+1. Prompts for your preferred provider (all supported providers — see below)
 2. Asks for your API key or base URL
-3. Writes `~/.config/clido/config.toml`
+3. Writes `~/.config/clido/config.toml` and a separate credentials file
 
 You can also run `clido init` at any time to reconfigure.
 
@@ -47,11 +47,11 @@ default_profile = "default"
 
 [profiles.default]
 provider = "anthropic"
-model = "claude-3-5-sonnet-20241022"
+model = "claude-sonnet-4-5"
 
 [profiles.fast]
 provider = "anthropic"
-model = "claude-3-5-haiku-20241022"
+model = "claude-haiku-4-5"
 
 [profiles.local]
 provider = "local"
@@ -63,21 +63,27 @@ Switch profiles with `--profile fast` or `CLIDO_PROFILE=fast`.
 
 ### Profile structure
 
-Each profile defines a provider, model, and optional credentials:
+Each profile defines a provider, model, and optional credentials. The setup wizard and `clido profile create` store API keys in a separate `credentials` file alongside `config.toml` (with chmod 600 permissions), keeping secrets out of the main config.
 
 ```toml
 [profiles.myprofile]
 provider = "anthropic"        # required — see Supported Providers below
 model = "claude-sonnet-4-5"   # required — model identifier
-api_key = "sk-..."            # optional — inline key (env var preferred)
 api_key_env = "MY_KEY"        # optional — name of env var holding the key
 base_url = "https://..."      # optional — override API endpoint
+# api_key = "sk-..."          # legacy fallback — prefer env var or credentials file
 
 # Optional fast/cheap provider for utility tasks (titles, summaries, etc.)
 [profiles.myprofile.fast]
 provider = "openai"
 model = "gpt-4o-mini"
 ```
+
+**API key resolution order:**
+
+1. Environment variable (e.g. `ANTHROPIC_API_KEY`)
+2. Credentials file (`~/.config/clido/credentials`, created automatically during setup)
+3. Inline `api_key` in config.toml (legacy, backward-compatible)
 
 **Managing profiles:**
 
@@ -98,8 +104,19 @@ In the TUI, press **Ctrl+P** to open the profile picker or use `/profile` slash 
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `OPENAI_API_KEY` | OpenAI / OpenRouter API key |
 | `OPENROUTER_API_KEY` | OpenRouter API key |
+| `GEMINI_API_KEY` | Google Gemini API key |
+| `DEEPSEEK_API_KEY` | DeepSeek API key |
+| `MISTRAL_API_KEY` | Mistral API key |
+| `XAI_API_KEY` | xAI (Grok) API key |
+| `GROQ_API_KEY` | Groq API key |
+| `TOGETHER_API_KEY` | Together AI API key |
+| `FIREWORKS_API_KEY` | Fireworks AI API key |
+| `CEREBRAS_API_KEY` | Cerebras API key |
+| `PERPLEXITY_API_KEY` | Perplexity API key |
 | `DASHSCOPE_API_KEY` | Alibaba Cloud (DashScope / Qwen) API key |
 | `MINIMAX_API_KEY` | MiniMax API key |
+| `MOONSHOT_API_KEY` | Kimi (Moonshot) API key |
+| `KIMI_CODE_API_KEY` | Kimi Code API key |
 | `CLIDO_PROFILE` | Active profile name |
 | `CLIDO_MODEL` | Model override |
 | `CLIDO_PROVIDER` | Provider override |
@@ -234,6 +251,7 @@ clido <SUBCOMMAND>
 
 Run `clido` (no arguments, at a TTY) to launch the full-screen interactive TUI. The TUI shows:
 - A scrollable conversation panel with assistant responses, tool calls, and diffs.
+- Side-by-side diff view when the terminal is wide enough (≥120 columns); falls back to inline unified diff on narrower terminals.
 - A header strip with provider, model, session ID, cost, and context window usage (% filled).
 - A status strip with live tool activity.
 - A hint bar with key bindings.
@@ -488,7 +506,7 @@ See [Building](docs/developer/building.md) for build/test commands and [Contribu
 
 ## Status
 
-**V1+ implementation:** Core agent loop, six tools, config with profiles, sessions with resume and stale-file detection, context compaction, permission modes, `clido doctor` and `clido init`, interactive TUI (`clido` with no args at a TTY), first-run setup, memory, repo index, declarative workflows, audit log, stats, shell completions, man page, list-models, planner (experimental), MCP support, agent profiles (create/switch/edit/delete with optional fast provider), checkpoints and rollback, and multi-provider support including Anthropic, OpenAI, OpenRouter, Mistral, MiniMax, Alibaba Cloud, and local (Ollama). Build and test: see **Build** above.
+**V1+ implementation:** Core agent loop, six tools, config with profiles, sessions with resume and stale-file detection, context compaction, permission modes, `clido doctor` and `clido init`, interactive TUI (`clido` with no args at a TTY), first-run setup, memory, repo index, declarative workflows, audit log, stats, shell completions, man page, list-models, planner (experimental), MCP support, agent profiles (create/switch/edit/delete with optional fast provider), checkpoints and rollback, unified credential storage, side-by-side diff viewer, and multi-provider support including Anthropic, OpenAI, OpenRouter, Mistral, MiniMax, Alibaba Cloud, and local (Ollama). Build and test: see **Build** above.
 
 ## Documentation
 

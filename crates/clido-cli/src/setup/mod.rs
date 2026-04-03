@@ -28,6 +28,8 @@ use clido_providers::registry::PROVIDER_REGISTRY;
 pub use types::SetupPreFill;
 use types::{build_saved_key_catalog, SetupOutcome};
 
+pub(crate) use config::upsert_credential;
+
 use config::{
     build_full_config_toml, collect_credentials_from_state, credentials_path,
     state_to_profile_entry, write_credentials_file,
@@ -328,12 +330,25 @@ pub async fn run_create_profile(initial_name: Option<String>) -> Result<(), anyh
         state.profile_name.clone()
     };
 
-    let entry = state_to_profile_entry(&state);
+    let mut entry = state_to_profile_entry(&state);
 
     let parent = config_path
         .parent()
         .ok_or_else(|| CliError::Usage("Invalid config path.".into()))?;
     std::fs::create_dir_all(parent)?;
+
+    // Save API key(s) to the credentials file (same as first-run setup),
+    // then strip them from the ProfileEntry so config.toml stays clean.
+    let credentials = collect_credentials_from_state(&state);
+    for (provider_id, api_key) in &credentials {
+        let _ = config::upsert_credential(&config_path, provider_id, api_key);
+    }
+    if !credentials.is_empty() {
+        entry.api_key = None;
+        if let Some(ref mut fast) = entry.fast {
+            fast.api_key = None;
+        }
+    }
 
     clido_core::upsert_profile_in_config(&config_path, &pname, &entry)
         .map_err(|e| CliError::Config(e.to_string()))?;
@@ -408,7 +423,20 @@ pub async fn run_edit_profile(
         ));
     };
 
-    let updated_entry = state_to_profile_entry(&state);
+    let mut updated_entry = state_to_profile_entry(&state);
+
+    // Save API key(s) to the credentials file (same as first-run setup),
+    // then strip them from the ProfileEntry so config.toml stays clean.
+    let credentials = collect_credentials_from_state(&state);
+    for (provider_id, api_key) in &credentials {
+        let _ = config::upsert_credential(&config_path, provider_id, api_key);
+    }
+    if !credentials.is_empty() {
+        updated_entry.api_key = None;
+        if let Some(ref mut fast) = updated_entry.fast {
+            fast.api_key = None;
+        }
+    }
 
     clido_core::upsert_profile_in_config(&config_path, &name, &updated_entry)
         .map_err(|e| CliError::Config(e.to_string()))?;

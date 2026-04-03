@@ -105,6 +105,6 @@ Each element is a task node:
 
 ## See also
 
-- [Plan Mode guide](/guide/planner) — interactive editor, flags, and slash commands
-- [Key Bindings](/reference/key-bindings#plan-editor) — plan editor keyboard shortcuts
-- [Flags](/reference/flags#--plan--planner) — `--plan`, `--plan-dry-run`, `--plan-no-edit`
+- [Plan Mode guide](/docs/guide/planner) — interactive editor, flags, and slash commands
+- [Key Bindings](/docs/reference/key-bindings#plan-editor) — plan editor keyboard shortcuts
+- [Flags](/docs/reference/flags#--plan--planner) — `--plan`, `--plan-dry-run`, `--plan-no-edit`

@@ -87,7 +87,7 @@ clido --output-format stream-json "count lines in main.rs"
 {"type":"result","exit_status":"success","total_cost_usd":0.0009,"num_turns":1,"duration_ms":2100}
 ```
 
-See [Output Formats](/reference/output-formats) for the full schema of each format.
+See [Output Formats](/docs/reference/output-formats) for the full schema of each format.
 
 ## Quiet mode
 
@@ -157,7 +157,7 @@ clido --permission-mode plan "review this codebase and suggest improvements"
 
 ```bash
 # Use a specific model for this invocation
-clido --model claude-3-haiku-20240307 "quick question: what is 17 * 23?"
+clido --model claude-haiku-4-5 "quick question: what is 17 * 23?"
 
 # Use a different provider
 clido --provider openrouter --model anthropic/claude-3-5-sonnet "refactor this"
@@ -209,4 +209,4 @@ fi
 | `--continue` | Resume newest session |
 | `--resume ID` | Resume session by ID prefix |
 
-See [All Flags](/reference/flags) for the complete reference.
+See [All Flags](/docs/reference/flags) for the complete reference.

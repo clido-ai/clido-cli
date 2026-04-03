@@ -131,7 +131,7 @@ clido config show
 Update a key in the global config file.
 
 ```bash
-clido config set model claude-3-haiku-20240307
+clido config set model claude-haiku-4-5
 clido config set provider openrouter
 clido config set api-key sk-ant-...
 ```
@@ -216,7 +216,7 @@ clido audit --json
 | `--since <date>` | Filter by start date (ISO 8601) |
 | `--json` | Output as newline-delimited JSON |
 
-See [Audit Log](/guide/audit) for full documentation.
+See [Audit Log](/docs/guide/audit) for full documentation.
 
 ---
 

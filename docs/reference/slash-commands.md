@@ -179,4 +179,4 @@ Models are ordered: favorites (alphabetical) → recently used → rest (alphabe
 
 ## Difference from CLI commands
 
-TUI slash commands are distinct from CLI subcommands. For example, `/sessions` in the TUI opens the picker, while `clido sessions list` on the command line prints a table. See [CLI Reference](/reference/cli) for the full list of CLI commands.
+TUI slash commands are distinct from CLI subcommands. For example, `/sessions` in the TUI opens the picker, while `clido sessions list` on the command line prints a table. See [CLI Reference](/docs/reference/cli) for the full list of CLI commands.

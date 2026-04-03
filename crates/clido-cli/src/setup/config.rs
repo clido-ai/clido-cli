@@ -114,7 +114,7 @@ fn build_toml_impl(s: &SetupState, profile_name: Option<&str>) -> String {
 // ── Credentials file helpers ──────────────────────────────────────────────────
 
 /// Path to the credentials file alongside the given config file.
-pub(super) fn credentials_path(config_path: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn credentials_path(config_path: &std::path::Path) -> std::path::PathBuf {
     config_path
         .parent()
         .unwrap_or(config_path)
@@ -148,6 +148,43 @@ pub(super) fn write_credentials_file(
         let _ = std::fs::set_permissions(path, perms);
     }
     Ok(())
+}
+
+/// Add or update a single credential in the credentials file, preserving
+/// existing entries for other providers. Used by TUI profile creation and
+/// CLI `profile new` to match the first-run setup behavior.
+pub(crate) fn upsert_credential(
+    config_path: &std::path::Path,
+    provider_id: &str,
+    api_key: &str,
+) -> std::io::Result<()> {
+    if api_key.is_empty() {
+        return Ok(());
+    }
+    let creds_path = credentials_path(config_path);
+
+    // Read existing credentials (if any) and merge.
+    let mut existing: Vec<(String, String)> = Vec::new();
+    if creds_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&creds_path) {
+            if let Ok(table) = toml::from_str::<toml::Value>(&content) {
+                if let Some(keys) = table.get("keys").and_then(|v| v.as_table()) {
+                    for (k, v) in keys {
+                        if let Some(s) = v.as_str() {
+                            if k != provider_id {
+                                existing.push((k.clone(), s.to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Append the new/updated key.
+    existing.push((provider_id.to_string(), api_key.to_string()));
+
+    write_credentials_file(&creds_path, &existing)
 }
 
 /// Collect all non-empty, non-local API key credentials from a setup state.

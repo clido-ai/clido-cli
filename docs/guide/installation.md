@@ -57,7 +57,7 @@ clido doctor
 ✓ All checks passed.
 ```
 
-If any check fails, `doctor` will explain what to do. See the [First Run](/guide/first-run) guide for full setup details.
+If any check fails, `doctor` will explain what to do. See the [First Run](/docs/guide/first-run) guide for full setup details.
 
 ## Platform notes
 
@@ -117,6 +117,6 @@ cargo install --path crates/clido-cli --force
 
 ## Next steps
 
-- [Quick Start](/guide/quick-start) — run your first prompt
-- [First Run](/guide/first-run) — configure a provider and API key
-- [Configuration](/guide/configuration) — full config reference
+- [Quick Start](/docs/guide/quick-start) — run your first prompt
+- [First Run](/docs/guide/first-run) — configure a provider and API key
+- [Configuration](/docs/guide/configuration) — full config reference

@@ -1,3 +1,4 @@
+mod diff;
 mod plan;
 mod profile;
 mod welcome;
@@ -1721,79 +1722,7 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 }
             }
             ChatLine::Diff(text) => {
-                let mut old_lineno: u32 = 0;
-                let mut new_lineno: u32 = 0;
-                for line in text.lines() {
-                    if line.starts_with("@@") {
-                        if let Some((o, n)) = parse_hunk_header(line) {
-                            old_lineno = o;
-                            new_lineno = n;
-                        }
-                        out.push(Line::from(vec![Span::styled(
-                            format!("  {}", line),
-                            Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
-                        )]));
-                    } else if line.starts_with("---") || line.starts_with("+++") {
-                        out.push(Line::from(vec![Span::styled(
-                            format!("  {}", line),
-                            Style::default()
-                                .fg(Color::DarkGray)
-                                .add_modifier(Modifier::DIM),
-                        )]));
-                    } else if line.starts_with('+') {
-                        let lineno = new_lineno;
-                        new_lineno += 1;
-                        out.push(Line::from(vec![
-                            Span::styled(
-                                format!("  {:>4} ", lineno),
-                                Style::default()
-                                    .fg(Color::DarkGray)
-                                    .add_modifier(Modifier::DIM),
-                            ),
-                            Span::styled(
-                                line.to_string(),
-                                Style::default()
-                                    .fg(Color::Green)
-                                    .add_modifier(Modifier::DIM),
-                            ),
-                        ]));
-                    } else if line.starts_with('-') {
-                        let lineno = old_lineno;
-                        old_lineno += 1;
-                        out.push(Line::from(vec![
-                            Span::styled(
-                                format!("  {:>4} ", lineno),
-                                Style::default()
-                                    .fg(Color::DarkGray)
-                                    .add_modifier(Modifier::DIM),
-                            ),
-                            Span::styled(
-                                line.to_string(),
-                                Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
-                            ),
-                        ]));
-                    } else {
-                        // context line — belongs to both
-                        let lineno = new_lineno;
-                        old_lineno += 1;
-                        new_lineno += 1;
-                        out.push(Line::from(vec![
-                            Span::styled(
-                                format!("  {:>4} ", lineno),
-                                Style::default()
-                                    .fg(Color::DarkGray)
-                                    .add_modifier(Modifier::DIM),
-                            ),
-                            Span::styled(
-                                line.to_string(),
-                                Style::default()
-                                    .fg(Color::DarkGray)
-                                    .add_modifier(Modifier::DIM),
-                            ),
-                        ]));
-                    }
-                }
-                out.push(Line::raw(""));
+                out.extend(diff::render_diff(text, width));
             }
             ChatLine::Info(text) => {
                 out.push(Line::from(vec![Span::styled(

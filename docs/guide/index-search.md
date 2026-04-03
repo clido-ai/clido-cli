@@ -128,7 +128,7 @@ The agent uses these results to navigate to the right files rather than reading 
 | C / C++ | `.c`, `.cpp`, `.h` | Functions, structs, typedefs |
 | Markdown | `.md` | Headings (as navigation symbols) |
 
-Additional languages can be added — see [Adding Tools](/developer/adding-tools) for extension points.
+Additional languages can be added — see [Adding Tools](/docs/developer/adding-tools) for extension points.
 
 ## Ignore file support
 

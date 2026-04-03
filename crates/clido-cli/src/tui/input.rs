@@ -619,7 +619,7 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                 let models = app.known_models.clone();
                                 let mut picker = ModelPickerState {
                                     models,
-                                    filter: id.to_string(),
+                                    filter: String::new(),
                                     selected: 0,
                                     scroll_offset: 0,
                                 };

@@ -2,7 +2,7 @@
 
 Full reference for all configuration keys in `config.toml`.
 
-See [Configuration guide](/guide/configuration) for a conceptual overview and instructions on changing config values.
+See [Configuration guide](/docs/guide/configuration) for a conceptual overview and instructions on changing config values.
 
 ## File location
 
@@ -12,6 +12,29 @@ See [Configuration guide](/guide/configuration) for a conceptual overview and in
 | macOS | `~/Library/Application Support/clido/config.toml` or `~/.config/clido/config.toml` |
 
 Override with `CLIDO_CONFIG` environment variable. Project-level config at `.clido/config.toml` is merged on top.
+
+## Credentials file
+
+API keys are stored separately from `config.toml` in a `credentials` file in the same directory:
+
+| Platform | Default path |
+|----------|-------------|
+| Linux | `~/.config/clido/credentials` |
+| macOS | `~/Library/Application Support/clido/credentials` or `~/.config/clido/credentials` |
+
+The credentials file uses TOML format:
+
+```toml
+[keys]
+anthropic = "sk-ant-..."
+openrouter = "sk-or-..."
+```
+
+This file is created automatically during setup with chmod 600 permissions. API keys are resolved in this order:
+
+1. Environment variable (e.g. `ANTHROPIC_API_KEY`)
+2. Credentials file (`credentials` alongside config.toml)
+3. Inline `api_key` in config.toml (legacy, not recommended)
 
 ## Complete annotated example
 
@@ -32,17 +55,17 @@ default_profile = "default"
 
 [profile.default]
 # Provider name. Required.
-# Valid values: "anthropic", "openai", "openrouter", "minimax", "alibabacloud", "local"
+# Valid values: "anthropic", "openai", "openrouter", "gemini", "deepseek", "mistral", "xai", "groq", "togetherai", "fireworks", "cerebras", "perplexity", "minimax", "alibabacloud", "kimi", "kimi-code", "local"
 provider = "anthropic"
 
 # Model name as recognised by the provider. Required.
-model = "claude-3-5-sonnet-20241022"
+model = "claude-sonnet-4-5"
 
 # Name of the environment variable holding the API key. Recommended.
 # If both api_key and api_key_env are set, api_key takes precedence.
 api_key_env = "ANTHROPIC_API_KEY"
 
-# API key stored directly in the config file. Not recommended for shared machines.
+# Legacy fallback. The setup wizard stores keys in the credentials file instead.
 # api_key = "sk-ant-..."
 
 # Custom base URL (for local models, Azure, or self-hosted endpoints).
@@ -51,7 +74,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 
 [profile.fast]
 provider    = "anthropic"
-model       = "claude-3-haiku-20240307"
+model       = "claude-haiku-4-5"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [profile.openrouter]
@@ -178,9 +201,9 @@ post_tool_use = ""
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `provider` | string | Yes | Provider: `anthropic`, `openai`, `openrouter`, `minimax`, `alibabacloud`, `local` |
+| `provider` | string | Yes | Provider: `anthropic`, `openai`, `openrouter`, `gemini`, `deepseek`, `mistral`, `xai`, `groq`, `togetherai`, `fireworks`, `cerebras`, `perplexity`, `minimax`, `alibabacloud`, `kimi`, `kimi-code`, `local` |
 | `model` | string | Yes | Model name |
-| `api_key` | string | No | API key (stored in plain text) |
+| `api_key` | string | No | Legacy fallback. The setup wizard stores keys in the credentials file instead. |
 | `api_key_env` | string | No | Environment variable name for API key |
 | `base_url` | string | No | Custom endpoint URL |
 
@@ -192,7 +215,7 @@ Optional fast/cheap provider for utility tasks (title generation, summaries, com
 |-----|------|----------|-------------|
 | `provider` | string | Yes | Provider identifier |
 | `model` | string | Yes | Model name |
-| `api_key` | string | No | API key (stored in plain text) |
+| `api_key` | string | No | Legacy fallback. The setup wizard stores keys in the credentials file instead. |
 | `api_key_env` | string | No | Environment variable name for API key |
 | `base_url` | string | No | Custom endpoint URL |
 
@@ -268,4 +291,4 @@ Values are resolved in this order (later values override earlier ones):
 4. Environment variables
 5. Command-line flags
 
-See [Environment Variables](/reference/env-vars) for the full variable list.
+See [Environment Variables](/docs/reference/env-vars) for the full variable list.

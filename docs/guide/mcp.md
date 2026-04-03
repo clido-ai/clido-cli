@@ -25,7 +25,7 @@ You can also set a default MCP config in your profile (editing `config.toml` dir
 ```toml
 [profile.default]
 provider    = "anthropic"
-model       = "claude-3-5-sonnet-20241022"
+model       = "claude-sonnet-4-5"
 api_key_env = "ANTHROPIC_API_KEY"
 # mcp_config = ".clido/mcp.json"   # planned for a future version
 ```

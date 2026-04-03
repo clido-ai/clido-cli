@@ -18,7 +18,7 @@ Planned capabilities include: core agent loop with tools, sessions, context and 
 ## Installation
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/clido-ai/clido-cli/master/scripts/install.sh | sh
+curl -fsSL https://clido.ai/install.sh | sh
 ```
 
 Or build from source (requires [Rust 1.94+](https://rustup.rs)):

@@ -2,7 +2,7 @@
 # Clido installer — https://github.com/clido-ai/clido-cli
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/clido-ai/clido-cli/master/scripts/install.sh | sh
+#   curl -fsSL https://clido.ai/install.sh | sh
 #
 # Options (via env vars):
 #   CLIDO_VERSION   Install a specific version (e.g. "v0.1.0"). Default: latest.

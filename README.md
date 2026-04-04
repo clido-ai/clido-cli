@@ -280,8 +280,8 @@ Type `/` in the input bar to see completions. Commands are grouped by category:
 |---|---|
 | `/model [name]` | Show or switch the active model |
 | `/models` | Open interactive model picker (search, filter, favorites, pricing) |
-| `/fast` | Switch to fast (cheap) model (respects `[roles] fast` in config) |
-| `/smart` | Switch to smart (powerful) model (respects `[roles] reasoning` in config) |
+| `/fast` | Switch to fast (cheap) model — uses `[roles].fast` in model_prefs.json, falls back to Claude Haiku |
+| `/smart` | Switch to smart (powerful) model — uses `[roles].reasoning` in model_prefs.json, falls back to Claude Opus |
 | `/fav` | Toggle the current model as a favorite |
 | `/reviewer [on\|off]` | Show or toggle reviewer sub-agent |
 

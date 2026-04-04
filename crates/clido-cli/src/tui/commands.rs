@@ -197,7 +197,13 @@ pub(super) fn cmd_keys(app: &mut App) {
 }
 
 pub(super) fn cmd_fast(app: &mut App) {
-    let new_model = "claude-haiku-4-5-20251001".to_string();
+    let new_model = app
+        .model_prefs
+        .roles
+        .get("fast")
+        .map(|s| s.as_str())
+        .unwrap_or("claude-haiku-4-5-20251001")
+        .to_string();
     app.model = new_model.clone();
     let _ = app.channels.model_switch_tx.send(new_model.clone());
     app.model_prefs.push_recent(&new_model);
@@ -206,7 +212,14 @@ pub(super) fn cmd_fast(app: &mut App) {
 }
 
 pub(super) fn cmd_smart(app: &mut App) {
-    let new_model = "claude-opus-4-6".to_string();
+    let new_model = app
+        .model_prefs
+        .roles
+        .get("smart")
+        .map(|s| s.as_str())
+        .or_else(|| app.model_prefs.roles.get("reasoning").map(|s| s.as_str()))
+        .unwrap_or("claude-opus-4-6")
+        .to_string();
     app.model = new_model.clone();
     let _ = app.channels.model_switch_tx.send(new_model.clone());
     app.model_prefs.push_recent(&new_model);

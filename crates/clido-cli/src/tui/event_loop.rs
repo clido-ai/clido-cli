@@ -555,6 +555,7 @@ pub(super) async fn agent_task(
                 }
             }
             AgentAction::Run(prompt) => {
+                let run_start = std::time::Instant::now();
                 cancel.store(false, std::sync::atomic::Ordering::Relaxed);
 
                 // When --planner is active and this is the first turn, attempt to parse
@@ -916,7 +917,7 @@ pub(super) async fn agent_task(
                     exit_status: session_exit.to_string(),
                     total_cost_usd: agent.cumulative_cost_usd,
                     num_turns: agent.turn_count(),
-                    duration_ms: 0,
+                    duration_ms: run_start.elapsed().as_millis() as u64,
                 });
             }
             AgentAction::Resume(resume_session_id) => {

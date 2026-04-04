@@ -68,10 +68,29 @@ use clido_agent::{AskUser, PermGrant as AgentPermGrant, PermRequest as AgentPerm
 
 pub(super) const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-/// Truecolor accent for borders and highlights — avoids saturated ANSI blue.
+/// Truecolor palette — unique to clido, not copied from opencode or anyone else.
+/// Warm-cold gradient: user = warm, assistant = cool, tools = neutral, status = ambient.
 pub(super) const TUI_SOFT_ACCENT: Color = Color::Rgb(150, 200, 255);
+pub(super) const TUI_ACCENT: Color = Color::Green;
 /// Selected row background in pickers and completion lists (muted slate).
 pub(super) const TUI_SELECTION_BG: Color = Color::Rgb(52, 62, 78);
+
+/// Code block: near-black interior, subtle blue-gray border.
+pub(super) const TUI_CODE_BG: Color = Color::Rgb(20, 20, 26);
+pub(super) const TUI_CODE_BORDER: Color = Color::Rgb(50, 50, 65);
+pub(super) const TUI_CODE_LANG: Color = Color::Rgb(180, 140, 220); // soft purple for lang label
+
+/// Diff: deeper, more readable backgrounds that don't wash out text.
+pub(super) const TUI_DIFF_ADD_BG: Color = Color::Rgb(16, 36, 18);
+pub(super) const TUI_DIFF_DEL_BG: Color = Color::Rgb(42, 16, 16);
+pub(super) const TUI_DIFF_ADD_FG: Color = Color::Rgb(150, 220, 150);
+pub(super) const TUI_DIFF_DEL_FG: Color = Color::Rgb(220, 150, 150);
+pub(super) const TUI_DIFF_HEADER: Color = Color::Rgb(130, 170, 200);
+
+/// Blockquote accent bar.
+/// Blockquote accent bar — reserved for future use.
+#[allow(dead_code)]
+pub(super) const TUI_QUOTE_ACCENT: Color = Color::Rgb(100, 110, 135);
 
 /// Slash commands grouped by section — now delegates to command_registry.
 pub(super) fn slash_command_sections() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
@@ -1384,6 +1403,7 @@ mod tests {
         let mut app = make_test_app();
         app.profile_overlay = Some(ProfileOverlayState::for_create(
             std::env::temp_dir().join("test-config.toml"),
+            &Default::default(),
         ));
         // Switch to overview mode so we hit render_profile_overview path
         if let Some(ref mut st) = app.profile_overlay {

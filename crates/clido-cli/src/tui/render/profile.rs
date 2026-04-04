@@ -495,10 +495,6 @@ pub(crate) fn render_profile_create(
         let env_hint = if !st.provider.is_empty() {
             let env_var = crate::provider::default_api_key_env(&st.provider);
             format!(
-                "  tip  →  set {}={env_var} to skip this step next time",
-                "ANTHROPIC_API_KEY" // simplified example
-            );
-            format!(
                 "  tip  →  set {} to auto-detect {} on next start",
                 env_var, st.provider
             )

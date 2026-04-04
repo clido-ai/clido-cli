@@ -53,7 +53,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         .fg(Color::DarkGray)
         .add_modifier(Modifier::DIM);
 
-    // Line 1: brand · version · provider/model · profile · reviewer
+    // Line 1: brand · version  |  provider/model  |  profile  |  session title
     let mut hline1: Vec<Span<'static>> = vec![
         Span::styled(
             "cli",
@@ -73,48 +73,54 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 .fg(Color::Rgb(210, 220, 240))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            format!("  v{}  ", version),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(
-            if app.per_turn_prev_model.is_some() {
-                format!("{}  {}⁺", app.provider, app.model)
-            } else {
-                format!("{}  {}", app.provider, app.model)
-            },
-            dim,
-        ),
-        Span::styled(format!("  [{}]", app.current_profile), dim),
     ];
-    // Show session ID (shortened) if available
+    hline1.push(Span::raw(" "));
+    hline1.push(Span::styled(format!("v{}", version), dim));
+
+    if !app.provider.is_empty() || !app.model.is_empty() {
+        let model_str = if app.per_turn_prev_model.is_some() {
+            format!("{}  {}⁺", app.provider, app.model)
+        } else {
+            format!("{}  {}", app.provider, app.model)
+        };
+        hline1.push(Span::styled("  │ ", Style::default().fg(Color::Rgb(60, 60, 75))));
+        hline1.push(Span::styled(model_str, dim));
+    }
+    hline1.push(Span::styled("  │ ", Style::default().fg(Color::Rgb(60, 60, 75))));
+    hline1.push(Span::styled(
+        app.current_profile.clone(),
+        Style::default()
+            .fg(TUI_SOFT_ACCENT)
+            .add_modifier(Modifier::BOLD),
+    ));
+    // Session info compact: id + title in one span
     if let Some(ref session_id) = app.current_session_id {
-        let short_id = &session_id[..session_id.len().min(8)];
+        let short_id = session_id[..session_id.len().min(8)].to_string();
         hline1.push(Span::styled(
-            format!("  #{} ", short_id),
+            format!("  #{}", short_id),
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
         ));
     }
     if let Some(ref title) = app.session_title {
+        let title_str = title.clone();
         hline1.push(Span::styled(
-            format!("  — {}", title),
+            format!("  — {}", title_str),
             Style::default()
                 .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC),
+                .add_modifier(Modifier::DIM),
         ));
     }
     if app.reviewer_configured {
-        let (dot, color) = if app.reviewer_enabled.load(Ordering::Relaxed) {
+        let reviewer_on = app.reviewer_enabled.load(Ordering::Relaxed);
+        let (dot, color) = if reviewer_on {
             ("●", Color::Green)
         } else {
             ("○", Color::DarkGray)
         };
-        hline1.push(Span::styled(
-            format!("  reviewer {}", dot),
-            Style::default().fg(color).add_modifier(Modifier::DIM),
-        ));
+        hline1.push(Span::styled("  │ ", Style::default().fg(Color::Rgb(60, 60, 75))));
+        hline1.push(Span::styled(format!("r {}", dot), Style::default().fg(color).add_modifier(Modifier::DIM)));
     }
 
     // Line 2: dir · cost/tokens
@@ -285,41 +291,43 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let spinner = SPINNER[app.spinner_tick];
         let mut slines: Vec<Line<'static>> = Vec::new();
         for entry in &app.status_log {
-            let (icon, style, elapsed_str) = if entry.done {
+            if entry.done {
                 let ms = entry.elapsed_ms.unwrap_or(0);
-                let t = format!(" {}ms", ms);
-                if entry.is_error {
-                    (
-                        "✗",
-                        Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
-                        t,
-                    )
+                let t = if ms < 1000 {
+                    format!("{}ms", ms)
                 } else {
-                    ("✓", status_style, t)
-                }
+                    format!("{:.1}s", ms as f64 / 1000.0)
+                };
+                let (icon, style) = if entry.is_error {
+                    ("✗", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                } else {
+                    ("✓", status_style)
+                };
+                slines.push(Line::from(vec![
+                    Span::styled(format!(" {} ", icon), style),
+                    Span::styled(tool_display_name(&entry.name).to_string(), style),
+                    Span::styled(format!(" {}", entry.detail), status_style),
+                    Span::styled(format!("  {}", t), status_style),
+                ]));
             } else {
                 let elapsed = entry.start.elapsed();
                 let secs = elapsed.as_secs_f64();
                 let t = if secs < 1.0 {
-                    format!(" {:.0}ms", elapsed.as_millis())
+                    format!("{}ms", elapsed.as_millis())
                 } else {
-                    format!(" {:.1}s", secs)
+                    format!("{:.1}s", secs)
                 };
-                let running_color = tool_color(&entry.name, false, false);
-                (
-                    spinner,
-                    Style::default()
-                        .fg(running_color)
-                        .add_modifier(Modifier::DIM),
-                    t,
-                )
-            };
-            slines.push(Line::from(vec![
-                Span::styled(format!("  {} ", icon), style),
-                Span::styled(tool_display_name(&entry.name).to_string(), style),
-                Span::styled(format!("  {}", entry.detail), status_style),
-                Span::styled(elapsed_str, status_style),
-            ]));
+                // Running state: single consistent amber color for all tools
+                let running_style = Style::default()
+                    .fg(Color::Rgb(200, 170, 80))
+                    .add_modifier(Modifier::DIM);
+                slines.push(Line::from(vec![
+                    Span::styled(format!(" {} ", spinner), running_style),
+                    Span::styled(tool_display_name(&entry.name).to_string(), running_style),
+                    Span::styled(format!(" {}", entry.detail), status_style),
+                    Span::styled(format!("  {}", t), status_style),
+                ]));
+            }
         }
         while slines.len() < 2 {
             slines.push(Line::raw(""));
@@ -355,20 +363,21 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         if has_queue {
             if has_thinking {
                 // Agent is active — compact divider before queued items
+                queue_lines.push(Line::raw(""));
                 queue_lines.push(Line::from(Span::styled(
-                    "  ── queued ──",
+                    "    queued:",
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
                 )));
             } else {
-                // Agent is idle — full header with count
-                queue_lines.push(Line::from(vec![Span::styled(
-                    format!("  ↻ {} queued", app.queued.len()),
+                // Agent is idle — header with count
+                queue_lines.push(Line::from(Span::styled(
+                    format!("    {} queued", app.queued.len()),
                     Style::default()
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::DIM),
-                )]));
+                )));
             }
 
             // Each queued item on its own line
@@ -385,25 +394,24 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 } else {
                     first_line.to_string()
                 };
-                let has_more = item.lines().count() > 1;
-                let suffix = if has_more { "…" } else { "" };
+                let _has_more = item.lines().count() > 1;
 
-                queue_lines.push(Line::from(vec![Span::styled(
-                    format!("    {}. \"{}{}\"", idx + 1, truncated, suffix),
+                queue_lines.push(Line::from(Span::styled(
+                    format!("      {}. {}", idx + 1, truncated),
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
-                )]));
+                )));
             }
 
             let more_count = app.queued.len().saturating_sub(max_items);
             if more_count > 0 {
-                queue_lines.push(Line::from(vec![Span::styled(
+                queue_lines.push(Line::from(Span::styled(
                     format!("    ... and {} more", more_count),
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
-                )]));
+                )));
             }
         }
 
@@ -881,8 +889,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             )]),
             Line::from(vec![Span::styled(
                 format!(
-                    "  {:<2} {:<32}  {:<12}  {:>8}  {:>8}  {:>6}  {}",
-                    "  ", "model", "provider", "$/1M in", "$/1M out", "ctx k", "alias"
+                    "    {:<32}  {:<12}  {:>8}  {:>8}  {:>6}  {}",
+                    "model", "provider", "$/1M in", "$/1M out", "ctx", "role"
                 ),
                 Style::default()
                     .fg(Color::DarkGray)
@@ -968,21 +976,22 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     Color::Reset
                 };
                 let fg = if selected { Color::White } else { Color::Gray };
-                let fav = if m.is_favorite { "★" } else { "  " };
+                let fav = if m.is_favorite { "★ " } else { "  " };
                 let ctx = m
                     .context_k
                     .map(|k| format!("{:>4}k", k))
                     .unwrap_or_else(|| "    ?".into());
-                let role = m.role.as_deref().unwrap_or("");
+                let role = m.role.as_deref().unwrap_or("-").trim();
                 let id_display: String = m.id.chars().take(32).collect();
                 let prov_display: String = m.provider.chars().take(12).collect();
-                content.push(Line::from(vec![Span::styled(
-                    format!(
-                        "  {} {:<32}  {:<12}  {:>8.2}  {:>8.2}  {}  {}",
-                        fav, id_display, prov_display, m.input_mtok, m.output_mtok, ctx, role
-                    ),
+                let formatted = format!(
+                    "  {}{:<32}  {:<12}  {:>8.2}  {:>8.2}  {:>6}  {}",
+                    fav, id_display, prov_display, m.input_mtok, m.output_mtok, ctx, role
+                );
+                content.push(Line::from(Span::styled(
+                    formatted,
                     Style::default().fg(fg).bg(bg),
-                )]));
+                )));
                 global_idx += 1;
             }
 
@@ -1664,43 +1673,43 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
 }
 
 pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'static>> {
-    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut out = Vec::new();
     for msg in &app.messages {
         match msg {
             ChatLine::User(text) => {
+                // User messages: bold label, clean content — like a command in a REPL.
                 out.push(Line::from(vec![Span::styled(
                     "you",
                     Style::default()
-                        .fg(Color::Green)
+                        .fg(TUI_ACCENT)
                         .add_modifier(Modifier::BOLD),
                 )]));
                 out.extend(render_markdown(text, width));
                 out.push(Line::raw(""));
             }
             ChatLine::Assistant(text) => {
-                // Always show "clido" as the main label; model name follows in dim gray.
-                let mut spans = vec![Span::styled(
-                    "clido",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )];
+                // Assistant: show model name as dim signature if it exists.
                 if !app.model.is_empty() {
-                    spans.push(Span::styled(
-                        format!("  {}", app.model),
+                    out.push(Line::from(Span::styled(
+                        app.model.clone(),
                         Style::default()
                             .fg(Color::DarkGray)
                             .add_modifier(Modifier::DIM),
-                    ));
+                    )));
                 }
-                out.push(Line::from(spans));
                 out.extend(render_markdown(text, width));
                 out.push(Line::raw(""));
             }
             ChatLine::Thinking(text) => {
+                // Thinking lines: dim, left-indented with a subtle `…` indicator.
                 for part in text.lines() {
                     out.push(Line::from(vec![
-                        Span::raw("    "),
+                        Span::styled(
+                            " ··· ",
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::DIM),
+                        ),
                         Span::styled(
                             part.to_string(),
                             Style::default()
@@ -1717,27 +1726,33 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 is_error,
                 ..
             } => {
+                // Tool calls as "execution events":
+                //   · read     crates/cli/src/main.rs
+                //   ✓ write    crates/cli/src/main.rs  (+12 −3)
+                //   ✗ bash     make test
                 let color = tool_color(name, *done, *is_error);
-                let style = Style::default().fg(color);
                 let icon = if *is_error {
                     "✗"
                 } else if *done {
                     "✓"
                 } else {
-                    "↻"
+                    "·"
                 };
-                let display_name = tool_display_name(name);
+                let display_name = tool_display_name(name).to_string();
                 let dim = Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM);
+                let style = Style::default().fg(color);
+
                 if detail.is_empty() {
-                    out.push(Line::from(vec![Span::styled(
-                        format!("  {} {}", icon, display_name),
-                        style,
-                    )]));
+                    out.push(Line::from(vec![
+                        Span::styled(format!(" {} ", icon), style),
+                        Span::styled(display_name, style),
+                    ]));
                 } else {
                     out.push(Line::from(vec![
-                        Span::styled(format!("  {} {}", icon, display_name), style),
+                        Span::styled(format!(" {} ", icon), style),
+                        Span::styled(display_name, style),
                         Span::styled(format!("  {}", detail.clone()), dim),
                     ]));
                 }
@@ -1756,18 +1771,21 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 )]));
             }
             ChatLine::Section(text) => {
-                out.push(Line::from(vec![Span::styled(
-                    format!("  {}", text),
-                    Style::default()
-                        .fg(Color::Gray)
-                        .add_modifier(Modifier::BOLD),
-                )]));
+                // Section separator: thin line + label
+                out.push(Line::raw(""));
+                out.push(Line::from(vec![
+                    Span::styled("─ ", Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
+                    Span::styled(
+                        text.clone(),
+                        Style::default()
+                            .fg(Color::Gray)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                out.push(Line::raw(""));
             }
-            ChatLine::WelcomeBrand => {
-                // Header removed — no longer displayed when first message is written.
-            }
-            ChatLine::WelcomeSplash => {
-                // Header removed — no longer displayed at start of resumed conversation.
+            ChatLine::WelcomeBrand | ChatLine::WelcomeSplash => {
+                // Skipped — no longer displayed
             }
         }
     }
@@ -1906,15 +1924,23 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                         CodeBlockKind::Fenced(l) if !l.is_empty() => l.to_string(),
                         _ => String::new(),
                     };
-                    let label = if lang.is_empty() {
-                        "code".to_string()
+                    if lang.is_empty() {
+                        out.push(Line::from(vec![Span::styled(
+                            "  ┌── code ──────────────────────────",
+                            Style::default().fg(TUI_CODE_BORDER),
+                        )]));
                     } else {
-                        lang
-                    };
-                    out.push(Line::from(vec![Span::styled(
-                        format!("┌─ {} ", label),
-                        Style::default().fg(Color::DarkGray),
-                    )]));
+                        out.push(Line::from(vec![Span::styled(
+                            format!("  ┌─ {} ", lang),
+                            Style::default().fg(TUI_CODE_LANG),
+                        )]));
+                    }
+                    // Code content uses code block background
+                    style_stack.push(
+                        Style::default()
+                            .fg(Color::Rgb(200, 210, 220))
+                            .bg(TUI_CODE_BG),
+                    );
                 }
                 Tag::List(_) => {
                     list_depth += 1;
@@ -1965,9 +1991,10 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                 Tag::CodeBlock(_) => {
                     in_code_block = false;
                     flush!();
+                    style_stack.pop();
                     out.push(Line::from(vec![Span::styled(
-                        format!("└{}", "─".repeat(content_w.min(60))),
-                        Style::default().fg(Color::DarkGray),
+                        format!("  └{}", "─".repeat(content_w.min(60))),
+                        Style::default().fg(TUI_CODE_BORDER),
                     )]));
                     out.push(Line::raw(""));
                 }
@@ -2028,9 +2055,7 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                         if !line.is_empty() {
                             cur_spans.push(Span::styled(
                                 format!("  {}", line),
-                                Style::default()
-                                    .fg(Color::White)
-                                    .add_modifier(Modifier::DIM),
+                                style_stack.last().copied().unwrap_or_default(),
                             ));
                         }
                     }

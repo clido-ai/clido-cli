@@ -834,7 +834,7 @@ impl App {
             return String::new();
         }
 
-        let mut lines = &self.rendered_line_texts[..];
+        let lines = &self.rendered_line_texts[..];
         let total_lines = lines.len();
         if total_lines == 0 {
             return String::new();

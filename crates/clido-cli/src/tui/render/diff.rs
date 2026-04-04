@@ -10,7 +10,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use super::parse_hunk_header;
+use super::*;
 
 /// Minimum terminal width (columns) to use side-by-side rendering.
 const SIDE_BY_SIDE_MIN_WIDTH: usize = 120;
@@ -81,10 +81,10 @@ fn render_unified(text: &str) -> Vec<Line<'static>> {
             let ln = new_lineno;
             new_lineno += 1;
             out.push(Line::from(vec![
-                Span::styled(format!("  {:>4} ", ln), gutter_style),
+                Span::styled(format!("     {:>4} ", ln), gutter_style),
                 Span::styled(
                     line.to_string(),
-                    Style::default().fg(Color::Green).add_modifier(dim),
+                    Style::default().fg(TUI_DIFF_ADD_FG).add_modifier(dim),
                 ),
             ]));
         } else if line.starts_with('-') {
@@ -94,7 +94,7 @@ fn render_unified(text: &str) -> Vec<Line<'static>> {
                 Span::styled(format!("  {:>4} ", ln), gutter_style),
                 Span::styled(
                     line.to_string(),
-                    Style::default().fg(Color::Red).add_modifier(dim),
+                    Style::default().fg(TUI_DIFF_DEL_FG).add_modifier(dim),
                 ),
             ]));
         } else {
@@ -135,7 +135,7 @@ fn render_side_by_side(text: &str, width: usize) -> Vec<Line<'static>> {
                     format!("  {}", header),
                     Style::default()
                         .fg(if header.starts_with("@@") {
-                            Color::Cyan
+                            TUI_DIFF_HEADER
                         } else {
                             Color::DarkGray
                         })
@@ -169,25 +169,25 @@ fn build_sbs_line(row: &SbsRow, half_w: usize) -> Line<'static> {
         None => "      ".to_string(),
     };
 
-    // Content styling per kind
+    // Content styling per kind — use the shared palette for consistent diff colors.
     let (left_style, right_style, left_bg, right_bg) = match row.kind {
         RowKind::Deleted => (
-            Style::default().fg(Color::Red).add_modifier(dim),
+            Style::default().fg(TUI_DIFF_DEL_FG).add_modifier(dim),
             gutter_style,
-            Some(Color::Rgb(40, 0, 0)),
+            Some(TUI_DIFF_DEL_BG),
             None,
         ),
         RowKind::Added => (
             gutter_style,
-            Style::default().fg(Color::Green).add_modifier(dim),
+            Style::default().fg(TUI_DIFF_ADD_FG).add_modifier(dim),
             None,
-            Some(Color::Rgb(0, 30, 0)),
+            Some(TUI_DIFF_ADD_BG),
         ),
         RowKind::Modified => (
-            Style::default().fg(Color::Red).add_modifier(dim),
-            Style::default().fg(Color::Green).add_modifier(dim),
-            Some(Color::Rgb(40, 0, 0)),
-            Some(Color::Rgb(0, 30, 0)),
+            Style::default().fg(TUI_DIFF_DEL_FG).add_modifier(dim),
+            Style::default().fg(TUI_DIFF_ADD_FG).add_modifier(dim),
+            Some(TUI_DIFF_DEL_BG),
+            Some(TUI_DIFF_ADD_BG),
         ),
         RowKind::Context | RowKind::Header => (gutter_style, gutter_style, None, None),
     };

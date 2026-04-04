@@ -9,13 +9,6 @@ use super::{AgentEvent, PermGrant};
 
 // ── Helper functions for profile overlay ──────────────────────────────────────
 
-/// Reuse offer: a key found in another profile that can be reused.
-#[derive(Debug, Clone)]
-pub(crate) struct SavedApiKeyOffer {
-    pub(crate) source_profile: String,
-    pub(crate) provider_id: String,
-}
-
 /// Build saved-key catalog from all profiles, checking credentials file + env + inline key.
 pub(crate) fn build_saved_keys_from_profiles(
     profiles: &std::collections::HashMap<String, clido_core::ProfileEntry>,
@@ -736,8 +729,22 @@ impl ProfileOverlayState {
                 self.mode = ProfileOverlayMode::PickingProvider { for_field: field };
             }
             ProfileEditField::Model | ProfileEditField::FastModel => {
+                let target_provider = match field {
+                    ProfileEditField::Model => &self.provider,
+                    ProfileEditField::FastModel => &self.fast_provider,
+                    _ => unreachable!(),
+                };
+                let filtered: Vec<ModelEntry> = if target_provider.is_empty() {
+                    known_models.to_vec()
+                } else {
+                    known_models
+                        .iter()
+                        .filter(|m| m.provider.eq_ignore_ascii_case(target_provider))
+                        .cloned()
+                        .collect()
+                };
                 let mut picker = ModelPickerState {
-                    models: known_models.to_vec(),
+                    models: filtered,
                     filter: String::new(),
                     selected: 0,
                     scroll_offset: 0,

@@ -335,16 +335,19 @@ pub(super) fn cmd_sessions(app: &mut App) {
     }
 }
 
-/// Add a side note — visible in the session but not sent to the agent.
+/// Send a note/hint to the agent — adds a user message to the conversation.
+/// Useful for correcting the agent mid-flight without stopping it.
 pub(super) fn cmd_note(app: &mut App, cmd: &str) {
     let text = cmd.trim_start_matches("/note").trim();
     if text.is_empty() {
-        app.push(ChatLine::Info("  Usage: /note <text>".into()));
+        app.push(ChatLine::Info("  Usage: /note <text>  — send a hint/correction to the agent".into()));
         return;
     }
-    // Render as an info line with a note icon so it's clearly distinguished from agent messages.
-    app.push(ChatLine::Info(format!("  📝 {}", text)));
-    app.push_toast("Note added (not sent to agent)".to_string(), Color::Cyan, std::time::Duration::from_secs(3));
+    // Add as a user message so the agent sees it in the next context window.
+    // If agent is busy, this will be processed after current tools finish.
+    // If idle, it triggers a response immediately.
+    app.push(ChatLine::User(format!("[Note] {}", text)));
+    app.send_now(text.to_string());
 }
 
 pub(super) fn cmd_workdir_arg(app: &mut App, cmd: &str) {
@@ -1191,33 +1194,8 @@ pub(super) fn cmd_agents(app: &mut App) {
 }
 
 pub(super) fn cmd_profiles(app: &mut App) {
-    match clido_core::load_config(&app.workspace_root) {
-        Err(e) => app.push(ChatLine::Info(format!("  ✗ Could not load config: {}", e))),
-        Ok(loaded) => {
-            app.push(ChatLine::Info("  Profiles:".into()));
-            let mut names: Vec<&String> = loaded.profiles.keys().collect();
-            names.sort();
-            for name in names {
-                let entry = &loaded.profiles[name];
-                let is_active = name == &loaded.default_profile;
-                let marker = if is_active { "▶" } else { " " };
-                app.push(ChatLine::Info(format!(
-                    "  {} {}  {} / {}",
-                    marker, name, entry.provider, entry.model
-                )));
-                if let Some(ref f) = entry.fast {
-                    app.push(ChatLine::Info(format!(
-                        "       fast      {} / {}",
-                        f.provider, f.model
-                    )));
-                }
-            }
-            app.push(ChatLine::Info(
-                "  /profile → pick & switch  |  /profile new  |  /profile edit  |  /profile delete <name>"
-                    .into(),
-            ));
-        }
-    }
+    // Open the interactive profile picker (same as /profile)
+    cmd_profile(app);
 }
 
 pub(super) fn cmd_profile(app: &mut App) {

@@ -388,22 +388,25 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let header_lines = if has_thinking { 2 } else { 1 };
             let max_items = queue_area.height.saturating_sub(header_lines) as usize;
             let effective_max = if max_items > 0 { max_items } else { 5 };
-            let item_width = queue_area.width.saturating_sub(10) as usize;
 
             for (idx, item) in app.queued.iter().enumerate().take(effective_max) {
                 let first_line = item.lines().next().unwrap_or(item.as_str());
-                let truncated = if first_line.chars().count() > item_width {
+                // Prefix is "      N. " — 6 spaces + number + ". "
+                let prefix = format!("      {}. ", idx + 1);
+                let prefix_len = prefix.chars().count();
+                let max_width = queue_area.width as usize;
+                let available = max_width.saturating_sub(prefix_len);
+                let truncated = if first_line.chars().count() > available {
                     format!(
                         "{}…",
-                        first_line.chars().take(item_width).collect::<String>()
+                        first_line.chars().take(available.saturating_sub(1)).collect::<String>()
                     )
                 } else {
                     first_line.to_string()
                 };
-                let _has_more = item.lines().count() > 1;
 
                 queue_lines.push(Line::from(Span::styled(
-                    format!("      {}. {}", idx + 1, truncated),
+                    format!("{}{}", prefix, truncated),
                     Style::default()
                         .fg(Color::DarkGray)
                         .add_modifier(Modifier::DIM),
@@ -1694,15 +1697,18 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 out.push(Line::raw(""));
             }
             ChatLine::Assistant(text) => {
-                // Assistant: show model name as dim signature if it exists.
-                if !app.model.is_empty() {
-                    out.push(Line::from(Span::styled(
-                        app.model.clone(),
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::DIM),
-                    )));
-                }
+                // Assistant: show brand + model name as dim signature.
+                let header = if app.model.is_empty() {
+                    "clido".to_string()
+                } else {
+                    format!("clido · {}", app.model)
+                };
+                out.push(Line::from(Span::styled(
+                    header,
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
+                )));
                 out.extend(render_markdown(text, width));
                 out.push(Line::raw(""));
             }

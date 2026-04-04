@@ -3,6 +3,65 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// Convert tool JSON input to a human-readable summary.
+fn format_tool_detail(name: &str, input: &str) -> String {
+    // Try to parse as JSON for better formatting
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(input) {
+        match name {
+            "Ls" | "ls" => {
+                let path = json.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+                let depth = json.get("depth").and_then(|v| v.as_u64());
+                let hidden = json.get("show_hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+                if let Some(d) = depth {
+                    if hidden {
+                        format!("{} (depth {}, hidden)", path, d)
+                    } else {
+                        format!("{} (depth {})", path, d)
+                    }
+                } else {
+                    path.to_string()
+                }
+            }
+            "Read" | "read" => {
+                json.get("path").and_then(|v| v.as_str()).unwrap_or(input).to_string()
+            }
+            "Write" | "write" => {
+                let path = json.get("file_path").or(json.get("path")).and_then(|v| v.as_str()).unwrap_or(input);
+                path.to_string()
+            }
+            "Edit" | "edit" => {
+                json.get("file_path").and_then(|v| v.as_str()).unwrap_or(input).to_string()
+            }
+            "Bash" | "bash" | "Shell" | "shell" => {
+                json.get("command").and_then(|v| v.as_str()).unwrap_or(input).to_string()
+            }
+            "Glob" | "glob" => {
+                json.get("pattern").and_then(|v| v.as_str()).unwrap_or(input).to_string()
+            }
+            "Grep" | "grep" => {
+                let pattern = json.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
+                let path = json.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+                format!("{} in {}", pattern, path)
+            }
+            _ => {
+                // For unknown tools, show first string value or truncate JSON
+                if let Some(obj) = json.as_object() {
+                    if let Some((_, v)) = obj.iter().find(|(_, v)| v.is_string()) {
+                        v.as_str().unwrap_or(input).to_string()
+                    } else {
+                        input.chars().take(50).collect()
+                    }
+                } else {
+                    input.chars().take(50).collect()
+                }
+            }
+        }
+    } else {
+        // Not valid JSON, return as-is but truncated
+        input.chars().take(60).collect()
+    }
+}
+
 use clido_agent::AgentLoop;
 use clido_core::ClidoError;
 use clido_storage::SessionWriter;
@@ -1930,15 +1989,17 @@ pub(super) async fn event_loop(
                         detail,
                     }) => {
                         last_agent_activity = std::time::Instant::now();
+                        // Format detail from JSON to human-readable
+                        let detail_formatted = format_tool_detail(&name, &detail);
                         app.push_status(
                             tool_use_id.clone(),
                             name.clone(),
-                            detail.clone(),
+                            detail_formatted.clone(),
                         );
                         app.push(ChatLine::ToolCall {
                             tool_use_id,
                             name,
-                            detail,
+                            detail: detail_formatted,
                             done: false,
                             is_error: false,
                         });

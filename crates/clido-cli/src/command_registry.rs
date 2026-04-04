@@ -102,7 +102,7 @@ pub static COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "/note",
         section: "Session",
-        description: "add a side note visible in the session but not sent to the agent",
+        description: "send a hint/correction to the agent (seen in next context window)",
         usage: Some("/note <text>"),
         takes_args: true,
         requires_idle: false,
@@ -389,7 +389,7 @@ pub static COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "/profiles",
         section: "Project",
-        description: "list all profiles with active model per slot",
+        description: "open interactive profile picker to switch profiles",
         usage: None,
         takes_args: false,
         requires_idle: false,

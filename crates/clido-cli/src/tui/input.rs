@@ -1935,6 +1935,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         }
         // Ctrl+Enter: interrupt current run and send immediately.
         (Km::CONTROL, Enter) => app.force_send(),
+        // Alt+Enter: also interrupt (for terminals where Ctrl+Enter doesn't work)
+        (Km::ALT, Enter) => app.force_send(),
         // Ctrl+Shift+C: enter copy mode for selecting chat lines.
         (Km::CONTROL | Km::SHIFT, Char('c')) => {
             app.selection_mode = !app.selection_mode;
@@ -1950,8 +1952,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 );
             }
         }
-        // Shift+Enter: insert a newline without sending (multiline input).
-        (Km::SHIFT, Enter) => {
+        // Shift+Enter or Ctrl+J: insert a newline without sending (multiline input).
+        (Km::SHIFT, Enter) | (Km::CONTROL, Char('j')) => {
             let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor);
             app.text_input.text.insert(byte_pos, '\n');
             app.text_input.cursor += 1;

@@ -673,7 +673,7 @@ impl ProfileOverlayState {
             config_path,
             is_new: true,
             provider_picker: ProviderPickerState::new(),
-            profile_model_picker: if !provider.is_empty() { None } else { None },
+            profile_model_picker: None,
             saved_keys,
         }
     }

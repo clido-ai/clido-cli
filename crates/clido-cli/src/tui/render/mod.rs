@@ -206,7 +206,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     // Input grows with content: 1 line of text = 3 rows (2 borders + 1), capped at 12.
     // When very narrow (< 40), collapse optional rows to avoid layout panics.
     let input_line_count = app.text_input.text.matches('\n').count() + 1;
-    let input_h = (input_line_count as u16 + 2).min(7).max(3); // 1-5 text lines + 2 borders, min 3
+    let input_h = (input_line_count as u16 + 2).clamp(3, 7); // 1-5 text lines + 2 borders, min 3
     let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
     // Queue area: height = header + items, but reserve enough chat space (min 10 lines).
     // Dynamic — fills available vertical space on tall terminals.

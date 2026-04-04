@@ -35,13 +35,7 @@ fn render_progress_bar(
     // Progress dots: ● ○ ○ ○
     let mut dots = Vec::new();
     for i in 1..=total_steps {
-        let dot = if i <= current_step && current_step < total_steps {
-            "●"
-        } else if i <= current_step {
-            "●"
-        } else {
-            "○"
-        };
+        let dot = if i <= current_step { "●" } else { "○" };
         let style = if i == current_step && i < total_steps {
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
         } else if i < current_step {

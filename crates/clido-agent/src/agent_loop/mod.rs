@@ -669,6 +669,15 @@ impl AgentLoop {
                 .complete(&to_send, &schemas, &self.config)
                 .await?;
 
+            // Cancel check after the blocking LLM call (10-60s).
+            if cancel
+                .as_ref()
+                .map(|c| c.load(Ordering::Relaxed))
+                .unwrap_or(false)
+            {
+                return Err(ClidoError::Interrupted);
+            }
+
             let turn_cost = pricing
                 .map(|t| compute_cost_usd(&response.usage, &self.config.model, t))
                 .unwrap_or_else(|| {
@@ -1232,6 +1241,18 @@ impl AgentLoop {
                 .provider
                 .complete(&to_send, &schemas, &self.config)
                 .await?;
+
+            // ── Cancel check after the blocking LLM call ──────────────────
+            // provider.complete() can take 10-60s. The user may have pressed
+            // /stop during that window — bail out immediately instead of
+            // continuing to process the response and run tools.
+            if cancel
+                .as_ref()
+                .map(|c| c.load(Ordering::Relaxed))
+                .unwrap_or(false)
+            {
+                return Err(ClidoError::Interrupted);
+            }
 
             let turn_cost = pricing
                 .map(|t| compute_cost_usd(&response.usage, &self.config.model, t))

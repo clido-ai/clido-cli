@@ -1867,13 +1867,14 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             (Km::NONE, Up) => {
                 let (row, col) = app.selection.focus;
                 if row > 0 {
-                    app.selection.update(row - 1, col);
+                    app.selection.update(row.saturating_sub(1), col);
                 }
                 return;
             }
             (Km::NONE, Down) => {
                 let (row, col) = app.selection.focus;
-                app.selection.update(row + 1, col);
+                let max_row = app.rendered_line_texts.len().saturating_sub(1);
+                app.selection.update((row + 1).min(max_row), col);
                 return;
             }
             (Km::NONE, Left) => {
@@ -1885,13 +1886,24 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             (Km::NONE, Right) => {
                 let (row, col) = app.selection.focus;
-                app.selection.update(row, col + 1);
+                let max_row = app.rendered_line_texts.len().saturating_sub(1);
+                let line = app
+                    .rendered_line_texts
+                    .get(row.min(max_row))
+                    .map(|l| l.as_str())
+                    .unwrap_or("");
+                let max_col = line.chars().count().saturating_sub(1);
+                if col < max_col {
+                    app.selection.update(row.min(max_row), col + 1);
+                } else if row < max_row {
+                    app.selection.update(row + 1, 0);
+                }
                 return;
             }
             (Km::NONE, Char(' ')) => {
-                // Space toggles selection mode (sets new anchor)
                 let (row, col) = app.selection.focus;
-                app.selection.start(row, col);
+                let max_row = app.rendered_line_texts.len().saturating_sub(1);
+                app.selection.start(row.min(max_row), col);
                 return;
             }
             _ => {}
@@ -1928,8 +1940,9 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             app.selection_mode = !app.selection_mode;
             if app.selection_mode {
                 app.selection.clear();
-                // Start at top of visible content
-                app.selection.start(app.scroll as usize, 0);
+                let max_row = app.rendered_line_texts.len().saturating_sub(1);
+                let start_row = (app.scroll as usize).min(max_row);
+                app.selection.start(start_row, 0);
                 app.push_toast(
                     "Copy mode: ↑↓←→ move · Space toggle · y copy · Esc exit".to_string(),
                     Color::Yellow,

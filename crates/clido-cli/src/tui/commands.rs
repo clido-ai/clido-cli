@@ -335,6 +335,18 @@ pub(super) fn cmd_sessions(app: &mut App) {
     }
 }
 
+/// Add a side note — visible in the session but not sent to the agent.
+pub(super) fn cmd_note(app: &mut App, cmd: &str) {
+    let text = cmd.trim_start_matches("/note").trim();
+    if text.is_empty() {
+        app.push(ChatLine::Info("  Usage: /note <text>".into()));
+        return;
+    }
+    // Render as an info line with a note icon so it's clearly distinguished from agent messages.
+    app.push(ChatLine::Info(format!("  📝 {}", text)));
+    app.push_toast("Note added (not sent to agent)".to_string(), Color::Cyan, std::time::Duration::from_secs(3));
+}
+
 pub(super) fn cmd_workdir_arg(app: &mut App, cmd: &str) {
     let arg = cmd.trim_start_matches("/workdir").trim();
     match resolve_workdir_arg(arg) {
@@ -2092,6 +2104,7 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
                 app.push(ChatLine::Info("  ✗ No active run to stop".into()));
             }
         }
+        _ if cmd.starts_with("/note ") => cmd_note(app, cmd),
         _ if cmd == "/copy" || cmd.starts_with("/copy ") => cmd_copy(app, cmd),
         "/quit" => {
             app.quit = true;

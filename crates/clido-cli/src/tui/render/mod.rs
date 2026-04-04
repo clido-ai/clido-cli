@@ -206,17 +206,21 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     // Input grows with content: 1 line of text = 3 rows (2 borders + 1), capped at 12.
     // When very narrow (< 40), collapse optional rows to avoid layout panics.
     let input_line_count = app.text_input.text.matches('\n').count() + 1;
-    let input_h = (input_line_count as u16 + 2).min(3);
+    let input_h = (input_line_count as u16 + 2).min(7).max(3); // 1-5 text lines + 2 borders, min 3
     let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
-    // Queue area shows the current thinking step plus any queued input items
-    // so the user can see exactly what's waiting to be processed.
+    // Queue area: height = header + items, but reserve enough chat space (min 10 lines).
+    // Dynamic — fills available vertical space on tall terminals.
+    let min_chat_h = 10u16;
+    let reserved_h = header_h + status_h + hint_h + input_h + 2; // chat borders
+    let available_for_queue = area.height.saturating_sub(min_chat_h + reserved_h);
     let queue_h = if app.current_step.is_some() && !app.queued.is_empty() {
-        // Thinking + header + items (up to 5)
-        (1 + 1 + app.queued.len().min(5)).min(8) as u16
+        let total = 1 + 1 + app.queued.len();
+        total.min(available_for_queue.max(3) as usize) as u16
     } else if app.current_step.is_some() {
         1 // Agent thinking - show step only
     } else if !app.queued.is_empty() {
-        (1 + app.queued.len().min(5) + 1).min(7) as u16 // header + items
+        let total = 1 + app.queued.len() + 1;
+        total.min(available_for_queue.max(3) as usize) as u16 // header + items
     } else {
         0 // Nothing to show
     };
@@ -380,11 +384,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 )));
             }
 
-            // Each queued item on its own line
-            let max_items = 5;
-            let item_width = 70;
+            // Each queued item on its own line — dynamic based on queue_area height
+            let header_lines = if has_thinking { 2 } else { 1 };
+            let max_items = queue_area.height.saturating_sub(header_lines) as usize;
+            let effective_max = if max_items > 0 { max_items } else { 5 };
+            let item_width = queue_area.width.saturating_sub(10) as usize;
 
-            for (idx, item) in app.queued.iter().enumerate().take(max_items) {
+            for (idx, item) in app.queued.iter().enumerate().take(effective_max) {
                 let first_line = item.lines().next().unwrap_or(item.as_str());
                 let truncated = if first_line.chars().count() > item_width {
                     format!(
@@ -404,7 +410,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 )));
             }
 
-            let more_count = app.queued.len().saturating_sub(max_items);
+            let more_count = app.queued.len().saturating_sub(effective_max);
             if more_count > 0 {
                 queue_lines.push(Line::from(Span::styled(
                     format!("    ... and {} more", more_count),

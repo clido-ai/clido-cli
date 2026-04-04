@@ -859,7 +859,7 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                         }
                     }
                     ProfileCreateStep::ApiKey if c == 'k' && !st.saved_keys.is_empty() => {
-                        st.mode = ProfileOverlayMode::PickingSavedKey;
+                        st.mode = ProfileOverlayMode::PickingSavedKey { selected: 0 };
                         st.status = None;
                     }
                     _ => {
@@ -1025,7 +1025,7 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
         },
 
         // ── PickingSavedKey: choose a saved API key ─────────────────────────
-        ProfileOverlayMode::PickingSavedKey => {
+        ProfileOverlayMode::PickingSavedKey { selected } => {
             match event.code {
                 Esc => {
                     st.mode =
@@ -1033,9 +1033,10 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                     st.status = None;
                 }
                 Enter => {
-                    // Select first (currently highlighted) saved key
-                    if let Some(offer) = st.saved_keys.first() {
-                        // Key is already in the offer — we need the real key from the source profile
+                    // Select the currently highlighted saved key
+                    let idx = *selected;
+                    if idx < st.saved_keys.len() {
+                        let offer = &st.saved_keys[idx];
                         let all_profiles = clido_core::load_config(&app.workspace_root)
                             .map(|c| c.profiles)
                             .unwrap_or_default();
@@ -1071,6 +1072,23 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                 st.status =
                                     Some("  ✗ Could not retrieve saved key".into());
                             }
+                        } else {
+                            st.status =
+                                Some("  ✗ Source profile not found".into());
+                        }
+                    }
+                }
+                Up => {
+                    if *selected > 0 {
+                        if let ProfileOverlayMode::PickingSavedKey { selected: s } = &mut st.mode {
+                            *s -= 1;
+                        }
+                    }
+                }
+                Down => {
+                    if *selected + 1 < st.saved_keys.len() {
+                        if let ProfileOverlayMode::PickingSavedKey { selected: s } = &mut st.mode {
+                            *s += 1;
                         }
                     }
                 }

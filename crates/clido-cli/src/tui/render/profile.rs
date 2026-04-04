@@ -125,7 +125,7 @@ pub(crate) fn render_profile_overlay(
         ProfileOverlayMode::PickingModel { .. } => {
             render_profile_model_picker(frame, popup_rect, content_area, hint_area, st)
         }
-        ProfileOverlayMode::PickingSavedKey => {
+        ProfileOverlayMode::PickingSavedKey { .. } => {
             render_profile_saved_key_picker(frame, popup_rect, content_area, hint_area, st)
         }
     }
@@ -539,15 +539,35 @@ pub(crate) fn render_profile_create(
         hint_area,
     );
 
-    // Cursor
-    let cursor_y = content_area.y + 4;
-    let shown_len = if *step == ProfileCreateStep::ApiKey && !st.input.is_empty() {
-        let len = st.input.len();
-        len.min(30) + format!(" ({} chars)", len).len()
+    // Cursor — compute actual rendered line offset so cursor aligns with visible text.
+    // Provider and Model steps return early (handled by separate render functions).
+    // Only Name and ApiKey reach here.
+    let saved_key_lines = if *step == ProfileCreateStep::ApiKey && !st.saved_keys.is_empty() {
+        // 1 header + matching keys (max 5) + 1 blank separator
+        let matching = st.saved_keys
+            .iter()
+            .filter(|offer| st.provider.is_empty() || offer.provider_id == st.provider)
+            .count();
+        1 + matching + 1
     } else {
-        st.input_cursor
+        0
     };
-    let cursor_x = content_area.x + 3 + shown_len as u16;
+    // blank(1) + step_label(1) + blank(1) + saved_keys(variable) + (api: manual_input_label is part of display_input)
+    // Input line is at: 3 (blank+label+blank) + saved_key_lines
+    let input_line_offset = 3 + saved_key_lines as u16;
+    let cursor_y = content_area.y + input_line_offset;
+    let cursor_x = if *step == ProfileCreateStep::ApiKey && !st.input.is_empty() {
+        let len = st.input.len();
+        // Position cursor after the displayed masked content
+        let displayed_len = if len > 30 {
+            30 + format!(" ({} chars)", len).len()
+        } else {
+            len
+        };
+        content_area.x + 3 + displayed_len as u16 + 1 // +1 for the blink cursor character
+    } else {
+        content_area.x + 3 + st.input_cursor as u16
+    };
     if cursor_y < content_area.y + content_area.height {
         frame.set_cursor_position((cursor_x, cursor_y));
     }
@@ -570,6 +590,12 @@ pub(crate) fn render_profile_saved_key_picker(
         popup_rect,
     );
 
+    let selected = if let ProfileOverlayMode::PickingSavedKey { selected } = st.mode {
+        selected
+    } else {
+        0
+    };
+
     // Header
     let mut lines: Vec<Line<'static>> = vec![
         Line::from(Span::styled(
@@ -581,23 +607,26 @@ pub(crate) fn render_profile_saved_key_picker(
         Line::raw(""),
     ];
 
-    // Show saved keys
+    // Show saved keys with scroll support
     let visible: usize = (content_area.height as usize).saturating_sub(4).max(2);
-    for (i, offer) in st.saved_keys.iter().enumerate() {
-        if i >= visible {
-            break;
-        }
-        let arrow = if i == 0 { "▶ " } else { "   " };
+    let scroll = if selected >= visible {
+        selected - visible + 1
+    } else {
+        0
+    };
+    for (i, offer) in st.saved_keys.iter().enumerate().skip(scroll).take(visible) {
+        let is_selected = i == selected;
+        let arrow = if is_selected { "▶ " } else { "   " };
         lines.push(Line::from(vec![
             Span::styled(
                 format!("  {}{}", arrow, offer.display),
                 Style::default()
-                    .fg(if i == 0 {
+                    .fg(if is_selected {
                         Color::Yellow
                     } else {
                         Color::Green
                     })
-                    .add_modifier(if i == 0 { Modifier::BOLD } else { Modifier::empty() }),
+                    .add_modifier(if is_selected { Modifier::BOLD } else { Modifier::empty() }),
             ),
             Span::styled(
                 format!("  ({}, profile: {})", offer.provider_id, offer.source_profile,),

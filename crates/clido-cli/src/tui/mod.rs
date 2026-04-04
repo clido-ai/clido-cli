@@ -896,6 +896,7 @@ mod tests {
             "p".into(),
             &entry,
             std::path::PathBuf::from("/tmp/t.toml"),
+            &Default::default(),
         );
         // Navigate to ApiKey field (cursor=1) — uses inline edit, not picker
         ov.cursor = 1;
@@ -931,6 +932,7 @@ mod tests {
             "p".into(),
             &entry,
             std::path::PathBuf::from("/tmp/t.toml"),
+            &Default::default(),
         );
         // Model field (cursor=2) now uses picker — begin_edit enters PickingModel mode
         ov.cursor = 2;
@@ -968,6 +970,7 @@ mod tests {
             "p".into(),
             &entry,
             std::path::PathBuf::from("/tmp/t.toml"),
+            &Default::default(),
         );
         ov.cursor = 0;
         assert_eq!(ov.cursor_field(), ProfileEditField::Provider);
@@ -994,6 +997,7 @@ mod tests {
             "p".into(),
             &entry,
             std::path::PathBuf::from("/tmp/t.toml"),
+            &Default::default(),
         );
         let masked = ov.masked_api_key();
         // Should not reveal full key

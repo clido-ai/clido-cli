@@ -497,7 +497,7 @@ pub(crate) enum ProfileOverlayMode {
     /// User is creating a new profile, step-by-step.
     Creating { step: ProfileCreateStep },
     /// Saved API key picker during profile creation.
-    PickingSavedKey,
+    PickingSavedKey { selected: usize },
 }
 
 /// Steps for the in-TUI new profile wizard.

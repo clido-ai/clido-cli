@@ -334,6 +334,7 @@ Type `/` in the input bar to see completions. Commands are grouped by category:
 | `/profile [name]` | Open profile picker — switch, create, or edit |
 | `/profile new` | Create a new profile via the guided wizard |
 | `/profile edit [name]` | Edit a profile in the TUI |
+| `/profile delete <name>` | Delete a profile (cannot delete the active profile) |
 | `/check` | Run diagnostics on current project |
 | `/rules` | Show active CLIDO.md rules files |
 | `/image <path>` | Attach an image to the next message |

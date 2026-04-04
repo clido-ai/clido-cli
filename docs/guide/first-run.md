@@ -74,7 +74,7 @@ In a normal terminal (TTY), the wizard uses a full-screen UI instead of the prom
 - **Ctrl+Q** / **Ctrl+C** also cancel without saving (no failed exit code for cancellation).
 - After entering a **new profile name**, **Esc** on the provider step goes back to edit the name.
 - **←** / **→**, **Home**, **End** move the cursor in the profile name, API key, and similar fields.
-- When **creating a profile** (`/profile new` or `clido profile create`) and another profile already has a **plaintext** API key for the same provider, the wizard lists it: **↑↓** to choose, **Enter** to reuse, **n** to type a new key.
+- When **creating a profile** (`/profile new` or `clido profile create`) and another profile already has a credentials file entry, env var, or inline API key for the same provider, the wizard lists it: **↑↓** to choose, **Enter** to reuse, **n** to type a new key.
 
 Non-TTY / piped runs use simple text prompts only; these keys do not apply there.
 

@@ -89,6 +89,7 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 | `/profile` | Open profile picker | `/profile` | Switch, create, or edit profiles interactively |
 | `/profile new` | Create a new profile | `/profile new` | Launches the guided setup wizard |
 | `/profile edit [name]` | Edit a profile | `/profile edit cheap` | Edit provider, model, and API key for the named profile |
+| `/profile delete <name>` | Delete a profile | `/profile delete old-profile` | Cannot delete the currently active profile |
 | `/settings` | Open settings editor | `/settings` | Edit roles and default model; changes saved to `config.toml` |
 | `/workdir [path]` | Show or set working directory | `/workdir ~/projects/myapp` | Without argument shows current cwd |
 | `/check` | Run diagnostics on the current project | `/check` | Invokes the DiagnosticsTool |

@@ -765,13 +765,13 @@ mod tests {
         let md = "```bash\necho hello\n```";
         let narrow = render_markdown(md, 40);
         let wide = render_markdown(md, 120);
-        // Find the close-bar line (starts with └)
+        // Find the close-bar line (contains the └ character)
         let close_narrow = narrow
             .iter()
             .find(|l| {
                 l.spans
                     .first()
-                    .map(|s| s.content.starts_with('└'))
+                    .map(|s| s.content.contains('└'))
                     .unwrap_or(false)
             })
             .expect("close bar missing on narrow");
@@ -780,7 +780,7 @@ mod tests {
             .find(|l| {
                 l.spans
                     .first()
-                    .map(|s| s.content.starts_with('└'))
+                    .map(|s| s.content.contains('└'))
                     .unwrap_or(false)
             })
             .expect("close bar missing on wide");

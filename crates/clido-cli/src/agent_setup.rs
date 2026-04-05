@@ -21,6 +21,123 @@ use crate::spawn_tools::{SpawnReviewerTool, SpawnWorkerTool};
 
 type TodoStore = std::sync::Arc<std::sync::Mutex<Vec<TodoItem>>>;
 
+/// Detect context window size from model name.
+/// Falls back to safe defaults when model is not recognized.
+fn detect_context_window(model: &str) -> u32 {
+    let model_lower = model.to_lowercase();
+    
+    // kimi (Moonshot AI) models
+    if model_lower.contains("kimi") {
+        if model_lower.contains("k2") || model_lower.contains("-k2-") {
+            return 256_000; // kimi-k2 has 256k context
+        }
+        if model_lower.contains("k1.5") || model_lower.contains("-k1.5-") {
+            return 128_000; // kimi-k1.5 has 128k context
+        }
+        // Default for other kimi models (k1, etc.)
+        return 128_000;
+    }
+    
+    // Cerebras models
+    if model_lower.contains("cerebras") {
+        return 128_000; // Cerebras models typically have 128k
+    }
+    
+    // DeepSeek models
+    if model_lower.contains("deepseek") {
+        if model_lower.contains("coder") || model_lower.contains("chat") {
+            return 128_000; // DeepSeek v2/v3 have 128k
+        }
+        return 64_000; // Older DeepSeek models have 64k
+    }
+    
+    // Mistral models
+    if model_lower.contains("mistral") {
+        if model_lower.contains("large") || model_lower.contains("medium") {
+            return 128_000;
+        }
+        return 32_000; // Mistral small/tiny have 32k
+    }
+    
+    // Llama models
+    if model_lower.contains("llama") {
+        if model_lower.contains("3") || model_lower.contains("-3-") {
+            return 128_000; // Llama 3 has 128k
+        }
+        return 8_192; // Llama 2 has 4k/8k
+    }
+    
+    // Gemma models
+    if model_lower.contains("gemma") {
+        return 8_192; // Gemma typically has 8k
+    }
+    
+    // Phi models
+    if model_lower.contains("phi") {
+        return 128_000; // Phi-3/4 have 128k
+    }
+    
+    // Qwen models
+    if model_lower.contains("qwen") {
+        if model_lower.contains("2.5") || model_lower.contains("-2.5-") {
+            return 128_000; // Qwen 2.5 has 128k
+        }
+        if model_lower.contains("2") || model_lower.contains("-2-") {
+            return 32_000; // Qwen 2 has 32k
+        }
+        return 128_000; // Default for newer Qwen
+    }
+    
+    // Claude models (should be in pricing table, but just in case)
+    if model_lower.contains("claude") {
+        if model_lower.contains("3") {
+            if model_lower.contains("opus") {
+                return 200_000;
+            }
+            return 200_000; // Claude 3 Sonnet/Haiku have 200k
+        }
+        return 100_000; // Claude 2 has 100k
+    }
+    
+    // GPT-4 models (should be in pricing table, but just in case)
+    if model_lower.contains("gpt-4") || model_lower.contains("gpt4") {
+        if model_lower.contains("32k") {
+            return 32_768;
+        }
+        if model_lower.contains("o1") || model_lower.contains("o3") {
+            return 200_000; // O1/O3 have large context
+        }
+        return 128_000; // GPT-4 Turbo and later have 128k
+    }
+    
+    // GPT-3.5 models
+    if model_lower.contains("gpt-3.5") || model_lower.contains("gpt3.5") {
+        if model_lower.contains("16k") {
+            return 16_384;
+        }
+        return 4_096; // Standard GPT-3.5 has 4k
+    }
+    
+    // Gemini models (should be in pricing table, but just in case)
+    if model_lower.contains("gemini") {
+        if model_lower.contains("1.5") || model_lower.contains("-1.5-") {
+            if model_lower.contains("flash") || model_lower.contains("pro") {
+                return 1_000_000; // Gemini 1.5 has 1M context!
+            }
+        }
+        return 32_768; // Older Gemini has 32k
+    }
+    
+    // Groq hosted models often have limited context
+    if model_lower.contains("groq") || model_lower.starts_with("llama-3") && model_lower.contains("groq") {
+        return 8_192; // Groq often limits to 8k
+    }
+    
+    // Safe default for unknown models - 128k is a common modern standard
+    // This is safer than 200k which causes issues with many providers
+    128_000
+}
+
 pub struct AgentSetup {
     pub provider: Arc<dyn clido_providers::ModelProvider>,
     /// Provider ID string (e.g. "kimi-code", "openrouter") — used for subscription checks.
@@ -296,10 +413,15 @@ impl AgentSetup {
         // every user turn, reflecting the current branch/status/log.
 
         if config.max_context_tokens.is_none() {
+            // Try to get context window from pricing table
             if let Some(entry) = pricing_table.models.get(&config.model) {
                 if let Some(cw) = entry.context_window {
                     config.max_context_tokens = Some(cw);
                 }
+            }
+            // If still not set, try to detect from model name patterns
+            if config.max_context_tokens.is_none() {
+                config.max_context_tokens = Some(detect_context_window(&config.model));
             }
         }
 

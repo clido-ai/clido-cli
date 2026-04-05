@@ -22,7 +22,7 @@ use clido_storage::{AuditEntry, AuditLog, SessionLine, SessionWriter};
 use clido_tools::{ToolOutput, ToolRegistry};
 use futures::future::join_all;
 use similar::TextDiff;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -36,6 +36,15 @@ use security::{detect_injection, enhanced_edit_error};
 const DOOM_LOOP_THRESHOLD: usize = 3;
 /// Budget warning thresholds (percentage of limit consumed).
 const BUDGET_WARNING_PCTS: &[u8] = &[50, 80, 90];
+
+/// Retry strategies for failed tool calls.
+#[derive(Debug, Clone, Copy)]
+enum RetryStrategy {
+    /// Retry immediately with no delay.
+    RetryOnce,
+    /// Wait for specified milliseconds before retrying.
+    WaitAndRetry { delay_ms: u64 },
+}
 
 /// Create a git checkpoint of dirty working tree before AI edits.
 /// Only runs once per agent session to avoid excessive commits.
@@ -187,6 +196,10 @@ pub struct AgentLoop {
     pub planner_mode: bool,
     /// Tracks recent tool failures for doom-loop detection.
     doom_monitor: VecDeque<String>,
+    /// Maximum retries for failed tool calls (0 = disable auto-retry).
+    max_tool_retries: u32,
+    /// Current retry attempts for the active tool batch.
+    retry_attempts: HashMap<String, u32>,
     /// Tracks which budget warning percentages have already been emitted this run.
     budget_warned_pcts: Vec<u8>,
     /// Optional callback to compute fresh git context each turn. When set, the
@@ -233,6 +246,8 @@ impl AgentLoop {
             base_system_prompt,
             doom_monitor: VecDeque::new(),
             budget_warned_pcts: Vec::new(),
+            max_tool_retries: 3,
+            retry_attempts: HashMap::new(),
             git_context_fn: None,
             fast_provider: None,
             fast_agent_config: None,
@@ -289,6 +304,8 @@ impl AgentLoop {
             base_system_prompt,
             doom_monitor: VecDeque::new(),
             budget_warned_pcts: Vec::new(),
+            max_tool_retries: 3,
+            retry_attempts: HashMap::new(),
             git_context_fn: None,
             fast_provider: None,
             fast_agent_config: None,
@@ -443,6 +460,150 @@ impl AgentLoop {
             content: vec![ContentBlock::Text { text: text.into() }],
         };
         self.history.push(msg);
+    }
+
+    /// Determine if a tool error is retryable and what strategy to use.
+    fn classify_retry_strategy(&self, tool_name: &str, error: &str) -> Option<RetryStrategy> {
+        let err_lower = error.to_lowercase();
+        
+        // Network/timeout errors - always retryable
+        if err_lower.contains("timeout") 
+            || err_lower.contains("timed out")
+            || err_lower.contains("connection")
+            || err_lower.contains("network")
+            || err_lower.contains("temporarily unavailable")
+            || err_lower.contains("rate limit")
+            || err_lower.contains("too many requests") {
+            return Some(RetryStrategy::WaitAndRetry { delay_ms: 1000 });
+        }
+        
+        // File not found - might be race condition or typo
+        if err_lower.contains("no such file")
+            || err_lower.contains("file not found")
+            || err_lower.contains("cannot find")
+            || err_lower.contains("does not exist") {
+            // Only retry Read, Glob, Grep operations - not Write/Edit
+            if matches!(tool_name, "Read" | "Glob" | "Grep" | "Ls" | "SemanticSearch") {
+                return Some(RetryStrategy::RetryOnce);
+            }
+        }
+        
+        // Permission denied - might be transient
+        if err_lower.contains("permission denied")
+            || err_lower.contains("access denied")
+            || err_lower.contains("unauthorized") {
+            return Some(RetryStrategy::RetryOnce);
+        }
+        
+        // Bash transient errors
+        if tool_name == "Bash" {
+            if err_lower.contains("resource temporarily unavailable")
+                || err_lower.contains("try again")
+                || err_lower.contains("device or resource busy") {
+                return Some(RetryStrategy::WaitAndRetry { delay_ms: 500 });
+            }
+        }
+        
+        // Web fetch/search specific errors
+        if matches!(tool_name, "WebFetch" | "WebSearch") {
+            if err_lower.contains("dns") 
+                || err_lower.contains("resolve")
+                || err_lower.contains("certificate")
+                || err_lower.contains("ssl") {
+                return Some(RetryStrategy::RetryOnce);
+            }
+        }
+        
+        None // Not retryable
+    }
+
+    /// Execute a tool with automatic retry logic for transient failures.
+    async fn execute_tool_with_retry(
+        &mut self,
+        name: &str,
+        input: &serde_json::Value,
+    ) -> ToolOutput {
+        let max_retries = self.max_tool_retries;
+        let mut last_output: Option<ToolOutput> = None;
+        
+        for attempt in 0..=max_retries {
+            let output = self.execute_tool_maybe_gated(name, input).await;
+            
+            if !output.is_error {
+                // Success - clear retry tracking for this tool
+                let key = format!("{}:{}", name, serde_json::to_string(input).unwrap_or_default());
+                self.retry_attempts.remove(&key);
+                return output;
+            }
+            
+            // Check if we've exhausted retries (last iteration)
+            if attempt == max_retries {
+                // Max retries exceeded - return last error with context
+                if let Some(mut final_output) = last_output {
+                    final_output.content = format!(
+                        "{}\n\n[Auto-retry exhausted after {} attempts]",
+                        final_output.content,
+                        max_retries + 1
+                    );
+                    return final_output;
+                }
+                return output;
+            }
+            
+            // Check if this error is retryable
+            match self.classify_retry_strategy(name, &output.content) {
+                Some(strategy) => {
+                    let key = format!("{}:{}", name, serde_json::to_string(input).unwrap_or_default());
+                    self.retry_attempts.insert(key.clone(), attempt);
+                    
+                    // Log retry attempt (attempt+1 since we're about to retry)
+                    if let Some(ref e) = self.emit {
+                        let _ = e.on_assistant_text(
+                            &format!("[Tool '{}' failed, retrying ({}/{})...]", name, attempt + 1, max_retries)
+                        ).await;
+                    }
+                    
+                    // Apply retry strategy
+                    match strategy {
+                        RetryStrategy::WaitAndRetry { delay_ms } => {
+                            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                        }
+                        RetryStrategy::RetryOnce => {
+                            // No delay for simple retry
+                        }
+                    }
+                    
+                    last_output = Some(output);
+                    // Continue to next retry attempt
+                }
+                None => {
+                    // Not retryable - return error immediately
+                    return output;
+                }
+            }
+        }
+        
+        unreachable!()
+    }
+
+    /// Execute a batch of tools with automatic retry for failed calls.
+    /// First runs all tools in parallel (if read-only), then retries any failures.
+    async fn execute_tool_batch_with_retry(
+        &mut self,
+        tool_uses: &[(String, String, serde_json::Value)],
+    ) -> Vec<ToolOutput> {
+        // First pass: execute all tools using the optimized batch method
+        let mut results = self.execute_tool_batch(tool_uses).await;
+        
+        // Second pass: retry any failures
+        for (i, result) in results.iter_mut().enumerate() {
+            if result.is_error {
+                let (_, name, input) = &tool_uses[i];
+                *result = self.execute_tool_with_retry(name, input).await;
+            }
+        }
+        
+        results
     }
 
     /// Immediately compact the conversation history, regardless of the compaction threshold.
@@ -789,7 +950,7 @@ impl AgentLoop {
                             }
                         }
                         let t0 = std::time::Instant::now();
-                        let results = self.execute_tool_batch(&tool_uses).await;
+                        let results = self.execute_tool_batch_with_retry(&tool_uses).await;
                         let batch_ms = t0.elapsed().as_millis() as u64;
                         if let Some(ref e) = self.emit {
                             for ((id, name, _), output) in tool_uses.iter().zip(results.iter()) {
@@ -849,7 +1010,7 @@ impl AgentLoop {
                                 }
                             }
                             let t0 = std::time::Instant::now();
-                            let output = self.execute_tool_maybe_gated(name, input).await;
+                            let output = self.execute_tool_with_retry(name, input).await;
                             let duration_ms = t0.elapsed().as_millis() as u64;
                             if let Some(ref e) = self.emit {
                                 e.on_tool_done(id, name, output.is_error, output.diff.clone())
@@ -1407,7 +1568,7 @@ impl AgentLoop {
                             }
                         }
                         let t0 = std::time::Instant::now();
-                        let results = self.execute_tool_batch(&tool_uses).await;
+                        let results = self.execute_tool_batch_with_retry(&tool_uses).await;
                         let batch_ms = t0.elapsed().as_millis() as u64;
                         if let Some(ref e) = self.emit {
                             for ((id, name, _), output) in tool_uses.iter().zip(results.iter()) {
@@ -1467,7 +1628,7 @@ impl AgentLoop {
                                 }
                             }
                             let t0 = std::time::Instant::now();
-                            let output = self.execute_tool_maybe_gated(name, input).await;
+                            let output = self.execute_tool_with_retry(name, input).await;
                             let duration_ms = t0.elapsed().as_millis() as u64;
                             if let Some(ref e) = self.emit {
                                 e.on_tool_done(id, name, output.is_error, output.diff.clone())

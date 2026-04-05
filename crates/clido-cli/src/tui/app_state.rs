@@ -141,13 +141,11 @@ pub(super) struct App {
     /// When true, the TUI exits and setup wizard re-runs to reconfigure.
     pub(super) wants_reinit: bool,
     /// When Some(name), the TUI exits and the active profile is switched then TUI restarts.
-    pub(super) wants_profile_switch: Option<String>,
     /// When true, the TUI exits and the profile-creation wizard runs, then TUI restarts.
     pub(super) wants_profile_create: bool,
     /// When Some(name), the TUI exits and the profile-edit wizard runs, then TUI restarts.
     pub(super) wants_profile_edit: Option<String>,
     /// When Some(id), restart TUI and resume this session immediately.
-    pub(super) restart_resume_session: Option<String>,
     /// Text selection state for in-app copy/paste.
     pub(super) selection: Selection,
     pub(super) provider: String,
@@ -315,10 +313,8 @@ impl App {
             selected_cmd: None,
             quit: false,
             wants_reinit: false,
-            wants_profile_switch: None,
             wants_profile_create: false,
             wants_profile_edit: None,
-            restart_resume_session: None,
             selection: Selection::default(),
             provider,
             model,

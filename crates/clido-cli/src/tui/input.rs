@@ -708,14 +708,7 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                     .unwrap_or_else(|| format!("  ✓ Profile '{}' created", name));
                                 app.push(ChatLine::Info(msg));
                                 app.profile_overlay = None;
-                                // Auto-switch to the newly created profile.
-                                app.push(ChatLine::Info(format!(
-                                    "  ↻ Switching to profile '{}'…",
-                                    name
-                                )));
-                                app.restart_resume_session = app.current_session_id.clone();
-                                app.wants_profile_switch = Some(name);
-                                app.quit = true;
+                                super::commands::switch_profile_seamless(app, &name);
                             } else {
                                 st.status = Some("  ✗ Select a model from the list".into());
                             }
@@ -1137,12 +1130,11 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                         app.model = new_model.clone();
                         app.api_key = new_api_key;
                         if provider_changed || key_changed {
-                            // Provider or key changed — need a full restart
-                            // to rebuild the agent with the new credentials.
                             app.profile_overlay = None;
-                            app.restart_resume_session = app.current_session_id.clone();
-                            app.wants_profile_switch = Some(name);
-                            app.quit = true;
+                            super::commands::reload_active_profile_in_agent(app, &name);
+                            app.push(ChatLine::Info(
+                                "  ↻ Profile updated — agent reloaded with new credentials".into(),
+                            ));
                         } else {
                             // Only model changed — live-switch
                             let _ = app.channels.model_switch_tx.send(new_model);
@@ -1183,9 +1175,10 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                         app.api_key = new_api_key;
                         if provider_changed || key_changed {
                             app.profile_overlay = None;
-                            app.restart_resume_session = app.current_session_id.clone();
-                            app.wants_profile_switch = Some(name);
-                            app.quit = true;
+                            super::commands::reload_active_profile_in_agent(app, &name);
+                            app.push(ChatLine::Info(
+                                "  ↻ Profile updated — agent reloaded with new credentials".into(),
+                            ));
                         } else {
                             let _ = app.channels.model_switch_tx.send(new_model);
                         }
@@ -1292,8 +1285,7 @@ pub(super) fn handle_app_action(app: &mut App, action: AppAction) {
             }
         }
         AppAction::SwitchProfile { profile_name } => {
-            app.wants_profile_switch = Some(profile_name);
-            app.quit = true;
+            super::commands::switch_profile_seamless(app, &profile_name);
         }
         AppAction::ResumeSession { session_id } => {
             let _ = app.channels.resume_tx.send(session_id);
@@ -1388,7 +1380,26 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     if let Some(ref path) = app.pending_path_permission {
         match event.code {
             Char('y') | Char('Y') => {
-                // Allow once - just grant permission for this call
+                // Allow this attempt: add the smallest sensible scope to session allow-list
+                // so PathGuard permits the retry (same as a one-shot "yes" for this path).
+                if !path.as_os_str().is_empty() {
+                    let scope = std::fs::canonicalize(path).ok().map(|c| {
+                        if c.is_dir() {
+                            c
+                        } else {
+                            c.parent().map(|p| p.to_path_buf()).unwrap_or(c)
+                        }
+                    });
+                    if let Some(scope) = scope {
+                        if !app.allowed_external_paths.contains(&scope) {
+                            app.allowed_external_paths.push(scope.clone());
+                        }
+                        let _ = app
+                            .channels
+                            .allowed_paths_tx
+                            .send(app.allowed_external_paths.clone());
+                    }
+                }
                 let _ = app.channels.path_permission_tx.send(path.clone());
                 app.push(ChatLine::Info(format!("  ✓ Allowed access to: {}", path.display())));
                 app.pending_path_permission = None;
@@ -1615,13 +1626,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                                 name
                             )));
                         } else {
-                            app.push(ChatLine::Info(format!(
-                                "  switching to profile '{}'…",
-                                name
-                            )));
-                            app.restart_resume_session = app.current_session_id.clone();
-                            app.wants_profile_switch = Some(name.clone());
-                            app.quit = true;
+                            super::commands::switch_profile_seamless(app, name);
                         }
                     }
                 }

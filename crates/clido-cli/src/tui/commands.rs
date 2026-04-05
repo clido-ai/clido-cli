@@ -6,6 +6,67 @@ use crate::overlay::{ErrorOverlay, OverlayKind, ReadOnlyOverlay};
 
 use super::*;
 
+/// Switch the default profile on disk, tell the agent to rebuild provider/tools in-process,
+/// and refresh header state — **without** restarting the TUI (same session).
+pub(super) fn switch_profile_seamless(app: &mut App, name: &str) {
+    match clido_core::load_config(&app.workspace_root) {
+        Err(e) => app.push(ChatLine::Info(format!("  ✗ Could not load config: {}", e))),
+        Ok(loaded) => {
+            if !loaded.profiles.contains_key(name) {
+                app.push(ChatLine::Info(format!(
+                    "  profile '{}' not found. Use /profiles to list or /profile new to create.",
+                    name
+                )));
+            } else if name == loaded.default_profile {
+                app.push(ChatLine::Info(format!(
+                    "  profile '{}' is already active.",
+                    name
+                )));
+            } else {
+                let config_path = clido_core::global_config_path()
+                    .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
+                if let Err(e) = clido_core::switch_active_profile(&config_path, name) {
+                    app.push(ChatLine::Info(format!(
+                        "  ✗ Failed to switch profile: {}",
+                        e
+                    )));
+                    return;
+                }
+                let _ = app.channels.profile_switch_tx.send(name.to_string());
+                crate::tui::event_loop::sync_tui_profile_from_disk(app, name);
+                if !app.api_key.is_empty() {
+                    crate::tui::event_loop::spawn_model_fetch(
+                        app.provider.clone(),
+                        app.api_key.clone(),
+                        app.base_url.clone(),
+                        app.channels.fetch_tx.clone(),
+                    );
+                    app.models_loading = true;
+                }
+                app.push(ChatLine::Info(format!(
+                    "  switched to profile '{}' (session continues)...",
+                    name
+                )));
+            }
+        }
+    }
+}
+
+/// Rebuild the running agent from disk for this profile (same name), e.g. after editing API keys.
+pub(super) fn reload_active_profile_in_agent(app: &mut App, name: &str) {
+    let _ = app.channels.profile_switch_tx.send(name.to_string());
+    crate::tui::event_loop::sync_tui_profile_from_disk(app, name);
+    if !app.api_key.is_empty() {
+        crate::tui::event_loop::spawn_model_fetch(
+            app.provider.clone(),
+            app.api_key.clone(),
+            app.base_url.clone(),
+            app.channels.fetch_tx.clone(),
+        );
+        app.models_loading = true;
+    }
+}
+
 /// Return true if `input` is an exact slash command or a slash command followed
 /// by a space (i.e. a command with arguments). Used to decide whether Enter
 /// should execute a command or send the input as a chat message.
@@ -1382,41 +1443,7 @@ pub(super) fn cmd_profile_edit(app: &mut App, cmd: &str) {
 
 pub(super) fn cmd_profile_switch(app: &mut App, cmd: &str) {
     let name = cmd.trim_start_matches("/profile ").trim();
-    match clido_core::load_config(&app.workspace_root) {
-        Err(e) => app.push(ChatLine::Info(format!("  ✗ Could not load config: {}", e))),
-        Ok(loaded) => {
-            if !loaded.profiles.contains_key(name) {
-                app.push(ChatLine::Info(format!(
-                    "  profile '{}' not found. Use /profiles to list or /profile new to create.",
-                    name
-                )));
-            } else if name == loaded.default_profile {
-                app.push(ChatLine::Info(format!(
-                    "  profile '{}' is already active.",
-                    name
-                )));
-            } else {
-                // Set the new profile as default in config
-                let config_path = clido_core::global_config_path()
-                    .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
-                if let Err(e) = clido_core::switch_active_profile(&config_path, name) {
-                    app.push(ChatLine::Info(format!(
-                        "  ✗ Failed to switch profile: {}",
-                        e
-                    )));
-                    return;
-                }
-                
-                app.push(ChatLine::Info(format!(
-                    "  switching to profile '{}' (session continues)...",
-                    name
-                )));
-                
-                // Send profile switch request to agent (seamless, no restart)
-                let _ = app.channels.profile_switch_tx.send(name.to_string());
-            }
-        }
-    }
+    switch_profile_seamless(app, name);
 }
 
 pub(super) fn cmd_profile_delete(app: &mut App, cmd: &str) {
@@ -2191,6 +2218,7 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
                     app.messages.push(ChatLine::WelcomeBrand);
                     app.current_session_id = Some(new_session_id.clone());
                     app.session_title = None; // Reset title for new session
+                    let _ = app.channels.resume_tx.send(new_session_id.clone());
                     app.push(ChatLine::Info(format!(
                         "  ✦ New session started (id: {}...)",
                         short_id

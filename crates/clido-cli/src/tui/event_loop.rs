@@ -209,7 +209,7 @@ pub(super) enum AgentAction {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn agent_task(
-    cli: Cli,
+    mut cli: Cli,
     workspace_root: std::path::PathBuf,
     preloaded_config: Option<clido_core::LoadedConfig>,
     preloaded_pricing: clido_core::PricingTable,
@@ -230,14 +230,18 @@ pub(super) async fn agent_task(
     path_permission_rx: mpsc::UnboundedReceiver<std::path::PathBuf>,
     mut profile_switch_rx: mpsc::UnboundedReceiver<String>,
 ) {
+    // Session-scoped paths outside workspace (also passed into AgentSetup on rebuild).
+    let mut allowed_external_paths: Vec<std::path::PathBuf> = Vec::new();
+
     let setup_result = match preloaded_config {
         Some(loaded) => AgentSetup::build_with_preloaded_and_store(
             &cli,
             &workspace_root,
             loaded,
             preloaded_pricing,
-            reviewer_enabled,
-            Some(todo_store),
+            reviewer_enabled.clone(),
+            Some(todo_store.clone()),
+            &allowed_external_paths,
         ),
         None => AgentSetup::build(&cli, &workspace_root),
     };
@@ -253,13 +257,9 @@ pub(super) async fn agent_task(
 
     let perms = Arc::new(Mutex::new(PermsState::default()));
     setup.ask_user = Some(Arc::new(TuiAskUser {
-        perm_tx,
+        perm_tx: perm_tx.clone(),
         perms: perms.clone(),
     }));
-
-    // Track allowed external paths for this session (used when recreating tools).
-    #[allow(unused_mut, unused_variables)]
-    let mut allowed_external_paths: Vec<std::path::PathBuf> = Vec::new();
 
     // Deduplication: check for existing sessions created within the last 5 seconds
     // with the same content to prevent duplicate sessions during rapid recovery.
@@ -623,20 +623,74 @@ pub(super) async fn agent_task(
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             AgentAction::SwitchProfile(profile_name) => {
-                // Inform user about the profile switch
-                if event_tx
-                    .send(AgentEvent::Info {
-                        message: format!("Switching to profile '{}'...", profile_name),
-                    })
-                    .is_err()
-                {
-                    return;
+                let wr = workspace_root.clone();
+                let loaded_res =
+                    tokio::task::spawn_blocking(move || clido_core::load_config(&wr)).await;
+                let loaded = match loaded_res.ok().and_then(|r| r.ok()) {
+                    Some(l) => l,
+                    _ => {
+                        let _ = event_tx.send(AgentEvent::Err(
+                            "profile switch: could not reload config from disk".into(),
+                        ));
+                        continue;
+                    }
+                };
+                if !loaded.profiles.contains_key(&profile_name) {
+                    let _ = event_tx.send(AgentEvent::Err(format!(
+                        "profile switch: profile '{}' not found in config",
+                        profile_name
+                    )));
+                    continue;
                 }
-                // For now, we return which causes the agent task to exit
-                // The TUI will display the message and the user can continue
-                // A full implementation would restart the agent_task with the new profile
-                // without restarting the TUI
-                return;
+                let mut try_cli = cli.clone();
+                try_cli.profile = Some(profile_name.clone());
+                match AgentSetup::build_with_preloaded_and_store(
+                    &try_cli,
+                    &workspace_root,
+                    loaded,
+                    setup.pricing_table.clone(),
+                    reviewer_enabled.clone(),
+                    Some(todo_store.clone()),
+                    &allowed_external_paths,
+                ) {
+                    Ok(new_setup) => {
+                        cli.profile = Some(profile_name.clone());
+                        setup.provider_name = new_setup.provider_name.clone();
+                        setup.pricing_table = new_setup.pricing_table.clone();
+                        setup.fast_provider = new_setup.fast_provider.clone();
+                        setup.fast_config = new_setup.fast_config.clone();
+                        setup.config = new_setup.config.clone();
+                        let switched_model = new_setup.config.model.clone();
+                        agent.switch_profile(
+                            new_setup.provider,
+                            new_setup.config,
+                            new_setup.registry,
+                        );
+                        setup.ask_user = Some(Arc::new(TuiAskUser {
+                            perm_tx: perm_tx.clone(),
+                            perms: perms.clone(),
+                        }));
+                        if event_tx
+                            .send(AgentEvent::Info {
+                                message: format!("Switched to profile '{}'", profile_name),
+                            })
+                            .is_err()
+                        {
+                            return;
+                        }
+                        if event_tx
+                            .send(AgentEvent::ModelSwitched {
+                                to_model: switched_model,
+                            })
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = event_tx.send(AgentEvent::Err(format!("profile switch: {e}")));
+                    }
+                }
             }
             AgentAction::Run(prompt) => {
                 let run_start = std::time::Instant::now();
@@ -1182,7 +1236,7 @@ pub(super) struct AgentRuntimeHandles {
 ///   1. `profile.api_key` (literal value in config.toml)
 ///   2. `profile.api_key_env` or the provider's conventional env var
 ///   3. Credentials file (`~/.config/clido/credentials`)
-fn resolve_display_api_key(profile: &clido_core::ProfileEntry) -> String {
+pub(super) fn resolve_display_api_key(profile: &clido_core::ProfileEntry) -> String {
     // 1. Direct value in config
     if let Some(ref k) = profile.api_key {
         if !k.is_empty() {
@@ -1216,6 +1270,21 @@ fn resolve_display_api_key(profile: &clido_core::ProfileEntry) -> String {
     }
 
     String::new()
+}
+
+/// Refresh header fields after a seamless profile switch (same session).
+pub(super) fn sync_tui_profile_from_disk(app: &mut App, profile_name: &str) {
+    let Ok(loaded) = clido_core::load_config(&app.workspace_root) else {
+        return;
+    };
+    let Ok(profile) = loaded.get_profile(profile_name) else {
+        return;
+    };
+    app.provider = profile.provider.clone();
+    app.model = profile.model.clone();
+    app.api_key = resolve_display_api_key(&profile);
+    app.base_url = profile.base_url.clone();
+    app.current_profile = profile_name.to_string();
 }
 
 pub(super) fn start_agent_runtime(
@@ -1556,94 +1625,6 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         .await?
         {
             EventLoopExit::Quit => break Ok(()),
-            EventLoopExit::ProfileSwitch(profile_name) => {
-                // Switch active profile on disk.
-                if let Some(config_path) = clido_core::global_config_path() {
-                    let _ = clido_core::switch_active_profile(&config_path, &profile_name);
-                }
-
-                // Reload config from disk.
-                let wr = workspace_root.clone();
-                let fresh_config: Option<clido_core::LoadedConfig> =
-                    tokio::task::spawn_blocking(move || clido_core::load_config(&wr).ok())
-                        .await
-                        .ok()
-                        .flatten();
-
-                // Extract new profile settings.
-                let (new_provider, new_model, new_api_key, new_base_url) = {
-                    let pname = profile_name.as_str();
-                    match fresh_config
-                        .as_ref()
-                        .and_then(|c| c.get_profile(pname).ok())
-                    {
-                        Some(profile) => {
-                            let key = resolve_display_api_key(profile);
-                            (
-                                profile.provider.clone(),
-                                profile.model.clone(),
-                                key,
-                                profile.base_url.clone(),
-                            )
-                        }
-                        None => ("?".to_string(), "?".to_string(), String::new(), None),
-                    }
-                };
-
-                // Abort old agent runtime.
-                runtime.agent_handle.abort();
-
-                // Start fresh agent runtime with updated config.
-                let mut switch_cli = cli.clone();
-                switch_cli.profile = Some(profile_name.clone());
-                let resume_id = app.current_session_id.as_deref().or(cli.resume.as_deref());
-                if let Some(sid) = resume_id {
-                    switch_cli.resume = Some(sid.to_string());
-                }
-
-                runtime = start_agent_runtime(
-                    switch_cli,
-                    workspace_root.clone(),
-                    fresh_config.clone().or_else(|| loaded_config.clone()),
-                    pricing_table.clone(),
-                    app.cancel.clone(),
-                    app.image_state.clone(),
-                    app.reviewer_enabled.clone(),
-                );
-
-                // Update app state in-place.
-                app.provider = new_provider.clone();
-                app.model = new_model.clone();
-                app.api_key = new_api_key.clone();
-                app.base_url = new_base_url.clone();
-                app.current_profile = profile_name.clone();
-                app.channels.prompt_tx = runtime.prompt_tx.clone();
-                app.channels.resume_tx = runtime.resume_tx.clone();
-                app.channels.model_switch_tx = runtime.model_switch_tx.clone();
-                app.channels.workdir_tx = runtime.workdir_tx.clone();
-                app.channels.compact_now_tx = runtime.compact_now_tx.clone();
-                app.quit = false;
-                app.busy = false;
-                app.status_log.clear();
-                app.cancel.store(false, Ordering::Relaxed);
-
-                // Kick off model list fetch for new provider.
-                if !new_api_key.is_empty() {
-                    spawn_model_fetch(
-                        new_provider,
-                        new_api_key,
-                        new_base_url,
-                        runtime.fetch_tx.clone(),
-                    );
-                    app.models_loading = true;
-                }
-
-                app.push(ChatLine::Info(format!(
-                    "  switched to profile '{profile_name}'"
-                )));
-                recovery_attempts = 0;
-                continue;
-            }
             EventLoopExit::Recover(reason) => {
                 recovery_attempts = recovery_attempts.saturating_add(1);
                 if recovery_attempts > 3 {
@@ -1682,6 +1663,12 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
                 app.channels.model_switch_tx = runtime.model_switch_tx.clone();
                 app.channels.workdir_tx = runtime.workdir_tx.clone();
                 app.channels.compact_now_tx = runtime.compact_now_tx.clone();
+                app.channels.fetch_tx = runtime.fetch_tx.clone();
+                app.channels.kill_tx = runtime.kill_tx.clone();
+                app.channels.allowed_paths_tx = runtime.allowed_paths_tx.clone();
+                app.channels.note_tx = runtime.note_tx.clone();
+                app.channels.path_permission_tx = runtime.path_permission_tx.clone();
+                app.channels.profile_switch_tx = runtime.profile_switch_tx.clone();
                 app.push(ChatLine::Thinking("↻ recovering runtime…".to_string()));
                 app.busy = false;
                 app.status_log.clear();
@@ -1706,16 +1693,6 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         DisableBracketedPaste
     );
 
-    // Handle /profile <name> switch request.
-    if let Some(profile_name) = app.wants_profile_switch.take() {
-        if let Some(config_path) = clido_core::global_config_path() {
-            let _ = clido_core::switch_active_profile(&config_path, &profile_name);
-        }
-        let mut next_cli = cli.clone();
-        next_cli.resume = app.restart_resume_session.take();
-        return run_tui(next_cli).await;
-    }
-
     // Handle /profile new — create a new profile via the guided wizard, then restart TUI.
     if app.wants_profile_create {
         crate::setup::run_create_profile(None).await?;
@@ -1733,7 +1710,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
             tracing::warn!(profile = %profile_name, "profile not found for /profile edit");
         }
         let mut next_cli = cli.clone();
-        next_cli.resume = app.restart_resume_session.take();
+        next_cli.resume = app.current_session_id.clone().or(cli.resume.clone());
         return run_tui(next_cli).await;
     }
 
@@ -1774,8 +1751,6 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
 pub(super) enum EventLoopExit {
     Quit,
     Recover(String),
-    /// Switch to a different profile without restarting the TUI.
-    ProfileSwitch(String),
 }
 
 pub(super) async fn event_loop(
@@ -2536,7 +2511,9 @@ pub(super) async fn event_loop(
                         "permission channel closed unexpectedly".to_string(),
                     ));
                 }
-        }
+            }
+
+        } // end select!
 
         // ── Throttle render
         // ── Spawn /enhance task if pending ─────────────────────────────
@@ -2587,10 +2564,6 @@ pub(super) async fn event_loop(
         }
 
         if app.quit {
-            // Check if this is a profile switch rather than a real quit.
-            if let Some(profile_name) = app.wants_profile_switch.take() {
-                return Ok(EventLoopExit::ProfileSwitch(profile_name));
-            }
             return Ok(EventLoopExit::Quit);
         }
     }

@@ -153,6 +153,13 @@ pub trait EventEmitter: Send + Sync {
     /// Called for any text the model emits while it's still calling tools (thinking aloud).
     /// Default impl is a no-op so existing code compiles without changes.
     async fn on_assistant_text(&self, _text: &str) {}
+    /// Ask the UI to approve access outside the workspace (TUI shows y/n/a prompt).
+    async fn on_path_permission_request(
+        &self,
+        _path: &std::path::Path,
+        _tool_name: &str,
+    ) {
+    }
     /// Called when cumulative cost crosses a budget threshold (50%, 80%, 90%).
     /// `pct` is the percentage (50, 80, or 90), `spent_usd` and `limit_usd` are raw values.
     /// Default impl is a no-op.
@@ -497,8 +504,16 @@ impl AgentLoop {
 
     /// Extract a file path from tool input JSON for permission requests.
     fn extract_path_from_input(input: &serde_json::Value) -> Option<std::path::PathBuf> {
-        // Try common path field names
-        for key in &["path", "file", "target", "source", "dest", "destination"] {
+        // Try common path field names (Read/Write/Edit use `file_path`).
+        for key in &[
+            "file_path",
+            "path",
+            "file",
+            "target",
+            "source",
+            "dest",
+            "destination",
+        ] {
             if let Some(path_str) = input.get(key).and_then(|v| v.as_str()) {
                 return Some(std::path::PathBuf::from(path_str));
             }
@@ -591,11 +606,9 @@ impl AgentLoop {
                     // Extract the path from the error or input
                     let requested_path = Self::extract_path_from_input(input).unwrap_or_default();
                     
-                    // Emit request to TUI
+                    // Emit request to TUI (modal y/n/a), not only as "thinking" text.
                     if let Some(ref e) = self.emit {
-                        let _ = e.on_assistant_text(
-                            &format!("[Requesting permission for external path: {}]", requested_path.display())
-                        ).await;
+                        e.on_path_permission_request(&requested_path, name).await;
                     }
                     
                     // Wait for user response (with timeout)

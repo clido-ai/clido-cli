@@ -178,6 +178,7 @@ impl AgentSetup {
             pricing_table,
             reviewer_enabled,
             None,
+            &[],
         )
     }
 
@@ -188,6 +189,7 @@ impl AgentSetup {
         pricing_table: PricingTable,
         reviewer_enabled: Arc<AtomicBool>,
         external_todo_store: Option<TodoStore>,
+        allowed_external_paths: &[std::path::PathBuf],
     ) -> Result<Self, anyhow::Error> {
         let profile_name = cli
             .profile
@@ -207,8 +209,13 @@ impl AgentSetup {
         )
         .map_err(CliError::Usage)?;
 
-        let (mut registry, todo_store) =
-            build_registry(cli, &loaded, workspace_root, external_todo_store)?;
+        let (mut registry, todo_store) = build_registry(
+            cli,
+            &loaded,
+            workspace_root,
+            external_todo_store,
+            allowed_external_paths,
+        )?;
         registry = load_mcp_tools(cli, registry);
 
         let permission_mode = parse_permission_mode(cli.permission_mode.as_deref());
@@ -654,6 +661,7 @@ fn build_registry(
     loaded: &clido_core::LoadedConfig,
     workspace_root: &Path,
     external_todo_store: Option<TodoStore>,
+    allowed_external_paths: &[std::path::PathBuf],
 ) -> Result<(ToolRegistry, TodoStore), anyhow::Error> {
     let allowed = cli
         .allowed_tools
@@ -683,8 +691,16 @@ fn build_registry(
         .into_iter()
         .collect::<Vec<_>>();
     let sandbox = cli.sandbox;
-    let (mut registry, mut todo_store) =
-        default_registry_with_todo_store(workspace_root.to_path_buf(), blocked, sandbox);
+    let (mut registry, mut todo_store) = if allowed_external_paths.is_empty() {
+        default_registry_with_todo_store(workspace_root.to_path_buf(), blocked, sandbox)
+    } else {
+        clido_tools::default_registry_with_options_and_allowed_paths(
+            workspace_root.to_path_buf(),
+            blocked,
+            sandbox,
+            allowed_external_paths.to_vec(),
+        )
+    };
     // If an external store was provided, replace so the TUI and agent share the same Arc.
     if let Some(ext) = external_todo_store {
         // Re-register TodoWriteTool with the external store.

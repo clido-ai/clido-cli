@@ -102,7 +102,6 @@ pub(crate) enum FocusTarget {
 impl FocusTarget {
     /// Returns true if this focus target is a modal overlay that should block
     /// normal input handling.
-    #[allow(dead_code)]
     pub(crate) fn is_modal(self) -> bool {
         !matches!(self, FocusTarget::ChatInput)
     }

@@ -92,11 +92,6 @@ pub(super) const TUI_DIFF_ADD_FG: Color = Color::Rgb(150, 220, 150);
 pub(super) const TUI_DIFF_DEL_FG: Color = Color::Rgb(220, 150, 150);
 pub(super) const TUI_DIFF_HEADER: Color = Color::Rgb(130, 170, 200);
 
-/// Blockquote accent bar.
-/// Blockquote accent bar — reserved for future use.
-#[allow(dead_code)]
-pub(super) const TUI_QUOTE_ACCENT: Color = Color::Rgb(100, 110, 135);
-
 /// Slash commands grouped by section — now delegates to command_registry.
 pub(super) fn slash_command_sections() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
     crate::command_registry::commands_by_section()

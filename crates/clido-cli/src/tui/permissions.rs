@@ -92,6 +92,17 @@ impl EventEmitter for TuiEmitter {
             limit: limit_usd,
         });
     }
+
+    async fn on_path_permission_request(
+        &self,
+        path: &std::path::Path,
+        tool_name: &str,
+    ) {
+        let _ = self.tx.send(AgentEvent::PathPermissionRequest {
+            path: path.to_path_buf(),
+            tool_name: tool_name.to_string(),
+        });
+    }
 }
 
 pub(super) fn format_tool_input(name: &str, input: &serde_json::Value) -> String {

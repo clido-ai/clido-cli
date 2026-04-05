@@ -18,12 +18,13 @@ pub(crate) fn spawn_update_check(tx: mpsc::UnboundedSender<AgentEvent>, force: b
         if !force && !should_check() {
             return;
         }
+        let Some(latest) = fetch_latest_version().await else {
+            return;
+        };
+        // Only record a successful check after we actually got a version from the API.
         mark_checked();
-        if let Some(latest) = fetch_latest_version().await {
-            let current_tag = format!("v{}", CURRENT_VERSION);
-            if latest != current_tag {
-                let _ = tx.send(AgentEvent::UpdateAvailable { version: latest });
-            }
+        if remote_is_newer(&latest, CURRENT_VERSION) {
+            let _ = tx.send(AgentEvent::UpdateAvailable { version: latest });
         }
     });
 }
@@ -48,8 +49,7 @@ pub(crate) fn spawn_do_update(
                 ));
                 return;
             };
-            let current_tag = format!("v{}", CURRENT_VERSION);
-            if v == current_tag {
+            if !remote_is_newer(&v, CURRENT_VERSION) {
                 let _ = tx.send(AgentEvent::UpdateStatus(format!(
                     "✓ Already on the latest version ({}).",
                     CURRENT_VERSION
@@ -90,6 +90,20 @@ pub(crate) fn spawn_do_update(
 }
 
 // ── Internals ──────────────────────────────────────────────────────────────────
+
+/// True if `latest_tag` (e.g. `v0.2.0`) is a semver **greater** than `current_pkg_version`
+/// (e.g. `0.1.0-beta.7` from `CARGO_PKG_VERSION`).
+fn remote_is_newer(latest_tag: &str, current_pkg_version: &str) -> bool {
+    let l = latest_tag.trim().trim_start_matches('v');
+    let c = current_pkg_version.trim().trim_start_matches('v');
+    match (semver::Version::parse(l), semver::Version::parse(c)) {
+        (Ok(lv), Ok(cv)) => lv > cv,
+        _ => {
+            // If tags are non-semver, fall back to inequality (legacy behavior).
+            l != c
+        }
+    }
+}
 
 pub(crate) async fn fetch_latest_version() -> Option<String> {
     #[derive(serde::Deserialize)]

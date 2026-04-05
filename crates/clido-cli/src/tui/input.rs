@@ -1337,7 +1337,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     if matches!((event.modifiers, event.code), (Km::CONTROL, Char('y'))) {
         match app.last_assistant_text() {
             Some(text) => {
-                if let Err(e) = copy_to_clipboard_osc52(text) {
+                if let Err(e) = copy_to_clipboard(text) {
                     app.push_toast(
                         format!("Copy failed: {}", e),
                         Color::Red,

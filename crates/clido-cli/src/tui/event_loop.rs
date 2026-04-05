@@ -192,10 +192,6 @@ pub(super) fn copy_to_clipboard(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn copy_to_clipboard_osc52(text: &str) -> Result<(), String> {
-    copy_to_clipboard(text)
-}
-
 // ── Agent background task ─────────────────────────────────────────────────────
 
 pub(super) enum AgentAction {
@@ -2540,15 +2536,9 @@ pub(super) async fn event_loop(
                         "permission channel closed unexpectedly".to_string(),
                     ));
                 }
-            }
         }
 
-        // ── Track focus changes (mouse capture stays always-on) ──────────
-        let cur_focus = app.focus();
-        if cur_focus != prev_focus {
-            prev_focus = cur_focus;
-        }
-
+        // ── Throttle render
         // ── Spawn /enhance task if pending ─────────────────────────────
         if let Some(raw_prompt) = app.pending_enhance.take() {
             let enhance_tx = app.channels.fetch_tx.clone();

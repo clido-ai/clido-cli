@@ -337,13 +337,33 @@ pub(super) fn cmd_sessions(app: &mut App) {
             ));
         }
         Ok(sessions) => {
-            let selected = sessions
-                .iter()
-                .position(|s| app.current_session_id.as_deref() == Some(&s.session_id))
-                .unwrap_or(0);
-            let mut picker = ListPicker::new(sessions, 12);
-            picker.selected = selected;
-            app.session_picker = Some(SessionPickerState { picker });
+            // Display session list with titles
+            app.push(ChatLine::Info(format!(
+                "  {} session(s) found:",
+                sessions.len()
+            )));
+            for (i, session) in sessions.iter().enumerate() {
+                let marker = if app.current_session_id.as_deref() == Some(&session.session_id) {
+                    "▶ "
+                } else {
+                    "  "
+                };
+                let title_display = session.title.as_ref()
+                    .map(|t| format!(" — {}", t))
+                    .unwrap_or_default();
+                app.push(ChatLine::Info(format!(
+                    "    {}. {}{}{} (${:.4})",
+                    i + 1,
+                    marker,
+                    &session.session_id[..8.min(session.session_id.len())],
+                    title_display,
+                    session.total_cost_usd
+                )));
+            }
+            app.push(ChatLine::Info("".into()));
+            app.push(ChatLine::Info(
+                "  Use /session <id> to resume, /sessions to refresh".into()
+            ));
         }
     }
 }

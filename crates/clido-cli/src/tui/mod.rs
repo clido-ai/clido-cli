@@ -24,7 +24,7 @@ use commands::{
 };
 #[allow(unused_imports)]
 use event_loop::{
-    agent_task, build_model_list, copy_to_clipboard, copy_to_clipboard_osc52, event_loop,
+    agent_task, build_model_list, copy_to_clipboard, event_loop,
     resolve_workdir_arg, run_tui_inner, spawn_model_fetch, start_agent_runtime,
     tui_memory_store_path, AgentAction, AgentRuntimeHandles, EventLoopExit,
 };

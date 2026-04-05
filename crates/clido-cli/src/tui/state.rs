@@ -191,6 +191,8 @@ pub(crate) struct AgentChannels {
     pub(crate) fetch_tx: mpsc::UnboundedSender<AgentEvent>,
     /// Channel to force abort the agent task immediately (for /stop command).
     pub(crate) kill_tx: mpsc::UnboundedSender<()>,
+    /// Channel to update allowed external paths for this session.
+    pub(crate) allowed_paths_tx: mpsc::UnboundedSender<Vec<std::path::PathBuf>>,
 }
 
 // ── Plan editor state ─────────────────────────────────────────────────────────

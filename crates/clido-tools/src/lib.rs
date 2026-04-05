@@ -59,6 +59,14 @@ pub fn default_registry(workspace_root: PathBuf) -> ToolRegistry {
     default_registry_with_blocked(workspace_root, Vec::new())
 }
 
+/// Build registry with allowed external paths (outside workspace_root).
+pub fn default_registry_with_allowed_paths(
+    workspace_root: PathBuf,
+    allowed_external: Vec<PathBuf>,
+) -> ToolRegistry {
+    default_registry_with_options_and_allowed_paths(workspace_root, Vec::new(), false, allowed_external).0
+}
+
 /// Build registry with blocked paths excluded from all file tools and Bash.
 pub fn default_registry_with_blocked(
     workspace_root: PathBuf,
@@ -74,6 +82,53 @@ pub fn default_registry_with_options(
     sandbox: bool,
 ) -> ToolRegistry {
     default_registry_with_todo_store(workspace_root, blocked, sandbox).0
+}
+
+/// Build registry with allowed external paths.
+pub fn default_registry_with_options_and_allowed_paths(
+    workspace_root: PathBuf,
+    blocked: Vec<PathBuf>,
+    sandbox: bool,
+    allowed_external: Vec<PathBuf>,
+) -> (ToolRegistry, std::sync::Arc<std::sync::Mutex<Vec<TodoItem>>>) {
+    let guard = PathGuard::new(workspace_root.clone())
+        .with_blocked(blocked.clone())
+        .with_allowed_external(allowed_external);
+    let tracker = FileTracker::new();
+    let read_cache = clido_context::read_cache::ReadCache::new();
+    let mut r = ToolRegistry::new();
+    r.register(ExitPlanModeTool);
+    if sandbox {
+        r.register(BashTool::new_sandboxed(blocked).with_workspace(workspace_root.clone()));
+    } else {
+        r.register(BashTool::new_with_blocked(blocked).with_workspace(workspace_root.clone()));
+    }
+    r.register(ReadTool::new_with_cache(
+        guard.clone(),
+        tracker.clone(),
+        read_cache,
+    ));
+    r.register(WriteTool::new_with_tracker(guard.clone(), tracker.clone()));
+    r.register(EditTool::new_with_tracker(guard.clone(), tracker.clone()));
+    r.register(MultiEditTool::new_with_tracker(
+        guard.clone(),
+        tracker.clone(),
+    ));
+    let todo_tool = TodoWriteTool::new();
+    let todo_store = todo_tool.store();
+    r.register(todo_tool);
+    r.register(GlobTool::new_with_guard(guard.clone()));
+    r.register(LsTool::new_with_guard(guard.clone()));
+    r.register(ApplyPatchTool::new(guard.clone()));
+    r.register(GrepTool::new_with_guard(guard));
+    r.register(GitTool::new(workspace_root.clone()));
+    r.register(SemanticSearchTool::new(workspace_root.clone()));
+    r.register(WebFetchTool::new());
+    r.register(WebSearchTool::new());
+    r.register(DiagnosticsTool::new());
+    r.register(TestLoopTool::new(workspace_root));
+    r.register(truncate::TruncateTool::new());
+    (r, todo_store)
 }
 
 /// Build registry and return both the registry and the agent's shared todo store.

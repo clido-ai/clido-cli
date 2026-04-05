@@ -204,6 +204,7 @@ pub(super) enum AgentAction {
     SwitchModel(String),
     SetWorkspace(std::path::PathBuf),
     CompactNow,
+    SetAllowedExternalPaths(Vec<std::path::PathBuf>),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -224,6 +225,7 @@ pub(super) async fn agent_task(
     reviewer_enabled: Arc<AtomicBool>,
     todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
     mut kill_rx: mpsc::UnboundedReceiver<()>,
+    mut allowed_paths_rx: mpsc::UnboundedReceiver<Vec<std::path::PathBuf>>,
 ) {
     let setup_result = match preloaded_config {
         Some(loaded) => AgentSetup::build_with_preloaded_and_store(
@@ -251,6 +253,10 @@ pub(super) async fn agent_task(
         perm_tx,
         perms: perms.clone(),
     }));
+
+    // Track allowed external paths for this session (used when recreating tools).
+    #[allow(unused_variables)]
+    let mut allowed_external_paths: Vec<std::path::PathBuf> = Vec::new();
 
     // Deduplication: check for existing sessions created within the last 5 seconds
     // with the same content to prevent duplicate sessions during rapid recovery.
@@ -485,6 +491,12 @@ pub(super) async fn agent_task(
                 cancel.store(true, Ordering::Relaxed);
                 continue;
             }
+            paths = allowed_paths_rx.recv() => {
+                match paths {
+                    Some(p) => AgentAction::SetAllowedExternalPaths(p),
+                    None => break,
+                }
+            }
         };
 
         match action {
@@ -552,6 +564,26 @@ pub(super) async fn agent_task(
                             return;
                         }
                     }
+                }
+            }
+            AgentAction::SetAllowedExternalPaths(paths) => {
+                // Store allowed paths for future tool registry rebuilds
+                // The paths will be applied on the next workspace switch or tool rebuild
+                let path_count = paths.len();
+                allowed_external_paths = paths.clone();
+                // Rebuild tools with new allowed paths
+                let new_registry = clido_tools::default_registry_with_allowed_paths(
+                    workspace_root.clone(),
+                    paths,
+                );
+                agent.replace_tools(new_registry);
+                if event_tx
+                    .send(AgentEvent::Info {
+                        message: format!("External paths updated: {} path(s) allowed", path_count),
+                    })
+                    .is_err()
+                {
+                    return;
                 }
             }
             AgentAction::Run(prompt) => {
@@ -1082,6 +1114,8 @@ pub(super) struct AgentRuntimeHandles {
     agent_handle: tokio::task::JoinHandle<()>,
     /// Channel to force abort the agent task immediately (for /stop command).
     kill_tx: mpsc::UnboundedSender<()>,
+    /// Channel to update allowed external paths for this session.
+    allowed_paths_tx: mpsc::UnboundedSender<Vec<std::path::PathBuf>>,
 }
 
 /// Resolve the API key for display purposes (welcome screen, etc.).
@@ -1143,6 +1177,7 @@ pub(super) fn start_agent_runtime(
     let (event_tx, event_rx) = mpsc::unbounded_channel::<AgentEvent>();
     let (perm_tx, perm_rx) = mpsc::unbounded_channel::<PermRequest>();
     let (kill_tx, kill_rx) = mpsc::unbounded_channel::<()>();
+    let (allowed_paths_tx, allowed_paths_rx) = mpsc::unbounded_channel::<Vec<std::path::PathBuf>>();
 
     // Pre-create the shared todo store so both the agent task and the TUI app can share it.
     let todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>> =
@@ -1165,6 +1200,7 @@ pub(super) fn start_agent_runtime(
         reviewer_enabled,
         todo_store.clone(),
         kill_rx,
+        allowed_paths_rx,
     ));
 
     AgentRuntimeHandles {
@@ -1179,6 +1215,7 @@ pub(super) fn start_agent_runtime(
         todo_store,
         agent_handle,
         kill_tx,
+        allowed_paths_tx,
     }
 }
 
@@ -1404,6 +1441,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
             compact_now_tx: runtime.compact_now_tx.clone(),
             fetch_tx: runtime.fetch_tx.clone(),
             kill_tx: runtime.kill_tx.clone(),
+            allowed_paths_tx: runtime.allowed_paths_tx.clone(),
         },
         cancel,
         provider.clone(),
@@ -2389,6 +2427,9 @@ pub(super) async fn event_loop(
                     }
                     Some(AgentEvent::UpdateStatus(status)) => {
                         app.push(ChatLine::Info(format!("  {}", status)));
+                    }
+                    Some(AgentEvent::Info { message }) => {
+                        app.push(ChatLine::Info(format!("  {}", message)));
                     }
                     None => {
                         return Ok(EventLoopExit::Recover(

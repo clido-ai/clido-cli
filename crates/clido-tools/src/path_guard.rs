@@ -3,10 +3,12 @@
 use std::path::{Path, PathBuf};
 
 /// Path-access guard: restricts operations to workspace_root and rejects blocked paths.
+/// Also allows access to explicitly permitted external paths outside the workspace.
 #[derive(Clone)]
 pub struct PathGuard {
     root: PathBuf,
     blocked: Vec<PathBuf>,
+    allowed_external: Vec<PathBuf>,
 }
 
 impl PathGuard {
@@ -14,6 +16,7 @@ impl PathGuard {
         Self {
             root: workspace_root,
             blocked: Vec::new(),
+            allowed_external: Vec::new(),
         }
     }
 
@@ -26,7 +29,33 @@ impl PathGuard {
         self
     }
 
-    /// Canonicalize path and ensure it is under workspace_root and not blocked.
+    /// Add allowed external paths (outside workspace_root) that tools may access.
+    pub fn with_allowed_external(mut self, paths: Vec<PathBuf>) -> Self {
+        // Canonicalize each allowed path so we can compare robustly.
+        self.allowed_external = paths
+            .into_iter()
+            .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+            .collect();
+        self
+    }
+
+    /// Set allowed external paths dynamically (for runtime permission changes).
+    pub fn set_allowed_external(&mut self, paths: Vec<PathBuf>) {
+        self.allowed_external = paths
+            .into_iter()
+            .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+            .collect();
+    }
+
+    /// Check if a canonical path is within any allowed external path.
+    fn is_in_allowed_external(&self, canonical: &Path) -> bool {
+        self.allowed_external.iter().any(|allowed| {
+            canonical == allowed || canonical.starts_with(allowed)
+        })
+    }
+
+    /// Canonicalize path and ensure it is under workspace_root (or explicitly allowed
+    /// external path) and not blocked.
     pub fn resolve_and_check(&self, path: &str) -> Result<PathBuf, String> {
         let root_canon = std::fs::canonicalize(&self.root)
             .map_err(|e| format!("canonicalize workspace root: {e}"))?;
@@ -36,21 +65,30 @@ impl PathGuard {
             root_canon.join(path)
         };
         let normalized = normalize_path(&joined);
-        if !normalized.starts_with(&root_canon) {
-            return Err("Access denied: path outside working directory.".to_string());
-        }
         let canonical = std::fs::canonicalize(&normalized)
             .map_err(|e| format!("canonicalize {}: {e}", normalized.display()))?;
-        if !canonical.starts_with(&root_canon) {
-            return Err("Access denied: path outside working directory.".to_string());
+        
+        // Check workspace root first
+        if canonical.starts_with(&root_canon) {
+            if self.is_blocked(&canonical) {
+                return Err("Access denied: this file is protected.".to_string());
+            }
+            return Ok(canonical);
         }
-        if self.is_blocked(&canonical) {
-            return Err("Access denied: this file is protected.".to_string());
+        
+        // Check allowed external paths
+        if self.is_in_allowed_external(&canonical) {
+            if self.is_blocked(&canonical) {
+                return Err("Access denied: this file is protected.".to_string());
+            }
+            return Ok(canonical);
         }
-        Ok(canonical)
+        
+        Err("Access denied: path outside working directory.".to_string())
     }
 
     /// Resolve path for write: file may not exist yet.
+    /// Also allows paths under allowed external directories.
     pub fn resolve_for_write(&self, path: &str) -> Result<PathBuf, String> {
         let root_canon = std::fs::canonicalize(&self.root)
             .map_err(|e| format!("canonicalize workspace root: {e}"))?;
@@ -59,23 +97,46 @@ impl PathGuard {
         } else {
             root_canon.join(path)
         };
+        
+        // For existing files, canonicalize and check
         if joined.exists() {
             let canonical = std::fs::canonicalize(&joined)
                 .map_err(|e| format!("canonicalize {}: {e}", joined.display()))?;
-            if !canonical.starts_with(&root_canon) {
-                return Err("Access denied: path outside working directory.".to_string());
+            
+            // Check workspace root
+            if canonical.starts_with(&root_canon) {
+                if self.is_blocked(&canonical) {
+                    return Err("Access denied: this file is protected.".to_string());
+                }
+                return Ok(canonical);
             }
-            if self.is_blocked(&canonical) {
-                return Err("Access denied: this file is protected.".to_string());
+            
+            // Check allowed external paths
+            if self.is_in_allowed_external(&canonical) {
+                if self.is_blocked(&canonical) {
+                    return Err("Access denied: this file is protected.".to_string());
+                }
+                return Ok(canonical);
             }
-            return Ok(canonical);
+            
+            return Err("Access denied: path outside working directory.".to_string());
         }
+        
+        // For new files, check parent directory
         if let Some(parent) = joined.parent() {
             let canon_parent = match std::fs::canonicalize(parent) {
                 Ok(p) => p,
                 Err(_) => {
+                    // Parent doesn't exist - check if it would be in workspace
                     if parent == root_canon || parent.starts_with(&root_canon) {
-                        // Check normalized target too
+                        let normalized = normalize_path(&joined);
+                        if self.is_blocked_raw(&normalized) {
+                            return Err("Access denied: this file is protected.".to_string());
+                        }
+                        return Ok(joined);
+                    }
+                    // Check if parent would be in allowed external paths
+                    if self.is_in_allowed_external(&parent) {
                         let normalized = normalize_path(&joined);
                         if self.is_blocked_raw(&normalized) {
                             return Err("Access denied: this file is protected.".to_string());
@@ -85,17 +146,34 @@ impl PathGuard {
                     return Err("Access denied: path outside working directory.".to_string());
                 }
             };
-            if !canon_parent.starts_with(&root_canon) {
-                return Err("Access denied: path outside working directory.".to_string());
-            }
-            if let Some(name) = joined.file_name() {
-                let target = canon_parent.join(name);
-                if self.is_blocked(&target) {
-                    return Err("Access denied: this file is protected.".to_string());
+            
+            // Check workspace root
+            if canon_parent.starts_with(&root_canon) {
+                if let Some(name) = joined.file_name() {
+                    let target = canon_parent.join(name);
+                    if self.is_blocked(&target) {
+                        return Err("Access denied: this file is protected.".to_string());
+                    }
+                    return Ok(target);
                 }
-                return Ok(target);
+                return Ok(joined);
             }
+            
+            // Check allowed external paths
+            if self.is_in_allowed_external(&canon_parent) {
+                if let Some(name) = joined.file_name() {
+                    let target = canon_parent.join(name);
+                    if self.is_blocked(&target) {
+                        return Err("Access denied: this file is protected.".to_string());
+                    }
+                    return Ok(target);
+                }
+                return Ok(joined);
+            }
+            
+            return Err("Access denied: path outside working directory.".to_string());
         }
+        
         Ok(joined)
     }
 

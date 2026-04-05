@@ -338,6 +338,8 @@ Type `/` in the input bar to see completions. Commands are grouped by category:
 | `/check` | Run diagnostics on current project |
 | `/rules` | Show active CLIDO.md rules files |
 | `/image <path>` | Attach an image to the next message |
+| `/allow-path <path>` | Allow agent to access files outside workspace (e.g., `/allow-path ~/Downloads`) |
+| `/allowed-paths` | List externally allowed paths for this session |
 | `/workdir [path]` | Show or set working directory |
 | `/stop` | Interrupt current run without sending a message |
 | `/copy [all\|n]` | Copy last assistant message (or all / nth) to clipboard |

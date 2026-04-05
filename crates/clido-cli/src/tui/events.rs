@@ -94,4 +94,8 @@ pub(crate) enum AgentEvent {
     },
     /// Progress/result message from the `/update` command's async install task.
     UpdateStatus(String),
+    /// General info message to display in the chat (non-error, non-response).
+    Info {
+        message: String,
+    },
 }

@@ -1175,6 +1175,110 @@ pub(super) fn cmd_image(app: &mut App, cmd: &str) {
     }
 }
 
+/// Add an external path to the allowed list for this session.
+/// Tools will be able to read/write files in these paths in addition to the workspace.
+pub(super) fn cmd_allow_path(app: &mut App, cmd: &str) {
+    let path_str = cmd.trim_start_matches("/allow-path").trim();
+    if path_str.is_empty() {
+        app.push(ChatLine::Info(
+            "  Usage: /allow-path <path>  (allow agent to access files outside workspace)".into(),
+        ));
+        return;
+    }
+
+    let path = std::path::Path::new(path_str);
+    
+    // Expand ~ to home directory
+    let expanded: std::path::PathBuf = if path_str.starts_with("~/") {
+        if let Some(home) = std::env::home_dir() {
+            home.join(&path_str[2..])
+        } else {
+            app.push(ChatLine::Info("  ✗ Could not determine home directory".into()));
+            return;
+        }
+    } else {
+        path.to_path_buf()
+    };
+
+    // Check if path exists
+    if !expanded.exists() {
+        app.push(ChatLine::Info(format!(
+            "  ✗ Path does not exist: {}",
+            expanded.display()
+        )));
+        return;
+    }
+
+    // Canonicalize to resolve symlinks and get absolute path
+    let canonical: std::path::PathBuf = match expanded.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            app.push(ChatLine::Info(format!(
+                "  ✗ Could not resolve path: {} ({})",
+                expanded.display(),
+                e
+            )));
+            return;
+        }
+    };
+
+    // Check if path is already in workspace (redundant but allowed)
+    if canonical.starts_with(&app.workspace_root) {
+        app.push(ChatLine::Info(format!(
+            "  ℹ Path is already within workspace: {}",
+            canonical.display()
+        )));
+        return;
+    }
+
+    // Check if already allowed
+    if app.allowed_external_paths.contains(&canonical) {
+        app.push(ChatLine::Info(format!(
+            "  ℹ Path already allowed: {}",
+            canonical.display()
+        )));
+        return;
+    }
+
+    // Add to allowed list
+    app.allowed_external_paths.push(canonical.clone());
+    
+    // Send updated paths to agent task
+    let _ = app.channels.allowed_paths_tx.send(app.allowed_external_paths.clone());
+    
+    app.push(ChatLine::Info(format!(
+        "  ✓ Allowed external path: {}",
+        canonical.display()
+    )));
+}
+
+/// List all externally allowed paths for this session.
+pub(super) fn cmd_allowed_paths(app: &mut App) {
+    let paths: Vec<std::path::PathBuf> = app.allowed_external_paths.clone();
+    if paths.is_empty() {
+        app.push(ChatLine::Info(
+            "  No external paths allowed. Use /allow-path <path> to add one.".into()
+        ));
+        return;
+    }
+
+    app.push(ChatLine::Info(format!(
+        "  {} external path(s) allowed this session:",
+        paths.len()
+    )));
+    for (i, path) in paths.iter().enumerate() {
+        app.push(ChatLine::Info(format!(
+            "    {}. {}",
+            i + 1,
+            path.display()
+        )));
+    }
+    app.push(ChatLine::Info("".into()));
+    app.push(ChatLine::Info(
+        "  Use /allow-path <path> to add more, or restart to clear.".into()
+    ));
+}
+
 pub(super) fn cmd_agents(app: &mut App) {
     match clido_core::load_config(&app.workspace_root) {
         Err(e) => app.push(ChatLine::Info(format!("  ✗ Could not load config: {}", e))),
@@ -2133,6 +2237,8 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
         "/index" => cmd_index(app),
         "/rules" => cmd_rules(app),
         _ if cmd == "/image" || cmd.starts_with("/image ") => cmd_image(app, cmd),
+        _ if cmd == "/allow-path" || cmd.starts_with("/allow-path ") => cmd_allow_path(app, cmd),
+        "/allowed-paths" => cmd_allowed_paths(app),
         "/agents" => cmd_agents(app),
         "/profiles" => cmd_profiles(app),
         "/profile" => cmd_profile(app),

@@ -451,6 +451,22 @@ pub static COMMANDS: &[SlashCommand] = &[
         requires_idle: false,
     },
     SlashCommand {
+        name: "/allow-path",
+        section: "Project",
+        description: "allow agent to access files outside workspace for this session",
+        usage: Some("/allow-path <path>"),
+        takes_args: true,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/allowed-paths",
+        section: "Project",
+        description: "list externally allowed paths for this session",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
+    SlashCommand {
         name: "/workdir",
         section: "Project",
         description: "show or set working directory",

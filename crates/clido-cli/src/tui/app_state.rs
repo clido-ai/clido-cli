@@ -236,6 +236,9 @@ pub(super) struct App {
     pub(super) api_key: String,
     /// Optional custom base URL for the active profile's provider.
     pub(super) base_url: Option<String>,
+    /// Externally allowed paths for this session (outside workspace_root).
+    /// Tools can access these paths in addition to the workspace.
+    pub(super) allowed_external_paths: Vec<std::path::PathBuf>,
 
     /// True while a model-list fetch is in progress (shows spinner in model picker).
     pub(super) models_loading: bool,
@@ -352,6 +355,7 @@ impl App {
             rate_limit_ping_count: 0,
             api_key,
             base_url,
+            allowed_external_paths: Vec::new(),
             models_loading: false,
             render_cache: std::collections::HashMap::new(),
             render_cache_msg_count: 0,

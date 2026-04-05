@@ -2,6 +2,7 @@
 
 mod app_state;
 mod commands;
+mod copy;
 mod event_loop;
 pub mod events;
 mod input;
@@ -24,7 +25,7 @@ use commands::{
 };
 #[allow(unused_imports)]
 use event_loop::{
-    agent_task, build_model_list, copy_to_clipboard, event_loop,
+    agent_task, build_model_list, copy_to_clipboard, event_loop, read_clipboard,
     resolve_workdir_arg, run_tui_inner, spawn_model_fetch, start_agent_runtime,
     tui_memory_store_path, AgentAction, AgentRuntimeHandles, EventLoopExit,
 };
@@ -68,29 +69,71 @@ use clido_agent::{AskUser, PermGrant as AgentPermGrant, PermRequest as AgentPerm
 
 pub(super) const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-/// Truecolor palette — unique to clido, not copied from opencode or anyone else.
-/// Warm-cold gradient: user = warm, assistant = cool, tools = neutral, status = ambient.
-pub(super) const TUI_SOFT_ACCENT: Color = Color::Rgb(150, 200, 255);
-pub(super) const TUI_ACCENT: Color = Color::Green;
-/// Softer white for main text — easier on the eyes than pure white.
-pub(super) const TUI_TEXT: Color = Color::Rgb(212, 212, 220);
-/// Slightly dimmer text for secondary content (reserved for future use).
+// ═══════════════════════════════════════════════════════════════════════════════
+// Theme — cohesive “editor tool” look: cool slate neutrals, one cool accent, calm states.
+// All RGB chosen for readable contrast on typical dark terminal backgrounds.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Primary interactive accent (focus rings, idle input, links in markdown).
+pub(super) const TUI_SOFT_ACCENT: Color = Color::Rgb(118, 198, 228);
+/// Brand mark between “cli” and “do” — slightly greener than the UI accent.
+pub(super) const TUI_MARK: Color = Color::Rgb(72, 214, 196);
+/// Main brand word color (high legibility, not pure white).
+pub(super) const TUI_BRAND_TEXT: Color = Color::Rgb(228, 232, 242);
+
+/// User message label / positive affordances.
+pub(super) const TUI_ACCENT: Color = Color::Rgb(132, 214, 172);
+/// Body text for messages.
+pub(super) const TUI_TEXT: Color = Color::Rgb(218, 222, 236);
+/// Secondary labels, metadata, de-emphasized copy.
+pub(super) const TUI_MUTED: Color = Color::Rgb(132, 140, 162);
+/// Section dividers in the header (`│` separators).
+pub(super) const TUI_DIVIDER: Color = Color::Rgb(72, 82, 104);
+/// Picker rows when not selected.
+pub(super) const TUI_ROW_DIM: Color = Color::Rgb(154, 162, 180);
+
 #[allow(dead_code)]
-pub(super) const TUI_TEXT_DIM: Color = Color::Rgb(180, 180, 190);
-/// Selected row background in pickers and completion lists (muted slate).
-pub(super) const TUI_SELECTION_BG: Color = Color::Rgb(52, 62, 78);
+pub(super) const TUI_TEXT_DIM: Color = TUI_MUTED;
 
-/// Code block: near-black interior, subtle blue-gray border.
-pub(super) const TUI_CODE_BG: Color = Color::Rgb(20, 20, 26);
-pub(super) const TUI_CODE_BORDER: Color = Color::Rgb(50, 50, 65);
-pub(super) const TUI_CODE_LANG: Color = Color::Rgb(180, 140, 220); // soft purple for lang label
+/// Selected row in lists / completions.
+pub(super) const TUI_SELECTION_BG: Color = Color::Rgb(44, 54, 74);
+/// Toast / overlay chrome backing.
+pub(super) const TUI_TOAST_BG: Color = Color::Rgb(48, 54, 68);
 
-/// Diff: deeper, more readable backgrounds that don't wash out text.
-pub(super) const TUI_DIFF_ADD_BG: Color = Color::Rgb(16, 36, 18);
-pub(super) const TUI_DIFF_DEL_BG: Color = Color::Rgb(42, 16, 16);
-pub(super) const TUI_DIFF_ADD_FG: Color = Color::Rgb(150, 220, 150);
-pub(super) const TUI_DIFF_DEL_FG: Color = Color::Rgb(220, 150, 150);
-pub(super) const TUI_DIFF_HEADER: Color = Color::Rgb(130, 170, 200);
+/// Agent busy / queued input chrome (soft lavender, not loud).
+pub(super) const TUI_STATE_BUSY: Color = Color::Rgb(158, 152, 208);
+/// Secondary busy tone (enhance / cyan-adjacent).
+pub(super) const TUI_STATE_INFO: Color = Color::Rgb(110, 200, 220);
+/// Warnings, rate-limit, queue headers.
+pub(super) const TUI_STATE_WARN: Color = Color::Rgb(230, 196, 120);
+/// Errors, destructive affordances.
+pub(super) const TUI_STATE_ERR: Color = Color::Rgb(240, 118, 128);
+/// Success checkmarks, reviewer on-dot.
+pub(super) const TUI_STATE_OK: Color = Color::Rgb(120, 206, 160);
+
+/// Running tool row (spinner line in the status strip).
+pub(super) const TUI_STATUS_RUN: Color = Color::Rgb(200, 175, 125);
+/// Modal / input outer border (popups share this family).
+pub(super) const TUI_BORDER_UI: Color = Color::Rgb(82, 94, 118);
+
+/// Code block: deep panel, cool border.
+pub(super) const TUI_CODE_BG: Color = Color::Rgb(22, 24, 32);
+pub(super) const TUI_CODE_FG: Color = Color::Rgb(212, 220, 235);
+
+/// Elevated / inset surface (tool error strip, code-adjacent panels) — same family as code bg.
+pub(super) const TUI_SURFACE_INSET: Color = TUI_CODE_BG;
+pub(super) const TUI_CODE_BORDER: Color = Color::Rgb(58, 66, 88);
+pub(super) const TUI_CODE_LANG: Color = Color::Rgb(190, 165, 235);
+/// Inline `code` in markdown — cool tint, never “warning yellow”.
+pub(super) const TUI_INLINE_CODE_FG: Color = Color::Rgb(198, 214, 238);
+pub(super) const TUI_INLINE_CODE_BG: Color = Color::Rgb(34, 38, 52);
+
+/// Diff panels.
+pub(super) const TUI_DIFF_ADD_BG: Color = Color::Rgb(18, 40, 28);
+pub(super) const TUI_DIFF_DEL_BG: Color = Color::Rgb(48, 22, 24);
+pub(super) const TUI_DIFF_ADD_FG: Color = Color::Rgb(150, 230, 170);
+pub(super) const TUI_DIFF_DEL_FG: Color = Color::Rgb(235, 160, 160);
+pub(super) const TUI_DIFF_HEADER: Color = Color::Rgb(140, 180, 210);
 
 /// Slash commands grouped by section — now delegates to command_registry.
 pub(super) fn slash_command_sections() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
@@ -813,23 +856,18 @@ mod tests {
         let md = "---";
         let narrow = render_markdown(md, 40);
         let wide = render_markdown(md, 100);
+        let is_hr_line = |l: &ratatui::text::Line<'_>| {
+            let s: String = l.spans.iter().map(|sp| sp.content.as_ref()).collect();
+            let t = s.trim_start();
+            t.starts_with('─') && t.chars().filter(|c| *c == '─').count() >= 8
+        };
         let hr_narrow = narrow
             .iter()
-            .find(|l| {
-                l.spans
-                    .first()
-                    .map(|s| s.content.starts_with('─'))
-                    .unwrap_or(false)
-            })
+            .find(|l| is_hr_line(l))
             .expect("hr missing on narrow");
         let hr_wide = wide
             .iter()
-            .find(|l| {
-                l.spans
-                    .first()
-                    .map(|s| s.content.starts_with('─'))
-                    .unwrap_or(false)
-            })
+            .find(|l| is_hr_line(l))
             .expect("hr missing on wide");
         let n_len: usize = hr_narrow
             .spans

@@ -1,6 +1,4 @@
 use crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::style::Color;
-
 use clido_planner::Complexity;
 
 use crate::list_picker::ListPicker;
@@ -11,6 +9,10 @@ use super::*;
 // ── Scroll helpers ────────────────────────────────────────────────────────────
 
 pub(super) fn scroll_up(app: &mut App, lines: u32) {
+    if app.suppress_next_chat_scroll_up {
+        app.suppress_next_chat_scroll_up = false;
+        return;
+    }
     if app.following {
         app.scroll = app.layout.max_scroll;
     }
@@ -19,6 +21,7 @@ pub(super) fn scroll_up(app: &mut App, lines: u32) {
 }
 
 pub(super) fn scroll_down(app: &mut App, lines: u32) {
+    app.suppress_next_chat_scroll_up = false;
     let new_scroll = app.scroll.saturating_add(lines);
     if new_scroll >= app.layout.max_scroll {
         app.scroll = app.layout.max_scroll;
@@ -1332,21 +1335,42 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 if let Err(e) = copy_to_clipboard(text) {
                     app.push_toast(
                         format!("Copy failed: {}", e),
-                        Color::Red,
+                        TUI_STATE_ERR,
                         std::time::Duration::from_secs(3),
                     );
                 } else {
                     app.push_toast(
                         "Copied to clipboard",
-                        Color::Green,
+                        TUI_STATE_OK,
                         std::time::Duration::from_secs(2),
                     );
                 }
             }
             None => app.push_toast(
                 "Nothing to copy yet",
-                Color::Yellow,
+                TUI_STATE_WARN,
                 std::time::Duration::from_secs(2),
+            ),
+        }
+        return;
+    }
+
+    // Ctrl+V: system clipboard → input (terminals that do not emit `Paste` for this binding).
+    if matches!((event.modifiers, event.code), (Km::CONTROL, Char('v'))) && !app.selection_mode {
+        match read_clipboard() {
+            Ok(s) if !s.is_empty() => {
+                let text = s.replace("\r\n", "\n").replace('\r', "\n");
+                let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor);
+                app.text_input.text.insert_str(byte_pos, &text);
+                app.text_input.cursor += text.chars().count();
+                app.selected_cmd = None;
+                app.text_input.history_idx = None;
+            }
+            Ok(_) => {}
+            Err(e) => app.push_toast(
+                format!("Clipboard: {}", e),
+                TUI_STATE_WARN,
+                std::time::Duration::from_secs(3),
             ),
         }
         return;
@@ -1887,14 +1911,14 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                             Ok(()) => {
                                 app.push_toast(
                                     "Copied to clipboard".to_string(),
-                                    Color::Green,
+                                    TUI_STATE_OK,
                                     std::time::Duration::from_secs(2),
                                 );
                             }
                             Err(e) => {
                                 app.push_toast(
                                     format!("Copy failed: {}", e),
-                                    Color::Red,
+                                    TUI_STATE_ERR,
                                     std::time::Duration::from_secs(3),
                                 );
                             }
@@ -1960,6 +1984,14 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.push(ChatLine::Info(
                     "  ✗ Auto-resume cancelled. Use /profile <name> to switch provider or just type to continue manually.".into(),
                 ));
+            } else if app.rate_limit_pinging && !app.rate_limit_cancelled {
+                app.rate_limit_cancelled = true;
+                app.rate_limit_pinging = false;
+                app.rate_limit_next_ping = None;
+                app.rate_limit_ping_count = 0;
+                app.push(ChatLine::Info(
+                    "  ✗ Background rate-limit checks cancelled — retry manually when ready.".into(),
+                ));
             } else if app.editing_queued_item.is_some() {
                 // Discard the queue item being edited (don't put it back)
                 app.editing_queued_item = None;
@@ -1988,7 +2020,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.selection.start(start_row, 0);
                 app.push_toast(
                     "Copy mode: ↑↓←→ move · Space toggle · y copy · Esc exit".to_string(),
-                    Color::Yellow,
+                    TUI_STATE_WARN,
                     std::time::Duration::from_secs(5),
                 );
             }

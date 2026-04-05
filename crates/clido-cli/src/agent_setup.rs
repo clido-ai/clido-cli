@@ -4,7 +4,7 @@
 use clido_agent::AskUser;
 use clido_core::{
     agent_config_from_loaded, load_config, load_pricing, AgentConfig, LoadedConfig, PermissionMode,
-    PricingTable,
+    PricingTable, ProfileEntry,
 };
 use clido_providers::RetryProvider;
 use clido_tools::{default_registry_with_todo_store, McpTool, TodoItem, ToolRegistry};
@@ -209,186 +209,21 @@ impl AgentSetup {
         )
         .map_err(CliError::Usage)?;
 
-        let (mut registry, todo_store) = build_registry(
-            cli,
-            &loaded,
-            workspace_root,
-            external_todo_store,
-            allowed_external_paths,
-        )?;
-        registry = load_mcp_tools(cli, registry);
-
-        let permission_mode = parse_permission_mode(cli.permission_mode.as_deref());
-
-        let mut system_prompt = assemble_system_prompt(cli)?;
-
-        // Load project-specific context from .clido.md if present.
-        let clido_md_path = workspace_root.join(".clido.md");
-        if clido_md_path.is_file() {
-            if let Ok(project_ctx) = std::fs::read_to_string(&clido_md_path) {
-                let trimmed = project_ctx.trim();
-                if !trimmed.is_empty() {
-                    system_prompt = format!(
-                        "<project_context>\n{}\n</project_context>\n\n{}",
-                        trimmed, system_prompt
-                    );
-                }
-            }
-        }
-
-        // Load skills from .clido/skills/ directory (project-local and global).
-        {
-            let mut skill_texts = Vec::new();
-            let skills_dir = workspace_root.join(".clido").join("skills");
-            if skills_dir.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(&skills_dir) {
-                    let mut paths: Vec<_> = entries
-                        .filter_map(|e| e.ok())
-                        .filter(|e| {
-                            e.path()
-                                .extension()
-                                .map(|ext| ext == "md" || ext == "txt")
-                                .unwrap_or(false)
-                        })
-                        .map(|e| e.path())
-                        .collect();
-                    paths.sort();
-                    for path in paths {
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            let trimmed = content.trim();
-                            if !trimmed.is_empty() {
-                                let name = path
-                                    .file_stem()
-                                    .map(|s| s.to_string_lossy().to_string())
-                                    .unwrap_or_default();
-                                skill_texts.push(format!("### {}\n{}", name, trimmed));
-                            }
-                        }
-                    }
-                }
-            }
-            // Also load from ~/.clido/skills/ (global skills).
-            let global_skills_dir = std::env::var("HOME")
-                .map(|h| std::path::PathBuf::from(h).join(".clido").join("skills"))
-                .ok();
-            if let Some(ref global_skills) = global_skills_dir {
-                if global_skills.is_dir() {
-                    if let Ok(entries) = std::fs::read_dir(global_skills) {
-                        let mut paths: Vec<_> = entries
-                            .filter_map(|e| e.ok())
-                            .filter(|e| {
-                                e.path()
-                                    .extension()
-                                    .map(|ext| ext == "md" || ext == "txt")
-                                    .unwrap_or(false)
-                            })
-                            .map(|e| e.path())
-                            .collect();
-                        paths.sort();
-                        for path in paths {
-                            if let Ok(content) = std::fs::read_to_string(&path) {
-                                let trimmed = content.trim();
-                                if !trimmed.is_empty() {
-                                    let name = path
-                                        .file_stem()
-                                        .map(|s| s.to_string_lossy().to_string())
-                                        .unwrap_or_default();
-                                    // Avoid duplicates if project has same-named skill
-                                    if !skill_texts
-                                        .iter()
-                                        .any(|s| s.starts_with(&format!("### {}\n", name)))
-                                    {
-                                        skill_texts.push(format!("### {}\n{}", name, trimmed));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if !skill_texts.is_empty() {
-                system_prompt = format!(
-                    "{}\n\n<skills>\n{}\n</skills>",
-                    system_prompt,
-                    skill_texts.join("\n\n")
-                );
-            }
-        }
-
-        // Append provider-specific prompt instructions.
-        let provider_name = profile.provider.as_str();
-        let model_name = cli.model.as_deref().unwrap_or(&profile.model);
-        let family =
-            clido_agent::provider_prompts::ProviderFamily::detect(provider_name, model_name);
-        let suffix = clido_agent::provider_prompts::provider_specific_instructions(family);
-        if !suffix.is_empty() {
-            system_prompt = format!("{}\n{}", system_prompt, suffix);
-        }
-
-        let mut config = agent_config_from_loaded(
-            &loaded,
-            profile_name,
-            cli.max_turns,
-            cli.max_budget_usd,
-            cli.model.clone(),
-            Some(system_prompt),
-            Some(permission_mode),
-            cli.quiet,
-            cli.max_parallel_tools,
-        )
-        .map_err(|e| CliError::Usage(e.to_string()))?;
-
-        // Build fast/utility provider from [profiles.<name>.fast] if configured.
-        let (fast_provider, fast_config) = if let Some(ref fast_cfg) = profile.fast {
-            match build_fast_provider(fast_cfg) {
-                Ok(fp) => {
-                    let mut fc = config.clone();
-                    fc.model = fast_cfg.model.clone();
-                    fc.system_prompt = None;
-                    (Some(fp), Some(fc))
-                }
-                Err(e) => {
-                    eprintln!("Warning: fast provider failed to build: {e}");
-                    (None, None)
-                }
-            }
-        } else {
-            (None, None)
-        };
-
-        // Worker/reviewer sub-agents use fast provider (or main if fast not configured).
-        let sub_provider: Arc<dyn clido_providers::ModelProvider> = fast_provider
-            .clone()
-            .unwrap_or_else(|| Arc::clone(&provider));
-        let sub_model = profile
-            .fast
-            .as_ref()
-            .map(|f| f.model.clone())
-            .unwrap_or_else(|| config.model.clone());
-
-        {
-            let mut worker_config = config.clone();
-            worker_config.system_prompt = None;
-            worker_config.max_turns = worker_config.max_turns.min(20);
-            worker_config.model = sub_model.clone();
-            registry.register(SpawnWorkerTool::new(
-                sub_provider.clone(),
-                worker_config,
-                workspace_root.to_path_buf(),
-            ));
-        }
-        {
-            let mut reviewer_config = config.clone();
-            reviewer_config.system_prompt = None;
-            reviewer_config.max_turns = reviewer_config.max_turns.min(10);
-            reviewer_config.model = sub_model;
-            registry.register(SpawnReviewerTool::new(
-                sub_provider,
-                reviewer_config,
-                workspace_root.to_path_buf(),
+        let (registry, todo_store, mut config, fast_provider, fast_config) =
+            build_full_tool_registry(
+                cli,
+                workspace_root,
+                &loaded,
+                profile_name,
+                profile,
+                &provider,
                 reviewer_enabled.clone(),
-            ));
-        }
+                external_todo_store,
+                allowed_external_paths,
+            )?;
+
+        let provider_name = profile.provider.as_str();
+        let permission_mode = parse_permission_mode(cli.permission_mode.as_deref());
 
         // Inject sub-agent routing instructions.
         {
@@ -469,6 +304,267 @@ impl AgentSetup {
             Arc::new(AtomicBool::new(true)),
         )
     }
+
+    /// Load config for `workspace_root` and build setup with optional external paths and shared todo store.
+    /// Used for TUI workdir switches so MCP, sub-agents, filters, and allowed paths stay consistent.
+    pub fn build_for_workspace_session(
+        cli: &Cli,
+        workspace_root: &Path,
+        reviewer_enabled: Arc<AtomicBool>,
+        external_todo_store: TodoStore,
+        allowed_external_paths: &[std::path::PathBuf],
+    ) -> Result<Self, anyhow::Error> {
+        let loaded = load_config(workspace_root)
+            .map_err(|e| CliError::Usage(format!("load config: {e}")))?;
+        let (pricing_table, _) = load_pricing();
+        Self::build_with_preloaded_and_store(
+            cli,
+            workspace_root,
+            loaded,
+            pricing_table,
+            reviewer_enabled,
+            Some(external_todo_store),
+            allowed_external_paths,
+        )
+    }
+}
+
+/// Core file tools (with filters + optional external paths), MCP, spawn worker/reviewer tools,
+/// and the base [`AgentConfig`] / fast-provider pair (before routing rules and token limits).
+/// `main_provider` must be the **unwrapped** provider from `make_provider` (before `RetryProvider::wrap`).
+pub(crate) fn build_full_tool_registry(
+    cli: &Cli,
+    workspace_root: &Path,
+    loaded: &LoadedConfig,
+    profile_name: &str,
+    profile: &ProfileEntry,
+    main_provider: &Arc<dyn clido_providers::ModelProvider>,
+    reviewer_enabled: Arc<AtomicBool>,
+    external_todo_store: Option<TodoStore>,
+    allowed_external_paths: &[std::path::PathBuf],
+) -> Result<
+    (
+        ToolRegistry,
+        TodoStore,
+        AgentConfig,
+        Option<Arc<dyn clido_providers::ModelProvider>>,
+        Option<AgentConfig>,
+    ),
+    anyhow::Error,
+> {
+    let (mut registry, todo_store) = build_registry(
+        cli,
+        loaded,
+        workspace_root,
+        external_todo_store,
+        allowed_external_paths,
+    )?;
+    registry = load_mcp_tools(cli, registry);
+
+    let permission_mode = parse_permission_mode(cli.permission_mode.as_deref());
+
+    let mut system_prompt = assemble_system_prompt(cli)?;
+
+    let clido_md_path = workspace_root.join(".clido.md");
+    if clido_md_path.is_file() {
+        if let Ok(project_ctx) = std::fs::read_to_string(&clido_md_path) {
+            let trimmed = project_ctx.trim();
+            if !trimmed.is_empty() {
+                system_prompt = format!(
+                    "<project_context>\n{}\n</project_context>\n\n{}",
+                    trimmed, system_prompt
+                );
+            }
+        }
+    }
+
+    {
+        let mut skill_texts = Vec::new();
+        let skills_dir = workspace_root.join(".clido").join("skills");
+        if skills_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&skills_dir) {
+                let mut paths: Vec<_> = entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.path()
+                            .extension()
+                            .map(|ext| ext == "md" || ext == "txt")
+                            .unwrap_or(false)
+                    })
+                    .map(|e| e.path())
+                    .collect();
+                paths.sort();
+                for path in paths {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let trimmed = content.trim();
+                        if !trimmed.is_empty() {
+                            let name = path
+                                .file_stem()
+                                .map(|s| s.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            skill_texts.push(format!("### {}\n{}", name, trimmed));
+                        }
+                    }
+                }
+            }
+        }
+        let global_skills_dir = std::env::var("HOME")
+            .map(|h| std::path::PathBuf::from(h).join(".clido").join("skills"))
+            .ok();
+        if let Some(ref global_skills) = global_skills_dir {
+            if global_skills.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(global_skills) {
+                    let mut paths: Vec<_> = entries
+                        .filter_map(|e| e.ok())
+                        .filter(|e| {
+                            e.path()
+                                .extension()
+                                .map(|ext| ext == "md" || ext == "txt")
+                                .unwrap_or(false)
+                        })
+                        .map(|e| e.path())
+                        .collect();
+                    paths.sort();
+                    for path in paths {
+                        if let Ok(content) = std::fs::read_to_string(&path) {
+                            let trimmed = content.trim();
+                            if !trimmed.is_empty() {
+                                let name = path
+                                    .file_stem()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_default();
+                                if !skill_texts
+                                    .iter()
+                                    .any(|s| s.starts_with(&format!("### {}\n", name)))
+                                {
+                                    skill_texts.push(format!("### {}\n{}", name, trimmed));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !skill_texts.is_empty() {
+            system_prompt = format!(
+                "{}\n\n<skills>\n{}\n</skills>",
+                system_prompt,
+                skill_texts.join("\n\n")
+            );
+        }
+    }
+
+    let provider_name = profile.provider.as_str();
+    let model_name = cli.model.as_deref().unwrap_or(&profile.model);
+    let family =
+        clido_agent::provider_prompts::ProviderFamily::detect(provider_name, model_name);
+    let suffix = clido_agent::provider_prompts::provider_specific_instructions(family);
+    if !suffix.is_empty() {
+        system_prompt = format!("{}\n{}", system_prompt, suffix);
+    }
+
+    let config = agent_config_from_loaded(
+        loaded,
+        profile_name,
+        cli.max_turns,
+        cli.max_budget_usd,
+        cli.model.clone(),
+        Some(system_prompt),
+        Some(permission_mode),
+        cli.quiet,
+        cli.max_parallel_tools,
+    )
+    .map_err(|e| CliError::Usage(e.to_string()))?;
+
+    let (fast_provider, fast_config) = if let Some(ref fast_cfg) = profile.fast {
+        match build_fast_provider(fast_cfg) {
+            Ok(fp) => {
+                let mut fc = config.clone();
+                fc.model = fast_cfg.model.clone();
+                fc.system_prompt = None;
+                (Some(fp), Some(fc))
+            }
+            Err(e) => {
+                eprintln!("Warning: fast provider failed to build: {e}");
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
+    let sub_provider: Arc<dyn clido_providers::ModelProvider> = fast_provider
+        .clone()
+        .unwrap_or_else(|| Arc::clone(main_provider));
+    let sub_model = profile
+        .fast
+        .as_ref()
+        .map(|f| f.model.clone())
+        .unwrap_or_else(|| config.model.clone());
+
+    {
+        let mut worker_config = config.clone();
+        worker_config.system_prompt = None;
+        worker_config.max_turns = worker_config.max_turns.min(20);
+        worker_config.model = sub_model.clone();
+        registry.register(SpawnWorkerTool::new(
+            sub_provider.clone(),
+            worker_config,
+            workspace_root.to_path_buf(),
+        ));
+    }
+    {
+        let mut reviewer_config = config.clone();
+        reviewer_config.system_prompt = None;
+        reviewer_config.max_turns = reviewer_config.max_turns.min(10);
+        reviewer_config.model = sub_model;
+        registry.register(SpawnReviewerTool::new(
+            sub_provider,
+            reviewer_config,
+            workspace_root.to_path_buf(),
+            reviewer_enabled,
+        ));
+    }
+
+    Ok((registry, todo_store, config, fast_provider, fast_config))
+}
+
+/// Reload config from disk and rebuild the full tool registry (for allowed-path updates in the TUI).
+pub(crate) fn regenerate_tool_registry(
+    cli: &Cli,
+    workspace_root: &Path,
+    reviewer_enabled: Arc<AtomicBool>,
+    todo_store: TodoStore,
+    allowed_external_paths: &[std::path::PathBuf],
+) -> Result<ToolRegistry, anyhow::Error> {
+    let loaded = load_config(workspace_root).map_err(|e| CliError::Usage(format!("load config: {e}")))?;
+    let profile_name = cli
+        .profile
+        .as_deref()
+        .unwrap_or(loaded.default_profile.as_str());
+    let profile = loaded
+        .get_profile(profile_name)
+        .map_err(|e| CliError::Usage(e.to_string()))?;
+    LoadedConfig::validate_provider(&profile.provider).map_err(|e| CliError::Usage(e.to_string()))?;
+    let provider = make_provider(
+        profile_name,
+        profile,
+        cli.provider.as_deref(),
+        cli.model.as_deref(),
+    )
+    .map_err(CliError::Usage)?;
+    let (registry, _, _, _, _) = build_full_tool_registry(
+        cli,
+        workspace_root,
+        &loaded,
+        profile_name,
+        profile,
+        &provider,
+        reviewer_enabled,
+        Some(todo_store),
+        allowed_external_paths,
+    )?;
+    Ok(registry)
 }
 
 fn build_fast_provider(
@@ -585,6 +681,13 @@ fn build_routing_instructions(has_worker: bool, has_reviewer: bool) -> String {
     );
     lines.push(
         "- Sub-agent cost counts against the session budget. Don't spawn unnecessarily.".into(),
+    );
+    lines.push(String::new());
+    lines.push("## Tool failures".into());
+    lines.push(
+        "- After any failed tool call, follow the **Tool failure protocol** in your system prompt: \
+         diagnose, adjust arguments or approach, then retry. Do not stop the task because of a single failure."
+            .into(),
     );
     lines.join("\n")
 }
@@ -744,106 +847,7 @@ fn assemble_system_prompt(cli: &Cli) -> Result<String, anyhow::Error> {
     } else if let Some(ref s) = cli.system_prompt {
         s.clone()
     } else {
-        "\
-You are clido, an AI software engineering agent. You help with coding tasks: \
-reading, understanding, writing, editing, and running code across any language \
-or stack. Always refer to yourself as clido — never as Claude, GPT, Gemini, or \
-any other model name.
-
-Respond in the language the user writes in.
-
-## Core behavior
-
-- Be concise and direct. Lead with the answer or action, not the reasoning.
-- Do not summarize what you just did — the user can see the diff.
-- Do not add filler: \"Great!\", \"Sure!\", \"Of course!\" — just act.
-- When you can say it in one sentence, don't use three.
-
-## Working with code
-
-- Always read a file before editing it. Never guess at its contents.
-- Understand the existing code before suggesting changes.
-- Make the smallest change that solves the problem. Do not refactor \
-surrounding code unless asked.
-- Do not add comments, docstrings, or type annotations to code you didn't change.
-- Do not add error handling for scenarios that cannot happen.
-- Three similar lines of code is better than a premature abstraction.
-- Do not design for hypothetical future requirements.
-
-## Planning
-
-- Before acting on any non-trivial task, state your plan in 2-3 lines. \
-Then execute.
-- If the plan turns out to be wrong mid-execution, stop and restate it.
-- When asked to create a plan, number each top-level step as \"Step N: description\". \
-Sub-bullets and notes under each step are encouraged for clarity.
-- When executing a plan, announce each step before starting it: \
-\"Step N: description\" on its own line. This helps the user track progress.
-
-## Multi-file and multi-step work
-
-- When a task spans multiple files, state your plan and order of operations \
-before starting. Do not begin file 3 while file 1 is still broken.
-- Reason about dependencies explicitly before making changes.
-- If the task is large, confirm the breakdown with the user before executing.
-- When something unexpected appears (unknown files, foreign config, merge \
-conflicts), investigate before acting.
-
-## Debugging
-
-- Identify likely causes based on evidence, not guesses.
-- Narrow down systematically before proposing a fix.
-- Explain why the fix works, not just what it changes.
-- Do not brute-force — if blocked, diagnose the root cause.
-
-## Testing
-
-- Write tests for new behavior when a test suite already exists.
-- Do not add tests to untested codebases unless explicitly asked.
-- Do not modify existing tests to make them pass — fix the code instead.
-- Tests should test behavior, not implementation details.
-
-## Tool discipline
-
-- Use the most specific tool available (Read, Grep, Glob) before falling \
-back to shell commands.
-- Prefer editing existing files over creating new ones.
-- Never delete or overwrite without reading first.
-- For destructive or irreversible actions (rm, force push, drop table), \
-stop and confirm with the user.
-
-## Security
-
-- Never introduce command injection, XSS, SQL injection, or other OWASP \
-top 10 vulnerabilities.
-- Never commit secrets, API keys, or credentials.
-- Validate at system boundaries (user input, external APIs). Trust internal \
-code and framework guarantees.
-
-## Git
-
-- Only commit when explicitly asked.
-- Write commit messages that explain *why*, not just *what*.
-- Never skip hooks (--no-verify) or force-push without explicit instruction.
-- Prefer new commits over amending published commits.
-
-## When to ask vs. act
-
-- For small, local, reversible changes: act immediately.
-- For ambiguous requirements: ask one focused question, not five.
-- For irreversible actions affecting shared state (push, delete, send): \
-confirm first.
-- If blocked, diagnose the root cause — do not brute-force or bypass \
-safety checks.
-
-## Communication
-
-- Reference specific file paths and line numbers when discussing code.
-- If the task is unclear, state your interpretation before acting.
-- If you discover something unexpected (unknown files, foreign config, \
-merge conflicts), investigate before overwriting.\
-"
-        .to_string()
+        clido_agent::prompts::bundled_default_system_prompt()
     };
     Ok(if let Some(ref append) = cli.append_system_prompt {
         format!("{}\n{}", base, append)

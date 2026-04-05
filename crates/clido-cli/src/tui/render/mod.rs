@@ -16,13 +16,70 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 
 use crate::overlay::OverlayKind;
 
 use super::*;
+
+// ── Chat input (multiline scroll/cursor) ────────────────────────────────────────
+
+/// Build visible lines for a multiline input and the cursor position inside the widget.
+/// `input_visible_w` matches single-line horizontal budget (inner width minus chrome).
+fn multiline_input_paragraph(
+    input: &crate::text_input::TextInput,
+    max_visible_content_rows: usize,
+    input_visible_w: usize,
+) -> (Vec<Line<'static>>, u16, u16) {
+    let text = &input.text;
+    let cursor = input.cursor;
+    let max_line_chars = input_visible_w.saturating_sub(1).max(1);
+
+    let byte_at_cursor = char_byte_pos(text, cursor);
+    let before_cursor = &text[..byte_at_cursor];
+    let cursor_line_idx = before_cursor.matches('\n').count();
+    let col_on_line = before_cursor
+        .rfind('\n')
+        .map(|p| text[p + 1..byte_at_cursor].chars().count())
+        .unwrap_or_else(|| before_cursor.chars().count());
+
+    let all_lines: Vec<&str> = text.split('\n').collect();
+
+    let v_scroll = if cursor_line_idx >= max_visible_content_rows {
+        cursor_line_idx - max_visible_content_rows + 1
+    } else {
+        0
+    };
+    let display_row = (cursor_line_idx - v_scroll) as u16;
+
+    let h_skip = if col_on_line >= max_line_chars {
+        col_on_line + 1 - max_line_chars
+    } else {
+        0
+    };
+    let col_display = col_on_line.saturating_sub(h_skip);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let last = v_scroll + max_visible_content_rows;
+    for line_idx in v_scroll..last {
+        let Some(line) = all_lines.get(line_idx).copied() else {
+            break;
+        };
+        let slice: String = if line_idx == cursor_line_idx {
+            line.chars()
+                .skip(h_skip)
+                .take(max_line_chars)
+                .collect()
+        } else {
+            line.chars().take(max_line_chars).collect()
+        };
+        lines.push(Line::raw(format!(" {}", slice)));
+    }
+
+    (lines, display_row, col_display as u16)
+}
 
 // ── Render ────────────────────────────────────────────────────────────────────
 
@@ -49,28 +106,24 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Header spans (built before layout so we can measure and pick height) ──
     let version = env!("CARGO_PKG_VERSION");
-    let dim = Style::default()
-        .fg(Color::DarkGray)
-        .add_modifier(Modifier::DIM);
+    let dim = Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM);
 
     // Line 1: brand · version  |  provider/model  |  profile  |  session title
     let mut hline1: Vec<Span<'static>> = vec![
         Span::styled(
             "cli",
             Style::default()
-                .fg(Color::Rgb(210, 220, 240))
+                .fg(TUI_BRAND_TEXT)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             ";",
-            Style::default()
-                .fg(TUI_SOFT_ACCENT)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(TUI_MARK).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             "do",
             Style::default()
-                .fg(Color::Rgb(210, 220, 240))
+                .fg(TUI_BRAND_TEXT)
                 .add_modifier(Modifier::BOLD),
         ),
     ];
@@ -83,10 +136,10 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         } else {
             format!("{}  {}", app.provider, app.model)
         };
-        hline1.push(Span::styled("  │ ", Style::default().fg(Color::Rgb(60, 60, 75))));
+        hline1.push(Span::styled("  │ ", Style::default().fg(TUI_DIVIDER)));
         hline1.push(Span::styled(model_str, dim));
     }
-    hline1.push(Span::styled("  │ ", Style::default().fg(Color::Rgb(60, 60, 75))));
+    hline1.push(Span::styled("  │ ", Style::default().fg(TUI_DIVIDER)));
     hline1.push(Span::styled(
         app.current_profile.clone(),
         Style::default()
@@ -98,28 +151,24 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let short_id = session_id[..session_id.len().min(8)].to_string();
         hline1.push(Span::styled(
             format!("  #{}", short_id),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ));
     }
     if let Some(ref title) = app.session_title {
         let title_str = title.clone();
         hline1.push(Span::styled(
-            format!("  — {}", title_str),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
+            format!("  ·  {}", title_str),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ));
     }
     if app.reviewer_configured {
         let reviewer_on = app.reviewer_enabled.load(Ordering::Relaxed);
         let (dot, color) = if reviewer_on {
-            ("●", Color::Green)
+            ("●", TUI_STATE_OK)
         } else {
-            ("○", Color::DarkGray)
+            ("○", TUI_MUTED)
         };
-        hline1.push(Span::styled("  │ ", Style::default().fg(Color::Rgb(60, 60, 75))));
+        hline1.push(Span::styled("  │ ", Style::default().fg(TUI_DIVIDER)));
         hline1.push(Span::styled(format!("r {}", dot), Style::default().fg(color).add_modifier(Modifier::DIM)));
     }
 
@@ -206,7 +255,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     // Input grows with content: 1 line of text = 3 rows (2 borders + 1), capped at 12.
     // When very narrow (< 40), collapse optional rows to avoid layout panics.
     let input_line_count = app.text_input.text.matches('\n').count() + 1;
-    let input_h = (input_line_count as u16 + 2).clamp(3, 7); // 1-5 text lines + 2 borders, min 3
+    // Up to 6 content rows (+ borders) so longer drafts stay visible on tall terminals.
+    let input_h = (input_line_count as u16 + 2).clamp(3, 8);
     let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
     // Queue area: height = header + items, but reserve enough chat space (min 10 lines).
     // Dynamic — fills available vertical space on tall terminals.
@@ -240,9 +290,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         // Minimal single-line header: just the model name.
         Paragraph::new(Line::from(vec![Span::styled(
             truncate_chars(&app.model, w),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]))
     } else if header_h == 1 {
         // Everything on one line — append line2 to line1 and fit to width.
@@ -275,6 +323,14 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         if let Some(ratio) = app.pending_scroll_ratio.take() {
             app.scroll = ((ratio * max_scroll as f64).round() as u32).min(max_scroll);
         }
+        let prev_max = app.chat_render_prev_max_scroll;
+        app.chat_render_prev_max_scroll = max_scroll;
+        if app.following
+            && prev_max > 0
+            && max_scroll > prev_max.saturating_add(10)
+        {
+            app.suppress_next_chat_scroll_up = true;
+        }
         let scroll = if app.following {
             max_scroll
         } else {
@@ -289,53 +345,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Status strip ──
     {
-        let status_style = Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM);
         let spinner = SPINNER[app.spinner_tick];
-        let mut slines: Vec<Line<'static>> = Vec::new();
-        for entry in &app.status_log {
-            if entry.done {
-                let ms = entry.elapsed_ms.unwrap_or(0);
-                let t = if ms < 1000 {
-                    format!("{}ms", ms)
-                } else {
-                    format!("{:.1}s", ms as f64 / 1000.0)
-                };
-                let (icon, style) = if entry.is_error {
-                    ("✗", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
-                } else {
-                    ("✓", status_style)
-                };
-                slines.push(Line::from(vec![
-                    Span::styled(format!(" {} ", icon), style),
-                    Span::styled(tool_display_name(&entry.name).to_string(), style),
-                    Span::styled(format!(" {}", entry.detail), status_style),
-                    Span::styled(format!("  {}", t), status_style),
-                ]));
-            } else {
-                let elapsed = entry.start.elapsed();
-                let secs = elapsed.as_secs_f64();
-                let t = if secs < 1.0 {
-                    format!("{}ms", elapsed.as_millis())
-                } else {
-                    format!("{:.1}s", secs)
-                };
-                // Running state: single consistent amber color for all tools
-                let running_style = Style::default()
-                    .fg(Color::Rgb(200, 170, 80))
-                    .add_modifier(Modifier::DIM);
-                slines.push(Line::from(vec![
-                    Span::styled(format!(" {} ", spinner), running_style),
-                    Span::styled(tool_display_name(&entry.name).to_string(), running_style),
-                    Span::styled(format!(" {}", entry.detail), status_style),
-                    Span::styled(format!("  {}", t), status_style),
-                ]));
-            }
-        }
-        while slines.len() < 2 {
-            slines.push(Line::raw(""));
-        }
+        let slines = status_strip_lines(&app.status_log, status_area.width, spinner);
         frame.render_widget(Paragraph::new(slines), status_area);
     }
 
@@ -353,13 +364,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             queue_lines.push(Line::from(vec![
                 Span::styled(
                     "  ▶ ",
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(TUI_SOFT_ACCENT)
+                        .add_modifier(Modifier::DIM),
                 ),
                 Span::styled(
                     truncate_chars(app.current_step.as_ref().unwrap(), 80),
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::DIM),
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                 ),
             ]));
         }
@@ -370,16 +381,14 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 queue_lines.push(Line::raw(""));
                 queue_lines.push(Line::from(Span::styled(
                     "    queued:",
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::DIM),
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                 )));
             } else {
                 // Agent is idle — header with count
                 queue_lines.push(Line::from(Span::styled(
                     format!("    {} queued", app.queued.len()),
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(TUI_STATE_WARN)
                         .add_modifier(Modifier::DIM),
                 )));
             }
@@ -391,8 +400,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
             for (idx, item) in app.queued.iter().enumerate().take(effective_max) {
                 let first_line = item.lines().next().unwrap_or(item.as_str());
-                // Prefix is "      N. " — 6 spaces + number + ". "
-                let prefix = format!("      {}. ", idx + 1);
+                let prefix = format!("      {:>2}. ", idx + 1);
                 let prefix_len = prefix.chars().count();
                 let max_width = queue_area.width as usize;
                 let available = max_width.saturating_sub(prefix_len);
@@ -407,9 +415,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
                 queue_lines.push(Line::from(Span::styled(
                     format!("{}{}", prefix, truncated),
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::DIM),
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                 )));
             }
 
@@ -417,9 +423,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             if more_count > 0 {
                 queue_lines.push(Line::from(Span::styled(
                     format!("    ... and {} more", more_count),
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::DIM),
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                 )));
             }
         }
@@ -432,47 +436,18 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // ── Input box (always rendered, even when permission popup is showing) ──
-    // Compute cursor position.  For multiline input, derive (row, col) from the
-    // char offset; for single-line input use horizontal scroll as before.
+    let max_visible_content_rows = input_h.saturating_sub(2) as usize;
     let input_visible_w = (input_area.width as usize).saturating_sub(4).max(1);
-    let byte_at_cursor = char_byte_pos(&app.text_input.text, app.text_input.cursor);
-    let before_cursor = &app.text_input.text[..byte_at_cursor];
     let is_multiline = app.text_input.text.contains('\n');
-    let (cursor_row, cursor_col): (u16, u16) = if is_multiline {
-        let row = before_cursor.matches('\n').count() as u16;
-        let col = before_cursor
-            .rfind('\n')
-            .map(|p| app.text_input.text[p + 1..byte_at_cursor].chars().count())
-            .unwrap_or_else(|| before_cursor.chars().count()) as u16;
-        (row, col.min(input_visible_w as u16))
+
+    let (input_para_lines, cursor_row, cursor_col) = if is_multiline {
+        multiline_input_paragraph(&app.text_input, max_visible_content_rows, input_visible_w)
     } else {
-        // Single-line: maintain horizontal scroll window.
         if app.text_input.cursor < app.text_input.scroll {
             app.text_input.scroll = app.text_input.cursor;
         } else if app.text_input.cursor >= app.text_input.scroll + input_visible_w {
             app.text_input.scroll = app.text_input.cursor - input_visible_w + 1;
         }
-        (0, (app.text_input.cursor - app.text_input.scroll) as u16)
-    };
-
-    // Build the paragraph text.  Multiline: one ratatui Line per input line.
-    // Single-line: horizontally-scrolled window as before.
-    let max_visible_content_rows = input_h.saturating_sub(2) as usize; // minus top+bottom border
-    let input_para_lines: Vec<Line<'static>> = if is_multiline {
-        let all_lines: Vec<&str> = app.text_input.text.split('\n').collect();
-        // Vertical scroll: keep the cursor line visible.
-        let v_scroll = if cursor_row as usize >= max_visible_content_rows {
-            cursor_row as usize - max_visible_content_rows + 1
-        } else {
-            0
-        };
-        all_lines
-            .iter()
-            .skip(v_scroll)
-            .take(max_visible_content_rows)
-            .map(|l| Line::raw(format!(" {}", l)))
-            .collect()
-    } else {
         let visible: String = app
             .text_input
             .text
@@ -480,7 +455,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             .skip(app.text_input.scroll)
             .take(input_visible_w)
             .collect();
-        vec![Line::raw(format!(" {}", visible))]
+        (
+            vec![Line::raw(format!(" {}", visible))],
+            0u16,
+            (app.text_input.cursor - app.text_input.scroll) as u16,
+        )
     };
 
     // Always clear the input area first — prevents any bleed-through from overlapping widgets.
@@ -488,28 +467,35 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     if app.busy || app.pending_perm.is_some() || app.enhancing {
         let spinner = SPINNER[app.spinner_tick];
+        let chrome_note = Style::default().fg(TUI_ROW_DIM).add_modifier(Modifier::DIM);
         let title_line = if app.pending_perm.is_some() {
             Line::from(vec![
-                Span::styled("⏸", Style::default().fg(Color::LightMagenta)),
+                Span::styled("⏸ ", Style::default().fg(TUI_STATE_WARN)),
+                Span::styled("Permission needed", Style::default().fg(TUI_STATE_WARN)),
                 Span::styled(
-                    " waiting for permission… ",
-                    Style::default().fg(Color::LightMagenta),
+                    "  ·  approve in the dialog above",
+                    chrome_note,
                 ),
             ])
         } else if app.enhancing {
             Line::from(vec![
-                Span::styled(format!("{} ", spinner), Style::default().fg(Color::Cyan)),
-                Span::styled("✦ enhancing prompt…", Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    format!("{} ", spinner),
+                    Style::default().fg(TUI_SOFT_ACCENT),
+                ),
+                Span::styled("Enhancing prompt", Style::default().fg(TUI_SOFT_ACCENT)),
+                Span::styled("  ·  wait…", chrome_note),
             ])
         } else if !app.queued.is_empty() {
             Line::from(vec![
                 Span::styled(
                     format!("{} ", spinner),
-                    Style::default().fg(Color::LightMagenta),
+                    Style::default().fg(TUI_STATE_BUSY),
                 ),
+                Span::styled("Agent running", Style::default().fg(TUI_BRAND_TEXT)),
                 Span::styled(
-                    "queued — Ctrl+Enter to interrupt".to_string(),
-                    Style::default().fg(Color::LightMagenta),
+                    "  ·  Ctrl+Enter interrupt  ·  queue with Enter",
+                    chrome_note,
                 ),
             ])
         } else if app.text_input.text.is_empty() {
@@ -522,35 +508,40 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Line::from(vec![
                 Span::styled(
                     format!("{} ", spinner),
-                    Style::default().fg(Color::LightMagenta),
+                    Style::default().fg(TUI_STATE_BUSY),
                 ),
                 Span::styled(
-                    format!(
-                        "thinking…{}  (type a follow-up to queue, Ctrl+Enter to interrupt)",
-                        elapsed_hint
-                    ),
-                    Style::default().fg(Color::LightMagenta),
+                    format!("Thinking{}", elapsed_hint),
+                    Style::default().fg(TUI_BRAND_TEXT),
+                ),
+                Span::styled(
+                    "  ·  type to queue a follow-up  ·  Ctrl+Enter interrupt",
+                    chrome_note,
                 ),
             ])
         } else {
             Line::from(vec![
                 Span::styled(
                     format!("{} ", spinner),
-                    Style::default().fg(Color::LightMagenta),
+                    Style::default().fg(TUI_STATE_BUSY),
                 ),
+                Span::styled("Thinking", Style::default().fg(TUI_BRAND_TEXT)),
                 Span::styled(
-                    "thinking…  Enter=queue  Ctrl+Enter=interrupt".to_string(),
-                    Style::default().fg(Color::LightMagenta),
+                    "  ·  Enter queues draft  ·  Ctrl+Enter interrupt",
+                    chrome_note,
                 ),
             ])
         };
         let border_color = if app.enhancing {
-            Color::Cyan
+            TUI_SOFT_ACCENT
+        } else if app.pending_perm.is_some() {
+            TUI_STATE_WARN
         } else {
-            Color::LightMagenta
+            TUI_BORDER_UI
         };
         let block = Block::default()
             .title(title_line)
+            .border_type(BorderType::Rounded)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border_color));
         let para = Paragraph::new(input_para_lines).block(block);
@@ -558,7 +549,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         if app.pending_perm.is_none() {
             frame.set_cursor_position((
                 input_area.x + 2 + cursor_col,
-                input_area.y + 1 + cursor_row.min(max_visible_content_rows as u16 - 1),
+                input_area.y + 1 + cursor_row,
             ));
         }
     } else if app.rate_limit_resume_at.is_some() && !app.rate_limit_cancelled {
@@ -578,49 +569,50 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         } else {
             format!("{}s", secs)
         };
+        let rl_dim = Style::default().fg(TUI_ROW_DIM).add_modifier(Modifier::DIM);
         let title_line = Line::from(vec![
-            Span::styled("⏳ ", Style::default().fg(Color::Yellow)),
+            Span::styled("⏳ ", Style::default().fg(TUI_STATE_WARN)),
             Span::styled(
-                format!("Auto-resume in {countdown}  (Esc=cancel  /profile=switch provider)"),
-                Style::default().fg(Color::Yellow),
+                format!("Rate limit  ·  resume in {countdown}"),
+                Style::default().fg(TUI_STATE_WARN),
             ),
+            Span::styled("  ·  Esc cancel  ·  /profile switch", rl_dim),
         ]);
         let block = Block::default()
             .title(title_line)
+            .border_type(BorderType::Rounded)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow));
+            .border_style(Style::default().fg(TUI_BORDER_UI));
         let para = Paragraph::new(input_para_lines).block(block);
         frame.render_widget(para, input_area);
-        frame.set_cursor_position((
-            input_area.x + 2 + cursor_col,
-            input_area.y + 1 + cursor_row.min(max_visible_content_rows as u16 - 1),
-        ));
+        frame.set_cursor_position((input_area.x + 2 + cursor_col, input_area.y + 1 + cursor_row));
     } else {
-        let idle_title = Line::from(vec![Span::styled(
-            if is_multiline {
-                " Shift+Enter=newline  (Enter=send  Ctrl+Enter=interrupt  /help=commands) "
-            } else {
-                " Ask anything  (Enter=send  Shift+Enter=newline  /help=commands) "
-            },
-            Style::default().fg(TUI_SOFT_ACCENT),
-        )]);
+        let idle_title = Line::from(vec![
+            Span::styled("Message", Style::default().fg(TUI_SOFT_ACCENT)),
+            Span::styled(
+                if is_multiline {
+                    "  ·  Shift+Enter newline  ·  Enter send  ·  Esc clear"
+                } else {
+                    "  ·  Enter send  ·  Shift+Enter newline  ·  Esc clear"
+                },
+                Style::default()
+                    .fg(TUI_ROW_DIM)
+                    .add_modifier(Modifier::DIM),
+            ),
+        ]);
         let block = Block::default()
             .title(idle_title)
+            .border_type(BorderType::Rounded)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(TUI_SOFT_ACCENT));
+            .border_style(Style::default().fg(TUI_BORDER_UI));
         let para = Paragraph::new(input_para_lines).block(block);
         frame.render_widget(para, input_area);
-        frame.set_cursor_position((
-            input_area.x + 2 + cursor_col,
-            input_area.y + 1 + cursor_row.min(max_visible_content_rows as u16 - 1),
-        ));
+        frame.set_cursor_position((input_area.x + 2 + cursor_col, input_area.y + 1 + cursor_row));
     }
 
     // ── Hint line — hidden when terminal is very narrow ──
     if area.width >= 40 {
-        let hint_dim = Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM);
+        let hint_dim = Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM);
         // Mode indicator: show active overlay/picker name
         let mode_label = if !app.overlay_stack.is_empty() {
             app.overlay_stack.top().map(|o| o.title().to_string())
@@ -638,42 +630,43 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let mut hint_spans: Vec<Span<'static>> = Vec::new();
         if let Some(label) = mode_label {
             hint_spans.push(Span::styled(
-                format!("  [{}]  ", label),
+                format!("  focus: {}  ·  ", label),
                 Style::default()
                     .fg(TUI_SOFT_ACCENT)
                     .add_modifier(Modifier::DIM),
             ));
         }
+        let hk = Style::default().fg(TUI_BRAND_TEXT);
         hint_spans.extend([
-            Span::styled("  Enter", Style::default().fg(Color::DarkGray)),
-            Span::styled(" send  ", hint_dim),
-            Span::styled("Shift+Enter", Style::default().fg(Color::DarkGray)),
-            Span::styled(" newline  ", hint_dim),
-            Span::styled("Esc", Style::default().fg(Color::DarkGray)),
-            Span::styled(" clear  ", hint_dim),
-            Span::styled("↑↓", Style::default().fg(Color::DarkGray)),
-            Span::styled(" history  ", hint_dim),
-            Span::styled("PgUp/PgDn", Style::default().fg(Color::DarkGray)),
-            Span::styled(" scroll  ", hint_dim),
-            Span::styled("/settings", Style::default().fg(Color::DarkGray)),
-            Span::styled(" settings  ", hint_dim),
-            Span::styled("/help", Style::default().fg(Color::DarkGray)),
-            Span::styled(" commands  ", hint_dim),
-            Span::styled("Ctrl+/", Style::default().fg(Color::DarkGray)),
-            Span::styled(" stop agent  ", hint_dim),
-            Span::styled("Ctrl+C", Style::default().fg(Color::DarkGray)),
-            Span::styled(" quit  ", hint_dim),
-            Span::styled("Ctrl+L", Style::default().fg(Color::DarkGray)),
-            Span::styled(" refresh  ", hint_dim),
+            Span::styled("Enter", hk),
+            Span::styled(" send · ", hint_dim),
+            Span::styled("Shift+Enter", hk),
+            Span::styled(" newline · ", hint_dim),
+            Span::styled("Ctrl+V", hk),
+            Span::styled(" paste · ", hint_dim),
+            Span::styled("Esc", hk),
+            Span::styled(" clear input · ", hint_dim),
+            Span::styled("↑↓", hk),
+            Span::styled(" history · ", hint_dim),
+            Span::styled("PgUp/Dn", hk),
+            Span::styled(" scroll · ", hint_dim),
+            Span::styled("/help", hk),
+            Span::styled(" · ", hint_dim),
+            Span::styled("/settings", hk),
+            Span::styled(" prefs · ", hint_dim),
+            Span::styled("Ctrl+/", hk),
+            Span::styled(" stop · ", hint_dim),
+            Span::styled("Ctrl+C", hk),
+            Span::styled(" quit · ", hint_dim),
+            Span::styled("Ctrl+L", hk),
+            Span::styled(" redraw", hint_dim),
         ]);
         // Scroll position indicator when not following.
         if app.layout.max_scroll > 0 && !app.following {
             let pct = (app.scroll * 100 / app.layout.max_scroll).min(100);
             hint_spans.push(Span::styled(
                 format!("  ↑ {}%", pct),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
             ));
         }
         let hint_spans = fit_spans(hint_spans, hint_area.width as usize);
@@ -684,9 +677,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     // ── "↓ new messages" scroll indicator ──
     if !app.following && app.layout.max_scroll > app.scroll {
         let unread_hint = Span::styled(
-            "  ↓ new messages  PgDn ",
+            "  ↓ new  PgDn ",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(TUI_MARK)
                 .add_modifier(Modifier::BOLD),
         );
         let hint_line = Line::from(vec![unread_hint]);
@@ -750,7 +743,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 CompletionRow::Header(section) => Line::from(Span::styled(
                     format!("  ── {} ", section),
                     Style::default()
-                        .fg(Color::DarkGray)
+                        .fg(TUI_MUTED)
                         .add_modifier(Modifier::DIM),
                 )),
                 CompletionRow::Cmd {
@@ -768,8 +761,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     modal_row_two_col(
                         format!("{} {:<width$}", marker, cmd, width = cmd_col_w - 2),
                         format!(" {}", desc_str),
-                        Color::Cyan,
-                        Color::DarkGray,
+                        TUI_SOFT_ACCENT,
+                        TUI_ROW_DIM,
                         selected,
                     )
                 }
@@ -829,13 +822,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 "id", "turns", "cost", "when", "preview"
             ),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )]));
         content.push(Line::from(vec![Span::styled(
             "  ────────  ─────  ──────  ───────────  ────────────────────".to_string(),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )]));
 
@@ -850,7 +843,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             } else {
                 Color::Reset
             };
-            let fg = if selected { TUI_TEXT } else { Color::Gray };
+            let fg = if selected { TUI_TEXT } else { TUI_ROW_DIM };
             let id_short = &s.session_id[..s.session_id.len().min(8)];
             let date_str = relative_time(&s.start_time);
             let preview_str: String = s.preview.chars().take(preview_w).collect();
@@ -878,7 +871,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let hint = " ↑↓ navigate · Enter resume · d delete · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content).block(modal_block_with_hint(&picker_title, hint, Color::Cyan)),
+            Paragraph::new(content).block(modal_block_with_hint(
+                &picker_title,
+                hint,
+                modal_border_default(),
+            )),
             popup_rect,
         );
     }
@@ -902,7 +899,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     "model", "provider", "$/1M in", "$/1M out", "ctx", "role"
                 ),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(TUI_MUTED)
                     .add_modifier(Modifier::DIM),
             )]),
             Line::raw(""),
@@ -917,7 +914,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             content.push(Line::from(vec![Span::styled(
                 msg.to_string(),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(TUI_MUTED)
                     .add_modifier(Modifier::DIM),
             )]));
         } else {
@@ -945,7 +942,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     content.push(Line::from(vec![Span::styled(
                         "  ★ Favorites".to_string(),
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(TUI_STATE_WARN)
                             .add_modifier(Modifier::BOLD),
                     )]));
                 }
@@ -959,7 +956,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     content.push(Line::from(vec![Span::styled(
                         "  ⏱ Recent".to_string(),
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(TUI_STATE_INFO)
                             .add_modifier(Modifier::BOLD),
                     )]));
                 }
@@ -973,7 +970,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     content.push(Line::from(vec![Span::styled(
                         "  All".to_string(),
                         Style::default()
-                            .fg(Color::DarkGray)
+                            .fg(TUI_MUTED)
                             .add_modifier(Modifier::BOLD),
                     )]));
                 }
@@ -984,7 +981,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 } else {
                     Color::Reset
                 };
-                let fg = if selected { TUI_TEXT } else { Color::Gray };
+                let fg = if selected { TUI_TEXT } else { TUI_ROW_DIM };
                 let fav = if m.is_favorite { "★ " } else { "  " };
                 let ctx = m
                     .context_k
@@ -1022,7 +1019,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let hint = " ↑↓ navigate · Enter select · Ctrl+S save default · f fav · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content).block(modal_block_with_hint(&title, hint, Color::Magenta)),
+            Paragraph::new(content).block(modal_block_with_hint(&title, hint, TUI_MARK)),
             popup_rect,
         );
     }
@@ -1044,7 +1041,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         content.push(Line::from(Span::styled(
             format!("  {:<20}  {}", "profile", "provider / model"),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )));
         content.push(Line::raw(""));
@@ -1056,7 +1053,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 } else {
                     "  no matches"
                 },
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(TUI_MUTED),
             )));
         }
 
@@ -1072,7 +1069,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             } else {
                 Color::Reset
             };
-            let fg = if selected { TUI_TEXT } else { Color::Gray };
+            let fg = if selected { TUI_TEXT } else { TUI_ROW_DIM };
             let marker = if selected { "▶" } else { " " };
             let active_mark = if is_active { "●" } else { " " };
             let model_display: String = format!("{} / {}", entry.provider, entry.model)
@@ -1097,7 +1094,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let hint = " ↑↓ navigate · Enter switch · n new · e edit · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content).block(modal_block_with_hint(&title, hint, Color::Cyan)),
+            Paragraph::new(content).block(modal_block_with_hint(&title, hint, modal_border_default())),
             popup_rect,
         );
     }
@@ -1118,19 +1115,19 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let content = vec![
                 Line::from(vec![Span::styled(
                     format!("  {}", preview),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(TUI_MUTED),
                 )]),
                 Line::raw(""),
                 Line::from(vec![
-                    Span::styled(" Feedback: ", Style::default().fg(Color::Yellow)),
+                    Span::styled(" Feedback: ", Style::default().fg(TUI_STATE_WARN)),
                     Span::styled(fb.as_str(), Style::default().fg(TUI_TEXT)),
-                    Span::styled("█", Style::default().fg(Color::Yellow)),
+                    Span::styled("█", Style::default().fg(TUI_STATE_WARN)),
                 ]),
                 Line::raw(""),
                 Line::from(vec![Span::styled(
-                    "  Enter to send feedback   Esc to go back",
+                    "  Enter send · Esc back · paste supported",
                     Style::default()
-                        .fg(Color::DarkGray)
+                        .fg(TUI_MUTED)
                         .add_modifier(Modifier::DIM),
                 )]),
             ];
@@ -1138,7 +1135,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             frame.render_widget(
                 Paragraph::new(content).block(modal_block(
                     " Explain why you are denying this ",
-                    Color::Red,
+                    TUI_STATE_ERR,
                 )),
                 popup_rect,
             );
@@ -1170,7 +1167,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let mut content = vec![
             Line::from(vec![Span::styled(
                 format!("  {}", preview),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(TUI_MUTED),
             )]),
             Line::raw(""),
         ];
@@ -1181,7 +1178,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     Span::styled(
                         " ▶ ",
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(TUI_STATE_WARN)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
@@ -1190,28 +1187,28 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                             .fg(TUI_TEXT)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(format!("  {}", hint), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("  {}", hint), Style::default().fg(TUI_MUTED)),
                 ]));
             } else {
                 content.push(Line::from(vec![
                     Span::raw("   "),
                     Span::styled(
                         format!("{:<28}", label),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(TUI_MUTED),
                     ),
                     Span::styled(
                         format!("  {}", hint),
                         Style::default()
-                            .fg(Color::DarkGray)
+                            .fg(TUI_MUTED)
                             .add_modifier(Modifier::DIM),
                     ),
                 ]));
             }
         }
         content.push(Line::from(vec![Span::styled(
-            "  ↑↓/1-5 select   Enter confirm   Esc deny",
+            "  ↑↓ pick · 1–5 jump · Enter confirm · Esc deny",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )]));
 
@@ -1219,7 +1216,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         frame.render_widget(
             Paragraph::new(content).block(modal_block(
                 &format!(" Allow {}? ", tool_display_name(&perm.tool_name)),
-                Color::Yellow,
+                TUI_STATE_WARN,
             )),
             popup_rect,
         );
@@ -1261,15 +1258,15 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     for l in recovery_lines {
                         content.push(Line::from(vec![Span::styled(
                             format!("  → {}", l),
-                            Style::default().fg(Color::Cyan),
+                            Style::default().fg(TUI_STATE_INFO),
                         )]));
                     }
                 }
                 content.push(Line::raw(""));
                 content.push(Line::from(vec![Span::styled(
-                    "  [ OK ]  (Enter / Esc / Space)",
+                    "  [ OK ] · Enter · Esc · Space",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(TUI_MARK)
                         .add_modifier(Modifier::BOLD),
                 )]));
                 let hint_title = if e.max_scroll > 0 {
@@ -1280,7 +1277,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 frame.render_widget(Clear, popup_rect);
                 frame.render_widget(
                     Paragraph::new(content)
-                        .block(modal_block(&hint_title, Color::Red))
+                        .block(modal_block(&hint_title, TUI_STATE_ERR))
                         .scroll((e.scroll_offset as u16, 0)),
                     popup_rect,
                 );
@@ -1290,7 +1287,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 if r.lines.is_empty() {
                     content.push(Line::from(vec![Span::styled(
                         "  (empty)".to_string(),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(TUI_MUTED),
                     )]));
                 } else {
                     for (heading, text) in &r.lines {
@@ -1301,14 +1298,14 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                                 content.push(Line::from(vec![Span::styled(
                                     format!("  {}", heading),
                                     Style::default()
-                                        .fg(Color::Cyan)
+                                        .fg(TUI_SOFT_ACCENT)
                                         .add_modifier(Modifier::BOLD),
                                 )]));
                             }
                             for line in text.lines() {
                                 content.push(Line::from(vec![Span::styled(
                                     format!("    {}", line),
-                                    Style::default().fg(Color::Gray),
+                                    Style::default().fg(TUI_ROW_DIM),
                                 )]));
                             }
                             content.push(Line::raw(""));
@@ -1317,9 +1314,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 }
                 content.push(Line::raw(""));
                 content.push(Line::from(vec![Span::styled(
-                    "  [ Close ]  (Enter / Esc)".to_string(),
+                    "  [ Close ] · Enter · Esc".to_string(),
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(TUI_MARK)
                         .add_modifier(Modifier::BOLD),
                 )]));
                 let popup_h = ((content.len() as u16) + 2).min(area.height.saturating_sub(4));
@@ -1338,7 +1335,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 };
                 frame.render_widget(
                     Paragraph::new(content)
-                        .block(modal_block(&hint_text, Color::Cyan))
+                        .block(modal_block(&hint_text, modal_border_default()))
                         .wrap(Wrap { trim: false })
                         .scroll((scroll_offset, 0)),
                     popup_rect,
@@ -1357,7 +1354,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     let marker = if i == c.selected { "▸ " } else { "  " };
                     let style = if i == c.selected {
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(TUI_MARK)
                             .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(TUI_TEXT)
@@ -1369,15 +1366,15 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 }
                 content.push(Line::raw(""));
                 content.push(Line::from(vec![Span::styled(
-                    "  ↑↓ Navigate  Enter Select  Esc Cancel",
-                    Style::default().fg(Color::DarkGray),
+                    "  ↑↓ navigate · Enter select · Esc cancel",
+                    Style::default().fg(TUI_MUTED),
                 )]));
                 let popup_h = ((content.len() as u16) + 2).min(area.height.saturating_sub(4));
                 let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
                 frame.render_widget(Clear, popup_rect);
                 frame.render_widget(
                     Paragraph::new(content)
-                        .block(modal_block(&format!(" {} ", c.title), Color::Yellow)),
+                        .block(modal_block(&format!(" {} ", c.title), modal_border_default())),
                     popup_rect,
                 );
             }
@@ -1389,7 +1386,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     if !app.toasts.is_empty() {
         let max_w = area.width.saturating_sub(4).min(50) as usize;
         let mut fallback_slot = 0u16;
-        let toast_bg = Color::Indexed(238); // medium-dark gray
+        let toast_bg = TUI_TOAST_BG;
         for toast in app.toasts.iter().take(3) {
             let msg: String = toast.message.chars().take(max_w).collect();
             let msg_display_w: u16 = msg
@@ -1458,7 +1455,7 @@ fn apply_selection_highlight(
     let (start_row, start_col, end_row, end_col) = selection.bounds();
 
     let sel_style = Style::default()
-        .bg(Color::Indexed(24)) // deep blue background
+        .bg(TUI_SELECTION_BG)
         .fg(TUI_TEXT);
 
     for line_idx in first_visible..last_visible {
@@ -1686,48 +1683,49 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
     for msg in &app.messages {
         match msg {
             ChatLine::User(text) => {
-                // User messages: bold label, clean content — like a command in a REPL.
-                out.push(Line::from(vec![Span::styled(
-                    "you",
+                out.push(Line::from(Span::styled(
+                    "  You",
                     Style::default()
                         .fg(TUI_ACCENT)
                         .add_modifier(Modifier::BOLD),
-                )]));
-                out.extend(render_markdown(text, width));
-                out.push(Line::raw(""));
-            }
-            ChatLine::Assistant(text) => {
-                // Assistant: show brand + model name as dim signature.
-                let header = if app.model.is_empty() {
-                    "clido".to_string()
-                } else {
-                    format!("clido · {}", app.model)
-                };
-                out.push(Line::from(Span::styled(
-                    header,
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::DIM),
                 )));
                 out.extend(render_markdown(text, width));
                 out.push(Line::raw(""));
             }
+            ChatLine::Assistant(text) => {
+                let model_bit = if app.model.is_empty() {
+                    String::new()
+                } else {
+                    format!("  ·  {}", app.model)
+                };
+                out.push(Line::from(vec![
+                    Span::styled(
+                        "  Assistant",
+                        Style::default()
+                            .fg(TUI_SOFT_ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        model_bit,
+                        Style::default()
+                            .fg(TUI_MUTED)
+                            .add_modifier(Modifier::DIM),
+                    ),
+                ]));
+                out.extend(render_markdown(text, width));
+                out.push(Line::raw(""));
+            }
             ChatLine::Thinking(text) => {
-                // Thinking lines: dim, left-indented with a subtle `…` indicator.
+                let think = Style::default()
+                    .fg(TUI_MUTED)
+                    .add_modifier(Modifier::DIM | Modifier::ITALIC);
                 for part in text.lines() {
+                    if part.trim().is_empty() {
+                        continue;
+                    }
                     out.push(Line::from(vec![
-                        Span::styled(
-                            " ··· ",
-                            Style::default()
-                                .fg(Color::DarkGray)
-                                .add_modifier(Modifier::DIM),
-                        ),
-                        Span::styled(
-                            part.to_string(),
-                            Style::default()
-                                .fg(Color::DarkGray)
-                                .add_modifier(Modifier::DIM),
-                        ),
+                        Span::styled("      ‥  ", think),
+                        Span::styled(part.to_string(), think),
                     ]));
                 }
             }
@@ -1738,60 +1736,53 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 is_error,
                 ..
             } => {
-                // Tool calls as "execution events":
-                //   · read     crates/cli/src/main.rs
-                //   ✓ write    crates/cli/src/main.rs  (+12 −3)
-                //   ✗ bash     make test
-                let color = tool_color(name, *done, *is_error);
-                let icon = if *is_error {
-                    "✗"
-                } else if *done {
-                    "✓"
-                } else {
-                    "·"
-                };
-                let display_name = tool_display_name(name).to_string();
-                let dim = Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM);
-                let style = Style::default().fg(color);
-
-                if detail.is_empty() {
-                    out.push(Line::from(vec![
-                        Span::styled(format!(" {} ", icon), style),
-                        Span::styled(display_name, style),
-                    ]));
-                } else {
-                    out.push(Line::from(vec![
-                        Span::styled(format!(" {} ", icon), style),
-                        Span::styled(display_name, style),
-                        Span::styled(format!("  {}", detail.clone()), dim),
-                    ]));
-                }
+                out.extend(tool_event_lines(
+                    width,
+                    name.as_str(),
+                    detail.as_str(),
+                    *done,
+                    *is_error,
+                ));
+                out.push(Line::raw(""));
             }
             ChatLine::Diff(text) => {
                 out.extend(diff::render_diff(text, width));
             }
             ChatLine::Info(text) => {
-                out.push(Line::from(vec![Span::styled(
-                    if text.is_empty() {
-                        String::new()
-                    } else {
-                        format!("  {}", text)
-                    },
-                    Style::default().fg(Color::DarkGray),
-                )]));
+                if text.is_empty() {
+                    out.push(Line::raw(""));
+                } else {
+                    out.push(Line::from(vec![
+                        Span::styled(
+                            "  › ",
+                            Style::default()
+                                .fg(TUI_DIVIDER)
+                                .add_modifier(Modifier::DIM),
+                        ),
+                        Span::styled(
+                            text.clone(),
+                            Style::default().fg(TUI_ROW_DIM),
+                        ),
+                    ]));
+                }
             }
             ChatLine::Section(text) => {
-                // Section separator: thin line + label
                 out.push(Line::raw(""));
+                let rule = "─".repeat((width / 3).clamp(4, 24));
                 out.push(Line::from(vec![
-                    Span::styled("─ ", Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
+                    Span::styled(
+                        format!("  {rule}  "),
+                        Style::default().fg(TUI_DIVIDER).add_modifier(Modifier::DIM),
+                    ),
                     Span::styled(
                         text.clone(),
                         Style::default()
-                            .fg(Color::Gray)
+                            .fg(TUI_BRAND_TEXT)
                             .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("  {}", "─".repeat((width / 4).clamp(4, 20))),
+                        Style::default().fg(TUI_DIVIDER).add_modifier(Modifier::DIM),
                     ),
                 ]));
                 out.push(Line::raw(""));
@@ -1912,20 +1903,20 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                 Tag::Heading(level, ..) => {
                     flush!();
                     let prefix = match level {
-                        HeadingLevel::H1 => "█ ",
-                        HeadingLevel::H2 => "▌ ",
+                        HeadingLevel::H1 => "◉ ",
+                        HeadingLevel::H2 => "◇ ",
                         HeadingLevel::H3 => "▸ ",
                         _ => "  ",
                     };
                     cur_spans.push(Span::styled(
                         prefix.to_string(),
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(TUI_SOFT_ACCENT)
                             .add_modifier(Modifier::BOLD),
                     ));
                     style_stack.push(
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(TUI_SOFT_ACCENT)
                             .add_modifier(Modifier::BOLD),
                     );
                 }
@@ -1936,21 +1927,28 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                         CodeBlockKind::Fenced(l) if !l.is_empty() => l.to_string(),
                         _ => String::new(),
                     };
+                    let fence_tail = |used: usize| {
+                        let n = content_w.saturating_sub(used).min(40).max(8);
+                        "─".repeat(n)
+                    };
                     if lang.is_empty() {
+                        let tail = fence_tail(4);
                         out.push(Line::from(vec![Span::styled(
-                            "  ┌── code ──────────────────────────",
+                            format!("  ┌{tail}"),
                             Style::default().fg(TUI_CODE_BORDER),
                         )]));
                     } else {
+                        let used = lang.chars().count() + 5;
+                        let tail = fence_tail(used);
                         out.push(Line::from(vec![Span::styled(
-                            format!("  ┌─ {} ", lang),
+                            format!("  ┌ {lang} {tail}"),
                             Style::default().fg(TUI_CODE_LANG),
                         )]));
                     }
                     // Code content uses code block background
                     style_stack.push(
                         Style::default()
-                            .fg(Color::Rgb(200, 210, 220))
+                            .fg(TUI_CODE_FG)
                             .bg(TUI_CODE_BG),
                     );
                 }
@@ -1961,10 +1959,10 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                     flush!();
                     let indent = "  ".repeat(list_depth.saturating_sub(1) as usize);
                     cur_spans.push(Span::styled(
-                        format!("{}• ", indent),
+                        format!("{}· ", indent),
                         Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
+                            .fg(TUI_SOFT_ACCENT)
+                            .add_modifier(Modifier::DIM),
                     ));
                 }
                 Tag::Paragraph => {}
@@ -2075,8 +2073,10 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                     // Emit blockquote gutter at the start of each line.
                     if bq_depth > 0 && cur_spans.is_empty() {
                         cur_spans.push(Span::styled(
-                            "▌ ".repeat(bq_depth as usize),
-                            Style::default().fg(Color::DarkGray),
+                            "│ ".repeat(bq_depth as usize),
+                            Style::default()
+                                .fg(TUI_DIVIDER)
+                                .add_modifier(Modifier::DIM),
                         ));
                     }
                     let style = style_stack.last().copied().unwrap_or_default();
@@ -2084,15 +2084,15 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                 }
             }
             Event::Code(t) => {
-                // Inline code — always use yellow dim style, never inherit parent style.
+                // Inline code — padded cell, theme tokens (no inherited emphasis).
                 if in_table_cell {
                     current_cell.push_str(&t);
                 } else {
                     cur_spans.push(Span::styled(
-                        t.to_string(),
+                        format!(" {} ", t),
                         Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::DIM),
+                            .fg(TUI_INLINE_CODE_FG)
+                            .bg(TUI_INLINE_CODE_BG),
                     ));
                 }
             }
@@ -2108,17 +2108,24 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
             }
             Event::Rule => {
                 flush!();
+                let w = content_w.saturating_sub(4).clamp(16, 64);
                 out.push(Line::from(vec![Span::styled(
-                    "─".repeat(content_w.min(72)),
-                    Style::default().fg(Color::DarkGray),
+                    format!("  {}", "─".repeat(w)),
+                    Style::default()
+                        .fg(TUI_DIVIDER)
+                        .add_modifier(Modifier::DIM),
                 )]));
                 out.push(Line::raw(""));
             }
             Event::TaskListMarker(checked) => {
-                let marker = if checked { "☑ " } else { "☐ " };
+                let (marker, col) = if checked {
+                    ("✓ ", TUI_STATE_OK)
+                } else {
+                    ("○ ", TUI_ROW_DIM)
+                };
                 cur_spans.push(Span::styled(
                     marker.to_string(),
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(col).add_modifier(Modifier::DIM),
                 ));
             }
             Event::Html(_) | Event::FootnoteReference(_) => {}
@@ -2180,9 +2187,9 @@ pub(super) fn render_table_to_lines(
         }
     };
 
-    let gray = Style::default().fg(Color::DarkGray);
+    let gray = Style::default().fg(TUI_MUTED);
     let hdr_style = Style::default()
-        .fg(Color::Cyan)
+        .fg(TUI_SOFT_ACCENT)
         .add_modifier(Modifier::BOLD);
 
     // ┌──┬──┬──┐

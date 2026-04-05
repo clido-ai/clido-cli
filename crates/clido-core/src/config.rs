@@ -165,7 +165,7 @@ pub struct AgentConfig {
     /// Max context tokens (from config or pricing). None = use default in context engine (e.g. 200000).
     #[serde(default)]
     pub max_context_tokens: Option<u32>,
-    /// Compact when context_tokens > max_context_tokens * compaction_threshold. Default 0.75.
+    /// Compact when context_tokens > max_context_tokens * compaction_threshold. Default 0.58.
     #[serde(default)]
     pub compaction_threshold: Option<f64>,
     /// Suppress spinner, tool lifecycle output, and cost footer.

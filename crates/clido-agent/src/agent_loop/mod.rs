@@ -29,13 +29,44 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
-use context::{compact_with_summary, PROACTIVE_SUMMARIZE_THRESHOLD};
+use context::{
+    compact_for_model_request, compact_with_summary, CONTEXT_OUTPUT_RESERVE,
+    PROACTIVE_SUMMARIZE_THRESHOLD,
+};
 pub use history::session_lines_to_messages;
 use security::{detect_injection, enhanced_edit_error};
 /// How many consecutive identical tool failures trigger doom-loop detection.
 const DOOM_LOOP_THRESHOLD: usize = 3;
 /// Budget warning thresholds (percentage of limit consumed).
 const BUDGET_WARNING_PCTS: &[u8] = &[50, 80, 90];
+
+/// When tools fail, prepend explicit recovery instructions so the model does not stop early.
+fn prepend_tool_recovery_nudge(
+    tool_uses: &[(String, String, serde_json::Value)],
+    outputs: &[(ToolOutput, u64)],
+    tool_results: &mut Vec<ContentBlock>,
+) {
+    let failures: Vec<(&str, &str)> = tool_uses
+        .iter()
+        .zip(outputs.iter())
+        .filter_map(|((_, name, _), (out, _))| {
+            if out.is_error {
+                Some((name.as_str(), out.content.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    if failures.is_empty() {
+        return;
+    }
+    tool_results.insert(
+        0,
+        ContentBlock::Text {
+            text: crate::prompts::tool_failure_recovery_nudge(&failures),
+        },
+    );
+}
 
 /// Retry strategies for failed tool calls.
 #[derive(Debug, Clone, Copy)]
@@ -576,6 +607,17 @@ impl AgentLoop {
                 return Some(RetryStrategy::RetryOnce);
             }
         }
+
+        // Generic I/O and connection flakiness
+        if err_lower.contains("i/o error")
+            || err_lower.contains("io error")
+            || err_lower.contains("os error")
+            || err_lower.contains("broken pipe")
+            || err_lower.contains("connection reset")
+            || err_lower.contains("resource temporarily unavailable")
+        {
+            return Some(RetryStrategy::WaitAndRetry { delay_ms: 400 });
+        }
         
         None // Not retryable
     }
@@ -760,7 +802,7 @@ impl AgentLoop {
             .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
         // Pass threshold=0 to force compaction unconditionally.
         let (util_provider, summarize_config) = self.utility_provider();
-        let compacted = compact_with_summary(
+        let compacted = compact_for_model_request(
             &self.history,
             sys_tokens,
             max_ctx,
@@ -932,8 +974,12 @@ impl AgentLoop {
                     .config
                     .max_context_tokens
                     .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
+                let effective_max = max_tok
+                    .saturating_sub(CONTEXT_OUTPUT_RESERVE)
+                    .max(32_000);
                 let current = sys_tok + estimate_tokens_messages(&self.history);
-                let proactive_limit = ((max_tok as f64) * PROACTIVE_SUMMARIZE_THRESHOLD) as u32;
+                let proactive_limit =
+                    ((effective_max as f64) * PROACTIVE_SUMMARIZE_THRESHOLD) as u32;
                 if current > proactive_limit {
                     let (util_prov, util_cfg) = self.utility_provider();
                     let count = context::proactive_summarize_pairs(
@@ -964,7 +1010,7 @@ impl AgentLoop {
                 .compaction_threshold
                 .unwrap_or(DEFAULT_COMPACTION_THRESHOLD);
             let (util_prov, summarize_config) = self.utility_provider();
-            let to_send = compact_with_summary(
+            let to_send = compact_for_model_request(
                 &self.history,
                 system_tokens,
                 max_ctx,
@@ -1216,6 +1262,7 @@ impl AgentLoop {
                             is_error: output.is_error,
                         });
                     }
+                    prepend_tool_recovery_nudge(&tool_uses, &outputs, &mut tool_results);
                     // Track consecutive tool errors for escalating hints.
                     if had_errors {
                         self.consecutive_tool_errors += 1;
@@ -1505,8 +1552,12 @@ impl AgentLoop {
                     .config
                     .max_context_tokens
                     .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
+                let effective_max = max_tok
+                    .saturating_sub(CONTEXT_OUTPUT_RESERVE)
+                    .max(32_000);
                 let current = sys_tok + estimate_tokens_messages(&self.history);
-                let proactive_limit = ((max_tok as f64) * PROACTIVE_SUMMARIZE_THRESHOLD) as u32;
+                let proactive_limit =
+                    ((effective_max as f64) * PROACTIVE_SUMMARIZE_THRESHOLD) as u32;
                 if current > proactive_limit {
                     let (util_prov, util_cfg) = self.utility_provider();
                     let count = context::proactive_summarize_pairs(
@@ -1537,7 +1588,7 @@ impl AgentLoop {
                 .compaction_threshold
                 .unwrap_or(DEFAULT_COMPACTION_THRESHOLD);
             let (util_prov, summarize_config) = self.utility_provider();
-            let to_send = compact_with_summary(
+            let to_send = compact_for_model_request(
                 &self.history,
                 system_tokens,
                 max_ctx,
@@ -1859,6 +1910,7 @@ impl AgentLoop {
                             self.doom_monitor.clear();
                         }
                     }
+                    prepend_tool_recovery_nudge(&tool_uses, &outputs, &mut tool_results);
                     // Track consecutive tool errors for escalating hints.
                     if had_errors {
                         self.consecutive_tool_errors += 1;

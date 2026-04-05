@@ -986,6 +986,71 @@ pub(crate) fn save_default_model_to_config(
     Ok(())
 }
 
+// ── Per-turn tool tally (transcript summary when a turn ends) ────────────────
+
+/// Counts tool starts in the current assistant turn for a one-line summary.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TurnToolTally {
+    read: u32,
+    write_edit: u32,
+    search: u32,
+    shell: u32,
+    glob: u32,
+    other: u32,
+}
+
+impl TurnToolTally {
+    pub(crate) fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn record(&mut self, name: &str) {
+        match name {
+            "Read" => self.read += 1,
+            "Write" | "Edit" => self.write_edit += 1,
+            "SemanticSearch" | "Grep" => self.search += 1,
+            "Bash" => self.shell += 1,
+            "Glob" => self.glob += 1,
+            _ => self.other += 1,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.read == 0
+            && self.write_edit == 0
+            && self.search == 0
+            && self.shell == 0
+            && self.glob == 0
+            && self.other == 0
+    }
+
+    /// Format a single info line and reset counts.
+    pub(crate) fn take_summary_line(&mut self) -> Option<String> {
+        if self.is_empty() {
+            return None;
+        }
+        let mut parts: Vec<String> = Vec::new();
+        let mut push = |n: u32, one: &str, many: &str| {
+            if n == 0 {
+                return;
+            }
+            parts.push(if n == 1 {
+                format!("1 {one}")
+            } else {
+                format!("{n} {many}")
+            });
+        };
+        push(self.read, "read", "reads");
+        push(self.write_edit, "edit", "edits");
+        push(self.search, "search", "searches");
+        push(self.shell, "bash", "bash");
+        push(self.glob, "glob", "globs");
+        push(self.other, "tool", "tools");
+        self.clear();
+        Some(format!("  Tools: {}", parts.join(" · ")))
+    }
+}
+
 // ── Status strip ─────────────────────────────────────────────────────────────
 
 pub(crate) struct StatusEntry {
@@ -1058,6 +1123,20 @@ mod tests {
         assert_eq!(stats.session_total_output_tokens, 0);
         assert_eq!(stats.session_total_cost_usd, 0.0);
         assert_eq!(stats.session_turn_count, 0);
+    }
+
+    #[test]
+    fn turn_tool_tally_summary_joins_categories_and_clears() {
+        let mut t = TurnToolTally::default();
+        t.record("Read");
+        t.record("Read");
+        t.record("SemanticSearch");
+        t.record("Bash");
+        let line = t.take_summary_line().expect("summary");
+        assert!(line.contains("2 reads"));
+        assert!(line.contains("1 search"));
+        assert!(line.contains("1 bash"));
+        assert!(t.take_summary_line().is_none());
     }
 
     // ── PlanState ────────────────────────────────────────────────────────────

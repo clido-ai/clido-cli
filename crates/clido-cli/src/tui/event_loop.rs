@@ -3,6 +3,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+fn trunc_tool_detail(s: &str, max_chars: usize) -> String {
+    let t = s.trim();
+    if t.chars().count() <= max_chars {
+        t.to_string()
+    } else {
+        format!(
+            "{}…",
+            t.chars()
+                .take(max_chars.saturating_sub(1))
+                .collect::<String>()
+        )
+    }
+}
+
 /// Convert tool JSON input to a human-readable summary.
 fn format_tool_detail(name: &str, input: &str) -> String {
     // Try to parse as JSON for better formatting
@@ -42,6 +56,74 @@ fn format_tool_detail(name: &str, input: &str) -> String {
                 let pattern = json.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
                 let path = json.get("path").and_then(|v| v.as_str()).unwrap_or(".");
                 format!("{} in {}", pattern, path)
+            }
+            "SemanticSearch" | "semantic_search" => {
+                let q = json.get("query").and_then(|v| v.as_str()).unwrap_or("").trim();
+                let dir = json
+                    .get("target_directory")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty());
+                let mut s = trunc_tool_detail(q, 72);
+                if let Some(d) = dir {
+                    s.push_str("  ·  in ");
+                    s.push_str(&trunc_tool_detail(d, 36));
+                }
+                s
+            }
+            "WebSearch" | "web_search" => json
+                .get("query")
+                .and_then(|v| v.as_str())
+                .map(|q| trunc_tool_detail(q, 80))
+                .unwrap_or_else(|| input.chars().take(60).collect()),
+            "WebFetch" | "web_fetch" => json
+                .get("url")
+                .and_then(|v| v.as_str())
+                .map(|u| trunc_tool_detail(u, 96))
+                .unwrap_or_else(|| input.chars().take(60).collect()),
+            "TodoWrite" | "todo_write" => {
+                let n = json
+                    .get("todos")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                if n == 0 {
+                    "todo list".to_string()
+                } else {
+                    let first = json
+                        .get("todos")
+                        .and_then(|v| v.as_array())
+                        .and_then(|a| a.first())
+                        .and_then(|o| o.get("content"))
+                        .and_then(|v| v.as_str())
+                        .map(|c| trunc_tool_detail(c, 48));
+                    match first {
+                        Some(f) if !f.is_empty() => format!("{n} items  ·  {f}"),
+                        _ => format!("{n} items"),
+                    }
+                }
+            }
+            "SpawnWorker" | "spawn_worker" => json
+                .get("task")
+                .and_then(|v| v.as_str())
+                .map(|t| trunc_tool_detail(t, 88))
+                .unwrap_or_else(|| "worker task".into()),
+            "SpawnReviewer" | "spawn_reviewer" => json
+                .get("criteria")
+                .and_then(|v| v.as_str())
+                .map(|c| trunc_tool_detail(c, 88))
+                .unwrap_or_else(|| "review".into()),
+            "ApplyPatch" | "apply_patch" => {
+                let patch = json.get("patch").and_then(|v| v.as_str()).unwrap_or("");
+                let lines = patch.lines().count();
+                let file_hint = patch
+                    .lines()
+                    .find(|l| l.starts_with("+++ "))
+                    .map(|l| l.trim_start_matches("+++ ").trim())
+                    .filter(|s| !s.is_empty() && *s != "/dev/null");
+                match file_hint {
+                    Some(f) => format!("{}  ·  {lines} lines", trunc_tool_detail(f, 48)),
+                    None => format!("unified diff  ·  {lines} lines"),
+                }
             }
             _ => {
                 // For unknown tools, show first string value or truncate JSON
@@ -192,6 +274,52 @@ pub(super) fn copy_to_clipboard(text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Read plain text from the system clipboard (inverse of [`copy_to_clipboard`]).
+/// Used for Ctrl+V when the terminal does not emit a `Paste` event.
+pub(super) fn read_clipboard() -> Result<String, String> {
+    use std::process::{Command, Stdio};
+
+    #[cfg(target_os = "macos")]
+    {
+        let out = Command::new("pbpaste")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|e| format!("pbpaste: {e}"))?;
+        if !out.status.success() {
+            return Err("clipboard read failed".into());
+        }
+        return String::from_utf8(out.stdout).map_err(|e| format!("clipboard: {e}"));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        for cmd in [
+            ["wl-paste", "-n"],
+            ["xclip", "-selection", "clipboard", "-o"],
+            ["xsel", "--clipboard", "--output"],
+        ] {
+            if let Ok(out) = Command::new(cmd[0])
+                .args(&cmd[1..])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .output()
+            {
+                if out.status.success() && !out.stdout.is_empty() {
+                    return String::from_utf8(out.stdout)
+                        .map_err(|e| format!("clipboard: {e}"));
+                }
+            }
+        }
+        return Err("clipboard read failed (install wl-paste, xclip, or xsel)".into());
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        Err("clipboard read not supported on this platform".into())
+    }
+}
+
 // ── Agent background task ─────────────────────────────────────────────────────
 
 pub(super) enum AgentAction {
@@ -210,7 +338,7 @@ pub(super) enum AgentAction {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn agent_task(
     mut cli: Cli,
-    workspace_root: std::path::PathBuf,
+    mut workspace_root: std::path::PathBuf,
     preloaded_config: Option<clido_core::LoadedConfig>,
     preloaded_pricing: clido_core::PricingTable,
     mut prompt_rx: mpsc::UnboundedReceiver<String>,
@@ -243,7 +371,13 @@ pub(super) async fn agent_task(
             Some(todo_store.clone()),
             &allowed_external_paths,
         ),
-        None => AgentSetup::build(&cli, &workspace_root),
+        None => AgentSetup::build_for_workspace_session(
+            &cli,
+            &workspace_root,
+            reviewer_enabled.clone(),
+            todo_store.clone(),
+            &allowed_external_paths,
+        ),
     };
     let mut setup = match setup_result {
         Ok(s) => s,
@@ -324,9 +458,13 @@ pub(super) async fn agent_task(
         .as_ref()
         .map(|c| c.model.clone())
         .unwrap_or_else(|| setup.config.model.clone());
-    let git_workspace = workspace_root.clone();
+    let git_workspace_root = Arc::new(Mutex::new(workspace_root.clone()));
+    let gwr = git_workspace_root.clone();
     let git_context_fn: Box<dyn Fn() -> Option<String> + Send + Sync> =
-        Box::new(move || GitContext::discover(&git_workspace).map(|ctx| ctx.to_prompt_section()));
+        Box::new(move || {
+            let ws = gwr.lock().ok()?;
+            GitContext::discover(ws.as_path()).map(|ctx| ctx.to_prompt_section())
+        });
     let mut agent = AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
         .with_path_permission_receiver(path_permission_rx)
         .with_fast_provider(setup.fast_provider, setup.fast_config)
@@ -431,8 +569,18 @@ pub(super) async fn agent_task(
         // Apply queued workdir changes before other actions so prompts never run
         // against stale tooling/permissions after a switch command.
         while let Ok(new_workspace) = workdir_rx.try_recv() {
-            match AgentSetup::build(&cli, &new_workspace) {
+            match AgentSetup::build_for_workspace_session(
+                &cli,
+                &new_workspace,
+                reviewer_enabled.clone(),
+                todo_store.clone(),
+                &allowed_external_paths,
+            ) {
                 Ok(new_setup) => {
+                    workspace_root = new_workspace.clone();
+                    if let Ok(mut g) = git_workspace_root.lock() {
+                        *g = new_workspace.clone();
+                    }
                     agent.replace_tools(new_setup.registry);
                     agent.reset_permission_mode_override();
                     if let Ok(mut state) = perms.lock() {
@@ -528,8 +676,18 @@ pub(super) async fn agent_task(
                 }
             }
             AgentAction::SetWorkspace(new_workspace) => {
-                match AgentSetup::build(&cli, &new_workspace) {
+                match AgentSetup::build_for_workspace_session(
+                    &cli,
+                    &new_workspace,
+                    reviewer_enabled.clone(),
+                    todo_store.clone(),
+                    &allowed_external_paths,
+                ) {
                     Ok(new_setup) => {
+                        workspace_root = new_workspace.clone();
+                        if let Ok(mut g) = git_workspace_root.lock() {
+                            *g = new_workspace.clone();
+                        }
                         agent.replace_tools(new_setup.registry);
                         agent.reset_permission_mode_override();
                         if let Ok(mut state) = perms.lock() {
@@ -583,26 +741,44 @@ pub(super) async fn agent_task(
                 }
             }
             AgentAction::SetAllowedExternalPaths(paths) => {
-                // Store allowed paths for future tool registry rebuilds
-                // The paths will be applied on the next workspace switch or tool rebuild
                 let path_count = paths.len();
-                #[allow(unused_assignments)]
-                {
-                    allowed_external_paths = paths.clone();
-                }
-                // Rebuild tools with new allowed paths
-                let new_registry = clido_tools::default_registry_with_allowed_paths(
-                    workspace_root.clone(),
-                    paths,
-                );
-                agent.replace_tools(new_registry);
-                if event_tx
-                    .send(AgentEvent::Info {
-                        message: format!("External paths updated: {} path(s) allowed", path_count),
-                    })
-                    .is_err()
-                {
-                    return;
+                allowed_external_paths = paths.clone();
+                let wr = workspace_root.clone();
+                let cli_c = cli.clone();
+                let rev = reviewer_enabled.clone();
+                let td = todo_store.clone();
+                let p = allowed_external_paths.clone();
+                let rt = tokio::runtime::Handle::current();
+                let reg_res = tokio::task::spawn_blocking(move || {
+                    let _guard = rt.enter();
+                    crate::agent_setup::regenerate_tool_registry(&cli_c, &wr, rev, td, &p)
+                })
+                .await;
+                match reg_res {
+                    Ok(Ok(new_registry)) => {
+                        agent.replace_tools(new_registry);
+                        if event_tx
+                            .send(AgentEvent::Info {
+                                message: format!(
+                                    "External paths updated: {} path(s) allowed",
+                                    path_count
+                                ),
+                            })
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        let _ = event_tx.send(AgentEvent::Err(format!(
+                            "external paths update failed: {e}"
+                        )));
+                    }
+                    Err(e) => {
+                        let _ = event_tx.send(AgentEvent::Err(format!(
+                            "external paths update failed: {e}"
+                        )));
+                    }
                 }
             }
             AgentAction::Note(text) => {
@@ -1768,8 +1944,6 @@ pub(super) async fn event_loop(
     const STALL_WARNING_SECS: u64 = 30;
     // Only redraw when state has actually changed to reduce CPU usage.
     let mut dirty = true;
-    // Track focus to toggle mouse capture when modals open/close.
-    let mut prev_focus = app.focus();
 
     loop {
         if dirty {
@@ -1804,7 +1978,7 @@ pub(super) async fn event_loop(
                                 );
                                 app.push_toast(
                                     format!("Rate limit recovery: ping #{} sent", ping_count),
-                                    Color::Yellow,
+                                    TUI_STATE_WARN,
                                     std::time::Duration::from_secs(3),
                                 );
                             }
@@ -1952,6 +2126,25 @@ pub(super) async fn event_loop(
                                 ov.input.insert_str(b, &clean);
                                 ov.input_cursor += clean.chars().count();
                             }
+                        } else if app.pending_perm.is_some() {
+                            if let Some(ref mut fb) = app.perm_feedback_input {
+                                fb.push_str(&text);
+                            }
+                            // Option list: ignore stray paste (do not leak into chat input).
+                        } else if let Some(mp) = app.model_picker.as_mut() {
+                            let insert = text.replace(['\n', '\r'], " ");
+                            if !insert.is_empty() {
+                                mp.filter.push_str(&insert);
+                                mp.selected = 0;
+                                mp.scroll_offset = 0;
+                                mp.clamp();
+                            }
+                        } else if let Some(sp) = app.session_picker.as_mut() {
+                            sp.picker.filter.paste(&text);
+                            sp.picker.apply_filter();
+                        } else if let Some(pp) = app.profile_picker.as_mut() {
+                            pp.picker.filter.paste(&text);
+                            pp.picker.apply_filter();
                         } else {
                             let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor);
                             app.text_input.text.insert_str(byte_pos, &text);
@@ -2062,7 +2255,7 @@ pub(super) async fn event_loop(
                                                 Err(e) => {
                                                     app.push_toast_at(
                                                         format!("Copy failed: {e}"),
-                                                        Color::Red,
+                                                        TUI_STATE_ERR,
                                                         std::time::Duration::from_secs(3),
                                                         toast_pos,
                                                     );
@@ -2105,6 +2298,7 @@ pub(super) async fn event_loop(
                         detail,
                     }) => {
                         last_agent_activity = std::time::Instant::now();
+                        app.turn_tool_tally.record(&name);
                         // Format detail from JSON to human-readable
                         let detail_formatted = format_tool_detail(&name, &detail);
                         app.push_status(
@@ -2287,6 +2481,7 @@ pub(super) async fn event_loop(
                             ));
                         } else {
                             // Unknown reset time - start background pinging mode
+                            app.rate_limit_cancelled = false;
                             app.rate_limit_pinging = true;
                             app.rate_limit_next_ping = Some(
                                 std::time::Instant::now() + std::time::Duration::from_secs(15 * 60)
@@ -2410,6 +2605,20 @@ pub(super) async fn event_loop(
                     }
                     Some(AgentEvent::ModelsLoaded { ids, provider }) => {
                         app.models_loading = false;
+                        // 15-minute rate-limit pings use model-list fetch; when it succeeds, resume the agent.
+                        if app.rate_limit_pinging && !app.rate_limit_cancelled && !ids.is_empty() {
+                            app.rate_limit_pinging = false;
+                            app.rate_limit_next_ping = None;
+                            app.rate_limit_ping_count = 0;
+                            app.push(ChatLine::Info(
+                                "  ▶ API reachable again — resuming automatically…".into(),
+                            ));
+                            if !app.busy {
+                                app.send_silent(
+                                    "continue where you left off — you were interrupted by a rate limit, pick up from where you stopped".to_string(),
+                                );
+                            }
+                        }
                         if !ids.is_empty() {
                             // Merge API-fetched model IDs with existing pricing data.
                             // Keep existing entries (which may have cost metadata) for known IDs,
@@ -2459,7 +2668,7 @@ pub(super) async fn event_loop(
                         app.text_input.set_text(enhanced);
                         app.push_toast(
                             "Enter to send, edit first if you like",
-                            Color::Cyan,
+                            TUI_STATE_INFO,
                             std::time::Duration::from_secs(3),
                         );
                     }

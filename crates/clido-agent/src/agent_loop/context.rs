@@ -10,8 +10,11 @@ use tracing::warn;
 
 use super::history::repair_orphaned_tool_calls;
 
-/// Proactive summarization triggers at this fraction of max context (below full compaction).
-pub(crate) const PROACTIVE_SUMMARIZE_THRESHOLD: f64 = 0.50;
+/// Proactive summarization triggers at this fraction of effective max context (below full compaction).
+pub(crate) const PROACTIVE_SUMMARIZE_THRESHOLD: f64 = 0.45;
+
+/// Reserve tokens for model output + provider overhead so request assembly stays under the real limit.
+pub(crate) const CONTEXT_OUTPUT_RESERVE: u32 = 12_288;
 /// Maximum number of tool pairs to summarize per turn (to limit latency).
 const MAX_PROACTIVE_SUMMARIES_PER_TURN: usize = 5;
 
@@ -295,6 +298,49 @@ pub(crate) async fn compact_with_summary(
     }];
     out.extend_from_slice(tail);
     Ok(out)
+}
+
+/// Like [`compact_with_summary`], but subtracts an output reserve from the context budget and
+/// retries once with a tighter budget + forced compaction if the first pass hits `ContextLimit`.
+pub(crate) async fn compact_for_model_request(
+    messages: &[Message],
+    system_prompt_tokens: u32,
+    max_context_tokens: u32,
+    compaction_threshold: f64,
+    provider: &dyn ModelProvider,
+    config: &AgentConfig,
+) -> Result<Vec<Message>> {
+    let budget = max_context_tokens
+        .saturating_sub(CONTEXT_OUTPUT_RESERVE)
+        .max(24_000);
+    match compact_with_summary(
+        messages,
+        system_prompt_tokens,
+        budget,
+        compaction_threshold,
+        provider,
+        config,
+    )
+    .await
+    {
+        Ok(m) => Ok(m),
+        Err(ClidoError::ContextLimit { .. }) => {
+            warn!(
+                "context assembly exceeded budget={budget}; retrying with tighter budget and full compaction"
+            );
+            let tight = budget.saturating_sub(8192).max(16_000);
+            compact_with_summary(
+                messages,
+                system_prompt_tokens,
+                tight,
+                0.0,
+                provider,
+                config,
+            )
+            .await
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Format `messages` as a flat transcript and ask the provider to summarize them.

@@ -126,7 +126,7 @@ pub struct ContextSection {
 }
 
 fn default_compaction_threshold() -> f64 {
-    0.75
+    0.58
 }
 
 impl Default for ContextSection {
@@ -685,7 +685,7 @@ mod tests {
     #[test]
     fn context_section_default_values() {
         let c = ContextSection::default();
-        assert!((c.compaction_threshold - 0.75).abs() < f64::EPSILON);
+        assert!((c.compaction_threshold - 0.58).abs() < f64::EPSILON);
         assert!(c.max_context_tokens.is_none());
     }
 

@@ -51,7 +51,7 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(TUI_SOFT_ACCENT)
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -70,7 +70,7 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         task_lines.push(Line::from(vec![Span::styled(
             "  Edit task",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(TUI_STATE_WARN)
                 .add_modifier(Modifier::BOLD),
         )]));
         task_lines.push(Line::raw(""));
@@ -80,21 +80,21 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
                 .fg(TUI_TEXT)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(TUI_MUTED)
         };
         let notes_style = if form.focused_field == TaskEditField::Notes {
             Style::default()
                 .fg(TUI_TEXT)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(TUI_MUTED)
         };
         let comp_style = if form.focused_field == TaskEditField::Complexity {
             Style::default()
                 .fg(TUI_TEXT)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(TUI_MUTED)
         };
 
         task_lines.push(Line::from(vec![
@@ -109,22 +109,22 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         let (low_style, med_style, high_style) = match form.complexity {
             Complexity::Low => (
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(TUI_STATE_OK)
                     .add_modifier(Modifier::BOLD),
-                Style::default().fg(Color::DarkGray),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(TUI_MUTED),
+                Style::default().fg(TUI_MUTED),
             ),
             Complexity::Medium => (
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(TUI_MUTED),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(TUI_STATE_WARN)
                     .add_modifier(Modifier::BOLD),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(TUI_MUTED),
             ),
             Complexity::High => (
-                Style::default().fg(Color::DarkGray),
-                Style::default().fg(Color::DarkGray),
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Style::default().fg(TUI_MUTED),
+                Style::default().fg(TUI_MUTED),
+                Style::default().fg(TUI_STATE_ERR).add_modifier(Modifier::BOLD),
             ),
         };
         task_lines.push(Line::from(vec![
@@ -137,7 +137,7 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         task_lines.push(Line::from(vec![Span::styled(
             "  Tab=next field  Enter=save  Esc=cancel",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )]));
     } else {
@@ -158,7 +158,7 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 Color::Reset
             };
-            let fg = if selected { Color::White } else { Color::Gray };
+            let fg = if selected { TUI_TEXT } else { TUI_ROW_DIM };
 
             let status_icon = match task.status {
                 TaskStatus::Pending => "○",
@@ -170,12 +170,12 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
 
             let complexity_badge = match task.complexity {
                 Complexity::Low => {
-                    Span::styled(" [low] ", Style::default().fg(Color::DarkGray).bg(bg))
+                    Span::styled(" [low] ", Style::default().fg(TUI_MUTED).bg(bg))
                 }
                 Complexity::Medium => {
-                    Span::styled(" [med] ", Style::default().fg(Color::Yellow).bg(bg))
+                    Span::styled(" [med] ", Style::default().fg(TUI_STATE_WARN).bg(bg))
                 }
-                Complexity::High => Span::styled(" [high]", Style::default().fg(Color::Red).bg(bg)),
+                Complexity::High => Span::styled(" [high]", Style::default().fg(TUI_STATE_ERR).bg(bg)),
             };
 
             let skip_str = if task.skip { "⊘ " } else { "  " };
@@ -208,7 +208,7 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         task_lines.push(Line::from(vec![Span::styled(
             progress,
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )]));
     }
@@ -236,7 +236,7 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(Line::from(vec![Span::styled(
             hint,
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )])),
         hint_area,
@@ -258,7 +258,7 @@ pub(crate) fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) 
         .borders(Borders::ALL)
         .border_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(TUI_SOFT_ACCENT)
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -294,7 +294,10 @@ pub(crate) fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) 
                 Span::raw(before),
                 Span::styled(
                     cursor_ch,
-                    Style::default().bg(Color::White).fg(Color::Black),
+                    Style::default()
+                        .bg(TUI_SELECTION_BG)
+                        .fg(TUI_BRAND_TEXT)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(after),
             ]));
@@ -306,39 +309,39 @@ pub(crate) fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) 
     frame.render_widget(Paragraph::new(lines), edit_area);
 
     let hint = Paragraph::new(Line::from(vec![
-        Span::styled("  ↑↓←→", Style::default().fg(Color::DarkGray)),
+        Span::styled("  ↑↓←→", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " navigate  ",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
-        Span::styled("Enter", Style::default().fg(Color::DarkGray)),
+        Span::styled("Enter", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " new line  ",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
-        Span::styled("Ctrl+S", Style::default().fg(Color::DarkGray)),
+        Span::styled("Ctrl+S", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " save  ",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
-        Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+        Span::styled("Esc", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " discard  ",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
-        Span::styled("Ctrl+C", Style::default().fg(Color::DarkGray)),
+        Span::styled("Ctrl+C", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " discard",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
     ]));
@@ -560,7 +563,7 @@ pub(crate) fn render_workflow_editor(frame: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(TUI_SOFT_ACCENT)
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -595,7 +598,10 @@ pub(crate) fn render_workflow_editor(frame: &mut Frame, app: &App, area: Rect) {
                 Span::raw(before),
                 Span::styled(
                     cursor_ch,
-                    Style::default().bg(Color::White).fg(Color::Black),
+                    Style::default()
+                        .bg(TUI_SELECTION_BG)
+                        .fg(TUI_BRAND_TEXT)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(after),
             ]));
@@ -607,32 +613,32 @@ pub(crate) fn render_workflow_editor(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(lines), edit_area);
 
     let hint = Paragraph::new(Line::from(vec![
-        Span::styled("  ↑↓←→", Style::default().fg(Color::DarkGray)),
+        Span::styled("  ↑↓←→", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " navigate  ",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
-        Span::styled("Enter", Style::default().fg(Color::DarkGray)),
+        Span::styled("Enter", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " new line  ",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
-        Span::styled("Ctrl+S", Style::default().fg(Color::DarkGray)),
+        Span::styled("Ctrl+S", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " validate & save  ",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
-        Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+        Span::styled("Esc", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " discard",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
     ]));

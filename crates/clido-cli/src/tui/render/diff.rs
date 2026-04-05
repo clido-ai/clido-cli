@@ -6,14 +6,21 @@
 //! diff view.
 
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 
 use super::*;
 
+use crate::tui::copy::diff as copy_diff;
+
 /// Minimum terminal width (columns) to use side-by-side rendering.
 const SIDE_BY_SIDE_MIN_WIDTH: usize = 120;
+
+/// Cap diff rows in the TUI so huge patches stay responsive.
+const MAX_DIFF_SOURCE_LINES: usize = 400;
+/// Blank line + two footer lines after truncated body.
+const TRUNCATE_FOOTER_LINES: usize = 3;
 
 /// Width reserved for each line-number gutter (e.g. " 123 ").
 const GUTTER_W: usize = 5;
@@ -46,18 +53,48 @@ enum RowKind {
 /// Render a unified diff string into styled TUI lines.
 /// Automatically chooses side-by-side when `width` ≥ 120.
 pub(crate) fn render_diff(text: &str, width: usize) -> Vec<Line<'static>> {
-    if width >= SIDE_BY_SIDE_MIN_WIDTH {
-        render_side_by_side(text, width)
+    let raw_line_count = text.lines().count();
+    let truncated = raw_line_count > MAX_DIFF_SOURCE_LINES;
+    let keep_lines = if truncated {
+        MAX_DIFF_SOURCE_LINES.saturating_sub(TRUNCATE_FOOTER_LINES)
     } else {
-        render_unified(text)
+        raw_line_count
+    };
+    let body: String = if truncated {
+        text.lines()
+            .take(keep_lines)
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        text.to_string()
+    };
+
+    let mut lines = if width >= SIDE_BY_SIDE_MIN_WIDTH {
+        render_side_by_side(&body, width)
+    } else {
+        render_unified(&body)
+    };
+
+    if truncated {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(vec![Span::styled(
+            copy_diff::truncated_banner(raw_line_count, keep_lines),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            copy_diff::TRUNCATE_HINT.to_string(),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+        )]));
     }
+
+    lines
 }
 
 // ── Unified (inline) renderer — existing logic extracted ────────────────────
 
 fn render_unified(text: &str) -> Vec<Line<'static>> {
     let dim = Modifier::DIM;
-    let gutter_style = Style::default().fg(Color::DarkGray).add_modifier(dim);
+    let gutter_style = Style::default().fg(TUI_MUTED).add_modifier(dim);
     let mut out = Vec::new();
     let mut old_lineno: u32 = 0;
     let mut new_lineno: u32 = 0;
@@ -70,12 +107,12 @@ fn render_unified(text: &str) -> Vec<Line<'static>> {
             }
             out.push(Line::from(vec![Span::styled(
                 format!("  {}", line),
-                Style::default().fg(Color::Cyan).add_modifier(dim),
+                Style::default().fg(TUI_DIFF_HEADER).add_modifier(dim),
             )]));
         } else if line.starts_with("---") || line.starts_with("+++") {
             out.push(Line::from(vec![Span::styled(
                 format!("  {}", line),
-                Style::default().fg(Color::DarkGray).add_modifier(dim),
+                Style::default().fg(TUI_MUTED).add_modifier(dim),
             )]));
         } else if line.starts_with('+') {
             let ln = new_lineno;
@@ -137,7 +174,7 @@ fn render_side_by_side(text: &str, width: usize) -> Vec<Line<'static>> {
                         .fg(if header.starts_with("@@") {
                             TUI_DIFF_HEADER
                         } else {
-                            Color::DarkGray
+                            TUI_MUTED
                         })
                         .add_modifier(Modifier::DIM),
                 )]));
@@ -154,8 +191,8 @@ fn render_side_by_side(text: &str, width: usize) -> Vec<Line<'static>> {
 /// Build a single side-by-side line with gutters, content, and divider.
 fn build_sbs_line(row: &SbsRow, half_w: usize) -> Line<'static> {
     let dim = Modifier::DIM;
-    let gutter_style = Style::default().fg(Color::DarkGray).add_modifier(dim);
-    let divider_style = Style::default().fg(Color::DarkGray).add_modifier(dim);
+    let gutter_style = Style::default().fg(TUI_MUTED).add_modifier(dim);
+    let divider_style = Style::default().fg(TUI_MUTED).add_modifier(dim);
 
     // Left gutter
     let left_gutter = match row.left_lineno {
@@ -347,6 +384,29 @@ mod tests {
 +    println!(\"world\");
      let x = 1;
  }";
+
+    #[test]
+    fn truncates_very_large_diff() {
+        let mut huge = String::from("--- a/x\n+++ b/x\n@@ -0,0 +1,500 @@\n");
+        for i in 0..500 {
+            huge.push_str(&format!("+line {i}\n"));
+        }
+        let lines = render_diff(&huge, 80);
+        let joined: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            joined.contains("truncated") || joined.contains("Truncated"),
+            "expected truncation notice in {joined:?}"
+        );
+        assert!(
+            joined.contains("397") || joined.contains("400"),
+            "expected line counts in footer: {joined:?}"
+        );
+    }
 
     #[test]
     fn unified_fallback_for_narrow() {

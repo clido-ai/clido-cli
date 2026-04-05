@@ -4,6 +4,8 @@ use clido_core::{AgentConfig, ContentBlock, Message, Role};
 use clido_providers::ModelProvider;
 use tracing::{debug, warn};
 
+use crate::prompts::architect_user_prompt;
+
 /// Use the utility provider to generate a plan for complex prompts.
 /// Returns None if the prompt is too simple or planning fails.
 pub(crate) async fn architect_plan(
@@ -26,18 +28,10 @@ pub(crate) async fn architect_plan(
         return None;
     }
 
-    let architect_prompt = format!(
-        "You are the ARCHITECT. Analyze the following task and produce a concise implementation plan.\n\
-         Focus on: which files to change, what approach to use, edge cases to handle.\n\
-         Be specific but brief (max 200 words). Do NOT write code — just the plan.\n\n\
-         Task: {}",
-        user_input
-    );
-
     let messages = vec![Message {
         role: Role::User,
         content: vec![ContentBlock::Text {
-            text: architect_prompt,
+            text: architect_user_prompt(user_input),
         }],
     }];
 

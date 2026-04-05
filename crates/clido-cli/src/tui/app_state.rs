@@ -12,6 +12,7 @@ use crate::repl::expand_at_file_refs;
 use crate::text_input::TextInput;
 
 use super::commands::{execute_slash, is_known_slash_cmd, parse_per_turn_model};
+use super::copy::info as copy_info;
 use super::render::build_plan_from_assistant_text;
 use super::state::*;
 
@@ -100,6 +101,12 @@ pub(super) struct App {
     pub(super) following: bool,
     /// If set after a terminal resize, restore scroll to this ratio of max_scroll on next render.
     pub(super) pending_scroll_ratio: Option<f64>,
+    /// Tool call counts for the current assistant turn (shown when the turn ends).
+    pub(super) turn_tool_tally: TurnToolTally,
+    /// `max_scroll` from the previous chat render — used to detect large jumps while following.
+    pub(super) chat_render_prev_max_scroll: u32,
+    /// After a large auto-follow jump, drop one spurious scroll-up (wheel echo).
+    pub(super) suppress_next_chat_scroll_up: bool,
 
     /// Layout metrics computed during render; consumed by input/event handlers.
     pub(super) layout: super::state::LayoutInfo,
@@ -290,6 +297,9 @@ impl App {
             scroll: 0,
             following: true,
             pending_scroll_ratio: None,
+            turn_tool_tally: TurnToolTally::default(),
+            chat_render_prev_max_scroll: 0,
+            suppress_next_chat_scroll_up: false,
             layout: super::state::LayoutInfo::default(),
 
             busy: false,
@@ -436,11 +446,21 @@ impl App {
         }
     }
 
+    /// Clear scheduled rate-limit auto-resume and background ping mode.
+    pub(super) fn disarm_rate_limit_recovery(&mut self) {
+        self.rate_limit_resume_at = None;
+        self.rate_limit_cancelled = false;
+        self.rate_limit_pinging = false;
+        self.rate_limit_next_ping = None;
+        self.rate_limit_ping_count = 0;
+    }
+
     /// Send immediately (not busy). Moves input → chat + agent.
     /// If input starts with `@model-name prompt`, applies a per-turn model override.
-    /// Send `prompt` to the agent without showing anything in the chat.
+    /// Sends `prompt` to the agent without showing anything in the chat.
     pub(super) fn send_silent(&mut self, prompt: String) {
         let _ = self.channels.prompt_tx.send(prompt);
+        self.turn_tool_tally.clear();
         self.text_input.text.clear();
         self.text_input.cursor = 0;
         self.busy = true;
@@ -451,12 +471,7 @@ impl App {
     }
 
     pub(super) fn send_now(&mut self, text: String) {
-        // Cancel any pending rate-limit auto-resume or background pinging.
-        self.rate_limit_resume_at = None;
-        self.rate_limit_cancelled = false;
-        self.rate_limit_pinging = false;
-        self.rate_limit_next_ping = None;
-        self.rate_limit_ping_count = 0;
+        self.disarm_rate_limit_recovery();
 
         // If a pending image was attached via /image, publish it to the shared image_state
         // so agent_task can prepend an Image ContentBlock to this user message.
@@ -500,11 +515,11 @@ impl App {
 
         if send_result.is_err() {
             // Agent task channel closed — can't send; stay idle and surface an error.
-            self.push(ChatLine::Info(
-                "  ✗ Agent is not running — try restarting clido.".into(),
-            ));
+            self.push(ChatLine::Info(copy_info::AGENT_NOT_RUNNING.into()));
             return;
         }
+
+        self.turn_tool_tally.clear();
 
         // Only clear input field if this text matches what's currently in the input
         // (user just submitted it). Don't clear if we're draining a queued item
@@ -531,9 +546,7 @@ impl App {
             return;
         }
         if trimmed == "/" {
-            self.push(ChatLine::Info(
-                "  Type a message or command — bare '/' alone is not sent".into(),
-            ));
+            self.push(ChatLine::Info(copy_info::BARE_SLASH.into()));
             return;
         }
         if is_known_slash_cmd(&trimmed) {
@@ -552,9 +565,7 @@ impl App {
                 continue;
             }
             if trimmed == "/" {
-                self.push(ChatLine::Info(
-                    "  Type a message or command — bare '/' alone is not sent".into(),
-                ));
+                self.push(ChatLine::Info(copy_info::BARE_SLASH.into()));
                 continue;
             }
             if is_known_slash_cmd(&trimmed) {
@@ -582,16 +593,12 @@ impl App {
         if text.is_empty() {
             if !self.empty_input_hint_shown && !self.busy {
                 self.empty_input_hint_shown = true;
-                self.push(ChatLine::Info(
-                    "  Type a message to start, or /help for available commands".into(),
-                ));
+                self.push(ChatLine::Info(copy_info::EMPTY_HINT.into()));
             }
             return;
         }
         if text == "/" {
-            self.push(ChatLine::Info(
-                "  Type a message or command — bare '/' alone is not sent".into(),
-            ));
+            self.push(ChatLine::Info(copy_info::BARE_SLASH.into()));
             self.text_input.text.clear();
             self.text_input.cursor = 0;
             return;
@@ -611,7 +618,7 @@ impl App {
             if self.busy {
                 self.stop_only();
             } else {
-                self.push(ChatLine::Info("  ✗ No active run to stop".into()));
+                self.push(ChatLine::Info(copy_info::NO_ACTIVE_STOP.into()));
             }
             self.text_input.text.clear();
             self.text_input.cursor = 0;
@@ -645,9 +652,7 @@ impl App {
             self.queued.push_front(text);
             self.text_input.text.clear();
             self.text_input.cursor = 0;
-            self.push(ChatLine::Info(
-                "  ↻ Interrupt requested — will send after current response completes".into(),
-            ));
+            self.push(ChatLine::Info(copy_info::INTERRUPT_QUEUE.into()));
         } else {
             self.dispatch_user_input(text);
         }
@@ -663,7 +668,7 @@ impl App {
         // Also set cancel flag as fallback
         self.cancel
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        self.push(ChatLine::Info("  ↻ Stopping...".into()));
+        self.push(ChatLine::Info(copy_info::STOPPING.into()));
     }
 
     pub(super) fn push_status(&mut self, tool_use_id: String, name: String, detail: String) {
@@ -701,6 +706,10 @@ impl App {
         self.cancel
             .store(false, std::sync::atomic::Ordering::Relaxed);
         self.stats.session_turn_count += 1;
+
+        if let Some(line) = self.turn_tool_tally.take_summary_line() {
+            self.push(ChatLine::Info(line));
+        }
 
         // Show elapsed time and per-turn cost for the completed turn.
         if let Some(start) = self.turn_start {
@@ -829,7 +838,7 @@ impl App {
 
         self.push_toast(
             format!("✓ Copied {} chars", text.len()),
-            Color::Green,
+            super::TUI_STATE_OK,
             std::time::Duration::from_secs(2),
         );
         true

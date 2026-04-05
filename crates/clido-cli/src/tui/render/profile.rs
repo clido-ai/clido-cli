@@ -37,18 +37,18 @@ fn render_progress_bar(
     for i in 1..=total_steps {
         let dot = if i <= current_step { "●" } else { "○" };
         let style = if i == current_step && i < total_steps {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default().fg(TUI_STATE_WARN).add_modifier(Modifier::BOLD)
         } else if i < current_step {
-            Style::default().fg(Color::Green)
+            Style::default().fg(TUI_STATE_OK)
         } else {
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)
         };
         dots.push(Span::styled(dot, style));
         if i < total_steps {
             let sep_style = if i < current_step {
-                Style::default().fg(Color::Green).add_modifier(Modifier::DIM)
+                Style::default().fg(TUI_STATE_OK).add_modifier(Modifier::DIM)
             } else {
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)
             };
             dots.push(Span::styled(" ─ ", sep_style));
         }
@@ -62,7 +62,7 @@ fn render_progress_bar(
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             bordered_title.as_str(),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(TUI_SOFT_ACCENT).add_modifier(Modifier::BOLD),
         ))),
         Rect {
             x: area.x,
@@ -141,7 +141,7 @@ pub(crate) fn render_profile_overview(
         Block::default()
             .title(title.as_str())
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(TUI_SOFT_ACCENT)),
         popup_rect,
     );
 
@@ -162,7 +162,7 @@ pub(crate) fn render_profile_overview(
             lines.push(Line::from(Span::styled(
                 format!("  {}", label),
                 Style::default()
-                    .fg(Color::Blue)
+                    .fg(TUI_STATE_INFO)
                     .add_modifier(Modifier::DIM | Modifier::BOLD),
             )));
             lines.push(Line::raw(""));
@@ -192,7 +192,7 @@ pub(crate) fn render_profile_overview(
         lines.push(Line::from(Span::styled(
             format!("  {}", label),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )));
         line_count += 1;
@@ -235,7 +235,7 @@ pub(crate) fn render_profile_overview(
             Span::styled(
                 " ▶ ",
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(TUI_STATE_WARN)
                     .add_modifier(Modifier::BOLD),
             )
         } else {
@@ -244,24 +244,24 @@ pub(crate) fn render_profile_overview(
 
         let value_style = if is_editing {
             Style::default()
-                .fg(Color::Yellow)
+                .fg(TUI_STATE_WARN)
                 .add_modifier(Modifier::BOLD)
         } else if selected {
             Style::default()
                 .fg(TUI_TEXT)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Green)
+            Style::default().fg(TUI_STATE_OK)
         };
 
         let mut spans = vec![cursor_span, Span::styled(display_value, value_style)];
 
         if is_editing {
-            spans.push(Span::styled("▌", Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled("▌", Style::default().fg(TUI_STATE_WARN)));
             spans.push(Span::styled(
                 "  Esc=cancel  Enter=save",
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(TUI_MUTED)
                     .add_modifier(Modifier::DIM),
             ));
             editing_line_y = content_area.y + line_count;
@@ -269,7 +269,7 @@ pub(crate) fn render_profile_overview(
             spans.push(Span::styled(
                 "  (Enter to edit)",
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(TUI_MUTED)
                     .add_modifier(Modifier::DIM),
             ));
         }
@@ -284,9 +284,9 @@ pub(crate) fn render_profile_overview(
         lines.push(Line::from(Span::styled(
             msg.clone(),
             Style::default().fg(if msg.starts_with("  ✓") {
-                Color::Green
+                TUI_STATE_OK
             } else {
-                Color::Red
+                TUI_STATE_ERR
             }),
         )));
     }
@@ -305,7 +305,7 @@ pub(crate) fn render_profile_overview(
     frame.render_widget(
         Paragraph::new(hint).style(
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
         hint_area,
@@ -355,7 +355,7 @@ pub(crate) fn render_profile_create(
     frame.render_widget(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(TUI_SOFT_ACCENT)),
         popup_rect,
     );
 
@@ -392,7 +392,7 @@ pub(crate) fn render_profile_create(
     lines.push(Line::from(Span::styled(
         format!("  {}", step_label),
         Style::default()
-            .fg(Color::Cyan)
+            .fg(TUI_SOFT_ACCENT)
             .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::raw(""));
@@ -402,7 +402,7 @@ pub(crate) fn render_profile_create(
         lines.push(Line::from(Span::styled(
             "  Saved keys from other profiles:",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )));
 
@@ -425,9 +425,9 @@ pub(crate) fn render_profile_create(
                         format!("  {}{} {}", arrow, key_short, offer.source_profile),
                         Style::default()
                             .fg(if i == 0 && st.input.is_empty() {
-                                Color::Yellow
+                                TUI_STATE_WARN
                             } else {
-                                Color::Green
+                                TUI_STATE_OK
                             })
                             .add_modifier(if i == 0 && st.input.is_empty() {
                                 Modifier::BOLD
@@ -437,7 +437,7 @@ pub(crate) fn render_profile_create(
                     ),
                     Span::styled(
                         format!("  ({})", offer.provider_id),
-                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                     ),
                 ]));
             }
@@ -457,21 +457,21 @@ pub(crate) fn render_profile_create(
         Span::styled(
             format!("   {input_placeholder}"),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )
     } else {
         Span::styled(
             format!("   {display_input}"),
             Style::default()
-                .fg(Color::Yellow)
+                .fg(TUI_STATE_WARN)
                 .add_modifier(Modifier::BOLD),
         )
     };
 
     lines.push(Line::from(vec![
         value_display,
-        Span::styled("▌", Style::default().fg(Color::Yellow)),
+        Span::styled("▌", Style::default().fg(TUI_STATE_WARN)),
     ]));
     lines.push(Line::raw(""));
 
@@ -479,8 +479,8 @@ pub(crate) fn render_profile_create(
     if matches!(step, ProfileCreateStep::ApiKey) {
         lines.push(Line::raw(""));
         lines.push(Line::from(vec![
-            Span::styled("  provider  ", Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
-            Span::styled(st.provider.clone(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("  provider  ", Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)),
+            Span::styled(st.provider.clone(), Style::default().fg(TUI_STATE_OK).add_modifier(Modifier::BOLD)),
         ]));
     }
 
@@ -499,7 +499,7 @@ pub(crate) fn render_profile_create(
             lines.push(Line::from(Span::styled(
                 env_hint,
                 Style::default()
-                    .fg(Color::Blue)
+                    .fg(TUI_STATE_INFO)
                     .add_modifier(Modifier::DIM),
             )));
         }
@@ -511,9 +511,9 @@ pub(crate) fn render_profile_create(
         lines.push(Line::from(Span::styled(
             msg.clone(),
             Style::default().fg(if msg.starts_with("  ✓") {
-                Color::Green
+                TUI_STATE_OK
             } else {
-                Color::Red
+                TUI_STATE_ERR
             }),
         )));
     }
@@ -527,7 +527,7 @@ pub(crate) fn render_profile_create(
     frame.render_widget(
         Paragraph::new(hint_text).style(
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
         hint_area,
@@ -580,7 +580,7 @@ pub(crate) fn render_profile_saved_key_picker(
         Block::default()
             .title(" Use Saved API Key ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::default().fg(TUI_SOFT_ACCENT)),
         popup_rect,
     );
 
@@ -595,7 +595,7 @@ pub(crate) fn render_profile_saved_key_picker(
         Line::from(Span::styled(
             "  Select a key to reuse from another profile:",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )),
         Line::raw(""),
@@ -616,15 +616,15 @@ pub(crate) fn render_profile_saved_key_picker(
                 format!("  {}{}", arrow, offer.display),
                 Style::default()
                     .fg(if is_selected {
-                        Color::Yellow
+                        TUI_STATE_WARN
                     } else {
-                        Color::Green
+                        TUI_STATE_OK
                     })
                     .add_modifier(if is_selected { Modifier::BOLD } else { Modifier::empty() }),
             ),
             Span::styled(
                 format!("  ({}, profile: {})", offer.provider_id, offer.source_profile,),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
             ),
         ]));
     }
@@ -633,7 +633,7 @@ pub(crate) fn render_profile_saved_key_picker(
         lines.push(Line::from(Span::styled(
             "  No saved keys available.",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )));
     }
@@ -649,7 +649,7 @@ pub(crate) fn render_profile_saved_key_picker(
         )
         .style(
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
         hint_area,
@@ -669,7 +669,7 @@ pub(crate) fn render_profile_provider_picker(
         Block::default()
             .title(" Select Provider ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(TUI_SOFT_ACCENT)),
         popup_rect,
     );
 
@@ -686,7 +686,7 @@ pub(crate) fn render_profile_provider_picker(
         vec![Line::from(Span::styled(
             format!("  ✓ {} detected (from {} env var)", st.provider, env_var),
             Style::default()
-                .fg(Color::Green)
+                .fg(TUI_STATE_OK)
                 .add_modifier(Modifier::BOLD),
         ))]
     };
@@ -714,7 +714,7 @@ pub(crate) fn render_profile_provider_picker(
         } else {
             Color::Reset
         };
-        let fg = if selected { TUI_TEXT } else { Color::Gray };
+        let fg = if selected { TUI_TEXT } else { TUI_ROW_DIM };
         lines.push(Line::from(vec![Span::styled(
             format!("  {:<12}  {}{}", id, name, key_marker),
             Style::default().fg(fg).bg(bg),
@@ -734,7 +734,7 @@ pub(crate) fn render_profile_provider_picker(
     frame.render_widget(
         Paragraph::new("↑↓=navigate  Enter=select  type to filter  Esc=cancel").style(
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
         hint_area,
@@ -754,7 +754,7 @@ pub(crate) fn render_profile_model_picker(
         Block::default()
             .title(format!(" Select Model (provider: {}) ", st.provider).as_str())
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Magenta)),
+            .border_style(Style::default().fg(TUI_SOFT_ACCENT)),
         popup_rect,
     );
 
@@ -776,7 +776,7 @@ pub(crate) fn render_profile_model_picker(
                 "model", "provider", "$/1M in", "$/1M out", "ctx k"
             ),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )),
         Line::raw(""),
@@ -790,7 +790,7 @@ pub(crate) fn render_profile_model_picker(
         } else {
             Color::Reset
         };
-        let fg = if selected { TUI_TEXT } else { Color::Gray };
+        let fg = if selected { TUI_TEXT } else { TUI_ROW_DIM };
         let ctx = m
             .context_k
             .map(|k| format!("{:>4}k", k))
@@ -821,7 +821,7 @@ pub(crate) fn render_profile_model_picker(
     frame.render_widget(
         Paragraph::new("↑↓=navigate  Enter=select  type to filter  Esc=cancel").style(
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         ),
         hint_area,

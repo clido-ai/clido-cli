@@ -38,7 +38,7 @@ pub fn load_and_assemble_rules_with_trust(
 pub const DEFAULT_MAX_CONTEXT_TOKENS: u32 = 200_000;
 
 /// Default compaction threshold (compact when context > max * threshold).
-pub const DEFAULT_COMPACTION_THRESHOLD: f64 = 0.65;
+pub const DEFAULT_COMPACTION_THRESHOLD: f64 = 0.58;
 
 /// Placeholder text for compacted (dropped) history.
 const COMPACTED_PLACEHOLDER: &str =

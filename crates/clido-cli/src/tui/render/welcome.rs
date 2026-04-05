@@ -1,6 +1,6 @@
 use ratatui::{
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
     Frame,
@@ -16,13 +16,13 @@ pub(crate) fn is_welcome_only(app: &App) -> bool {
 
 /// Centered welcome panel rendered when no conversation has started yet.
 pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
-    let muted = Style::default().fg(Color::Rgb(110, 125, 150));
-    let soft = Style::default().fg(Color::Rgb(185, 195, 215));
+    let muted = Style::default().fg(TUI_MUTED);
+    let soft = Style::default().fg(TUI_BRAND_TEXT);
     let accent = Style::default()
         .fg(TUI_SOFT_ACCENT)
         .add_modifier(Modifier::BOLD);
-    let dim_green = Style::default().fg(Color::Rgb(100, 180, 120));
-    let dim_yellow = Style::default().fg(Color::Rgb(200, 180, 90));
+    let dim_green = Style::default().fg(TUI_STATE_OK);
+    let dim_yellow = Style::default().fg(TUI_STATE_WARN);
 
     // Shorten workdir to ~/...
     let home = std::env::var("HOME").unwrap_or_default();
@@ -35,7 +35,7 @@ pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
 
     // Key status
     let key_status = if app.api_key.is_empty() {
-        Span::styled("key ✗", Style::default().fg(Color::Red))
+        Span::styled("key ✗", Style::default().fg(TUI_STATE_ERR))
     } else {
         Span::styled("key ✓", dim_green)
     };
@@ -63,25 +63,32 @@ pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled("fast ·", muted)
     };
 
+    const L: &str = "    ";
+    const LW: usize = 10;
+    let lbl = |s: &str| format!("{:<w$}", s, w = LW);
+
     let content: Vec<Line<'static>> = vec![
         Line::raw(""),
-        Line::from(Span::styled(format!("    {}", workdir), muted)),
+        Line::from(vec![
+            Span::styled(format!("{L}{}", lbl("workdir")), muted),
+            Span::styled(workdir, soft),
+        ]),
         Line::raw(""),
         Line::from(vec![
-            Span::styled("    profile  ".to_string(), muted),
+            Span::styled(format!("{L}{}", lbl("profile")), muted),
             Span::styled(
                 app.current_profile.clone(),
                 soft.add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("    provider ".to_string(), muted),
+            Span::styled(format!("{L}{}", lbl("provider")), muted),
             Span::styled(app.provider.clone(), soft),
             Span::styled("  ·  ".to_string(), muted),
             Span::styled(app.model.clone(), soft),
         ]),
         Line::from(vec![
-            Span::styled("    ".to_string(), muted),
+            Span::styled(format!("{L}{}", lbl("status")), muted),
             key_status,
             Span::styled("  ·  ".to_string(), muted),
             budget_span,
@@ -90,17 +97,21 @@ pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            "    /help   /model   /settings   /config".to_string(),
+            format!("{L}/help · /model · /settings · /config"),
             accent,
         )),
         Line::from(Span::styled(
-            "    ↑↓=history  PgUp/Dn=scroll  Ctrl+/=stop".to_string(),
+            format!("{L}Ctrl+M models · Ctrl+P profiles · Ctrl+K keys · Ctrl+V paste"),
+            muted,
+        )),
+        Line::from(Span::styled(
+            format!("{L}↑↓ history · PgUp/Dn scroll · Shift+Enter newline · Ctrl+/ stop"),
             muted,
         )),
         Line::raw(""),
     ];
 
-    let border_color = Color::Rgb(55, 70, 95);
+    let border_color = TUI_BORDER_UI;
     let panel_w = 64u16.min(area.width.saturating_sub(4));
     let panel_h = (content.len() as u16 + 2).min(area.height.saturating_sub(4));
     let x = area.x + area.width.saturating_sub(panel_w) / 2;
@@ -116,19 +127,17 @@ pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 "cli".to_string(),
                 Style::default()
-                    .fg(Color::Rgb(210, 220, 240))
+                    .fg(TUI_BRAND_TEXT)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 ";".to_string(),
-                Style::default()
-                    .fg(TUI_SOFT_ACCENT)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(TUI_MARK).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "do".to_string(),
                 Style::default()
-                    .fg(Color::Rgb(210, 220, 240))
+                    .fg(TUI_BRAND_TEXT)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),

@@ -1,11 +1,20 @@
+//! Shared modal primitives: popups above the input, scroll/filter affordances, tool colors.
+//!
+//! **Overlay hints** use a middle dot (`·`) between clauses so footers read the same
+//! everywhere (pickers, errors, permissions, choice dialogs).
+
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders},
+    widgets::{Block, BorderType, Borders},
 };
 
-use crate::tui::{TUI_SELECTION_BG, TUI_SOFT_ACCENT};
+use crate::tui::state::StatusEntry;
+use crate::tui::{
+    TUI_ACCENT, TUI_BORDER_UI, TUI_MUTED, TUI_ROW_DIM, TUI_SELECTION_BG, TUI_SOFT_ACCENT,
+    TUI_STATE_ERR, TUI_STATE_INFO, TUI_STATE_OK, TUI_STATUS_RUN, TUI_SURFACE_INSET, TUI_TEXT,
+};
 
 // ── Modal component helpers ───────────────────────────────────────────────────
 
@@ -70,6 +79,7 @@ pub(crate) fn modal_block(title: &str, border_color: Color) -> Block<'static> {
     Block::default()
         .title(title.to_string())
         .title_alignment(Alignment::Left)
+        .border_type(BorderType::Rounded)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
 }
@@ -84,19 +94,24 @@ pub(crate) fn modal_block_with_hint(
         .title_alignment(Alignment::Left)
         .title_bottom(Line::from(Span::styled(
             hint.to_string(),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )))
+        .border_type(BorderType::Rounded)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
 }
 
-/// Build a filter indicator line (🔍 + yellow text) for picker popups.
+/// Filter row for picker popups (no emoji — works everywhere).
 pub(crate) fn filter_indicator_line(filter_text: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled("  🔍 ", Style::default().fg(Color::DarkGray)),
-        Span::styled(filter_text.to_string(), Style::default().fg(Color::Yellow)),
+        Span::styled(
+            "  filter ",
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+        ),
+        Span::styled(
+            format!("› {}", filter_text),
+            Style::default().fg(TUI_SOFT_ACCENT),
+        ),
     ])
 }
 
@@ -114,9 +129,7 @@ pub(crate) fn scroll_indicator_line(above: usize, below: usize) -> Option<Line<'
     }
     Some(Line::from(Span::styled(
         format!("  {}", parts.join("  ")),
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
+        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
     )))
 }
 
@@ -144,6 +157,12 @@ pub(crate) fn modal_row_two_col(
         Span::styled(right, Style::default().fg(right_color).bg(bg)),
     ])
 }
+
+/// Default border for list-style modals when callers do not need a semantic hue.
+pub(crate) fn modal_border_default() -> Color {
+    TUI_BORDER_UI
+}
+
 pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         s.to_string()
@@ -180,6 +199,89 @@ pub(crate) fn word_wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
+/// Status strip: fixed columns (icon · tool name · detail · time) for stable scanning.
+pub(crate) fn status_strip_lines(
+    entries: &std::collections::VecDeque<StatusEntry>,
+    strip_width: u16,
+    spinner: &str,
+) -> Vec<Line<'static>> {
+    let w = strip_width as usize;
+    const ICON_W: usize = 3;
+    const TIME_W: usize = 8;
+    const NAME_W: usize = 12;
+    let detail_max = w.saturating_sub(ICON_W + NAME_W + TIME_W + 4).max(6);
+
+    let status_style = Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM);
+
+    let pad_right = |s: String, cols: usize| -> String {
+        let n = s.chars().count();
+        if n >= cols {
+            s
+        } else {
+            format!("{s}{}", " ".repeat(cols - n))
+        }
+    };
+
+    let mut slines: Vec<Line<'static>> = Vec::new();
+    for entry in entries {
+        let time_s = if entry.done {
+            let ms = entry.elapsed_ms.unwrap_or(0);
+            if ms < 1000 {
+                format!("{ms}ms")
+            } else {
+                format!("{:.1}s", ms as f64 / 1000.0)
+            }
+        } else {
+            let elapsed = entry.start.elapsed();
+            let secs = elapsed.as_secs_f64();
+            if secs < 1.0 {
+                format!("{}ms", elapsed.as_millis())
+            } else {
+                format!("{:.1}s", secs)
+            }
+        };
+        let time_cell = pad_right(truncate_chars(&time_s, TIME_W), TIME_W);
+
+        let (icon, icon_style) = if entry.done {
+            if entry.is_error {
+                (
+                    "✗",
+                    Style::default()
+                        .fg(TUI_STATE_ERR)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                (
+                    "✓",
+                    Style::default().fg(TUI_STATE_OK).add_modifier(Modifier::DIM),
+                )
+            }
+        } else {
+            (
+                spinner,
+                Style::default().fg(TUI_STATUS_RUN).add_modifier(Modifier::DIM),
+            )
+        };
+
+        let name_cell = pad_right(
+            truncate_chars(tool_display_name(&entry.name), NAME_W),
+            NAME_W,
+        );
+        let det = truncate_chars(&entry.detail, detail_max);
+
+        slines.push(Line::from(vec![
+            Span::styled(format!(" {} ", icon), icon_style),
+            Span::styled(name_cell, icon_style),
+            Span::styled(format!(" {}", det), status_style),
+            Span::styled(format!(" {}", time_cell), status_style),
+        ]));
+    }
+    while slines.len() < 2 {
+        slines.push(Line::raw(""));
+    }
+    slines
+}
+
 /// Drop spans from the right until the total char width fits within `max_width`.
 /// Prevents mid-span clipping in single-line bars.
 pub(crate) fn fit_spans(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Span<'static>> {
@@ -196,22 +298,78 @@ pub(crate) fn fit_spans(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Span
     out
 }
 
+/// Tool rows in the transcript: bold status + name, then wrapped detail for scanability.
+pub(crate) fn tool_event_lines(
+    width: usize,
+    name: &str,
+    detail: &str,
+    done: bool,
+    is_error: bool,
+) -> Vec<Line<'static>> {
+    let color = tool_color(name, done, is_error);
+    let icon = if is_error {
+        "✗"
+    } else if done {
+        "✓"
+    } else {
+        "◌"
+    };
+    let display_name = tool_display_name(name).to_string();
+    let accent = Style::default()
+        .fg(color)
+        .add_modifier(Modifier::BOLD);
+    let detail_style = Style::default()
+        .fg(TUI_ROW_DIM)
+        .add_modifier(Modifier::DIM);
+    let gutter = "  ";
+
+    let mut lines = Vec::new();
+    if is_error {
+        lines.push(Line::from(vec![Span::styled(
+            "  tool failed — output may be incomplete",
+            Style::default()
+                .fg(TUI_STATE_ERR)
+                .bg(TUI_SURFACE_INSET)
+                .add_modifier(Modifier::DIM),
+        )]));
+    }
+    lines.push(Line::from(vec![
+        Span::styled(format!("{gutter}{icon}  "), accent),
+        Span::styled(display_name.clone(), accent),
+    ]));
+
+    let detail_trim = detail.trim();
+    if detail_trim.is_empty() {
+        return lines;
+    }
+
+    let indent = gutter.chars().count() + 4;
+    let wrap_w = width.saturating_sub(indent).max(12);
+    for wline in word_wrap(detail_trim, wrap_w) {
+        lines.push(Line::from(vec![
+            Span::styled(" ".repeat(indent), detail_style),
+            Span::styled(wline, detail_style),
+        ]));
+    }
+    lines
+}
+
 /// Return the semantic color for a tool call based on its type and state.
 pub(crate) fn tool_color(name: &str, done: bool, is_error: bool) -> Color {
     if is_error {
-        return Color::Red;
+        return TUI_STATE_ERR;
     }
     if done {
-        return Color::DarkGray;
+        return TUI_MUTED;
     }
     match name {
         "Read" | "Glob" | "Grep" => TUI_SOFT_ACCENT,
-        "Write" | "Edit" => Color::Green,
-        "Bash" => Color::Yellow,
-        "SemanticSearch" => Color::Cyan,
-        "WebFetch" | "WebSearch" => Color::Magenta,
-        "SpawnWorker" | "SpawnReviewer" => Color::LightCyan,
-        _ => Color::White,
+        "Write" | "Edit" => TUI_ACCENT,
+        "Bash" => TUI_STATUS_RUN,
+        "SemanticSearch" => TUI_STATE_INFO,
+        "WebFetch" | "WebSearch" => Color::Rgb(200, 155, 235),
+        "SpawnWorker" | "SpawnReviewer" => Color::Rgb(130, 210, 215),
+        _ => TUI_TEXT,
     }
 }
 
@@ -230,6 +388,10 @@ pub(crate) fn tool_display_name(name: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::{
+        TUI_ACCENT, TUI_MUTED, TUI_SOFT_ACCENT, TUI_STATE_ERR, TUI_STATE_INFO, TUI_STATUS_RUN,
+        TUI_TEXT,
+    };
 
     // ── word_wrap ────────────────────────────────────────────────────────────
 
@@ -306,15 +468,15 @@ mod tests {
     // ── tool_color ──────────────────────────────────────────────────────────
 
     #[test]
-    fn tool_color_error_is_red() {
-        assert_eq!(tool_color("Read", false, true), Color::Red);
-        assert_eq!(tool_color("Bash", false, true), Color::Red);
+    fn tool_color_error_matches_theme() {
+        assert_eq!(tool_color("Read", false, true), TUI_STATE_ERR);
+        assert_eq!(tool_color("Bash", false, true), TUI_STATE_ERR);
     }
 
     #[test]
-    fn tool_color_done_is_dark_gray() {
-        assert_eq!(tool_color("Read", true, false), Color::DarkGray);
-        assert_eq!(tool_color("Write", true, false), Color::DarkGray);
+    fn tool_color_done_is_muted() {
+        assert_eq!(tool_color("Read", true, false), TUI_MUTED);
+        assert_eq!(tool_color("Write", true, false), TUI_MUTED);
     }
 
     #[test]
@@ -322,19 +484,31 @@ mod tests {
         assert_eq!(tool_color("Read", false, false), TUI_SOFT_ACCENT);
         assert_eq!(tool_color("Glob", false, false), TUI_SOFT_ACCENT);
         assert_eq!(tool_color("Grep", false, false), TUI_SOFT_ACCENT);
-        assert_eq!(tool_color("Write", false, false), Color::Green);
-        assert_eq!(tool_color("Edit", false, false), Color::Green);
-        assert_eq!(tool_color("Bash", false, false), Color::Yellow);
-        assert_eq!(tool_color("SemanticSearch", false, false), Color::Cyan);
-        assert_eq!(tool_color("WebFetch", false, false), Color::Magenta);
-        assert_eq!(tool_color("WebSearch", false, false), Color::Magenta);
-        assert_eq!(tool_color("SpawnWorker", false, false), Color::LightCyan);
-        assert_eq!(tool_color("SpawnReviewer", false, false), Color::LightCyan);
+        assert_eq!(tool_color("Write", false, false), TUI_ACCENT);
+        assert_eq!(tool_color("Edit", false, false), TUI_ACCENT);
+        assert_eq!(tool_color("Bash", false, false), TUI_STATUS_RUN);
+        assert_eq!(tool_color("SemanticSearch", false, false), TUI_STATE_INFO);
+        assert_eq!(
+            tool_color("WebFetch", false, false),
+            Color::Rgb(200, 155, 235)
+        );
+        assert_eq!(
+            tool_color("WebSearch", false, false),
+            Color::Rgb(200, 155, 235)
+        );
+        assert_eq!(
+            tool_color("SpawnWorker", false, false),
+            Color::Rgb(130, 210, 215)
+        );
+        assert_eq!(
+            tool_color("SpawnReviewer", false, false),
+            Color::Rgb(130, 210, 215)
+        );
     }
 
     #[test]
-    fn tool_color_unknown_tool_is_white() {
-        assert_eq!(tool_color("UnknownTool", false, false), Color::White);
+    fn tool_color_unknown_tool_is_body_text() {
+        assert_eq!(tool_color("UnknownTool", false, false), TUI_TEXT);
     }
 
     #[test]

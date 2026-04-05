@@ -72,6 +72,10 @@ pub(super) const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", 
 /// Warm-cold gradient: user = warm, assistant = cool, tools = neutral, status = ambient.
 pub(super) const TUI_SOFT_ACCENT: Color = Color::Rgb(150, 200, 255);
 pub(super) const TUI_ACCENT: Color = Color::Green;
+/// Softer white for main text — easier on the eyes than pure white.
+pub(super) const TUI_TEXT: Color = Color::Rgb(212, 212, 220);
+/// Slightly dimmer text for secondary content.
+pub(super) const TUI_TEXT_DIM: Color = Color::Rgb(180, 180, 190);
 /// Selected row background in pickers and completion lists (muted slate).
 pub(super) const TUI_SELECTION_BG: Color = Color::Rgb(52, 62, 78);
 

@@ -248,7 +248,7 @@ pub(crate) fn render_profile_overview(
                 .add_modifier(Modifier::BOLD)
         } else if selected {
             Style::default()
-                .fg(Color::White)
+                .fg(TUI_TEXT)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Green)
@@ -694,7 +694,7 @@ pub(crate) fn render_profile_provider_picker(
     let mut lines: Vec<Line<'static>> = detected_label;
     lines.push(Line::from(vec![Span::styled(
         format!("  Filter: {}_", picker.filter),
-        Style::default().fg(Color::White),
+        Style::default().fg(TUI_TEXT),
     )]));
     lines.push(Line::raw(""));
 
@@ -714,7 +714,7 @@ pub(crate) fn render_profile_provider_picker(
         } else {
             Color::Reset
         };
-        let fg = if selected { Color::White } else { Color::Gray };
+        let fg = if selected { TUI_TEXT } else { Color::Gray };
         lines.push(Line::from(vec![Span::styled(
             format!("  {:<12}  {}{}", id, name, key_marker),
             Style::default().fg(fg).bg(bg),
@@ -768,7 +768,7 @@ pub(crate) fn render_profile_model_picker(
     let mut lines: Vec<Line<'static>> = vec![
         Line::from(Span::styled(
             format!("  Filter: {}_", picker.filter),
-            Style::default().fg(Color::White),
+            Style::default().fg(TUI_TEXT),
         )),
         Line::from(Span::styled(
             format!(
@@ -790,7 +790,7 @@ pub(crate) fn render_profile_model_picker(
         } else {
             Color::Reset
         };
-        let fg = if selected { Color::White } else { Color::Gray };
+        let fg = if selected { TUI_TEXT } else { Color::Gray };
         let ctx = m
             .context_k
             .map(|k| format!("{:>4}k", k))

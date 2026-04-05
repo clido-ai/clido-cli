@@ -16,6 +16,8 @@ use super::types::{ModelOption, SetupState, SetupStep};
 
 use super::{anonymize_key, FAST_PROVIDER_OPTIONS, PROFILE_NAME_PREFIX, SETUP_INPUT_ACCENT};
 
+use crate::tui::TUI_TEXT;
+
 // ── TUI rendering ─────────────────────────────────────────────────────────────
 
 pub(super) fn draw_setup(f: &mut Frame, s: &SetupState) {
@@ -57,7 +59,7 @@ pub(super) fn draw_setup(f: &mut Frame, s: &SetupState) {
                 format!("  v{}  │  setup — ", env!("CARGO_PKG_VERSION")),
                 Style::default().fg(Color::DarkGray),
             ),
-            Span::styled(step_label, Style::default().fg(Color::White)),
+            Span::styled(step_label, Style::default().fg(TUI_TEXT)),
         ])),
         hdr,
     );
@@ -152,7 +154,7 @@ fn draw_profile_name(f: &mut Frame, area: Rect, s: &SetupState) {
             Span::styled(
                 s.text_input.text.clone(),
                 Style::default()
-                    .fg(Color::White)
+                    .fg(TUI_TEXT)
                     .add_modifier(Modifier::BOLD),
             ),
         ])),
@@ -177,7 +179,7 @@ fn draw_provider(f: &mut Frame, area: Rect, s: &SetupState) {
                 Span::styled(
                     format!("{:<16}", def.name),
                     Style::default()
-                        .fg(Color::White)
+                        .fg(TUI_TEXT)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -363,7 +365,7 @@ fn draw_credential(f: &mut Frame, area: Rect, s: &SetupState) {
     } else {
         Line::from(vec![Span::styled(
             format!(" {}", masked),
-            Style::default().fg(Color::White),
+            Style::default().fg(TUI_TEXT),
         )])
     };
     let block = Block::default()
@@ -471,7 +473,7 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
                             Span::styled(
                                 "Custom\u{2026}",
                                 Style::default()
-                                    .fg(Color::White)
+                                    .fg(TUI_TEXT)
                                     .add_modifier(Modifier::BOLD),
                             ),
                         ])
@@ -494,7 +496,7 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
                             Span::styled(
                                 entry.id.clone(),
                                 Style::default()
-                                    .fg(Color::White)
+                                    .fg(TUI_TEXT)
                                     .add_modifier(Modifier::BOLD),
                             ),
                         ])
@@ -653,7 +655,7 @@ fn draw_fast_intro(f: &mut Frame, area: Rect, s: &SetupState) {
                 Span::styled(
                     format!("{:<24}", name),
                     Style::default()
-                        .fg(Color::White)
+                        .fg(TUI_TEXT)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(format!("  {}", desc), Style::default().fg(Color::DarkGray)),
@@ -725,7 +727,7 @@ fn draw_subagent_provider(f: &mut Frame, area: Rect, s: &SetupState) {
                 Span::styled(
                     format!("{:<16}", def.name),
                     Style::default()
-                        .fg(Color::White)
+                        .fg(TUI_TEXT)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -800,7 +802,7 @@ fn draw_subagent_credential(f: &mut Frame, area: Rect, s: &SetupState) {
     } else {
         Line::from(vec![Span::styled(
             format!(" {}", masked),
-            Style::default().fg(Color::White),
+            Style::default().fg(TUI_TEXT),
         )])
     };
     let block = Block::default()
@@ -889,7 +891,7 @@ fn draw_fast_model(f: &mut Frame, area: Rect, s: &SetupState) {
                             Span::styled(
                                 "Custom\u{2026}",
                                 Style::default()
-                                    .fg(Color::White)
+                                    .fg(TUI_TEXT)
                                     .add_modifier(Modifier::BOLD),
                             ),
                         ])
@@ -912,7 +914,7 @@ fn draw_fast_model(f: &mut Frame, area: Rect, s: &SetupState) {
                             Span::styled(
                                 e.id.clone(),
                                 Style::default()
-                                    .fg(Color::White)
+                                    .fg(TUI_TEXT)
                                     .add_modifier(Modifier::BOLD),
                             ),
                         ])

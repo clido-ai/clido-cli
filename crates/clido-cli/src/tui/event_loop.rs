@@ -2009,7 +2009,7 @@ pub(super) async fn event_loop(
                                                     let char_count = text.chars().count();
                                                     app.push_toast_at(
                                                         format!("Copied {char_count} chars"),
-                                                        Color::White,
+                                                        TUI_TEXT,
                                                         std::time::Duration::from_secs(2),
                                                         toast_pos,
                                                     );

@@ -850,7 +850,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             } else {
                 Color::Reset
             };
-            let fg = if selected { Color::White } else { Color::Gray };
+            let fg = if selected { TUI_TEXT } else { Color::Gray };
             let id_short = &s.session_id[..s.session_id.len().min(8)];
             let date_str = relative_time(&s.start_time);
             let preview_str: String = s.preview.chars().take(preview_w).collect();
@@ -894,7 +894,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let mut content: Vec<Line<'static>> = vec![
             Line::from(vec![Span::styled(
                 format!("  Filter: {}_", picker.filter),
-                Style::default().fg(Color::White),
+                Style::default().fg(TUI_TEXT),
             )]),
             Line::from(vec![Span::styled(
                 format!(
@@ -984,7 +984,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 } else {
                     Color::Reset
                 };
-                let fg = if selected { Color::White } else { Color::Gray };
+                let fg = if selected { TUI_TEXT } else { Color::Gray };
                 let fav = if m.is_favorite { "★ " } else { "  " };
                 let ctx = m
                     .context_k
@@ -1072,7 +1072,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             } else {
                 Color::Reset
             };
-            let fg = if selected { Color::White } else { Color::Gray };
+            let fg = if selected { TUI_TEXT } else { Color::Gray };
             let marker = if selected { "▶" } else { " " };
             let active_mark = if is_active { "●" } else { " " };
             let model_display: String = format!("{} / {}", entry.provider, entry.model)
@@ -1123,7 +1123,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 Line::raw(""),
                 Line::from(vec![
                     Span::styled(" Feedback: ", Style::default().fg(Color::Yellow)),
-                    Span::styled(fb.as_str(), Style::default().fg(Color::White)),
+                    Span::styled(fb.as_str(), Style::default().fg(TUI_TEXT)),
                     Span::styled("█", Style::default().fg(Color::Yellow)),
                 ]),
                 Line::raw(""),
@@ -1187,7 +1187,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     Span::styled(
                         format!("{:<28}", label),
                         Style::default()
-                            .fg(Color::White)
+                            .fg(TUI_TEXT)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(format!("  {}", hint), Style::default().fg(Color::DarkGray)),
@@ -1252,7 +1252,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     .map(|l| {
                         Line::from(vec![Span::styled(
                             format!("  {}", l),
-                            Style::default().fg(Color::White),
+                            Style::default().fg(TUI_TEXT),
                         )])
                     })
                     .collect();
@@ -1349,7 +1349,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 if !c.message.is_empty() {
                     content.push(Line::from(vec![Span::styled(
                         format!("  {}", c.message),
-                        Style::default().fg(Color::White),
+                        Style::default().fg(TUI_TEXT),
                     )]));
                     content.push(Line::raw(""));
                 }
@@ -1360,7 +1360,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                             .fg(Color::Yellow)
                             .add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(Color::White)
+                        Style::default().fg(TUI_TEXT)
                     };
                     content.push(Line::from(vec![Span::styled(
                         format!("  {}{}", marker, choice.label),
@@ -1459,7 +1459,7 @@ fn apply_selection_highlight(
 
     let sel_style = Style::default()
         .bg(Color::Indexed(24)) // deep blue background
-        .fg(Color::White);
+        .fg(TUI_TEXT);
 
     for line_idx in first_visible..last_visible {
         if line_idx >= result.len() {

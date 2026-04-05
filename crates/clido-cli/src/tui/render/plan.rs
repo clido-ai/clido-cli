@@ -77,21 +77,21 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
 
         let desc_style = if form.focused_field == TaskEditField::Description {
             Style::default()
-                .fg(Color::White)
+                .fg(TUI_TEXT)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
         let notes_style = if form.focused_field == TaskEditField::Notes {
             Style::default()
-                .fg(Color::White)
+                .fg(TUI_TEXT)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
         let comp_style = if form.focused_field == TaskEditField::Complexity {
             Style::default()
-                .fg(Color::White)
+                .fg(TUI_TEXT)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)

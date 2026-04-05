@@ -30,8 +30,7 @@ use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
 use context::{
-    compact_for_model_request, compact_with_summary, CONTEXT_OUTPUT_RESERVE,
-    PROACTIVE_SUMMARIZE_THRESHOLD,
+    compact_for_model_request, CONTEXT_OUTPUT_RESERVE, PROACTIVE_SUMMARIZE_THRESHOLD,
 };
 pub use history::session_lines_to_messages;
 use security::{detect_injection, enhanced_edit_error};
@@ -3156,7 +3155,7 @@ mod tests {
             }],
         }];
         // Use a very high threshold so no compaction happens
-        let result = compact_with_summary(&messages, 0, 200_000, 0.9, &provider, &mock_config())
+        let result = context::compact_with_summary(&messages, 0, 200_000, 0.9, &provider, &mock_config())
             .await
             .unwrap();
         assert_eq!(result.len(), messages.len());
@@ -3179,7 +3178,7 @@ mod tests {
             })
             .collect();
         // Small context to force compaction
-        let result = compact_with_summary(
+        let result = context::compact_with_summary(
             &messages,
             0,
             2000, // very small max context

@@ -970,4 +970,11 @@ mod tests {
             "should include guidance for failed/disabled sub-agents"
         );
     }
+
+    #[test]
+    fn routing_instructions_tool_failure_section() {
+        let s = build_routing_instructions(false, false);
+        assert!(s.contains("Tool failures"));
+        assert!(s.contains("Tool failure protocol"));
+    }
 }

@@ -205,6 +205,8 @@ pub(super) enum AgentAction {
     SetWorkspace(std::path::PathBuf),
     CompactNow,
     SetAllowedExternalPaths(Vec<std::path::PathBuf>),
+    /// Inject a note/hint into the running conversation, interrupting current execution.
+    Note(String),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -226,6 +228,7 @@ pub(super) async fn agent_task(
     todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
     mut kill_rx: mpsc::UnboundedReceiver<()>,
     mut allowed_paths_rx: mpsc::UnboundedReceiver<Vec<std::path::PathBuf>>,
+    mut note_rx: mpsc::UnboundedReceiver<String>,
 ) {
     let setup_result = match preloaded_config {
         Some(loaded) => AgentSetup::build_with_preloaded_and_store(
@@ -497,6 +500,12 @@ pub(super) async fn agent_task(
                     None => break,
                 }
             }
+            note = note_rx.recv() => {
+                match note {
+                    Some(n) => AgentAction::Note(n),
+                    None => break,
+                }
+            }
         };
 
         match action {
@@ -585,6 +594,23 @@ pub(super) async fn agent_task(
                 {
                     return;
                 }
+            }
+            AgentAction::Note(text) => {
+                // Inject the note into agent history as a user message.
+                // This interrupts current execution so the note is seen immediately.
+                agent.push_user_message(text);
+                if event_tx
+                    .send(AgentEvent::Info {
+                        message: "Note received — agent will see it immediately".to_string(),
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+                // Cancel current execution so agent restarts with the note in context.
+                // The cancel flag is checked after tool execution; agent will return
+                // Interrupted and the loop will continue, picking up the queued action.
+                cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             AgentAction::Run(prompt) => {
                 let run_start = std::time::Instant::now();
@@ -1116,6 +1142,8 @@ pub(super) struct AgentRuntimeHandles {
     kill_tx: mpsc::UnboundedSender<()>,
     /// Channel to update allowed external paths for this session.
     allowed_paths_tx: mpsc::UnboundedSender<Vec<std::path::PathBuf>>,
+    /// Channel to inject a note/hint into the running conversation.
+    note_tx: mpsc::UnboundedSender<String>,
 }
 
 /// Resolve the API key for display purposes (welcome screen, etc.).
@@ -1178,6 +1206,7 @@ pub(super) fn start_agent_runtime(
     let (perm_tx, perm_rx) = mpsc::unbounded_channel::<PermRequest>();
     let (kill_tx, kill_rx) = mpsc::unbounded_channel::<()>();
     let (allowed_paths_tx, allowed_paths_rx) = mpsc::unbounded_channel::<Vec<std::path::PathBuf>>();
+    let (note_tx, note_rx) = mpsc::unbounded_channel::<String>();
 
     // Pre-create the shared todo store so both the agent task and the TUI app can share it.
     let todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>> =
@@ -1201,6 +1230,7 @@ pub(super) fn start_agent_runtime(
         todo_store.clone(),
         kill_rx,
         allowed_paths_rx,
+        note_rx,
     ));
 
     AgentRuntimeHandles {
@@ -1216,6 +1246,7 @@ pub(super) fn start_agent_runtime(
         agent_handle,
         kill_tx,
         allowed_paths_tx,
+        note_tx,
     }
 }
 
@@ -1442,6 +1473,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
             fetch_tx: runtime.fetch_tx.clone(),
             kill_tx: runtime.kill_tx.clone(),
             allowed_paths_tx: runtime.allowed_paths_tx.clone(),
+            note_tx: runtime.note_tx.clone(),
         },
         cancel,
         provider.clone(),

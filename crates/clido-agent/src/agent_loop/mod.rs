@@ -434,6 +434,17 @@ impl AgentLoop {
         self.budget_warned_pcts.clear();
     }
 
+    /// Push a user message directly into history without running the completion loop.
+    /// Used by the TUI to inject notes/hints mid-conversation.
+    pub fn push_user_message(&mut self, text: impl Into<String>) {
+        use clido_core::{ContentBlock, Message, Role};
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text { text: text.into() }],
+        };
+        self.history.push(msg);
+    }
+
     /// Immediately compact the conversation history, regardless of the compaction threshold.
     /// Returns `(before, after)` message counts. Useful for the `/compact` TUI command.
     pub async fn compact_history_now(&mut self) -> Result<(usize, usize)> {

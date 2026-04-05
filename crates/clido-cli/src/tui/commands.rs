@@ -348,19 +348,18 @@ pub(super) fn cmd_sessions(app: &mut App) {
     }
 }
 
-/// Send a note/hint to the agent — adds a user message to the conversation.
-/// Useful for correcting the agent mid-flight without stopping it.
+/// Send a note/hint to the agent — adds a user message immediately.
+/// Interrupts current agent execution so the note is seen right away.
 pub(super) fn cmd_note(app: &mut App, cmd: &str) {
     let text = cmd.trim_start_matches("/note").trim();
     if text.is_empty() {
         app.push(ChatLine::Info("  Usage: /note <text>  — send a hint/correction to the agent".into()));
         return;
     }
-    // Add as a user message so the agent sees it in the next context window.
-    // If agent is busy, this will be processed after current tools finish.
-    // If idle, it triggers a response immediately.
+    // Add to chat history immediately.
     app.push(ChatLine::User(format!("[Note] {}", text)));
-    app.send_now(text.to_string());
+    // Send via note channel — this interrupts current agent execution.
+    let _ = app.channels.note_tx.send(text.to_string());
 }
 
 pub(super) fn cmd_workdir_arg(app: &mut App, cmd: &str) {

@@ -224,6 +224,13 @@ pub(super) struct App {
     pub(super) rate_limit_resume_at: Option<std::time::Instant>,
     /// Whether the user has cancelled the auto-resume (Escape while waiting).
     pub(super) rate_limit_cancelled: bool,
+    /// Background ping mode: when rate limit has unknown reset time, we ping
+    /// every 15 minutes to check if API is available again.
+    pub(super) rate_limit_pinging: bool,
+    /// Next scheduled ping time for background rate limit recovery.
+    pub(super) rate_limit_next_ping: Option<std::time::Instant>,
+    /// Count of background pings sent (for user feedback).
+    pub(super) rate_limit_ping_count: u32,
 
     /// Resolved API key for the active profile — used for live model fetching.
     pub(super) api_key: String,
@@ -340,6 +347,9 @@ impl App {
             workflow_editor_path: None,
             rate_limit_resume_at: None,
             rate_limit_cancelled: false,
+            rate_limit_pinging: false,
+            rate_limit_next_ping: None,
+            rate_limit_ping_count: 0,
             api_key,
             base_url,
             models_loading: false,
@@ -438,9 +448,12 @@ impl App {
     }
 
     pub(super) fn send_now(&mut self, text: String) {
-        // Cancel any pending rate-limit auto-resume — user is taking manual action.
+        // Cancel any pending rate-limit auto-resume or background pinging.
         self.rate_limit_resume_at = None;
         self.rate_limit_cancelled = false;
+        self.rate_limit_pinging = false;
+        self.rate_limit_next_ping = None;
+        self.rate_limit_ping_count = 0;
 
         // If a pending image was attached via /image, publish it to the shared image_state
         // so agent_task can prepend an Image ContentBlock to this user message.

@@ -1701,6 +1701,38 @@ pub(super) async fn event_loop(
                     app.tick_spinner();
                     dirty = true;
                 }
+                
+                // Check for background rate limit ping
+                if app.rate_limit_pinging && !app.rate_limit_cancelled {
+                    if let Some(next_ping) = app.rate_limit_next_ping {
+                        if std::time::Instant::now() >= next_ping {
+                            app.rate_limit_ping_count += 1;
+                            let ping_count = app.rate_limit_ping_count;
+                            
+                            // Send a minimal request to test if API is back
+                            // Use the model fetch as a lightweight ping
+                            if !app.models_loading && !app.api_key.is_empty() {
+                                app.models_loading = true;
+                                spawn_model_fetch(
+                                    app.provider.clone(),
+                                    app.api_key.clone(),
+                                    app.base_url.clone(),
+                                    app.channels.fetch_tx.clone(),
+                                );
+                                app.push_toast(
+                                    format!("Rate limit recovery: ping #{} sent", ping_count),
+                                    Color::Yellow,
+                                    std::time::Duration::from_secs(3),
+                                );
+                            }
+                            
+                            // Schedule next ping in 15 minutes
+                            app.rate_limit_next_ping = Some(
+                                std::time::Instant::now() + std::time::Duration::from_secs(15 * 60)
+                            );
+                        }
+                    }
+                }
                 if app.busy && app.pending_perm.is_none() {
                     let baseline = if let Some(turn_start) = app.turn_start {
                         if turn_start > last_agent_activity {
@@ -2171,8 +2203,14 @@ pub(super) async fn event_loop(
                                 "    ⏳ Will auto-resume when limit resets. Press Esc to cancel.".into()
                             ));
                         } else {
+                            // Unknown reset time - start background pinging mode
+                            app.rate_limit_pinging = true;
+                            app.rate_limit_next_ping = Some(
+                                std::time::Instant::now() + std::time::Duration::from_secs(15 * 60)
+                            );
+                            app.rate_limit_ping_count = 0;
                             app.push(ChatLine::Info(
-                                "    Tip: use /profile <name> to switch to another provider".into()
+                                "    ⏳ Auto-recovery active: checking every 15 min. Press Esc to cancel.".into()
                             ));
                         }
                         app.on_agent_done();

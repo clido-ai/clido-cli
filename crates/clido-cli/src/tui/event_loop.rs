@@ -1993,51 +1993,51 @@ pub(super) async fn event_loop(
                             MouseEventKind::ScrollDown => {
                                 match focus {
                                     FocusTarget::Overlay => {
-                                        app.overlay_stack.scroll_by(3);
+                                        app.overlay_stack.scroll_by(1);
                                     }
                                     FocusTarget::ModelPicker => {
                                         if let Some(mp) = app.model_picker.as_mut() {
                                             let n = mp.filtered().len();
                                             if n > 0 {
-                                                mp.selected = (mp.selected + 3).min(n - 1);
+                                                mp.selected = (mp.selected + 1).min(n - 1);
                                                 mp.scroll_offset = mp.scroll_offset.min(mp.selected);
                                             }
                                         }
                                     }
                                     FocusTarget::SessionPicker => {
                                         if let Some(sp) = app.session_picker.as_mut() {
-                                            for _ in 0..3 { sp.picker.move_down(); }
+                                            sp.picker.move_down();
                                         }
                                     }
                                     FocusTarget::ProfilePicker => {
                                         if let Some(pp) = app.profile_picker.as_mut() {
-                                            for _ in 0..3 { pp.picker.move_down(); }
+                                            pp.picker.move_down();
                                         }
                                     }
-                                    _ => scroll_down(app, 3),
+                                    _ => scroll_down(app, 1),
                                 }
                             }
                             MouseEventKind::ScrollUp => {
                                 match focus {
                                     FocusTarget::Overlay => {
-                                        app.overlay_stack.scroll_by(-3);
+                                        app.overlay_stack.scroll_by(-1);
                                     }
                                     FocusTarget::ModelPicker => {
                                         if let Some(mp) = app.model_picker.as_mut() {
-                                            mp.selected = mp.selected.saturating_sub(3);
+                                            mp.selected = mp.selected.saturating_sub(1);
                                         }
                                     }
                                     FocusTarget::SessionPicker => {
                                         if let Some(sp) = app.session_picker.as_mut() {
-                                            for _ in 0..3 { sp.picker.move_up(); }
+                                            sp.picker.move_up();
                                         }
                                     }
                                     FocusTarget::ProfilePicker => {
                                         if let Some(pp) = app.profile_picker.as_mut() {
-                                            for _ in 0..3 { pp.picker.move_up(); }
+                                            pp.picker.move_up();
                                         }
                                     }
-                                    _ => scroll_up(app, 3),
+                                    _ => scroll_up(app, 1),
                                 }
                             }
                             MouseEventKind::Down(_) => {

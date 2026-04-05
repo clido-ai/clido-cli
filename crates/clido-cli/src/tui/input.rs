@@ -2187,10 +2187,10 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         }
         // ── Chat scroll (PageUp/PageDown — larger jumps) ─────────────────────
         (_, PageUp) => {
-            scroll_up(app, 10);
+            scroll_up(app, 3);
         }
         (_, PageDown) => {
-            scroll_down(app, 10);
+            scroll_down(app, 3);
         }
         (Km::CONTROL, Char('u')) => {
             app.text_input.text.clear();

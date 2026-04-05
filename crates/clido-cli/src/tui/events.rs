@@ -100,6 +100,7 @@ pub(crate) enum AgentEvent {
     },
     /// Request permission to access a path outside the workspace.
     /// The TUI should prompt the user and respond via the permission channel.
+    #[allow(dead_code)]
     PathPermissionRequest {
         path: std::path::PathBuf,
         tool_name: String,

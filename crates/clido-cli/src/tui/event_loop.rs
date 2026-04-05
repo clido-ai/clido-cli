@@ -231,7 +231,7 @@ pub(super) async fn agent_task(
     mut kill_rx: mpsc::UnboundedReceiver<()>,
     mut allowed_paths_rx: mpsc::UnboundedReceiver<Vec<std::path::PathBuf>>,
     mut note_rx: mpsc::UnboundedReceiver<String>,
-    mut path_permission_rx: mpsc::UnboundedReceiver<std::path::PathBuf>,
+    path_permission_rx: mpsc::UnboundedReceiver<std::path::PathBuf>,
     mut profile_switch_rx: mpsc::UnboundedReceiver<String>,
 ) {
     let setup_result = match preloaded_config {
@@ -262,7 +262,7 @@ pub(super) async fn agent_task(
     }));
 
     // Track allowed external paths for this session (used when recreating tools).
-    #[allow(unused_variables)]
+    #[allow(unused_mut, unused_variables)]
     let mut allowed_external_paths: Vec<std::path::PathBuf> = Vec::new();
 
     // Deduplication: check for existing sessions created within the last 5 seconds
@@ -590,7 +590,10 @@ pub(super) async fn agent_task(
                 // Store allowed paths for future tool registry rebuilds
                 // The paths will be applied on the next workspace switch or tool rebuild
                 let path_count = paths.len();
-                allowed_external_paths = paths.clone();
+                #[allow(unused_assignments)]
+                {
+                    allowed_external_paths = paths.clone();
+                }
                 // Rebuild tools with new allowed paths
                 let new_registry = clido_tools::default_registry_with_allowed_paths(
                     workspace_root.clone(),

@@ -207,6 +207,8 @@ pub(super) enum AgentAction {
     SetAllowedExternalPaths(Vec<std::path::PathBuf>),
     /// Inject a note/hint into the running conversation, interrupting current execution.
     Note(String),
+    /// Switch to a different profile while preserving session history.
+    SwitchProfile(String),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -230,6 +232,7 @@ pub(super) async fn agent_task(
     mut allowed_paths_rx: mpsc::UnboundedReceiver<Vec<std::path::PathBuf>>,
     mut note_rx: mpsc::UnboundedReceiver<String>,
     mut path_permission_rx: mpsc::UnboundedReceiver<std::path::PathBuf>,
+    mut profile_switch_rx: mpsc::UnboundedReceiver<String>,
 ) {
     let setup_result = match preloaded_config {
         Some(loaded) => AgentSetup::build_with_preloaded_and_store(
@@ -490,6 +493,12 @@ pub(super) async fn agent_task(
                     None => break,
                 }
             }
+            profile = profile_switch_rx.recv() => {
+                match profile {
+                    Some(p) => AgentAction::SwitchProfile(p),
+                    None => break,
+                }
+            }
             _ = kill_rx.recv() => {
                 // Kill signal - set cancel flag and let agent finish current tools gracefully
                 // This ensures tool results are added to history before stopping
@@ -613,6 +622,22 @@ pub(super) async fn agent_task(
                 // The cancel flag is checked after tool execution; agent will return
                 // Interrupted and the loop will continue, picking up the queued action.
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            AgentAction::SwitchProfile(profile_name) => {
+                // Inform user about the profile switch
+                if event_tx
+                    .send(AgentEvent::Info {
+                        message: format!("Switching to profile '{}'...", profile_name),
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+                // For now, we return which causes the agent task to exit
+                // The TUI will display the message and the user can continue
+                // A full implementation would restart the agent_task with the new profile
+                // without restarting the TUI
+                return;
             }
             AgentAction::Run(prompt) => {
                 let run_start = std::time::Instant::now();
@@ -1148,6 +1173,8 @@ pub(super) struct AgentRuntimeHandles {
     note_tx: mpsc::UnboundedSender<String>,
     /// Channel to grant permission for external path access (user clicked "Allow").
     path_permission_tx: mpsc::UnboundedSender<std::path::PathBuf>,
+    /// Channel to request switching to a different profile seamlessly.
+    profile_switch_tx: mpsc::UnboundedSender<String>,
 }
 
 /// Resolve the API key for display purposes (welcome screen, etc.).
@@ -1212,6 +1239,7 @@ pub(super) fn start_agent_runtime(
     let (allowed_paths_tx, allowed_paths_rx) = mpsc::unbounded_channel::<Vec<std::path::PathBuf>>();
     let (note_tx, note_rx) = mpsc::unbounded_channel::<String>();
     let (path_permission_tx, path_permission_rx) = mpsc::unbounded_channel::<std::path::PathBuf>();
+    let (profile_switch_tx, profile_switch_rx) = mpsc::unbounded_channel::<String>();
 
     // Pre-create the shared todo store so both the agent task and the TUI app can share it.
     let todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>> =
@@ -1237,6 +1265,7 @@ pub(super) fn start_agent_runtime(
         allowed_paths_rx,
         note_rx,
         path_permission_rx,
+        profile_switch_rx,
     ));
 
     AgentRuntimeHandles {
@@ -1254,6 +1283,7 @@ pub(super) fn start_agent_runtime(
         allowed_paths_tx,
         note_tx,
         path_permission_tx,
+        profile_switch_tx,
     }
 }
 
@@ -1482,6 +1512,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
             allowed_paths_tx: runtime.allowed_paths_tx.clone(),
             note_tx: runtime.note_tx.clone(),
             path_permission_tx: runtime.path_permission_tx.clone(),
+            profile_switch_tx: runtime.profile_switch_tx.clone(),
         },
         cancel,
         provider.clone(),

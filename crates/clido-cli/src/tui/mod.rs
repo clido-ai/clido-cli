@@ -131,6 +131,7 @@ mod tests {
         let (allowed_paths_tx, _allowed_paths_rx) = mpsc::unbounded_channel();
         let (note_tx, _note_rx) = mpsc::unbounded_channel();
         let (path_permission_tx, _path_permission_rx) = mpsc::unbounded_channel();
+        let (profile_switch_tx, _profile_switch_rx) = mpsc::unbounded_channel();
         App::new(
             AgentChannels {
                 prompt_tx,
@@ -143,6 +144,7 @@ mod tests {
                 allowed_paths_tx,
                 note_tx,
                 path_permission_tx,
+                profile_switch_tx,
             },
             Arc::new(AtomicBool::new(false)),
             "openrouter".to_string(),

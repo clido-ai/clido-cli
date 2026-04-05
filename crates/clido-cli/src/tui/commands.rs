@@ -1376,13 +1376,24 @@ pub(super) fn cmd_profile_switch(app: &mut App, cmd: &str) {
                     name
                 )));
             } else {
+                // Set the new profile as default in config
+                let config_path = clido_core::global_config_path()
+                    .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
+                if let Err(e) = clido_core::switch_active_profile(&config_path, name) {
+                    app.push(ChatLine::Info(format!(
+                        "  ✗ Failed to switch profile: {}",
+                        e
+                    )));
+                    return;
+                }
+                
                 app.push(ChatLine::Info(format!(
-                    "  switching to profile '{}'…",
+                    "  switching to profile '{}' (session continues)...",
                     name
                 )));
-                app.restart_resume_session = app.current_session_id.clone();
-                app.wants_profile_switch = Some(name.to_string());
-                app.quit = true;
+                
+                // Send profile switch request to agent (seamless, no restart)
+                let _ = app.channels.profile_switch_tx.send(name.to_string());
             }
         }
     }

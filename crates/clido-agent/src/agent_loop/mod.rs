@@ -356,6 +356,26 @@ impl AgentLoop {
         self.config.model = model;
     }
 
+    /// Switch to a new profile (provider + config) while preserving conversation history.
+    /// This allows seamless profile switching within a session.
+    pub fn switch_profile(
+        &mut self,
+        provider: Arc<dyn ModelProvider>,
+        config: AgentConfig,
+        tools: ToolRegistry,
+    ) {
+        // Preserve history - this is the key for seamless switching
+        // Only update provider, config, and tools
+        self.provider = provider;
+        self.config = config;
+        self.tools = tools;
+        // Reset doom monitor since we're starting fresh with a new provider
+        self.doom_monitor.clear();
+        // Reset retry attempts
+        self.retry_attempts.clear();
+        // Keep cumulative costs/tokens as they're session-level metrics
+    }
+
     /// Return the model currently active for this session.
     pub fn current_model(&self) -> &str {
         &self.config.model

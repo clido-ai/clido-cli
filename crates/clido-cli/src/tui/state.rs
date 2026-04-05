@@ -197,6 +197,8 @@ pub(crate) struct AgentChannels {
     pub(crate) note_tx: mpsc::UnboundedSender<String>,
     /// Channel to grant permission for external path access (user clicked "Allow").
     pub(crate) path_permission_tx: mpsc::UnboundedSender<std::path::PathBuf>,
+    /// Channel to request switching to a different profile seamlessly.
+    pub(crate) profile_switch_tx: mpsc::UnboundedSender<String>,
 }
 
 // ── Plan editor state ─────────────────────────────────────────────────────────

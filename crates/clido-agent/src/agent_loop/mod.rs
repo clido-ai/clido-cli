@@ -215,6 +215,8 @@ pub struct AgentLoop {
     consecutive_tool_errors: usize,
     /// Whether we've already created a pre-edit checkpoint this session.
     checkpoint_created: bool,
+    /// Receiver for path permission grants from the TUI (for interactive external path access).
+    path_permission_rx: Option<tokio::sync::mpsc::UnboundedReceiver<std::path::PathBuf>>,
 }
 
 impl AgentLoop {
@@ -248,6 +250,7 @@ impl AgentLoop {
             budget_warned_pcts: Vec::new(),
             max_tool_retries: 3,
             retry_attempts: HashMap::new(),
+            path_permission_rx: None,
             git_context_fn: None,
             fast_provider: None,
             fast_agent_config: None,
@@ -306,6 +309,7 @@ impl AgentLoop {
             budget_warned_pcts: Vec::new(),
             max_tool_retries: 3,
             retry_attempts: HashMap::new(),
+            path_permission_rx: None,
             git_context_fn: None,
             fast_provider: None,
             fast_agent_config: None,
@@ -438,6 +442,15 @@ impl AgentLoop {
         self.last_turn_count
     }
 
+    /// Set the path permission receiver for interactive external path access.
+    pub fn with_path_permission_receiver(
+        mut self,
+        rx: tokio::sync::mpsc::UnboundedReceiver<std::path::PathBuf>,
+    ) -> Self {
+        self.path_permission_rx = Some(rx);
+        self
+    }
+
     /// Replace the current conversation history (for session resume).
     pub fn replace_history(&mut self, history: Vec<clido_core::Message>) {
         self.history = history;
@@ -460,6 +473,21 @@ impl AgentLoop {
             content: vec![ContentBlock::Text { text: text.into() }],
         };
         self.history.push(msg);
+    }
+
+    /// Extract a file path from tool input JSON for permission requests.
+    fn extract_path_from_input(input: &serde_json::Value) -> Option<std::path::PathBuf> {
+        // Try common path field names
+        for key in &["path", "file", "target", "source", "dest", "destination"] {
+            if let Some(path_str) = input.get(key).and_then(|v| v.as_str()) {
+                return Some(std::path::PathBuf::from(path_str));
+            }
+        }
+        // For Glob/SemanticSearch, try "pattern" or "query"
+        if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
+            return Some(std::path::PathBuf::from(pattern));
+        }
+        None
     }
 
     /// Determine if a tool error is retryable and what strategy to use.
@@ -534,6 +562,83 @@ impl AgentLoop {
                 let key = format!("{}:{}", name, serde_json::to_string(input).unwrap_or_default());
                 self.retry_attempts.remove(&key);
                 return output;
+            }
+            
+            // Check for "path outside working directory" error - request interactive permission
+            if output.content.contains("path outside working directory") 
+                || output.content.contains("Access denied: path outside") {
+                if let Some(ref mut rx) = self.path_permission_rx {
+                    // Extract the path from the error or input
+                    let requested_path = Self::extract_path_from_input(input).unwrap_or_default();
+                    
+                    // Emit request to TUI
+                    if let Some(ref e) = self.emit {
+                        let _ = e.on_assistant_text(
+                            &format!("[Requesting permission for external path: {}]", requested_path.display())
+                        ).await;
+                    }
+                    
+                    // Wait for user response (with timeout)
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(60),
+                        rx.recv()
+                    ).await {
+                        Ok(Some(granted_path)) if !granted_path.as_os_str().is_empty() => {
+                            // User granted permission - the TUI will have updated allowed paths
+                            // and rebuilt the tools. We need to retry with the new registry.
+                            if let Some(ref e) = self.emit {
+                                let _ = e.on_assistant_text(
+                                    &format!("[Permission granted for: {}]", granted_path.display())
+                                ).await;
+                            }
+                            // Return a special output indicating we need to retry with new tools
+                            // The caller (execute_tool_batch_with_retry) will handle the actual retry
+                            return ToolOutput {
+                                content: format!(
+                                    "External path access granted by user. Retrying with: {}",
+                                    granted_path.display()
+                                ),
+                                is_error: false,
+                                path: None,
+                                content_hash: None,
+                                mtime_nanos: None,
+                                diff: None,
+                            };
+                        }
+                        Ok(Some(_)) => {
+                            // User denied (empty path means denial)
+                            return ToolOutput {
+                                content: format!(
+                                    "{}\n\n[User denied access to external path]",
+                                    output.content
+                                ),
+                                is_error: true,
+                                path: None,
+                                content_hash: None,
+                                mtime_nanos: None,
+                                diff: None,
+                            };
+                        }
+                        Ok(None) => {
+                            // Channel closed
+                            return output;
+                        }
+                        Err(_) => {
+                            // Timeout
+                            return ToolOutput {
+                                content: format!(
+                                    "{}\n\n[Permission request timed out after 60s]",
+                                    output.content
+                                ),
+                                is_error: true,
+                                path: None,
+                                content_hash: None,
+                                mtime_nanos: None,
+                                diff: None,
+                            };
+                        }
+                    }
+                }
             }
             
             // Check if we've exhausted retries (last iteration)

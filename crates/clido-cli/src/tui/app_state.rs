@@ -188,6 +188,8 @@ pub(super) struct App {
     /// Shared state: image to attach to the next prompt.  Written by the TUI on send,
     /// drained by agent_task before calling run/run_next_turn.
     pub(super) image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>>,
+    /// Pending path permission request waiting for user response (y/n/a).
+    pub(super) pending_path_permission: Option<std::path::PathBuf>,
 
     /// Whether we're in plan dry-run mode (show editor but never execute).
     pub(super) plan_dry_run: bool,
@@ -336,6 +338,7 @@ impl App {
             per_turn_prev_model: None,
             pending_image: None,
             image_state,
+            pending_path_permission: None,
             current_step: None,
             last_executed_step_num: None,
             plan_dry_run,

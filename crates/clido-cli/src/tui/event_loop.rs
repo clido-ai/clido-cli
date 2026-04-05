@@ -229,6 +229,7 @@ pub(super) async fn agent_task(
     mut kill_rx: mpsc::UnboundedReceiver<()>,
     mut allowed_paths_rx: mpsc::UnboundedReceiver<Vec<std::path::PathBuf>>,
     mut note_rx: mpsc::UnboundedReceiver<String>,
+    mut path_permission_rx: mpsc::UnboundedReceiver<std::path::PathBuf>,
 ) {
     let setup_result = match preloaded_config {
         Some(loaded) => AgentSetup::build_with_preloaded_and_store(
@@ -328,6 +329,7 @@ pub(super) async fn agent_task(
     let git_context_fn: Box<dyn Fn() -> Option<String> + Send + Sync> =
         Box::new(move || GitContext::discover(&git_workspace).map(|ctx| ctx.to_prompt_section()));
     let mut agent = AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
+        .with_path_permission_receiver(path_permission_rx)
         .with_fast_provider(setup.fast_provider, setup.fast_config)
         .with_emitter(emitter)
         .with_planner(planner_mode)
@@ -1144,6 +1146,8 @@ pub(super) struct AgentRuntimeHandles {
     allowed_paths_tx: mpsc::UnboundedSender<Vec<std::path::PathBuf>>,
     /// Channel to inject a note/hint into the running conversation.
     note_tx: mpsc::UnboundedSender<String>,
+    /// Channel to grant permission for external path access (user clicked "Allow").
+    path_permission_tx: mpsc::UnboundedSender<std::path::PathBuf>,
 }
 
 /// Resolve the API key for display purposes (welcome screen, etc.).
@@ -1207,6 +1211,7 @@ pub(super) fn start_agent_runtime(
     let (kill_tx, kill_rx) = mpsc::unbounded_channel::<()>();
     let (allowed_paths_tx, allowed_paths_rx) = mpsc::unbounded_channel::<Vec<std::path::PathBuf>>();
     let (note_tx, note_rx) = mpsc::unbounded_channel::<String>();
+    let (path_permission_tx, path_permission_rx) = mpsc::unbounded_channel::<std::path::PathBuf>();
 
     // Pre-create the shared todo store so both the agent task and the TUI app can share it.
     let todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>> =
@@ -1231,6 +1236,7 @@ pub(super) fn start_agent_runtime(
         kill_rx,
         allowed_paths_rx,
         note_rx,
+        path_permission_rx,
     ));
 
     AgentRuntimeHandles {
@@ -1247,6 +1253,7 @@ pub(super) fn start_agent_runtime(
         kill_tx,
         allowed_paths_tx,
         note_tx,
+        path_permission_tx,
     }
 }
 
@@ -1474,6 +1481,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
             kill_tx: runtime.kill_tx.clone(),
             allowed_paths_tx: runtime.allowed_paths_tx.clone(),
             note_tx: runtime.note_tx.clone(),
+            path_permission_tx: runtime.path_permission_tx.clone(),
         },
         cancel,
         provider.clone(),
@@ -2462,6 +2470,19 @@ pub(super) async fn event_loop(
                     }
                     Some(AgentEvent::Info { message }) => {
                         app.push(ChatLine::Info(format!("  {}", message)));
+                    }
+                    Some(AgentEvent::PathPermissionRequest { path, tool_name }) => {
+                        // Show interactive prompt for external path access
+                        app.push(ChatLine::Info(format!(
+                            "  🔒 Tool '{}' wants to access: {}",
+                            tool_name,
+                            path.display()
+                        )));
+                        app.push(ChatLine::Info(
+                            "  Allow this path for this session? [y]es / [n]o / [a]lways (add to allowed paths)".into()
+                        ));
+                        // Store the pending request so input handler can respond
+                        app.pending_path_permission = Some(path);
                     }
                     None => {
                         return Ok(EventLoopExit::Recover(

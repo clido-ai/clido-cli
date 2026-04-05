@@ -1384,6 +1384,42 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         return;
     }
 
+    // ── Pending path permission request ─────────────────────────────────────
+    if let Some(ref path) = app.pending_path_permission {
+        match event.code {
+            Char('y') | Char('Y') => {
+                // Allow once - just grant permission for this call
+                let _ = app.channels.path_permission_tx.send(path.clone());
+                app.push(ChatLine::Info(format!("  ✓ Allowed access to: {}", path.display())));
+                app.pending_path_permission = None;
+                return;
+            }
+            Char('n') | Char('N') | Esc => {
+                // Deny - send empty path to signal denial
+                let _ = app.channels.path_permission_tx.send(std::path::PathBuf::new());
+                app.push(ChatLine::Info(format!("  ✗ Denied access to: {}", path.display())));
+                app.pending_path_permission = None;
+                return;
+            }
+            Char('a') | Char('A') => {
+                // Always allow - add to allowed paths for this session
+                app.allowed_external_paths.push(path.clone());
+                let _ = app.channels.allowed_paths_tx.send(app.allowed_external_paths.clone());
+                let _ = app.channels.path_permission_tx.send(path.clone());
+                app.push(ChatLine::Info(format!(
+                    "  ✓ Added to allowed paths: {} (and granted access)",
+                    path.display()
+                )));
+                app.pending_path_permission = None;
+                return;
+            }
+            _ => {
+                // Ignore other keys while waiting for permission response
+                return;
+            }
+        }
+    }
+
     // ── Overlay stack (new system) ───────────────────────────────────────────
     match app.overlay_stack.handle_key(event) {
         OverlayKeyResult::Consumed => return,

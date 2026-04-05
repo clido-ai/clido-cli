@@ -195,6 +195,8 @@ pub(crate) struct AgentChannels {
     pub(crate) allowed_paths_tx: mpsc::UnboundedSender<Vec<std::path::PathBuf>>,
     /// Channel to inject a note/hint into the running conversation.
     pub(crate) note_tx: mpsc::UnboundedSender<String>,
+    /// Channel to grant permission for external path access (user clicked "Allow").
+    pub(crate) path_permission_tx: mpsc::UnboundedSender<std::path::PathBuf>,
 }
 
 // ── Plan editor state ─────────────────────────────────────────────────────────

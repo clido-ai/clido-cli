@@ -23,10 +23,11 @@ This page describes the high-level design of clido: how the crates fit together,
 │  ┌─────────────────────────────────────────────────────┐  │
 │  │  AgentLoop                                          │  │
 │  │  • Manages conversation history (Vec<Message>)      │  │
-│  │  • Calls provider.complete(messages, tools)         │  │
-│  │  • Dispatches tool calls from response              │  │
-│  │  • Emits AgentEvents (tool_start, tool_done, text)  │  │
-│  │  • Checks turn + budget limits                      │  │
+│  │  • Validates tool_use JSON against each tool schema │  │
+│  │  • Calls provider.complete (optional request pacing)│  │
+│  │  • Dispatches tool calls; typed failures + retries  │  │
+│  │  • Doom / stall detection; wall-time + call caps    │  │
+│  │  • Emits events; turn + budget limits               │  │
 │  │  • Writes SessionLines to SessionWriter             │  │
 │  └──────────────────────┬──────────────────────────────┘  │
 └─────────────────────────┼─────────────────────────────────┘
@@ -78,15 +79,17 @@ AgentLoop
       │
       ▼
   AgentLoop
-  7. Parse response content blocks
+  7. Parse response content blocks; reject duplicate/malformed tool_use ids
   8. If stop_reason == EndTurn: emit text, return
   9. If stop_reason == ToolUse:
-     a. Emit on_tool_start events
-     b. Execute tool calls (parallel for read-only tools)
-     c. Emit on_tool_done events
-     d. Append AssistantMessage + ToolResult to history
-     e. Write to SessionWriter + AuditLog
-    10. Loop back to step 2
+     a. Validate each tool input against JSON Schema (before committing assistant text)
+     b. Emit on_tool_start events
+     c. Execute tool calls (parallel for read-only tools); classify failures; retry with backoff when policy allows
+     d. Observe doom / stall across batches; enforce max_tool_calls_per_turn and per-turn wall time
+     e. Emit on_tool_done events
+     f. Append AssistantMessage + ToolResult to history
+     g. Write to SessionWriter + AuditLog
+  10. Loop back to step 2
 ```
 
 ## Session lifecycle
@@ -174,6 +177,12 @@ The agent loop runs in a single Tokio async task. Tool execution uses `tokio::ta
 
 Only read-only tools run in parallel. Write, Edit, and Bash always run serially to prevent race conditions.
 
-## Agent loop hardening (production plan)
+## Agent loop hardening
 
-The full-scope plan for a production-grade agent loop is **[agent-loop-production-plan.md](./agent-loop-production-plan.md)**. It is a single non-optional backlog: validation, typed errors, retries, stall/doom detection, streaming semantics, session integrity, metrics, configuration, documentation, and a verifiable failure-mode matrix.
+Behavior is implemented in `crates/clido-agent/src/agent_loop/` (see **[agent-loop-production-plan.md](./agent-loop-production-plan.md)** for the design checklist and tuning knobs). In short:
+
+- **Validation** — `tool_use` arguments are checked with compiled JSON Schema before `execute`; invalid calls never reach tools.
+- **Typed failures** — `ToolOutput.failure_kind` (`clido_core::ToolFailureKind`) drives retry vs fail-fast; the loop still applies string heuristics when kind is `Unknown`.
+- **Guards** — Configurable per-turn wall time, max tool calls, doom-loop and stall detectors, optional minimum interval between `complete` calls (`[agent]` in `docs/guide/configuration.md`).
+- **Interrupts** — See **[agent-loop-interrupt-semantics.md](./agent-loop-interrupt-semantics.md)** for cancel timing vs history.
+- **Metrics** — `AgentMetrics` hook (default no-op) for observability integrations.

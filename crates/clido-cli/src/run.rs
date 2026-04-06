@@ -285,9 +285,7 @@ pub async fn run_agent(cli: Cli) -> Result<(), anyhow::Error> {
     let duration_ms = start.elapsed().as_millis() as u64;
     let exit_status = match &result {
         Ok(_) => "completed",
-        Err(ClidoError::MaxTurnsExceeded) => "max_turns_reached",
-        Err(ClidoError::BudgetExceeded) => "budget_exceeded",
-        Err(_) => "error",
+        Err(e) => e.agent_exit_status(),
     };
 
     if let Err(ClidoError::Interrupted) = &result {
@@ -492,11 +490,7 @@ pub(crate) fn emit_result(
         }
         Err(e) => {
             let msg = e.to_string();
-            let exit_status = match &e {
-                ClidoError::MaxTurnsExceeded => "max_turns_reached",
-                ClidoError::BudgetExceeded => "budget_exceeded",
-                _ => "error",
-            };
+            let exit_status = e.agent_exit_status();
             if output_format == "json" {
                 let out = serde_json::json!({
                     "schema_version": 1,

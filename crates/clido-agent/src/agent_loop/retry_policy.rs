@@ -47,17 +47,16 @@ fn legacy_string_retry(tool_name: &str, error: &str) -> Option<RetryStrategy> {
     {
         return Some(RetryStrategy::WaitAndRetry { delay_ms: 1000 });
     }
-    if err_lower.contains("no such file")
+    if (err_lower.contains("no such file")
         || err_lower.contains("file not found")
         || err_lower.contains("cannot find")
-        || err_lower.contains("does not exist")
-    {
-        if matches!(
+        || err_lower.contains("does not exist"))
+        && matches!(
             tool_name,
             "Read" | "Glob" | "Grep" | "Ls" | "SemanticSearch"
-        ) {
-            return Some(RetryStrategy::RetryOnce);
-        }
+        )
+    {
+        return Some(RetryStrategy::RetryOnce);
     }
     if err_lower.contains("permission denied")
         || err_lower.contains("access denied")

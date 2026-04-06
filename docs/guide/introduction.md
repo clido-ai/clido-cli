@@ -18,7 +18,7 @@ clido connects a large language model to a set of tools that can interact with y
 | `Grep` | Searches file content with regex |
 | `SemanticSearch` | Searches your indexed repository by symbol or concept |
 
-The agent loops autonomously — it calls tools, observes results, and continues until it completes the task, hits a turn limit, or exceeds a cost budget.
+The agent loops autonomously — it calls tools, observes results, and continues until it completes the task, hits a turn limit, or exceeds a cost budget. Tool arguments are validated against JSON Schema before execution; the loop enforces optional per-turn wall time, tool-call caps, and stall/doom detection (see [Configuration](./configuration.md) and [Agent loop hardening](../developer/agent-loop-production-plan.md)).
 
 ## Key capabilities
 

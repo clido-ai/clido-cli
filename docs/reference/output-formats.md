@@ -33,41 +33,62 @@ clido --output-format json "count lines in src/main.rs"
 
 ### JSON schema
 
+Success:
+
 ```json
 {
-  "session_id": "a1b2c3d4e5f6789abcdef0123456789abcdef01",
+  "schema_version": 1,
+  "type": "result",
+  "exit_status": "completed",
   "result": "src/main.rs has 312 lines.",
-  "total_cost_usd": 0.0009,
+  "session_id": "a1b2c3d4e5f6789abcdef0123456789abcdef01",
   "num_turns": 1,
   "duration_ms": 2100,
-  "exit_status": "success",
-  "model": "claude-sonnet-4-5",
-  "provider": "anthropic"
+  "total_cost_usd": 0.0009,
+  "is_error": false,
+  "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 80,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
 }
 ```
+
+Failure (`is_error: true`): same shape; `result` holds the error message and `exit_status` is a classifier (see table below).
 
 ### Field descriptions
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `schema_version` | integer | Format version (currently `1`) |
+| `type` | string | Always `result` for the final object |
+| `exit_status` | string | Outcome classifier (see table) |
+| `result` | string | Final assistant text or error message |
 | `session_id` | string | Full 40-character session ID |
-| `result` | string | Agent's final response text |
-| `total_cost_usd` | number | Accumulated cost in USD |
 | `num_turns` | integer | Number of agent turns |
 | `duration_ms` | integer | Total wall time in milliseconds |
-| `exit_status` | string | `success`, `max_turns`, `max_budget`, `error`, `interrupted` |
-| `model` | string | Model used |
-| `provider` | string | Provider used |
+| `total_cost_usd` | number | Accumulated cost in USD |
+| `is_error` | boolean | `false` on success, `true` on failure |
+| `usage` | object | Token counts (`input_tokens`, `output_tokens`, cache read/creation fields) |
 
-### `exit_status` values
+### `exit_status` values (`json` and `stream-json`)
 
 | Value | Meaning |
 |-------|---------|
-| `success` | Agent completed the task |
-| `max_turns` | Turn limit reached (exit code 3) |
-| `max_budget` | Budget limit reached (exit code 3) |
-| `error` | Agent or provider error (exit code 1) |
-| `interrupted` | User interrupted with Ctrl+C (exit code 130) |
+| `completed` | Agent finished normally (exit code `0`) |
+| `max_turns_reached` | `--max-turns` / config turn cap (exit code `3`) |
+| `budget_exceeded` | `--max-budget-usd` / config budget cap (exit code `3`) |
+| `interrupted` | User cancelled (often exit `130` before a result line) |
+| `rate_limited` | Provider rate limit with no automatic recovery (exit code `1`) |
+| `max_wall_time_exceeded` | `[agent]` per-turn wall time exceeded (exit code `1`) |
+| `max_tool_calls_per_turn` | `[agent]` tool-call cap for one user turn (exit code `1`) |
+| `stall_detected` | Heuristic stall guard tripped (exit code `1`) |
+| `malformed_model_output` | Invalid or duplicate `tool_use` blocks (exit code `1`) |
+| `doom_loop` | Same tool error repeated beyond the configured threshold (exit code `1`) |
+| `error` | Other failures: provider, tool, I/O, etc. (exit code `1`) |
+
+The interactive TUI writes session `Result` lines with `exit_status` too; successful runs usually use `success` (same meaning as `completed` above). See [Exit codes](./exit-codes.md).
 
 ## stream-json
 
@@ -81,7 +102,7 @@ clido --output-format stream-json "count lines in src/main.rs"
 {"type":"tool_start","tool_name":"Read","input":{"file_path":"src/main.rs"},"turn":1}
 {"type":"tool_done","tool_name":"Read","is_error":false,"duration_ms":8,"turn":1}
 {"type":"assistant_text","text":"src/main.rs has 312 lines.","turn":1}
-{"type":"result","session_id":"a1b2c3...","exit_status":"success","total_cost_usd":0.0009,"num_turns":1,"duration_ms":2100}
+{"type":"result","session_id":"a1b2c3...","exit_status":"completed","total_cost_usd":0.0009,"num_turns":1,"duration_ms":2100}
 ```
 
 ### Event types
@@ -150,13 +171,17 @@ The final event, emitted after the agent finishes.
 {
   "type": "result",
   "session_id": "a1b2c3d4e5f6789abcdef0123456789abcdef01",
-  "exit_status": "success",
+  "exit_status": "completed",
+  "result": "src/main.rs has 312 lines.",
   "total_cost_usd": 0.0009,
   "num_turns": 1,
   "duration_ms": 2100,
   "model": "claude-sonnet-4-5",
-  "provider": "anthropic"
+  "is_error": false
 }
+```
+
+`stream-json` result lines also include `usage` and `schema_version` in current builds.
 ```
 
 ### Example: consuming stream-json from another program

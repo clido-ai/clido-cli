@@ -124,6 +124,25 @@ impl ClidoError {
             _ => true,
         }
     }
+
+    /// Stable label for CLI JSON / stream-json `exit_status` and session `Result` lines when a run fails.
+    ///
+    /// Successful runs use `"completed"` in JSON output (`emit_result`); the TUI writes `"success"` to the session file on success.
+    #[must_use]
+    pub fn agent_exit_status(&self) -> &'static str {
+        match self {
+            ClidoError::MaxTurnsExceeded => "max_turns_reached",
+            ClidoError::BudgetExceeded => "budget_exceeded",
+            ClidoError::MaxWallTimeExceeded => "max_wall_time_exceeded",
+            ClidoError::MaxToolCallsPerTurnExceeded => "max_tool_calls_per_turn",
+            ClidoError::StallDetected { .. } => "stall_detected",
+            ClidoError::MalformedModelOutput { .. } => "malformed_model_output",
+            ClidoError::Interrupted => "interrupted",
+            ClidoError::RateLimited { .. } => "rate_limited",
+            ClidoError::DoomLoop { .. } => "doom_loop",
+            _ => "error",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -257,5 +276,79 @@ mod tests {
     fn truncate_policy_provider_always() {
         let e = ClidoError::Provider("x".into());
         assert!(e.should_truncate_history_after_failed_run(5, 0));
+    }
+
+    #[test]
+    fn malformed_model_output_display() {
+        let e = ClidoError::MalformedModelOutput {
+            detail: "duplicate tool id".into(),
+        };
+        let s = e.to_string();
+        assert!(s.contains("malformed model output"), "got: {s}");
+        assert!(s.contains("duplicate"), "got: {s}");
+    }
+
+    #[test]
+    fn max_wall_time_display() {
+        let e = ClidoError::MaxWallTimeExceeded;
+        assert!(e.to_string().contains("max wall time"));
+    }
+
+    #[test]
+    fn max_tool_calls_per_turn_display() {
+        let e = ClidoError::MaxToolCallsPerTurnExceeded;
+        assert!(e.to_string().contains("max tool calls per turn"));
+    }
+
+    #[test]
+    fn stall_detected_display() {
+        let e = ClidoError::StallDetected {
+            reason: "all errors".into(),
+        };
+        let s = e.to_string();
+        assert!(s.contains("stall detected"), "got: {s}");
+        assert!(s.contains("all errors"), "got: {s}");
+    }
+
+    #[test]
+    fn truncate_policy_malformed_when_only_user_line() {
+        let e = ClidoError::MalformedModelOutput {
+            detail: "x".into(),
+        };
+        assert!(e.should_truncate_history_after_failed_run(1, 0));
+        assert!(!e.should_truncate_history_after_failed_run(3, 0));
+    }
+
+    #[test]
+    fn truncate_policy_stall_like_max_turns() {
+        let e = ClidoError::StallDetected {
+            reason: "x".into(),
+        };
+        assert!(e.should_truncate_history_after_failed_run(1, 0));
+        assert!(!e.should_truncate_history_after_failed_run(3, 0));
+    }
+
+    #[test]
+    fn agent_exit_status_labels() {
+        assert_eq!(
+            ClidoError::MaxWallTimeExceeded.agent_exit_status(),
+            "max_wall_time_exceeded"
+        );
+        assert_eq!(
+            ClidoError::MalformedModelOutput {
+                detail: "x".into()
+            }
+            .agent_exit_status(),
+            "malformed_model_output"
+        );
+        assert_eq!(
+            ClidoError::DoomLoop {
+                tool: "Bash".into(),
+                error: "x".into(),
+            }
+            .agent_exit_status(),
+            "doom_loop"
+        );
+        assert_eq!(ClidoError::Provider("x".into()).agent_exit_status(), "error");
     }
 }

@@ -1195,7 +1195,7 @@ pub(super) async fn agent_task(
                                     }
                                 }
                                 Err(e) => {
-                                    session_exit = "error";
+                                    session_exit = e.agent_exit_status();
                                     if event_tx.send(AgentEvent::Err(format!("{e}"))).is_err() {
                                         return;
                                     }
@@ -1245,7 +1245,7 @@ pub(super) async fn agent_task(
                         }
                     }
                     Err(e) => {
-                        session_exit = "error";
+                        session_exit = e.agent_exit_status();
                         if event_tx.send(AgentEvent::Err(format!("{e}"))).is_err() {
                             return;
                         }
@@ -1373,7 +1373,7 @@ pub(super) async fn agent_task(
                                     }
                                 }
                                 Err(e) => {
-                                    session_exit = "error";
+                                    session_exit = e.agent_exit_status();
                                     if event_tx.send(AgentEvent::Err(format!("{e}"))).is_err() {
                                         return;
                                     }
@@ -1420,7 +1420,7 @@ pub(super) async fn agent_task(
                         }
                     }
                     Err(e) => {
-                        session_exit = "error";
+                        session_exit = e.agent_exit_status();
                         if event_tx.send(AgentEvent::Err(format!("{e}"))).is_err() {
                             return;
                         }

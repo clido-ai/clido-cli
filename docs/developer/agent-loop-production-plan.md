@@ -1,6 +1,12 @@
 # Production-grade agent loop — implementation plan
 
-This document is the **full-scope** engineering plan to harden clido’s agent loop (`crido-agent` / `AgentLoop`) for production: predictable failure semantics, validated tool execution, bounded retries, integrity of history and session logs, and test coverage. **There is no MVP slice:** every section below is **in scope** for completion of this initiative.
+**Status (implemented in tree):** The items below are **shipped** in `clido-agent` unless called out as documentation-only. Code lives mainly in `crates/clido-agent/src/agent_loop/` (`mod.rs`, `validation.rs`, `parse.rs`, `doom.rs`, `stall.rs`, `retry_policy.rs`, `metrics.rs`, `throttle.rs`). Supporting types: `clido-core` (`ToolFailureKind`, extended `AgentConfig` / `ClidoError`), `clido-tools` (`ToolOutput.failure_kind`).
+
+This document remains the **design reference** for behavior and tuning.
+
+---
+
+This document is the **full-scope** engineering plan to harden clido’s agent loop (`clido-agent` / `AgentLoop`) for production: predictable failure semantics, validated tool execution, bounded retries, integrity of history and session logs, and test coverage. **There is no MVP slice:** every section below is **in scope** for completion of this initiative.
 
 **Primary code today:** `crates/clido-agent/src/agent_loop/mod.rs` and related modules (`context.rs`, `security.rs`, …), tool registry in `clido-tools`, providers in `clido-providers`, TUI/repl emitters in `clido-cli`.
 

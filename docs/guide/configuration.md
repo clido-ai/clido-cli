@@ -56,6 +56,25 @@ max-turns       = 200      # Maximum agent turns per session (default in clido-c
 max-budget-usd  = 5.0      # Maximum spend per session in USD (optional; omit for no cap).
 max-concurrent-tools = 4   # Max parallel read-only tool calls. Default: 4.
 
+# ── Production agent loop (optional overrides; defaults are safe) ─────────────
+# Wall-clock cap for one user message / completion loop (0 = unlimited). Default: 900 s.
+# max-wall-time-per-turn-sec = 900
+# Hard cap on individual tool invocations per user turn. Default: 200.
+# max-tool-calls-per-turn = 200
+# Stall heuristic threshold (repeated all-error batches / identical tool batches). Default: 6.
+# stall-threshold = 6
+# Doom loop: consecutive identical normalized errors. Default: 3.
+# doom-consecutive-same-error = 3
+# Doom loop: sliding window size and min repeats of same (tool, args). Defaults: 8 / 4.
+# doom-same-args-window = 8
+# doom-same-args-min = 4
+# Auto-retries for transient tool failures. Default: 3. Alias: tool-retries.
+# max-tool-retries = 3
+# retry-backoff-max-ms = 10000
+# retry-jitter-numerator = 25   # fraction of delay used for spread (0–100)
+# Minimum gap between provider completion calls (ms). 0 = off.
+# provider-min-request-interval-ms = 0
+
 # ── Context settings ─────────────────────────────────────────────────────────
 
 [context]

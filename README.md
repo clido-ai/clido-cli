@@ -12,6 +12,7 @@
 - **Multi-provider** — Use different AI backends (e.g. Anthropic, OpenAI) via profiles.
 - **Safe by default** — Destructive or state-changing actions require your approval.
 - **Session-aware** — Resume after interrupt; cost and usage visible when you care.
+- **Production-grade agent loop** — Tool inputs are validated against each tool’s JSON Schema before execution; failures carry typed categories for retry policy; configurable wall-time and tool-call caps, stall and doom-loop detection, and optional spacing between LLM calls (see `docs/guide/configuration.md` and `docs/developer/agent-loop-production-plan.md`).
 
 Shipped today: multi-provider agent with tools, TUI, sessions, memory, MCP, semantic search, YAML workflows, checkpoints, audit log, **skills** (folder-based reusable instructions), and plan/todo UX in the TUI. See `docs/guide/` for detail.
 

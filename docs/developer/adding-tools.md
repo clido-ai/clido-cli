@@ -9,32 +9,32 @@ All tools implement the `Tool` trait defined in `clido-tools/src/lib.rs`:
 ```rust
 #[async_trait]
 pub trait Tool: Send + Sync {
-    /// The name the LLM uses to call this tool. Must be unique in the registry.
     fn name(&self) -> &str;
-
-    /// Human-readable description sent to the LLM in the tool list.
     fn description(&self) -> &str;
-
-    /// JSON Schema for the input object. Used to validate calls and inform the LLM.
+    /// JSON Schema for the input object — compiled by the agent before every call.
     fn schema(&self) -> serde_json::Value;
-
-    /// Execute the tool. Returns a `ToolOutput` with the result text and any metadata.
-    async fn execute(
-        &self,
-        input: serde_json::Value,
-        workspace_root: &std::path::Path,
-    ) -> anyhow::Result<ToolOutput>;
+    /// Return `true` for read-only tools (parallel batching, no permission prompt).
+    fn is_read_only(&self) -> bool {
+        false
+    }
+    async fn execute(&self, input: serde_json::Value) -> ToolOutput;
 }
 
 pub struct ToolOutput {
-    /// Text returned to the LLM (and stored in the session).
     pub content: String,
-    /// Whether this is an error (affects how the LLM interprets the result).
     pub is_error: bool,
-    /// For Edit operations: the unified diff (used by TUI for display).
+    /// Stable failure class for retry policy; `None` means "unknown" (heuristics apply).
+    pub failure_kind: Option<clido_core::ToolFailureKind>,
+    pub path: Option<String>,
+    pub content_hash: Option<String>,
+    pub mtime_nanos: Option<u64>,
     pub diff: Option<String>,
 }
 ```
+
+Use `ToolOutput::ok`, `ToolOutput::err`, and `ToolOutput::err_kind(message, kind)` helpers in `clido-tools`. The agent validates `input` against `schema()` **before** `execute`; your tool should still return clear `is_error` messages for logical mistakes the schema cannot express.
+
+For recoverable vs permanent failures from the model’s perspective, set `failure_kind` when possible (see `clido_core::tool_failure::ToolFailureKind`).
 
 ## Worked example: adding a `FetchUrl` tool
 
@@ -46,8 +46,8 @@ Create `crates/clido-tools/src/fetch_url.rs`:
 
 ```rust
 use async_trait::async_trait;
+use clido_core::ToolFailureKind;
 use serde_json::{json, Value};
-use std::path::Path;
 
 use crate::{Tool, ToolOutput};
 
@@ -82,42 +82,66 @@ impl Tool for FetchUrlTool {
         })
     }
 
-    async fn execute(
-        &self,
-        input: Value,
-        _workspace_root: &Path,
-    ) -> anyhow::Result<ToolOutput> {
-        let url = input["url"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'url' field"))?;
+    async fn execute(&self, input: Value) -> ToolOutput {
+        let Some(url) = input["url"].as_str() else {
+            return ToolOutput::err_kind(
+                "missing or invalid 'url' field".into(),
+                ToolFailureKind::Logical,
+            );
+        };
 
-        let max_bytes = input["max_bytes"]
-            .as_u64()
-            .unwrap_or(50_000) as usize;
+        let max_bytes = input["max_bytes"].as_u64().unwrap_or(50_000) as usize;
 
-        // Validate URL scheme
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            return Ok(ToolOutput {
-                content: format!("Error: URL must use http:// or https://, got: {}", url),
-                is_error: true,
-                diff: None,
-            });
+            return ToolOutput::err_kind(
+                format!("Error: URL must use http:// or https://, got: {}", url),
+                ToolFailureKind::Logical,
+            );
         }
 
-        let client = reqwest::Client::builder()
+        let client = match reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
-            .build()?;
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                return ToolOutput::err_kind(
+                    format!("Error: build HTTP client: {e}"),
+                    ToolFailureKind::Transport,
+                );
+            }
+        };
 
-        let response = client.get(url).send().await?;
+        let response = match client.get(url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                return ToolOutput::err_kind(
+                    format!("Error: request failed: {e}"),
+                    ToolFailureKind::Transport,
+                );
+            }
+        };
+
         let status = response.status();
-        let text = response.text().await?;
+        let text = match response.text().await {
+            Ok(t) => t,
+            Err(e) => {
+                return ToolOutput::err_kind(
+                    format!("Error: read response body: {e}"),
+                    ToolFailureKind::Transport,
+                );
+            }
+        };
 
         if !status.is_success() {
-            return Ok(ToolOutput {
-                content: format!("HTTP {}: {}", status, &text[..text.len().min(500)]),
-                is_error: true,
-                diff: None,
-            });
+            return ToolOutput::err_kind(
+                format!(
+                    "HTTP {}: {}",
+                    status,
+                    &text[..text.len().min(500)]
+                ),
+                ToolFailureKind::Transport,
+            );
         }
 
         let truncated = &text[..text.len().min(max_bytes)];
@@ -127,11 +151,7 @@ impl Tool for FetchUrlTool {
             truncated.to_string()
         };
 
-        Ok(ToolOutput {
-            content,
-            is_error: false,
-            diff: None,
-        })
+        ToolOutput::ok(content)
     }
 }
 ```
@@ -178,17 +198,16 @@ Add a test module at the bottom of `fetch_url.rs`:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clido_core::ToolFailureKind;
     use serde_json::json;
 
     #[tokio::test]
     async fn rejects_non_http_scheme() {
         let tool = FetchUrlTool;
-        let result = tool
-            .execute(json!({"url": "ftp://example.com"}), std::path::Path::new("/"))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"url": "ftp://example.com"})).await;
         assert!(result.is_error);
         assert!(result.content.contains("must use http"));
+        assert_eq!(result.failure_kind, Some(ToolFailureKind::Logical));
     }
 
     #[tokio::test]
@@ -196,12 +215,8 @@ mod tests {
     async fn fetches_real_url() {
         let tool = FetchUrlTool;
         let result = tool
-            .execute(
-                json!({"url": "https://httpbin.org/get", "max_bytes": 1000}),
-                std::path::Path::new("/"),
-            )
-            .await
-            .unwrap();
+            .execute(json!({"url": "https://httpbin.org/get", "max_bytes": 1000}))
+            .await;
         assert!(!result.is_error);
         assert!(result.content.contains("url"));
     }
@@ -216,9 +231,9 @@ cargo test -p clido-tools -- fetch_url
 
 ## Input validation guidelines
 
-- Always validate required fields and return `ToolOutput { is_error: true, ... }` for invalid input (not `Err(...)`) — the LLM needs to see the error to self-correct
-- Use `anyhow::Result` for genuine I/O errors that are not recoverable
-- Truncate long outputs (50,000 bytes is a reasonable ceiling)
+- The agent rejects calls that violate your JSON Schema before `execute` runs; still validate domain rules inside the tool and return `ToolOutput::err` / `err_kind` so the model can self-correct.
+- Prefer returning `ToolOutput` over panicking; `execute` does not use `Result`.
+- Truncate long outputs (50,000 bytes is a reasonable ceiling).
 
 ## Schema best practices
 
@@ -231,15 +246,7 @@ The JSON Schema `description` fields are read by the LLM to understand how to ca
 
 ## Read-only vs state-changing tools
 
-The permission system determines whether `AskUser::ask()` is called before the tool. Currently, the set of state-changing tools is hardcoded in the agent loop as: `Bash`, `Write`, `Edit`.
-
-To mark your tool as state-changing (so the user is prompted before execution in `default` permission mode), you need to add its name to the list in `crates/clido-agent/src/agent_loop.rs`:
-
-```rust
-fn is_state_changing(tool_name: &str) -> bool {
-    matches!(tool_name, "Bash" | "Write" | "Edit" | "FetchUrl")
-}
-```
+The permission layer uses `Tool::is_read_only()`. Override it to return `true` only for tools that never mutate disk or run shell commands without gating. Any tool with the default `false` is treated as state-changing: in `default` permission mode the TUI prompts before execution (when `AskUser` is wired).
 
 ## Registering MCP tools
 

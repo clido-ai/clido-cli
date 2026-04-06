@@ -382,6 +382,7 @@ pub async fn run_repl(cli: Cli) -> Result<(), anyhow::Error> {
                         "schema_version": 1,
                         "type": "repl_turn",
                         "is_error": true,
+                        "error_kind": e.agent_exit_status(),
                         "result": msg,
                     });
                     println!(

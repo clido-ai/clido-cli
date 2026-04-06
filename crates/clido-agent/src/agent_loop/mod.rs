@@ -421,7 +421,9 @@ impl AgentLoop {
         self.provider = provider;
         self.config = config;
         self.tools = tools;
-        self.schema_cache.lock().ok().map(|mut g| g.clear());
+        if let Ok(mut g) = self.schema_cache.lock() {
+            g.clear();
+        }
         self.doom.clear();
         // Reset retry attempts
         self.retry_attempts.clear();

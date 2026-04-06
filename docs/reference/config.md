@@ -136,6 +136,7 @@ max-concurrent-tools = 4
 # Use provider streaming completion and aggregate to a full response (provider must support it).
 # Type: boolean  Default: false
 # stream-model-completion = false
+# When true, invalid streamed tool argument JSON fails the turn (MalformedModelOutput) — never coerced to {}.
 
 # Per-tool execute timeout in seconds (agent loop wrapper around Tool::execute).
 # Type: integer  Default: 60

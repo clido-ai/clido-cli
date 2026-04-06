@@ -56,6 +56,7 @@ max-turns       = 200      # Maximum agent turns per session (default in clido-c
 max-budget-usd  = 5.0      # Maximum spend per session in USD (optional; omit for no cap).
 max-concurrent-tools = 4   # Max parallel read-only tool calls. Default: 4.
 # stream-model-completion = false   # Stream + aggregate when the provider supports it.
+# If true, malformed streamed tool JSON fails the turn (no silent empty `{}` args).
 # tool-timeout-secs = 60            # Wall-clock cap per tool invocation (agent loop).
 # max-tool-output-bytes = 512000    # Truncate tool output beyond this size (0 = off).
 

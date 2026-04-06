@@ -12,6 +12,8 @@ A session is a newline-delimited JSON (JSONL) file stored in:
 
 Each line in the file is a typed record: metadata, user messages, assistant messages, tool calls, tool results, and a final result record. See [Session Format](/docs/developer/session-format) for the complete schema.
 
+The first line is always a `meta` record with `schema_version`. If you open a session file written by a newer clido that bumps the schema, an older binary will refuse to load it until you upgrade. The current version is documented in the session format reference.
+
 Sessions are created automatically the first time you run a prompt. There is no explicit "new session" command — just start a new conversation.
 
 ## Listing sessions

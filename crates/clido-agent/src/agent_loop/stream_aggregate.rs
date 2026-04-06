@@ -104,3 +104,56 @@ fn flush_text(content: &mut Vec<ContentBlock>, buf: &mut String) {
     }
     buf.clear();
 }
+
+#[cfg(test)]
+mod tests {
+    use std::pin::Pin;
+
+    use clido_core::ClidoError;
+    use clido_providers::StreamEvent;
+    use futures::stream;
+    use futures::Stream;
+
+    use super::collect_stream_to_model_response;
+
+    fn box_stream<I>(s: I) -> Pin<Box<dyn Stream<Item = clido_core::Result<StreamEvent>> + Send>>
+    where
+        I: Stream<Item = clido_core::Result<StreamEvent>> + Send + 'static,
+    {
+        Box::pin(s)
+    }
+
+    #[tokio::test]
+    async fn stream_rejects_invalid_tool_json() {
+        let events = vec![
+            Ok(StreamEvent::ToolUseStart {
+                id: "tu_1".to_string(),
+                name: "Read".to_string(),
+            }),
+            Ok(StreamEvent::ToolUseDelta {
+                id: "tu_1".to_string(),
+                partial_json: "not-json".to_string(),
+            }),
+            Ok(StreamEvent::ToolUseEnd {
+                id: "tu_1".to_string(),
+            }),
+            Ok(StreamEvent::MessageDelta {
+                stop_reason: clido_core::StopReason::ToolUse,
+                usage: Default::default(),
+            }),
+        ];
+        let st = box_stream(stream::iter(events));
+        let r = collect_stream_to_model_response(st, "test-model".to_string(), None).await;
+        assert!(r.is_err(), "expected error, got {r:?}");
+        let err = r.unwrap_err();
+        match err {
+            ClidoError::MalformedModelOutput { detail } => {
+                assert!(
+                    detail.contains("tu_1") && detail.contains("invalid arguments JSON"),
+                    "detail={detail}"
+                );
+            }
+            other => panic!("wrong error: {other:?}"),
+        }
+    }
+}

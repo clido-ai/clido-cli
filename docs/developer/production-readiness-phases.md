@@ -33,7 +33,7 @@ This document tracks the **production-readiness initiative** (audit → code). S
 ## Phase 5 — TUI run state
 
 - [x] `AppRunState` (`Idle` / `Generating` / `RunningTools`) on `App`, driven by `AgentEvent::RunState`, send paths (`Generating`), `TuiEmitter` tool start/done, and `on_agent_done` / resume (`Idle`).
-- [ ] Bounded `AgentEvent` channels — **deferred** (unbounded retained; document risk).
+- [x] Bounded `AgentEvent` channel (capacity 4096) — agent→TUI backpressure via `tokio::sync::mpsc::Sender`; async `.send().await` on hot path.
 
 ## Phase 6 — Observability
 

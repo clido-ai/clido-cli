@@ -383,9 +383,10 @@ impl AgentLoop {
         self
     }
 
-    /// Attach a per-turn git context provider. The closure is called before each
-    /// `run()` invocation and its output (if any) is appended to the system prompt
-    /// as a `<git_context>` block so the model always sees fresh repo state.
+    /// Attach a per-turn git context provider. The closure is called at the start of
+    /// each outer turn (`run` / `run_next_*` / [`run_continue`]) and its output (if any)
+    /// is appended to the system prompt as a `<git_context>` block so the model sees
+    /// fresh repo state.
     pub fn with_git_context_fn(mut self, f: Box<dyn Fn() -> Option<String> + Send + Sync>) -> Self {
         self.git_context_fn = Some(f);
         self
@@ -423,10 +424,10 @@ impl AgentLoop {
         config: AgentConfig,
         tools: ToolRegistry,
     ) {
-        // Preserve history - this is the key for seamless switching
-        // Only update provider, config, and tools
+        // Preserve history - this is the key for seamless switching.
         self.provider = provider;
         self.config = config;
+        self.base_system_prompt = self.config.system_prompt.clone();
         self.tools = tools;
         if let Ok(mut g) = self.schema_cache.lock() {
             g.clear();
@@ -572,8 +573,8 @@ impl AgentLoop {
     /// Compute fresh git context via `git_context_fn` (if set) and return a new
     /// system prompt string with the context appended. Returns `None` when no
     /// git context function is registered or when the function returns nothing.
-    /// Like `inject_memories`, always builds from `base_system_prompt` so the
-    /// block does not accumulate across repeated turns.
+    /// Appends a fresh git section to `current_system_prompt` (typically base + optional
+    /// memories). Does not read `config.system_prompt` so callers can rebuild cleanly each turn.
     fn inject_git_context(&self, current_system_prompt: &str) -> Option<String> {
         let git_section = (self.git_context_fn.as_ref()?)()?;
         Some(format!("{}\n\n{}", current_system_prompt, git_section))
@@ -587,6 +588,46 @@ impl AgentLoop {
                 let _ = lock.prune_old(5000);
             }
         }
+    }
+
+    fn default_base_prompt_text(&self) -> String {
+        self.base_system_prompt.clone().unwrap_or_else(|| {
+            "You are a helpful coding assistant.".to_string()
+        })
+    }
+
+    /// Text of the most recent user message (first text block), for memory search on continue.
+    fn first_user_text_from_last_user_message(&self) -> Option<String> {
+        self.history.iter().rev().find(|m| m.role == Role::User).and_then(|m| {
+            m.content.iter().find_map(|b| {
+                if let ContentBlock::Text { text } = b {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
+        })
+    }
+
+    /// Rebuild `config.system_prompt` from the stored base prompt, memory retrieval, and git.
+    /// Call at the start of every outer user turn and [`run_continue`] so injected blocks stay
+    /// current and do not stack across `run_next_turn` or go stale after `run_continue`.
+    fn refresh_system_prompt_for_outer_turn(&mut self, memory_hint: Option<&str>) {
+        let search_key = memory_hint
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or_else(|| self.first_user_text_from_last_user_message())
+            .filter(|s| !s.is_empty());
+        let after_mem = if let Some(ref p) = search_key {
+            self.inject_memories(p)
+                .unwrap_or_else(|| self.default_base_prompt_text())
+        } else {
+            self.default_base_prompt_text()
+        };
+        let final_prompt = self
+            .inject_git_context(&after_mem)
+            .unwrap_or(after_mem);
+        self.config.system_prompt = Some(final_prompt);
     }
 
     /// Turn count from last run (for session result line).
@@ -995,6 +1036,8 @@ impl AgentLoop {
             .transpose()
             .map_err(ClidoError::from)?;
 
+        self.refresh_system_prompt_for_outer_turn(None);
+
         let result = self
             .completion_loop_run(&mut session, pricing, cancel, "continue turn")
             .await;
@@ -1021,6 +1064,7 @@ impl AgentLoop {
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
         self.turn_correlation_id = uuid::Uuid::new_v4();
+        self.refresh_system_prompt_for_outer_turn(Some(user_input));
         let history_before = self.history.len();
         let user_msg = Message {
             role: Role::User,
@@ -1069,15 +1113,7 @@ impl AgentLoop {
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
         self.turn_correlation_id = uuid::Uuid::new_v4();
-        // Inject relevant memories into system prompt before running.
-        if let Some(injected) = self.inject_memories(user_input) {
-            self.config.system_prompt = Some(injected);
-        }
-        // Refresh git context each turn so the model always sees the current branch/diff.
-        let base_for_git = self.config.system_prompt.clone().unwrap_or_default();
-        if let Some(with_git) = self.inject_git_context(&base_for_git) {
-            self.config.system_prompt = Some(with_git);
-        }
+        self.refresh_system_prompt_for_outer_turn(Some(user_input));
 
         let history_before = self.history.len();
 
@@ -1139,13 +1175,7 @@ impl AgentLoop {
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
         self.turn_correlation_id = uuid::Uuid::new_v4();
-        if let Some(injected) = self.inject_memories(user_input) {
-            self.config.system_prompt = Some(injected);
-        }
-        let base_for_git = self.config.system_prompt.clone().unwrap_or_default();
-        if let Some(with_git) = self.inject_git_context(&base_for_git) {
-            self.config.system_prompt = Some(with_git);
-        }
+        self.refresh_system_prompt_for_outer_turn(Some(user_input));
 
         let history_before = self.history.len();
         let mut content = extra_blocks;
@@ -1196,6 +1226,7 @@ impl AgentLoop {
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
         self.turn_correlation_id = uuid::Uuid::new_v4();
+        self.refresh_system_prompt_for_outer_turn(Some(user_input));
         let history_before = self.history.len();
         let mut content = extra_blocks;
         content.push(ContentBlock::Text {

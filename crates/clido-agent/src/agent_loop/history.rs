@@ -81,7 +81,10 @@ pub fn try_session_lines_to_messages(lines: &[SessionLine]) -> Result<Vec<Messag
     Ok(messages)
 }
 
-/// Best-effort load (drops invalid content values). Prefer [`try_session_lines_to_messages`] for resume.
+/// Best-effort load (drops invalid content values).
+///
+/// **Do not use for resume, verify, or any path where silent data loss is unacceptable.**
+/// Use [`try_session_lines_to_messages`] for production resume and `clido sessions verify`.
 pub fn session_lines_to_messages(lines: &[SessionLine]) -> Vec<Message> {
     let mut messages = Vec::new();
     let mut tool_result_buf: Vec<ContentBlock> = Vec::new();

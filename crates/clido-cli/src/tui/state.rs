@@ -130,6 +130,10 @@ pub(crate) struct LayoutInfo {
     pub(crate) chat_area_width: u16,
     /// Maximum scroll offset for the chat content (total_lines − visible_lines).
     pub(crate) max_scroll: u32,
+    /// Right-hand status rail is active (wide terminal).
+    pub(crate) status_rail_active: bool,
+    /// Max scroll for the status rail (`0` when all lines fit).
+    pub(crate) status_panel_max_scroll: u16,
 }
 
 impl Default for LayoutInfo {
@@ -138,6 +142,8 @@ impl Default for LayoutInfo {
             chat_area_y: (0, 0),
             chat_area_width: 120,
             max_scroll: 0,
+            status_rail_active: false,
+            status_panel_max_scroll: 0,
         }
     }
 }

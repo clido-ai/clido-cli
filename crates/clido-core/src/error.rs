@@ -52,6 +52,22 @@ pub enum ClidoError {
     #[error("max_turns exceeded")]
     MaxTurnsExceeded,
 
+    /// Provider returned `tool_use` stop reason but no valid tool blocks (or duplicate ids).
+    #[error("malformed model output: {detail}")]
+    MalformedModelOutput { detail: String },
+
+    /// Per-user-turn wall clock budget exceeded.
+    #[error("max wall time per turn exceeded")]
+    MaxWallTimeExceeded,
+
+    /// Too many tool invocations in a single user turn.
+    #[error("max tool calls per turn exceeded")]
+    MaxToolCallsPerTurnExceeded,
+
+    /// Heuristic: agent produced tool traffic without measurable progress.
+    #[error("stall detected: {reason}")]
+    StallDetected { reason: String },
+
     #[error("interrupted by user")]
     Interrupted,
 
@@ -93,8 +109,17 @@ impl ClidoError {
     ) -> bool {
         match self {
             ClidoError::RateLimited { .. } | ClidoError::ContextLimit { .. } => false,
-            ClidoError::MaxTurnsExceeded | ClidoError::BudgetExceeded => {
+            ClidoError::MaxTurnsExceeded
+            | ClidoError::BudgetExceeded
+            | ClidoError::MaxWallTimeExceeded
+            | ClidoError::MaxToolCallsPerTurnExceeded
+            | ClidoError::StallDetected { .. } => {
                 history_len == history_before_turn.saturating_add(1)
+            }
+            ClidoError::MalformedModelOutput { .. } => {
+                // Usually raised before an assistant message is committed; truncate if nothing
+                // beyond the user line was appended.
+                history_len <= history_before_turn.saturating_add(1)
             }
             _ => true,
         }

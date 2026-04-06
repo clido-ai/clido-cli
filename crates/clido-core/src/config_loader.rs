@@ -78,6 +78,28 @@ pub struct AgentSection {
     /// Enable harness mode: structured `.clido/harness/` tasks + `HarnessControl` tool + strict protocol.
     #[serde(default)]
     pub harness: bool,
+    /// Wall-clock seconds for one user turn (0 = unlimited).
+    #[serde(default)]
+    pub max_wall_time_per_turn_sec: Option<u64>,
+    #[serde(default)]
+    pub max_tool_calls_per_turn: Option<u32>,
+    #[serde(default)]
+    pub stall_threshold: Option<u32>,
+    #[serde(default)]
+    pub doom_consecutive_same_error: Option<usize>,
+    #[serde(default)]
+    pub doom_same_args_window: Option<usize>,
+    #[serde(default)]
+    pub doom_same_args_min: Option<usize>,
+    /// Alias: `tool-retries` for backward compatibility.
+    #[serde(default, alias = "tool-retries")]
+    pub max_tool_retries: Option<u32>,
+    #[serde(default)]
+    pub retry_backoff_max_ms: Option<u64>,
+    #[serde(default)]
+    pub retry_jitter_numerator: Option<u8>,
+    #[serde(default)]
+    pub provider_min_request_interval_ms: Option<u32>,
 }
 
 impl Default for AgentSection {
@@ -94,6 +116,16 @@ impl Default for AgentSection {
             max_checkpoints_per_session: 50,
             max_output_tokens: None,
             harness: false,
+            max_wall_time_per_turn_sec: None,
+            max_tool_calls_per_turn: None,
+            stall_threshold: None,
+            doom_consecutive_same_error: None,
+            doom_same_args_window: None,
+            doom_same_args_min: None,
+            max_tool_retries: None,
+            retry_backoff_max_ms: None,
+            retry_jitter_numerator: None,
+            provider_min_request_interval_ms: None,
         }
     }
 }
@@ -398,6 +430,46 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
             .max_output_tokens
             .or(base.agent.max_output_tokens),
         harness: later.agent.harness || base.agent.harness,
+        max_wall_time_per_turn_sec: later
+            .agent
+            .max_wall_time_per_turn_sec
+            .or(base.agent.max_wall_time_per_turn_sec),
+        max_tool_calls_per_turn: later
+            .agent
+            .max_tool_calls_per_turn
+            .or(base.agent.max_tool_calls_per_turn),
+        stall_threshold: later
+            .agent
+            .stall_threshold
+            .or(base.agent.stall_threshold),
+        doom_consecutive_same_error: later
+            .agent
+            .doom_consecutive_same_error
+            .or(base.agent.doom_consecutive_same_error),
+        doom_same_args_window: later
+            .agent
+            .doom_same_args_window
+            .or(base.agent.doom_same_args_window),
+        doom_same_args_min: later
+            .agent
+            .doom_same_args_min
+            .or(base.agent.doom_same_args_min),
+        max_tool_retries: later
+            .agent
+            .max_tool_retries
+            .or(base.agent.max_tool_retries),
+        retry_backoff_max_ms: later
+            .agent
+            .retry_backoff_max_ms
+            .or(base.agent.retry_backoff_max_ms),
+        retry_jitter_numerator: later
+            .agent
+            .retry_jitter_numerator
+            .or(base.agent.retry_jitter_numerator),
+        provider_min_request_interval_ms: later
+            .agent
+            .provider_min_request_interval_ms
+            .or(base.agent.provider_min_request_interval_ms),
     };
     let tools = ToolsSection {
         allowed: if later.tools.allowed.is_empty() {
@@ -689,6 +761,7 @@ pub fn agent_config_from_loaded(
     let max_parallel_tools = cli_max_parallel_tools
         .or(loaded.agent.max_concurrent_tools)
         .unwrap_or(4);
+    let def = AgentConfig::default();
     Ok(AgentConfig {
         max_turns: cli_max_turns.unwrap_or(loaded.agent.max_turns),
         max_budget_usd: cli_max_budget_usd.or(loaded.agent.max_budget_usd),
@@ -705,6 +778,46 @@ pub fn agent_config_from_loaded(
         no_rules: loaded.agent.no_rules,
         rules_file: loaded.agent.rules_file.clone(),
         max_output_tokens: loaded.agent.max_output_tokens,
+        max_wall_time_per_turn_sec: loaded
+            .agent
+            .max_wall_time_per_turn_sec
+            .unwrap_or(def.max_wall_time_per_turn_sec),
+        max_tool_calls_per_turn: loaded
+            .agent
+            .max_tool_calls_per_turn
+            .unwrap_or(def.max_tool_calls_per_turn),
+        stall_threshold: loaded
+            .agent
+            .stall_threshold
+            .unwrap_or(def.stall_threshold),
+        doom_consecutive_same_error: loaded
+            .agent
+            .doom_consecutive_same_error
+            .unwrap_or(def.doom_consecutive_same_error),
+        doom_same_args_window: loaded
+            .agent
+            .doom_same_args_window
+            .unwrap_or(def.doom_same_args_window),
+        doom_same_args_min: loaded
+            .agent
+            .doom_same_args_min
+            .unwrap_or(def.doom_same_args_min),
+        max_tool_retries: loaded
+            .agent
+            .max_tool_retries
+            .unwrap_or(def.max_tool_retries),
+        retry_backoff_max_ms: loaded
+            .agent
+            .retry_backoff_max_ms
+            .unwrap_or(def.retry_backoff_max_ms),
+        retry_jitter_numerator: loaded
+            .agent
+            .retry_jitter_numerator
+            .unwrap_or(def.retry_jitter_numerator),
+        provider_min_request_interval_ms: loaded
+            .agent
+            .provider_min_request_interval_ms
+            .unwrap_or(def.provider_min_request_interval_ms),
     })
 }
 

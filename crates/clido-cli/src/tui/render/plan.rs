@@ -212,10 +212,15 @@ pub(crate) fn plan_panel_height_for_layout(
 }
 
 /// Build wrapped lines for the progress strip (`plan_h` rows from [`plan_panel_height_for_layout`]).
+/// `max_step_lines` caps listed steps (horizontal strip uses ~5; status rail uses more).
+/// When `with_strip_title_row` is false (status rail), omit the "Progress · auto" title row — the rail
+/// draws its own section header.
 pub(crate) fn build_plan_todo_strip_lines(
     app: &App,
     steps: &[PlanPanelStep],
     width: u16,
+    max_step_lines: usize,
+    with_strip_title_row: bool,
 ) -> Vec<Line<'static>> {
     let w = width as usize;
     let dim = Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM);
@@ -229,13 +234,16 @@ pub(crate) fn build_plan_todo_strip_lines(
     } else {
         "Progress"
     };
-    let mut out: Vec<Line<'static>> = vec![Line::from(vec![
-        Span::styled(
-            format!("{TUI_GUTTER}{header_title}"),
-            dim.add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(format!("  ·  {header_note}"), dim),
-    ])];
+    let mut out: Vec<Line<'static>> = Vec::new();
+    if with_strip_title_row {
+        out.push(Line::from(vec![
+            Span::styled(
+                format!("{TUI_GUTTER}{header_title}"),
+                dim.add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!("  ·  {header_note}"), dim),
+        ]));
+    }
 
     if steps.is_empty() {
         if app.harness_mode {
@@ -265,12 +273,12 @@ pub(crate) fn build_plan_todo_strip_lines(
         return out;
     }
 
-    const MAX_STEP_LINES: usize = 5;
-    let show_more = steps.len() > MAX_STEP_LINES;
+    let cap = max_step_lines.max(1);
+    let show_more = steps.len() > cap;
     let take = if show_more {
-        MAX_STEP_LINES - 1
+        cap - 1
     } else {
-        steps.len().min(MAX_STEP_LINES)
+        steps.len().min(cap)
     };
 
     let prefix_cols = 4usize;

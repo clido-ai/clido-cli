@@ -227,10 +227,13 @@ pub(crate) fn word_wrap(text: &str, width: usize) -> Vec<String> {
 }
 
 /// Status strip: fixed columns (icon · tool name · detail · time) for stable scanning.
+/// `max_entries`: when `Some(n)`, only the last `n` entries (oldest dropped) so a 2-row strip
+/// does not overflow; when `None`, render all entries (status rail activity section).
 pub(crate) fn status_strip_lines(
     entries: &std::collections::VecDeque<StatusEntry>,
     strip_width: u16,
     spinner: &str,
+    max_entries: Option<usize>,
 ) -> Vec<Line<'static>> {
     let w = strip_width as usize;
     const ICON_W: usize = 3;
@@ -249,8 +252,12 @@ pub(crate) fn status_strip_lines(
         }
     };
 
+    let skip = max_entries
+        .map(|n| entries.len().saturating_sub(n))
+        .unwrap_or(0);
+
     let mut slines: Vec<Line<'static>> = Vec::new();
-    for entry in entries {
+    for entry in entries.iter().skip(skip) {
         let time_s = if entry.done {
             let ms = entry.elapsed_ms.unwrap_or(0);
             if ms < 1000 {

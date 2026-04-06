@@ -1,9 +1,16 @@
 //! Minimal agent loop: history, provider call, tool execution, repeat.
 
 mod context;
+mod doom;
 pub mod history;
+pub mod metrics;
+mod parse;
 mod planning;
+mod retry_policy;
 mod security;
+mod stall;
+mod throttle;
+mod validation;
 
 use async_trait::async_trait;
 use clido_context::{
@@ -12,7 +19,7 @@ use clido_context::{
 };
 use clido_core::{
     compute_cost_usd, AgentConfig, ContentBlock, HooksConfig, Message, PermissionMode, Role,
-    StopReason,
+    StopReason, ToolFailureKind,
 };
 use clido_core::{evaluate_rules, RuleAction};
 use clido_core::{ClidoError, PricingTable, Result};
@@ -22,18 +29,22 @@ use clido_storage::{AuditEntry, AuditLog, SessionLine, SessionWriter};
 use clido_tools::{ToolOutput, ToolRegistry, ACCESS_DENIED_OUTSIDE_WORKSPACE};
 use futures::future::join_all;
 use similar::TextDiff;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
 use context::{compact_for_model_request, CONTEXT_OUTPUT_RESERVE, PROACTIVE_SUMMARIZE_THRESHOLD};
 pub use history::session_lines_to_messages;
 use security::{detect_injection, enhanced_edit_error};
-/// How many consecutive identical tool failures trigger doom-loop detection.
-const DOOM_LOOP_THRESHOLD: usize = 3;
+
+use doom::DoomTracker;
+use metrics::{AgentMetrics, NoopAgentMetrics};
+use retry_policy::{backoff_delay_ms, classify_retry, RetryStrategy};
+use stall::StallTracker;
+use validation::SchemaCache;
 /// Budget warning thresholds (percentage of limit consumed).
 const BUDGET_WARNING_PCTS: &[u8] = &[50, 80, 90];
 
@@ -63,15 +74,6 @@ fn prepend_tool_recovery_nudge(
             text: crate::prompts::tool_failure_recovery_nudge(&failures),
         },
     );
-}
-
-/// Retry strategies for failed tool calls.
-#[derive(Debug, Clone, Copy)]
-enum RetryStrategy {
-    /// Retry immediately with no delay.
-    RetryOnce,
-    /// Wait for specified milliseconds before retrying.
-    WaitAndRetry { delay_ms: u64 },
 }
 
 /// Create a git checkpoint of dirty working tree before AI edits.
@@ -224,10 +226,16 @@ pub struct AgentLoop {
     /// When true, the agent will emit a planning step on the first turn (--planner flag).
     /// The plan is purely informational: the reactive loop still drives execution.
     pub planner_mode: bool,
-    /// Tracks recent tool failures for doom-loop detection.
-    doom_monitor: VecDeque<String>,
-    /// Maximum retries for failed tool calls (0 = disable auto-retry).
-    max_tool_retries: u32,
+    /// Sliding-window doom-loop detection (normalized errors + repeated args).
+    doom: DoomTracker,
+    /// Heuristic stall score for tool-heavy turns.
+    stall: StallTracker,
+    /// JSON Schema cache for tool inputs (invalidated on registry replace).
+    schema_cache: Arc<Mutex<SchemaCache>>,
+    /// Wall-clock end of the last provider `complete` (for request spacing).
+    last_complete_end: Option<Instant>,
+    /// Metrics hooks (default no-op).
+    metrics: Arc<dyn AgentMetrics>,
     /// Current retry attempts for the active tool batch.
     retry_attempts: HashMap<String, u32>,
     /// Tracks which budget warning percentages have already been emitted this run.
@@ -257,6 +265,7 @@ impl AgentLoop {
         ask_user: Option<Arc<dyn AskUser>>,
     ) -> Self {
         let base_system_prompt = config.system_prompt.clone();
+        let doom_window = config.doom_same_args_window;
         Self {
             provider,
             tools,
@@ -276,9 +285,12 @@ impl AgentLoop {
             memory: None,
             planner_mode: false,
             base_system_prompt,
-            doom_monitor: VecDeque::new(),
+            doom: DoomTracker::new(doom_window),
+            stall: StallTracker::new(),
+            schema_cache: Arc::new(Mutex::new(SchemaCache::new())),
+            last_complete_end: None,
+            metrics: Arc::new(NoopAgentMetrics),
             budget_warned_pcts: Vec::new(),
-            max_tool_retries: 3,
             retry_attempts: HashMap::new(),
             path_permission_rx: None,
             git_context_fn: None,
@@ -316,6 +328,7 @@ impl AgentLoop {
         ask_user: Option<Arc<dyn AskUser>>,
     ) -> Self {
         let base_system_prompt = config.system_prompt.clone();
+        let doom_window = config.doom_same_args_window;
         Self {
             provider,
             tools,
@@ -335,9 +348,12 @@ impl AgentLoop {
             memory: None,
             planner_mode: false,
             base_system_prompt,
-            doom_monitor: VecDeque::new(),
+            doom: DoomTracker::new(doom_window),
+            stall: StallTracker::new(),
+            schema_cache: Arc::new(Mutex::new(SchemaCache::new())),
+            last_complete_end: None,
+            metrics: Arc::new(NoopAgentMetrics),
             budget_warned_pcts: Vec::new(),
-            max_tool_retries: 3,
             retry_attempts: HashMap::new(),
             path_permission_rx: None,
             git_context_fn: None,
@@ -381,6 +397,12 @@ impl AgentLoop {
         self
     }
 
+    /// Attach metrics hooks (default is a no-op implementation).
+    pub fn with_metrics(mut self, metrics: Arc<dyn AgentMetrics>) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
     /// Switch the model used for subsequent turns. Conversation history is preserved.
     pub fn set_model(&mut self, model: String) {
         self.config.model = model;
@@ -399,8 +421,8 @@ impl AgentLoop {
         self.provider = provider;
         self.config = config;
         self.tools = tools;
-        // Reset doom monitor since we're starting fresh with a new provider
-        self.doom_monitor.clear();
+        self.schema_cache.lock().ok().map(|mut g| g.clear());
+        self.doom.clear();
         // Reset retry attempts
         self.retry_attempts.clear();
         // Keep cumulative costs/tokens as they're session-level metrics
@@ -476,6 +498,9 @@ impl AgentLoop {
     /// Replace the active tool registry (used by TUI workdir changes).
     pub fn replace_tools(&mut self, tools: ToolRegistry) {
         self.tools = tools;
+        if let Ok(mut g) = self.schema_cache.lock() {
+            g.clear();
+        }
     }
 
     /// Reset the runtime permission mode override (used when the workdir changes so
@@ -556,7 +581,7 @@ impl AgentLoop {
         self.cumulative_output_tokens = 0;
         self.cumulative_cache_read_tokens = 0;
         self.cumulative_cache_creation_tokens = 0;
-        self.doom_monitor.clear();
+        self.doom.clear();
         self.budget_warned_pcts.clear();
     }
 
@@ -594,85 +619,13 @@ impl AgentLoop {
         None
     }
 
-    /// Determine if a tool error is retryable and what strategy to use.
-    fn classify_retry_strategy(&self, tool_name: &str, error: &str) -> Option<RetryStrategy> {
-        let err_lower = error.to_lowercase();
-
-        // Network/timeout errors - always retryable
-        if err_lower.contains("timeout")
-            || err_lower.contains("timed out")
-            || err_lower.contains("connection")
-            || err_lower.contains("network")
-            || err_lower.contains("temporarily unavailable")
-            || err_lower.contains("rate limit")
-            || err_lower.contains("too many requests")
-        {
-            return Some(RetryStrategy::WaitAndRetry { delay_ms: 1000 });
-        }
-
-        // File not found - might be race condition or typo
-        if err_lower.contains("no such file")
-            || err_lower.contains("file not found")
-            || err_lower.contains("cannot find")
-            || err_lower.contains("does not exist")
-        {
-            // Only retry Read, Glob, Grep operations - not Write/Edit
-            if matches!(
-                tool_name,
-                "Read" | "Glob" | "Grep" | "Ls" | "SemanticSearch"
-            ) {
-                return Some(RetryStrategy::RetryOnce);
-            }
-        }
-
-        // Permission denied - might be transient
-        if err_lower.contains("permission denied")
-            || err_lower.contains("access denied")
-            || err_lower.contains("unauthorized")
-        {
-            return Some(RetryStrategy::RetryOnce);
-        }
-
-        // Bash transient errors
-        if tool_name == "Bash"
-            && (err_lower.contains("resource temporarily unavailable")
-                || err_lower.contains("try again")
-                || err_lower.contains("device or resource busy"))
-        {
-            return Some(RetryStrategy::WaitAndRetry { delay_ms: 500 });
-        }
-
-        // Web fetch/search specific errors
-        if matches!(tool_name, "WebFetch" | "WebSearch")
-            && (err_lower.contains("dns")
-                || err_lower.contains("resolve")
-                || err_lower.contains("certificate")
-                || err_lower.contains("ssl"))
-        {
-            return Some(RetryStrategy::RetryOnce);
-        }
-
-        // Generic I/O and connection flakiness
-        if err_lower.contains("i/o error")
-            || err_lower.contains("io error")
-            || err_lower.contains("os error")
-            || err_lower.contains("broken pipe")
-            || err_lower.contains("connection reset")
-            || err_lower.contains("resource temporarily unavailable")
-        {
-            return Some(RetryStrategy::WaitAndRetry { delay_ms: 400 });
-        }
-
-        None // Not retryable
-    }
-
     /// Execute a tool with automatic retry logic for transient failures.
     async fn execute_tool_with_retry(
         &mut self,
         name: &str,
         input: &serde_json::Value,
     ) -> ToolOutput {
-        let max_retries = self.max_tool_retries;
+        let max_retries = self.config.max_tool_retries;
         let mut last_output: Option<ToolOutput> = None;
 
         for attempt in 0..=max_retries {
@@ -720,6 +673,7 @@ impl AgentLoop {
                                     output.content
                                 ),
                                 is_error: true,
+                                failure_kind: Some(ToolFailureKind::PermissionDenied),
                                 path: None,
                                 content_hash: None,
                                 mtime_nanos: None,
@@ -738,6 +692,7 @@ impl AgentLoop {
                                     output.content
                                 ),
                                 is_error: true,
+                                failure_kind: Some(ToolFailureKind::Timeout),
                                 path: None,
                                 content_hash: None,
                                 mtime_nanos: None,
@@ -762,8 +717,8 @@ impl AgentLoop {
                 return output;
             }
 
-            // Check if this error is retryable
-            match self.classify_retry_strategy(name, &output.content) {
+            // Check if this error is retryable (typed kind first, then legacy strings).
+            match classify_retry(output.failure_kind, name, &output.content) {
                 Some(strategy) => {
                     let key = format!(
                         "{}:{}",
@@ -771,6 +726,8 @@ impl AgentLoop {
                         serde_json::to_string(input).unwrap_or_default()
                     );
                     self.retry_attempts.insert(key.clone(), attempt);
+
+                    self.metrics.tool_retry_scheduled(name, attempt + 1);
 
                     // Log retry attempt (attempt+1 since we're about to retry)
                     if let Some(ref e) = self.emit {
@@ -784,13 +741,25 @@ impl AgentLoop {
                             .await;
                     }
 
-                    // Apply retry strategy
+                    // Apply retry strategy (capped backoff + jitter)
                     match strategy {
                         RetryStrategy::WaitAndRetry { delay_ms } => {
-                            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                            let d = backoff_delay_ms(
+                                delay_ms,
+                                attempt,
+                                self.config.retry_backoff_max_ms,
+                                self.config.retry_jitter_numerator,
+                            );
+                            tokio::time::sleep(Duration::from_millis(d)).await;
                         }
                         RetryStrategy::RetryOnce => {
-                            // No delay for simple retry
+                            let d = backoff_delay_ms(
+                                80,
+                                attempt,
+                                self.config.retry_backoff_max_ms,
+                                self.config.retry_jitter_numerator,
+                            );
+                            tokio::time::sleep(Duration::from_millis(d)).await;
                         }
                     }
 
@@ -1272,10 +1241,18 @@ impl AgentLoop {
         self.cumulative_output_tokens = 0;
         self.cumulative_cache_read_tokens = 0;
         self.cumulative_cache_creation_tokens = 0;
-        self.doom_monitor.clear();
+        self.doom.clear();
+        self.stall.reset();
         self.budget_warned_pcts.clear();
         const DEFAULT_INPUT_USD_PER_1M: f64 = 3.0;
         const DEFAULT_OUTPUT_USD_PER_1M: f64 = 15.0;
+
+        let mut tool_calls_this_turn: u32 = 0;
+        let turn_deadline = if self.config.max_wall_time_per_turn_sec > 0 {
+            Some(Instant::now() + Duration::from_secs(self.config.max_wall_time_per_turn_sec))
+        } else {
+            None
+        };
 
         loop {
             if cancel
@@ -1284,6 +1261,11 @@ impl AgentLoop {
                 .unwrap_or(false)
             {
                 return Err(ClidoError::Interrupted);
+            }
+            if let Some(dl) = turn_deadline {
+                if Instant::now() >= dl {
+                    return Err(ClidoError::MaxWallTimeExceeded);
+                }
             }
             if turns >= self.config.max_turns {
                 return Err(ClidoError::MaxTurnsExceeded);
@@ -1348,10 +1330,18 @@ impl AgentLoop {
             )
             .await?;
 
+            throttle::throttle_before_complete(
+                &mut self.last_complete_end,
+                self.config.provider_min_request_interval_ms,
+            )
+            .await;
+
             let response = self
                 .provider
                 .complete(&to_send, &schemas, &self.config)
                 .await?;
+
+            throttle::mark_complete_finished(&mut self.last_complete_end);
 
             // ── Cancel check after the blocking LLM call ──────────────────
             // provider.complete() can take 10-60s. The user may have pressed
@@ -1405,7 +1395,31 @@ impl AgentLoop {
                 response.usage.output_tokens
             );
 
-            // Append assistant message
+            let stop = response.stop_reason;
+            let tool_uses_parsed: Option<Vec<(String, String, serde_json::Value)>> =
+                if stop == StopReason::ToolUse {
+                    let u = parse::tool_uses_from_assistant_content(&response.content).map_err(
+                        |d| ClidoError::MalformedModelOutput { detail: d },
+                    )?;
+                    if u.is_empty() {
+                        return Err(ClidoError::MalformedModelOutput {
+                            detail: "stop_reason was ToolUse but no tool_use blocks".into(),
+                        });
+                    }
+                    let add = u.len() as u32;
+                    if tool_calls_this_turn.saturating_add(add) > self.config.max_tool_calls_per_turn
+                    {
+                        return Err(ClidoError::MaxToolCallsPerTurnExceeded);
+                    }
+                    tool_calls_this_turn = tool_calls_this_turn.saturating_add(add);
+                    Some(u)
+                } else {
+                    None
+                };
+
+            self.metrics.model_turn_completed(turns);
+
+            // Append assistant message (ToolUse batches validated before commit).
             self.history.push(Message {
                 role: Role::Assistant,
                 content: response.content.clone(),
@@ -1420,7 +1434,7 @@ impl AgentLoop {
                 w.log_write_line(&SessionLine::AssistantMessage { content });
             }
 
-            match response.stop_reason {
+            match stop {
                 StopReason::EndTurn => {
                     let text: String = response
                         .content
@@ -1456,17 +1470,8 @@ impl AgentLoop {
                         }
                     }
 
-                    let tool_uses: Vec<(String, String, serde_json::Value)> = response
-                        .content
-                        .iter()
-                        .filter_map(|b| {
-                            if let ContentBlock::ToolUse { id, name, input } = b {
-                                Some((id.clone(), name.clone(), input.clone()))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
+                    let tool_uses: Vec<(String, String, serde_json::Value)> =
+                        tool_uses_parsed.expect("tool uses validated before assistant commit");
 
                     if let Some(w) = session.as_mut() {
                         for (id, name, input) in &tool_uses {
@@ -1607,6 +1612,15 @@ impl AgentLoop {
                         outputs
                     };
 
+                    self.stall.observe_batch(&tool_uses, &outputs);
+                    if self.stall.score() >= self.config.stall_threshold {
+                        self.metrics.stall_detected();
+                        return Err(ClidoError::StallDetected {
+                            reason: "tool stall score reached threshold (repeated batches or all-error rounds)"
+                                .into(),
+                        });
+                    }
+
                     let mut tool_results = Vec::new();
                     let mut had_errors = false;
                     for ((id, name, input), (output, duration_ms)) in
@@ -1626,6 +1640,8 @@ impl AgentLoop {
                         if output.is_error {
                             had_errors = true;
                         }
+                        self.metrics.tool_call_finished(name, output.is_error, output.failure_kind);
+
                         tool_results.push(ContentBlock::ToolResult {
                             tool_use_id: id.clone(),
                             content: if output.is_error {
@@ -1636,29 +1652,22 @@ impl AgentLoop {
                             is_error: output.is_error,
                         });
 
-                        // Doom-loop detection: N consecutive identical failures from
-                        // the same tool → stop rather than keep spending tokens in a loop.
                         if output.is_error {
-                            let key = format!(
-                                "{}:{}",
+                            if let Some((t, err)) = self.doom.record_failure(
                                 name,
-                                output.content.chars().take(120).collect::<String>()
-                            );
-                            self.doom_monitor.push_back(key.clone());
-                            if self.doom_monitor.len() > DOOM_LOOP_THRESHOLD {
-                                self.doom_monitor.pop_front();
-                            }
-                            if self.doom_monitor.len() >= DOOM_LOOP_THRESHOLD
-                                && self.doom_monitor.iter().all(|k| k == &key)
-                            {
+                                &output.content,
+                                input,
+                                self.config.doom_consecutive_same_error,
+                                self.config.doom_same_args_min,
+                            ) {
+                                self.metrics.doom_detected(&t);
                                 return Err(ClidoError::DoomLoop {
-                                    tool: name.clone(),
-                                    error: output.content.chars().take(200).collect::<String>(),
+                                    tool: t,
+                                    error: err,
                                 });
                             }
                         } else {
-                            // A successful tool call resets the doom counter.
-                            self.doom_monitor.clear();
+                            self.doom.clear();
                         }
                     }
                     prepend_tool_recovery_nudge(&tool_uses, &outputs, &mut tool_results);
@@ -1960,19 +1969,29 @@ impl AgentLoop {
     const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
 
     async fn execute_tool(&self, name: &str, input: &serde_json::Value) -> ToolOutput {
-        match self.tools.get(name) {
-            Some(tool) => {
-                // Wrap tool execution in a timeout to prevent hangs
-                match tokio::time::timeout(Self::TOOL_TIMEOUT, tool.execute(input.clone())).await {
-                    Ok(output) => output,
-                    Err(_) => ToolOutput::err(format!(
-                        "Tool '{}' timed out after {} seconds - operation took too long",
-                        name,
-                        Self::TOOL_TIMEOUT.as_secs()
-                    )),
-                }
+        let Some(tool) = self.tools.get(name) else {
+            return ToolOutput::err_kind(
+                format!("Tool not found: {name}"),
+                ToolFailureKind::NotFound,
+            );
+        };
+        let schema = tool.schema();
+        if let Ok(mut guard) = self.schema_cache.lock() {
+            if let Err(msg) = guard.validate(name, &schema, input) {
+                self.metrics.validation_rejected(name);
+                return ToolOutput::err_kind(msg, ToolFailureKind::ValidationInput);
             }
-            None => ToolOutput::err(format!("Tool not found: {}", name)),
+        }
+        match tokio::time::timeout(Self::TOOL_TIMEOUT, tool.execute(input.clone())).await {
+            Ok(output) => output,
+            Err(_) => ToolOutput::err_kind(
+                format!(
+                    "Tool '{}' timed out after {} seconds - operation took too long",
+                    name,
+                    Self::TOOL_TIMEOUT.as_secs()
+                ),
+                ToolFailureKind::Timeout,
+            ),
         }
     }
 
@@ -2021,10 +2040,14 @@ impl AgentLoop {
             let max_parallel = self.config.max_parallel_tools.max(1) as usize;
             let semaphore = Arc::new(Semaphore::new(max_parallel));
             let tools = &self.tools;
+            let cache = Arc::clone(&self.schema_cache);
+            let metrics = Arc::clone(&self.metrics);
             let futures: Vec<_> = tool_uses
                 .iter()
                 .map(|(_, name, input)| {
                     let sem = semaphore.clone();
+                    let cache = Arc::clone(&cache);
+                    let metrics = Arc::clone(&metrics);
                     let name = name.clone();
                     let input = input.clone();
                     async move {
@@ -2036,7 +2059,16 @@ impl AgentLoop {
                         };
                         match tools.get(&name) {
                             Some(tool) => {
-                                // Wrap in timeout like sequential execution
+                                let schema = tool.schema();
+                                if let Ok(mut g) = cache.lock() {
+                                    if let Err(msg) = g.validate(&name, &schema, &input) {
+                                        metrics.validation_rejected(&name);
+                                        return ToolOutput::err_kind(
+                                            msg,
+                                            ToolFailureKind::ValidationInput,
+                                        );
+                                    }
+                                }
                                 match tokio::time::timeout(
                                     Duration::from_secs(60),
                                     tool.execute(input),
@@ -2044,13 +2076,16 @@ impl AgentLoop {
                                 .await
                                 {
                                     Ok(output) => output,
-                                    Err(_) => ToolOutput::err(format!(
-                                        "Tool '{}' timed out after 60 seconds",
-                                        name
-                                    )),
+                                    Err(_) => ToolOutput::err_kind(
+                                        format!("Tool '{name}' timed out after 60 seconds"),
+                                        ToolFailureKind::Timeout,
+                                    ),
                                 }
                             }
-                            None => ToolOutput::err(format!("Tool not found: {}", name)),
+                            None => ToolOutput::err_kind(
+                                format!("Tool not found: {name}"),
+                                ToolFailureKind::NotFound,
+                            ),
                         }
                     }
                 })
@@ -2343,6 +2378,7 @@ mod tests {
             no_rules: false,
             rules_file: None,
             max_output_tokens: None,
+            ..Default::default()
         }
     }
 

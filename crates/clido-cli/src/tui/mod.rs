@@ -138,6 +138,8 @@ pub(super) const TUI_SURFACE_STATUS: Color = Color::Rgb(22, 25, 35);
 pub(super) const TUI_SURFACE_HINT: Color = Color::Rgb(20, 22, 30);
 /// Input dock — cool lift, distinct from transcript (`L3`).
 pub(super) const TUI_SURFACE_ACTION: Color = Color::Rgb(32, 36, 52);
+/// Status rail (IDE panel) — between transcript and focus strip tones.
+pub(super) const TUI_SURFACE_RAIL: Color = Color::Rgb(26, 29, 40);
 /// Permission / approval emphasis (warm dark tint on dock).
 pub(super) const TUI_SURFACE_WARN_BG: Color = Color::Rgb(42, 36, 26);
 /// Rate-limit / hold state (amber-neutral dock tint).

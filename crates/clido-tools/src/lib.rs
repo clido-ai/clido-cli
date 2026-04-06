@@ -29,6 +29,7 @@ mod write;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use clido_core::ToolFailureKind;
 
 pub use apply_patch_tool::ApplyPatchTool;
 pub use bash::BashTool;
@@ -208,6 +209,8 @@ pub fn default_registry_with_todo_store(
 pub struct ToolOutput {
     pub content: String,
     pub is_error: bool,
+    /// Stable failure class for agent retry policy; `None` means "unknown" (heuristics apply).
+    pub failure_kind: Option<ToolFailureKind>,
     /// For Write/Edit: path written (for session stale-file detection).
     pub path: Option<String>,
     /// For Write/Edit: content hash after write (for session stale-file detection).
@@ -223,6 +226,7 @@ impl ToolOutput {
         Self {
             content: content.into(),
             is_error: false,
+            failure_kind: None,
             path: None,
             content_hash: None,
             mtime_nanos: None,
@@ -233,6 +237,18 @@ impl ToolOutput {
         Self {
             content: content.into(),
             is_error: true,
+            failure_kind: None,
+            path: None,
+            content_hash: None,
+            mtime_nanos: None,
+            diff: None,
+        }
+    }
+    pub fn err_kind(content: impl Into<String>, kind: ToolFailureKind) -> Self {
+        Self {
+            content: content.into(),
+            is_error: true,
+            failure_kind: Some(kind),
             path: None,
             content_hash: None,
             mtime_nanos: None,
@@ -248,6 +264,7 @@ impl ToolOutput {
         Self {
             content: content.into(),
             is_error: false,
+            failure_kind: None,
             path: Some(path.into()),
             content_hash: Some(content_hash.into()),
             mtime_nanos: Some(mtime_nanos),
@@ -328,6 +345,18 @@ mod tests {
         let reg = default_registry(tmp.path().to_path_buf());
         let schemas = reg.schemas();
         assert!(!schemas.is_empty());
+    }
+
+    /// Every registered tool must expose a JSON Schema that compiles (agent validates inputs).
+    #[test]
+    fn default_registry_tool_schemas_compile() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = default_registry(tmp.path().to_path_buf());
+        for ts in reg.schemas() {
+            jsonschema::validator_for(&ts.input_schema).unwrap_or_else(|e| {
+                panic!("schema compile failed for tool {}: {e}", ts.name);
+            });
+        }
     }
 
     /// Line 70: sandbox branch in default_registry_with_options.

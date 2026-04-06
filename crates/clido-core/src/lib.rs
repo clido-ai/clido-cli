@@ -6,6 +6,7 @@ pub mod error;
 pub mod model_prefs;
 pub mod pricing;
 pub mod skills;
+pub mod tool_failure;
 pub mod types;
 
 pub use config::{
@@ -18,6 +19,7 @@ pub use config_loader::{
     upsert_profile_in_config, LoadedConfig, ProfileEntry, SkillsSection,
 };
 pub use error::{ClidoError, Result};
+pub use tool_failure::ToolFailureKind;
 pub use model_prefs::ModelPrefs;
 pub use pricing::{compute_cost_usd, load_pricing, ModelPricingEntry, PricingTable};
 pub use types::{ContentBlock, Message, ModelResponse, Role, StopReason, ToolSchema, Usage};

@@ -6,6 +6,7 @@ use clido_core::PermissionMode;
 use ratatui::style::Color;
 use ratatui::text::Line;
 
+use crate::git_context::GitContext;
 use crate::image_input::ImageAttachment;
 use crate::overlay::OverlayStack;
 use crate::repl::expand_at_file_refs;
@@ -110,6 +111,10 @@ pub(super) struct App {
 
     /// Layout metrics computed during render; consumed by input/event handlers.
     pub(super) layout: super::state::LayoutInfo,
+    /// Vertical scroll within the status rail (wide-terminal layout).
+    pub(super) status_panel_scroll: u16,
+    /// Cached `git` snapshot for the status rail (refreshed on workdir change and at startup).
+    pub(super) tui_git_snapshot: Option<GitContext>,
     pub(super) busy: bool,
     pub(super) spinner_tick: usize,
     pub(super) pending_perm: Option<PendingPerm>,
@@ -309,6 +314,8 @@ impl App {
             chat_render_prev_max_scroll: 0,
             suppress_next_chat_scroll_up: false,
             layout: super::state::LayoutInfo::default(),
+            status_panel_scroll: 0,
+            tui_git_snapshot: GitContext::discover(&workspace_root),
 
             busy: false,
             spinner_tick: 0,
@@ -432,6 +439,11 @@ impl App {
     pub(super) fn expire_toasts(&mut self) {
         let now = std::time::Instant::now();
         self.toasts.retain(|t| t.expires > now);
+    }
+
+    /// Refresh git branch/status for the status rail after `workspace_root` changes.
+    pub(super) fn refresh_git_snapshot(&mut self) {
+        self.tui_git_snapshot = GitContext::discover(&self.workspace_root);
     }
 
     /// Determine which component currently owns input focus.
@@ -705,8 +717,9 @@ impl App {
             start: std::time::Instant::now(),
             elapsed_ms: None,
         });
-        // Keep only the last 2 visible entries.
-        while self.status_log.len() > 2 {
+        // Ring buffer for tool activity (status strip shows a tail; rail can show more).
+        const STATUS_LOG_CAP: usize = 24;
+        while self.status_log.len() > STATUS_LOG_CAP {
             self.status_log.pop_front();
         }
     }

@@ -2341,12 +2341,20 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 }
             }
         }
-        // ── Chat scroll (PageUp/PageDown — larger jumps) ─────────────────────
+        // ── Chat scroll (PageUp/PageDown) or status rail scroll (Alt+PgUp/PgDn) ─
         (_, PageUp) => {
-            scroll_up(app, 3);
+            if app.layout.status_rail_active && event.modifiers.contains(Km::ALT) {
+                app.status_panel_scroll = app.status_panel_scroll.saturating_sub(3);
+            } else {
+                scroll_up(app, 3);
+            }
         }
         (_, PageDown) => {
-            scroll_down(app, 3);
+            if app.layout.status_rail_active && event.modifiers.contains(Km::ALT) {
+                app.status_panel_scroll = (app.status_panel_scroll + 3).min(app.layout.status_panel_max_scroll);
+            } else {
+                scroll_down(app, 3);
+            }
         }
         (Km::CONTROL, Char('u')) => {
             app.text_input.text.clear();

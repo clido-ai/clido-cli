@@ -185,10 +185,76 @@ pub struct AgentConfig {
     /// Maximum tokens the model may produce per response. None = provider default (8192).
     #[serde(default)]
     pub max_output_tokens: Option<u32>,
+    /// Wall-clock seconds allowed for one user turn (entire completion loop). 0 = no limit.
+    #[serde(default = "default_max_wall_time_per_turn_sec")]
+    pub max_wall_time_per_turn_sec: u64,
+    /// Maximum tool invocations (individual calls) per user turn.
+    #[serde(default = "default_max_tool_calls_per_turn")]
+    pub max_tool_calls_per_turn: u32,
+    /// Stall score threshold before failing the turn (see agent loop stall tracker).
+    #[serde(default = "default_stall_threshold")]
+    pub stall_threshold: u32,
+    /// Consecutive identical normalized tool errors to trigger doom loop.
+    #[serde(default = "default_doom_consecutive")]
+    pub doom_consecutive_same_error: usize,
+    /// Sliding window size (entries) for doom-loop args repetition detection.
+    #[serde(default = "default_doom_window")]
+    pub doom_same_args_window: usize,
+    /// Repeated identical `(tool, args_hash)` within the window triggers doom (minimum count).
+    #[serde(default = "default_doom_same_args_min")]
+    pub doom_same_args_min: usize,
+    /// Auto-retries per tool call for transient failures (network, etc.).
+    #[serde(default = "default_max_tool_retries")]
+    pub max_tool_retries: u32,
+    /// Upper bound on exponential backoff delay between retries (milliseconds).
+    #[serde(default = "default_retry_backoff_max_ms")]
+    pub retry_backoff_max_ms: u64,
+    /// Jitter as a fraction of delay: delay * jitter_numerator / 100.
+    #[serde(default = "default_retry_jitter_numerator")]
+    pub retry_jitter_numerator: u8,
+    /// Minimum spacing between provider `complete` calls (ms). 0 = disabled.
+    #[serde(default)]
+    pub provider_min_request_interval_ms: u32,
 }
 
 fn default_max_parallel_tools() -> u32 {
     4
+}
+
+fn default_max_wall_time_per_turn_sec() -> u64 {
+    900
+}
+
+fn default_max_tool_calls_per_turn() -> u32 {
+    200
+}
+
+fn default_stall_threshold() -> u32 {
+    6
+}
+
+fn default_doom_consecutive() -> usize {
+    3
+}
+
+fn default_doom_window() -> usize {
+    8
+}
+
+fn default_doom_same_args_min() -> usize {
+    4
+}
+
+fn default_max_tool_retries() -> u32 {
+    3
+}
+
+fn default_retry_backoff_max_ms() -> u64 {
+    10_000
+}
+
+fn default_retry_jitter_numerator() -> u8 {
+    25
 }
 
 impl Default for AgentConfig {
@@ -209,6 +275,16 @@ impl Default for AgentConfig {
             no_rules: false,
             rules_file: None,
             max_output_tokens: None,
+            max_wall_time_per_turn_sec: default_max_wall_time_per_turn_sec(),
+            max_tool_calls_per_turn: default_max_tool_calls_per_turn(),
+            stall_threshold: default_stall_threshold(),
+            doom_consecutive_same_error: default_doom_consecutive(),
+            doom_same_args_window: default_doom_window(),
+            doom_same_args_min: default_doom_same_args_min(),
+            max_tool_retries: default_max_tool_retries(),
+            retry_backoff_max_ms: default_retry_backoff_max_ms(),
+            retry_jitter_numerator: default_retry_jitter_numerator(),
+            provider_min_request_interval_ms: 0,
         }
     }
 }

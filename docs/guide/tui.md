@@ -36,6 +36,8 @@ Regions use **different background tones** so you can tell header, transcript, a
 ╰─ multiline input ─────────────────────────────────────────────────────────────╯
 ```
 
+**Wide terminals (118+ columns):** the progress strip, status strip, and queue move into a **right-hand status rail** beside the chat (sections: **AGENT**, **SESSION**, **TASK**, **CONTEXT** — Git + cwd — **QUEUE**, **TOOLS**). Rail width scales slightly with terminal size (about 26% of the main row, capped). When the rail scrolls, a **footer** shows visible line range and total (`1–12/40 · Alt+Pg`). **Alt+Page Up** / **Alt+Page Down** scroll the rail. Model and profile stay in the **header** to avoid duplicating them in the rail. Narrower terminals keep the stacked layout above.
+
 | Area | Description |
 |------|-------------|
 | **Header** | Model, profile, workspace path, session id/title, token/cost hints. |
@@ -61,7 +63,8 @@ See [Slash commands](/docs/reference/slash-commands) for the full command list (
 | `Ctrl+/` | Interrupt current run without sending a new message |
 | `Ctrl+Y` | Copy the last assistant message via OSC 52 |
 | `Up` / `Down` | Scroll chat history (or history navigation when typing) |
-| `Page Up` / `Page Down` | Scroll chat history by page |
+| `Page Up` / `Page Down` | Scroll chat by page |
+| `Alt+Page Up` / `Alt+Page Down` | Scroll the **status rail** (wide layouts only, when the rail scrolls) |
 | `Ctrl+U` | Clear the input field |
 
 ### While agent is running

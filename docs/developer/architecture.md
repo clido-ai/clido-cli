@@ -173,3 +173,7 @@ The compaction strategy summarises the oldest turns in the conversation into a s
 The agent loop runs in a single Tokio async task. Tool execution uses `tokio::task::spawn` for parallel tool calls, bounded by a `tokio::sync::Semaphore` (size = `max_parallel_tools`).
 
 Only read-only tools run in parallel. Write, Edit, and Bash always run serially to prevent race conditions.
+
+## Agent loop hardening (production plan)
+
+The full-scope plan for a production-grade agent loop is **[agent-loop-production-plan.md](./agent-loop-production-plan.md)**. It is a single non-optional backlog: validation, typed errors, retries, stall/doom detection, streaming semantics, session integrity, metrics, configuration, documentation, and a verifiable failure-mode matrix.

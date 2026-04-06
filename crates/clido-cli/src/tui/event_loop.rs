@@ -2602,6 +2602,7 @@ pub(super) async fn event_loop(
                     Some(AgentEvent::WorkdirSwitched { path }) => {
                         last_agent_activity = std::time::Instant::now();
                         app.workspace_root = path.clone();
+                        app.refresh_git_snapshot();
                         app.harness_mode = app.harness_from_cli
                             || clido_core::load_config(&path)
                                 .ok()

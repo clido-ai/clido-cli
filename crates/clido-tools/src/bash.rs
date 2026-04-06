@@ -273,6 +273,7 @@ impl Tool for BashTool {
                     pattern
                 ),
                 is_error: true,
+                failure_kind: None,
                 diff: None,
                 path: None,
                 content_hash: None,

@@ -1,6 +1,7 @@
 mod diff;
 mod plan;
 mod profile;
+mod status_panel;
 mod surfaces;
 mod welcome;
 mod widgets;
@@ -254,48 +255,97 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         2
     };
 
-    // Layout: header | chat | progress strip (0–N) | status (2) | queue (1) | hint (1) | input
-    // Input grows with content: 1 line of text = 3 rows (2 borders + 1), capped at 12.
-    // When very narrow (< 40), collapse optional rows to avoid layout panics.
+    // Layout: wide terminals use a right **status rail** (IDE-style); narrow keeps stacked strips.
+    // Input grows with content: 1 line of text = 3 rows (2 borders + 1), capped at 8.
     let input_line_count = app.text_input.text.matches('\n').count() + 1;
-    // Up to 6 content rows (+ borders) so longer drafts stay visible on tall terminals.
     let input_h = (input_line_count as u16 + 2).clamp(3, 8);
     let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
     let plan_steps = gather_plan_panel_steps(app);
-    let plan_h = plan_panel_height_for_layout(
-        app.plan_panel_visibility,
-        area.width,
-        area.height,
-        &plan_steps,
-        app.harness_mode,
-    );
-    // Queue area: height = header + items, but reserve enough chat space (min 10 lines).
-    // Dynamic — fills available vertical space on tall terminals.
-    let min_chat_h = 10u16;
-    let reserved_h = header_h + plan_h + status_h + hint_h + input_h + 2; // slack for transcript wrap / resize
-    let available_for_queue = area.height.saturating_sub(min_chat_h + reserved_h);
-    let queue_h = if app.current_step.is_some() && !app.queued.is_empty() {
-        let total = 1 + 1 + app.queued.len();
-        total.min(available_for_queue.max(3) as usize) as u16
-    } else if app.current_step.is_some() {
-        1 // Agent thinking - show step only
-    } else if !app.queued.is_empty() {
-        let total = 1 + app.queued.len() + 1;
-        total.min(available_for_queue.max(3) as usize) as u16 // header + items
-    } else {
-        0 // Nothing to show
-    };
-    let [header_area, chat_area, plan_area, status_area, queue_area, hint_area, input_area] =
-        Layout::vertical([
+    let use_rail = area.width >= status_panel::STATUS_RAIL_MIN_TERM_WIDTH;
+    app.layout.status_rail_active = use_rail;
+    let mut stacked_plan_h: u16 = 0;
+
+    let (
+        header_area,
+        chat_area,
+        plan_area,
+        status_area,
+        queue_area,
+        hint_area,
+        input_area,
+        rail_area_opt,
+    ) = if use_rail {
+        let [h_area, below_header] = Layout::vertical([
             Constraint::Length(header_h),
             Constraint::Min(0),
-            Constraint::Length(plan_h),
-            Constraint::Length(status_h),
-            Constraint::Length(queue_h),
+        ])
+        .areas(area);
+        let [mid_area, hint_a, input_a] = Layout::vertical([
+            Constraint::Min(0),
             Constraint::Length(hint_h),
             Constraint::Length(input_h),
         ])
-        .areas(area);
+        .areas(below_header);
+        let rail_w = status_panel::status_rail_width(mid_area.width);
+        let [chat_a, rail_a] = Layout::horizontal([
+            Constraint::Min(0),
+            Constraint::Length(rail_w),
+        ])
+        .areas(mid_area);
+        (
+            h_area,
+            chat_a,
+            Rect::default(),
+            Rect::default(),
+            Rect::default(),
+            hint_a,
+            input_a,
+            Some(rail_a),
+        )
+    } else {
+        stacked_plan_h = plan_panel_height_for_layout(
+            app.plan_panel_visibility,
+            area.width,
+            area.height,
+            &plan_steps,
+            app.harness_mode,
+        );
+        let min_chat_h = 10u16;
+        let reserved_h = header_h + stacked_plan_h + status_h + hint_h + input_h + 2;
+        let available_for_queue = area.height.saturating_sub(min_chat_h + reserved_h);
+        let queue_h = if app.current_step.is_some() && !app.queued.is_empty() {
+            let total = 1 + 1 + app.queued.len();
+            total.min(available_for_queue.max(3) as usize) as u16
+        } else if app.current_step.is_some() {
+            1
+        } else if !app.queued.is_empty() {
+            let total = 1 + app.queued.len() + 1;
+            total.min(available_for_queue.max(3) as usize) as u16
+        } else {
+            0
+        };
+        let [h_area, ch_area, pl_area, st_area, qu_area, hi_area, inp_area] =
+            Layout::vertical([
+                Constraint::Length(header_h),
+                Constraint::Min(0),
+                Constraint::Length(stacked_plan_h),
+                Constraint::Length(status_h),
+                Constraint::Length(queue_h),
+                Constraint::Length(hint_h),
+                Constraint::Length(input_h),
+            ])
+            .areas(area);
+        (
+            h_area,
+            ch_area,
+            pl_area,
+            st_area,
+            qu_area,
+            hi_area,
+            inp_area,
+            None,
+        )
+    };
 
     // ── Header render ──
     let header_para = if is_narrow {
@@ -363,26 +413,36 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         }
     }
 
-    // ── Progress strip (above status; visibility: /progress on|off|auto) ──
-    if plan_h > 0 {
-        let pb = surfaces::focus_lane_zone_block();
-        let p_inner = pb.inner(plan_area);
-        frame.render_widget(pb, plan_area);
-        let plines = build_plan_todo_strip_lines(app, &plan_steps, p_inner.width);
-        frame.render_widget(Paragraph::new(plines), p_inner);
-    }
+    // ── Status rail (wide) or stacked progress / status / queue (narrow) ──
+    if let Some(rail_area) = rail_area_opt {
+        status_panel::render_status_rail(frame, app, rail_area);
+    } else {
+        // ── Progress strip (above status; visibility: /progress on|off|auto) ──
+        if stacked_plan_h > 0 {
+            let pb = surfaces::focus_lane_zone_block();
+            let p_inner = pb.inner(plan_area);
+            frame.render_widget(pb, plan_area);
+            let plines = build_plan_todo_strip_lines(
+                app,
+                &plan_steps,
+                p_inner.width,
+                5,
+                true,
+            );
+            frame.render_widget(Paragraph::new(plines), p_inner);
+        }
 
-    // ── Status strip ──
-    if status_area.height > 0 {
-        let sb = surfaces::status_zone_block();
-        let s_inner = sb.inner(status_area);
-        frame.render_widget(sb, status_area);
-        let spinner = SPINNER[app.spinner_tick];
-        let slines = status_strip_lines(&app.status_log, s_inner.width, spinner);
-        frame.render_widget(Paragraph::new(slines), s_inner);
-    }
+        // ── Status strip ──
+        if status_area.height > 0 {
+            let sb = surfaces::status_zone_block();
+            let s_inner = sb.inner(status_area);
+            frame.render_widget(sb, status_area);
+            let spinner = SPINNER[app.spinner_tick];
+            let slines = status_strip_lines(&app.status_log, s_inner.width, spinner, Some(2));
+            frame.render_widget(Paragraph::new(slines), s_inner);
+        }
 
-    // ── Queue strip ──
+        // ── Queue strip ──
     // When the agent is thinking with queued items: show thinking step + queued list.
     // When idle with queued items: show queued list with count header.
     // When thinking alone: just the step text.
@@ -472,6 +532,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
         frame.render_widget(qb, queue_area);
         frame.render_widget(Paragraph::new(queue_lines), q_inner);
+        }
     }
 
     // ── Input box (always rendered, even when permission popup is showing) ──
@@ -692,6 +753,10 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Span::styled("Ctrl+L", hk),
             Span::styled(" redraw", hint_dim),
         ]);
+        if app.layout.status_rail_active && app.layout.status_panel_max_scroll > 0 {
+            hint_spans.push(Span::styled("Alt+PgUp/Dn", hk));
+            hint_spans.push(Span::styled(format!(" status{TUI_SEP}"), hint_dim));
+        }
         // Scroll position indicator when not following.
         if app.layout.max_scroll > 0 && !app.following {
             let pct = (app.scroll * 100 / app.layout.max_scroll).min(100);

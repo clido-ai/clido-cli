@@ -68,6 +68,36 @@ pub enum ClidoError {
 /// Result type using ClidoError.
 pub type Result<T> = std::result::Result<T, ClidoError>;
 
+impl ClidoError {
+    /// Whether to rewind in-memory conversation history to `history_before_turn` after a failed
+    /// agent `run` / `run_next_turn`.
+    ///
+    /// **Why:** On generic failures we drop the whole turn so the next message does not create
+    /// invalid same-role sequences. **Recoverable** errors are different:
+    /// - `RateLimited` — the user or TUI retries; truncating would erase tool traces and break
+    ///   "continue" / auto-resume (model sees no prior task).
+    /// - `ContextLimit` — compaction failed; keeping the user turn allows `/compact` or a
+    ///   follow-up without losing the prompt.
+    /// - `MaxTurnsExceeded` / `BudgetExceeded` — if the model already produced assistant (and
+    ///   possibly tool) content this turn, we **keep** it so auto-continue and budget handling
+    ///   still see a consistent transcript. If the turn never got past the new user line
+    ///   (`history_len == history_before_turn + 1`), we truncate like a bare failure.
+    #[must_use]
+    pub fn should_truncate_history_after_failed_run(
+        &self,
+        history_len: usize,
+        history_before_turn: usize,
+    ) -> bool {
+        match self {
+            ClidoError::RateLimited { .. } | ClidoError::ContextLimit { .. } => false,
+            ClidoError::MaxTurnsExceeded | ClidoError::BudgetExceeded => {
+                history_len == history_before_turn.saturating_add(1)
+            }
+            _ => true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +205,29 @@ mod tests {
         let json_err = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
         let e = ClidoError::from(json_err);
         assert!(e.to_string().contains("json error"));
+    }
+
+    #[test]
+    fn truncate_policy_rate_limit_never() {
+        let e = ClidoError::RateLimited {
+            message: "slow down".into(),
+            retry_after_secs: Some(60),
+            is_subscription_limit: false,
+        };
+        assert!(!e.should_truncate_history_after_failed_run(99, 0));
+        assert!(!e.should_truncate_history_after_failed_run(3, 1));
+    }
+
+    #[test]
+    fn truncate_policy_max_turns_only_when_just_user() {
+        let e = ClidoError::MaxTurnsExceeded;
+        assert!(e.should_truncate_history_after_failed_run(1, 0)); // only new user
+        assert!(!e.should_truncate_history_after_failed_run(3, 0)); // user + more
+    }
+
+    #[test]
+    fn truncate_policy_provider_always() {
+        let e = ClidoError::Provider("x".into());
+        assert!(e.should_truncate_history_after_failed_run(5, 0));
     }
 }

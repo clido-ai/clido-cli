@@ -1343,12 +1343,12 @@ impl AgentLoop {
         }
 
         let result = self.run_completion_loop(session, pricing, cancel).await;
-        if result.is_err() {
-            // Roll back ALL messages added during this turn to avoid partial
-            // history pollution (consecutive same-role messages break most APIs).
-            self.history.truncate(history_before);
-        } else {
-            self.prune_memory_if_needed();
+        match &result {
+            Ok(_) => self.prune_memory_if_needed(),
+            Err(e) if e.should_truncate_history_after_failed_run(self.history.len(), history_before) => {
+                self.history.truncate(history_before);
+            }
+            Err(_) => {}
         }
         result
     }
@@ -1408,14 +1408,12 @@ impl AgentLoop {
         }
 
         let result = self.run_completion_loop(session, pricing, cancel).await;
-        // If the run failed before any assistant response, rollback the user message
-        // so the next call doesn't send consecutive user messages (which most APIs reject).
-        if result.is_err() {
-            // Roll back ALL messages added during this turn to avoid partial
-            // history pollution (consecutive same-role messages break most APIs).
-            self.history.truncate(history_before);
-        } else {
-            self.prune_memory_if_needed();
+        match &result {
+            Ok(_) => self.prune_memory_if_needed(),
+            Err(e) if e.should_truncate_history_after_failed_run(self.history.len(), history_before) => {
+                self.history.truncate(history_before);
+            }
+            Err(_) => {}
         }
         result
     }
@@ -1461,12 +1459,12 @@ impl AgentLoop {
         }
 
         let result = self.run_completion_loop(session, pricing, cancel).await;
-        if result.is_err() {
-            // Roll back ALL messages added during this turn to avoid partial
-            // history pollution (consecutive same-role messages break most APIs).
-            self.history.truncate(history_before);
-        } else {
-            self.prune_memory_if_needed();
+        match &result {
+            Ok(_) => self.prune_memory_if_needed(),
+            Err(e) if e.should_truncate_history_after_failed_run(self.history.len(), history_before) => {
+                self.history.truncate(history_before);
+            }
+            Err(_) => {}
         }
         result
     }
@@ -1504,12 +1502,12 @@ impl AgentLoop {
         }
 
         let result = self.run_completion_loop(session, pricing, cancel).await;
-        if result.is_err() {
-            // Roll back ALL messages added during this turn to avoid partial
-            // history pollution (consecutive same-role messages break most APIs).
-            self.history.truncate(history_before);
-        } else {
-            self.prune_memory_if_needed();
+        match &result {
+            Ok(_) => self.prune_memory_if_needed(),
+            Err(e) if e.should_truncate_history_after_failed_run(self.history.len(), history_before) => {
+                self.history.truncate(history_before);
+            }
+            Err(_) => {}
         }
         result
     }
@@ -2441,15 +2439,15 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use clido_core::{
-        AgentConfig, ContentBlock, ModelResponse, PermissionMode, Role, StopReason, ToolSchema,
-        Usage,
+        AgentConfig, ContentBlock, ModelResponse, Message, PermissionMode, Role, StopReason,
+        ToolSchema, Usage,
     };
     use clido_providers::ModelProvider;
     use clido_storage::SessionLine;
     use clido_tools::ToolRegistry;
     use futures::Stream;
     use std::pin::Pin;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::sync::Arc;
 
     struct DenyAskUser;
@@ -2508,6 +2506,67 @@ mod tests {
         > {
             unimplemented!()
         }
+        async fn list_models(&self) -> Vec<clido_providers::ModelEntry> {
+            vec![]
+        }
+    }
+
+    /// First `complete` returns rate-limited; later calls succeed (simulates retry / resume).
+    struct RateLimitedThenOkProvider {
+        calls: AtomicU32,
+    }
+
+    impl RateLimitedThenOkProvider {
+        fn new() -> Self {
+            Self {
+                calls: AtomicU32::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ModelProvider for RateLimitedThenOkProvider {
+        async fn complete(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _config: &AgentConfig,
+        ) -> clido_core::Result<ModelResponse> {
+            let n = self.calls.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                return Err(ClidoError::RateLimited {
+                    message: "too many requests".into(),
+                    retry_after_secs: Some(1),
+                    is_subscription_limit: false,
+                });
+            }
+            Ok(ModelResponse {
+                id: "mock-id".to_string(),
+                model: "mock".to_string(),
+                content: vec![ContentBlock::Text {
+                    text: "after rate limit".to_string(),
+                }],
+                stop_reason: StopReason::EndTurn,
+                usage: Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                },
+            })
+        }
+
+        async fn complete_stream(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _config: &AgentConfig,
+        ) -> clido_core::Result<
+            Pin<Box<dyn Stream<Item = clido_core::Result<clido_providers::StreamEvent>> + Send>>,
+        > {
+            unimplemented!()
+        }
+
         async fn list_models(&self) -> Vec<clido_providers::ModelEntry> {
             vec![]
         }
@@ -2843,6 +2902,28 @@ mod tests {
     }
 
     // ── history rollback on failed run ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn run_next_turn_preserves_history_when_rate_limited() {
+        let provider = Arc::new(RateLimitedThenOkProvider::new());
+        let mut agent = AgentLoop::new(provider, empty_registry(), mock_config(), None);
+        agent.run("first", None, None, None).await.unwrap();
+        let len_after_first = agent.history.len();
+
+        let r = agent.run_next_turn("second", None, None, None).await;
+        assert!(
+            matches!(r, Err(ClidoError::RateLimited { .. })),
+            "expected RateLimited, got {r:?}"
+        );
+        assert_eq!(
+            agent.history.len(),
+            len_after_first + 1,
+            "user line for the rate-limited turn must stay in history for resume"
+        );
+
+        let r2 = agent.run_next_turn("continue", None, None, None).await.unwrap();
+        assert_eq!(r2, "after rate limit");
+    }
 
     /// Provider that always fails to simulate a network/API error.
     struct FailingProvider;

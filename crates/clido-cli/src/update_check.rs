@@ -103,7 +103,7 @@ pub(crate) fn spawn_do_update(known_version: Option<String>, tx: mpsc::Sender<Ag
 // ── Internals ──────────────────────────────────────────────────────────────────
 
 /// True if `latest_tag` (e.g. `v0.2.0`) is a semver **greater** than `current_pkg_version`
-/// (e.g. `0.1.0-beta.9` from `CARGO_PKG_VERSION`).
+/// (e.g. `0.1.0-beta.8` from `CARGO_PKG_VERSION`).
 fn remote_is_newer(latest_tag: &str, current_pkg_version: &str) -> bool {
     let l = latest_tag.trim().trim_start_matches('v');
     let c = current_pkg_version.trim().trim_start_matches('v');

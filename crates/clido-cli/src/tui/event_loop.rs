@@ -319,13 +319,14 @@ pub(super) fn read_clipboard() -> Result<String, String> {
 
     #[cfg(target_os = "linux")]
     {
-        for cmd in [
-            ["wl-paste", "-n"],
-            ["xclip", "-selection", "clipboard", "-o"],
-            ["xsel", "--clipboard", "--output"],
-        ] {
-            if let Ok(out) = Command::new(cmd[0])
-                .args(&cmd[1..])
+        const READ_CMDS: &[(&str, &[&str])] = &[
+            ("wl-paste", &["-n"]),
+            ("xclip", &["-selection", "clipboard", "-o"]),
+            ("xsel", &["--clipboard", "--output"]),
+        ];
+        for (bin, args) in READ_CMDS {
+            if let Ok(out) = Command::new(bin)
+                .args(*args)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .output()

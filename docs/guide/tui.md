@@ -23,8 +23,8 @@ clido --resume abc123     # resume a specific session by ID prefix
 ╭─ header: brand · model · profile · session … ───────────────────────────────╮
 │  [chat]  conversation, tools, markdown, code blocks                           │
 │  …                                                                            │
-├─ plan/todo (optional) ───────────────────────────────────────────────────────┤
-│  Plan · auto    ○ step one    › active step    ✓ done                        │
+├─ progress (optional) ─────────────────────────────────────────────────────────┤
+│  Progress · auto   ○ todo   › active   ✓ done   (todos / planner / harness)   │
 ├─ status strip ────────────────────────────────────────────────────────────────┤
 │  activity log / tool line · spinner                                            │
 ├─ queue (optional) ─────────────────────────────────────────────────────────────┤
@@ -146,7 +146,7 @@ Press Enter to resume the selected session. The chat history is loaded and you c
 
 ## Status strip
 
-The strip **below the chat** (and below the optional plan/todo panel) shows recent activity and the current tool. Detailed **session id, cost, tokens, and model** appear in the **header**, not only here.
+The strip **below the chat** (and below the optional progress panel) shows recent activity and the current tool. Detailed **session id, cost, tokens, and model** appear in the **header**, not only here.
 
 When the agent is idle, the spinner clears; queued messages may still show above the input.
 

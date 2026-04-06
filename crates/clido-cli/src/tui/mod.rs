@@ -467,12 +467,13 @@ mod tests {
                 }
             })
             .collect();
-        // All six sections should appear as headers.
+        // Core section headers should appear (order may vary).
         assert!(headers.contains(&"Session"));
         assert!(headers.contains(&"Git"));
         assert!(headers.contains(&"Model"));
         assert!(headers.contains(&"Context"));
-        assert!(headers.contains(&"Plan"));
+        assert!(headers.contains(&"Progress"));
+        assert!(headers.contains(&"Planning"));
         assert!(headers.contains(&"Project"));
     }
 

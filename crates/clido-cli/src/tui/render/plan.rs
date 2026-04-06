@@ -15,7 +15,7 @@ use crate::tui::*;
 
 use super::widgets::truncate_chars;
 
-// ── Plan / todo strip (main layout, above status) ─────────────────────────────
+// ── Progress strip (main layout, above status): todos, planner snapshot, harness, live step ──
 
 /// One row in the plan/todo panel (todos, planner snapshot, or status hint).
 #[derive(Debug, Clone)]
@@ -155,7 +155,7 @@ fn plan_panel_content_row_count(step_count: usize) -> u16 {
     }
 }
 
-/// Vertical space for the plan/todo strip (0 = hidden).
+/// Vertical space for the progress strip (0 = hidden).
 pub(crate) fn plan_panel_height_for_layout(
     vis: PlanPanelVisibility,
     term_w: u16,
@@ -171,9 +171,12 @@ pub(crate) fn plan_panel_height_for_layout(
     const MIN_W: u16 = 52;
     /// Auto: only on larger terminals so chat + input stay usable.
     const MIN_TERM_H_AUTO: u16 = 28;
-    /// On: still hide when the terminal is unusably short.
-    const MIN_TERM_H_ON: u16 = 22;
+    /// On: hide only when the terminal is too short to be usable.
+    const MIN_TERM_H_ON: u16 = 18;
     const HEADER_ROWS: u16 = 1;
+    /// When visibility is On and there is nothing to list, still reserve this many body rows
+    /// so the strip stays visibly present (user asked to always see the panel when toggled on).
+    const ON_EMPTY_BODY_ROWS: u16 = 2;
 
     if term_w < MIN_W {
         return 0;
@@ -200,7 +203,7 @@ pub(crate) fn plan_panel_height_for_layout(
                 return 0;
             }
             if empty {
-                HEADER_ROWS + 1
+                HEADER_ROWS + ON_EMPTY_BODY_ROWS
             } else {
                 HEADER_ROWS + body_rows
             }
@@ -208,7 +211,7 @@ pub(crate) fn plan_panel_height_for_layout(
     }
 }
 
-/// Build wrapped lines for the plan/todo strip (`plan_h` rows from [`plan_panel_height_for_layout`]).
+/// Build wrapped lines for the progress strip (`plan_h` rows from [`plan_panel_height_for_layout`]).
 pub(crate) fn build_plan_todo_strip_lines(
     app: &App,
     steps: &[PlanPanelStep],
@@ -221,7 +224,11 @@ pub(crate) fn build_plan_todo_strip_lines(
         PlanPanelVisibility::On => "on",
         PlanPanelVisibility::Off => "off",
     };
-    let header_title = if app.harness_mode { "Harness" } else { "Plan" };
+    let header_title = if app.harness_mode {
+        "Harness"
+    } else {
+        "Progress"
+    };
     let mut out: Vec<Line<'static>> = vec![Line::from(vec![
         Span::styled(
             format!("{TUI_GUTTER}{header_title}"),
@@ -231,15 +238,30 @@ pub(crate) fn build_plan_todo_strip_lines(
     ])];
 
     if steps.is_empty() {
-        let hint = if app.harness_mode {
-            "No harness rows — tasks live in .clido/harness/tasks.json"
+        if app.harness_mode {
+            out.push(Line::from(vec![Span::styled(
+                format!("{TUI_GUTTER}No harness tasks yet — .clido/harness/tasks.json"),
+                dim,
+            )]));
+            out.push(Line::from(vec![Span::styled(
+                format!("{TUI_GUTTER}Agent uses HarnessControl planner_append_tasks when harness is on."),
+                dim,
+            )]));
+        } else if matches!(app.plan_panel_visibility, PlanPanelVisibility::On) {
+            out.push(Line::from(vec![Span::styled(
+                format!("{TUI_GUTTER}Nothing listed yet — todos, saved planner steps, or the live agent step show here."),
+                dim,
+            )]));
+            out.push(Line::from(vec![Span::styled(
+                format!("{TUI_GUTTER}/plan <task> for a written plan  ·  /progress on|off|auto for this strip"),
+                dim,
+            )]));
         } else {
-            "No active steps — use /plan <task> or let the agent set todos."
-        };
-        out.push(Line::from(vec![Span::styled(
-            format!("{TUI_GUTTER}{hint}"),
-            dim,
-        )]));
+            out.push(Line::from(vec![Span::styled(
+                format!("{TUI_GUTTER}No rows — use /plan <task> or let the agent set todos."),
+                dim,
+            )]));
+        }
         return out;
     }
 
@@ -942,10 +964,10 @@ mod plan_panel_tests {
     fn on_shows_placeholder_when_empty() {
         assert_eq!(
             plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 22, &[], false),
-            2
+            3
         );
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 21, &[], false),
+            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 17, &[], false),
             0
         );
     }

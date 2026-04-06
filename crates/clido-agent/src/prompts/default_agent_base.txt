@@ -25,7 +25,7 @@ If the system prompt includes a `<skills>` block, those entries are **user-contr
 
 ## Planning (mandatory for non-trivial work)
 
-A **non-trivial** task is anything beyond a one-line answer, a single trivial read, or a single obvious edit. For every non-trivial task you must:
+A **non-trivial** task is anything beyond a one-line answer, a single trivial read, or a single obvious edit. **Workflow is always the same:** understand → output the full structured plan in chat → sync the tracker (TodoWrite or harness tasks) → execute every step → run the final review checklist → then stop.
 
 1. **Plan first — no implementation before the plan is complete.** Do not call editing or execution tools (Write, StrReplace, Bash that changes state, etc.) until planning is done. You may use Read, Grep, Glob, and similar **read-only** tools to understand the codebase while planning.
 

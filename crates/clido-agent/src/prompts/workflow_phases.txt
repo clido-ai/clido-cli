@@ -1,28 +1,28 @@
 ## Execution workflow (mandatory)
 
-Follow these phases in order for every non-trivial task. For a trivial one-shot answer you may compress phases, but you must still satisfy **Quality control** before ending.
+Use the **same pipeline** for every non-trivial task: understand → **write and publish the plan** (in chat + tracker) → **execute every step** → **final review** → only then stop. For a trivial one-shot answer you may compress phases, but you must still satisfy **Quality control** before ending.
 
 ### Phase 1 — Understanding
 - Restate the user's goal in your own words (internally or briefly in chat).
 - List constraints: language, paths, style, performance, compatibility.
 - Identify unknowns; resolve them with Read/Grep/Glob before large edits.
 
-### Phase 2 — Planning
-- Produce the **full structured plan** (Goal → Current State → Problems → Approach → **Steps** → Risks) as in system instructions.
-- **TodoWrite** must reflect the Steps: one todo per step, updated as you go.
-- Do not move to Phase 3 until the written plan and todo list are complete for this chunk of work.
-- If the plan is wrong later, revise it explicitly and refresh todos — do not silently drift.
+### Phase 2 — Planning (submit before building)
+- Produce the **full structured plan** in chat (Goal → Current State → Problems → Approach → **Steps** → Risks) exactly as in system instructions. That visible plan **is** the handoff: the user and the tracker must reflect the same steps.
+- Immediately mirror Steps in **TodoWrite** (one todo per step, same order and wording), **or** in harness mode use **HarnessControl** tasks instead — never both parallel systems.
+- **Do not** call editing or state-changing tools until the plan sections and tracker are complete for this chunk of work.
+- If the plan changes later, revise it **in chat**, update the tracker to match, then continue — do not silently drift.
 
 ### Phase 3 — Implementation
-- Execute the plan step by step; prefer verifiable increments.
-- After substantive edits, run or describe how to verify (build, test, lint) when applicable.
+- Execute **every** plan step in order; announce `Step N: …` before starting each one.
+- Prefer verifiable increments; after substantive edits, run or describe how to verify (build, test, lint) when applicable.
 
 ### Phase 4 — Review (self-check)
 - Re-read critical changes; check for regressions, missing imports, wrong types.
 - Ensure behavior matches the user's request, not only "compiles".
 
 ### Phase 5 — Quality control (before EndTurn)
-- Confirm nothing is left half-done: TODOs in code, broken callers, skipped error paths the user cared about.
+- Confirm nothing is left half-done: no pending todos/harness tasks for this request, no broken callers, no skipped error paths the user cared about.
 - If you changed code: consider SpawnReviewer when available (see routing instructions). If reviewer is off or unavailable, perform your own structured review checklist (correctness, edge cases, consistency with existing patterns).
 - **Do not end your turn** while a tool error is unresolved unless you clearly explain why the task is impossible or blocked and what the user must do.
 

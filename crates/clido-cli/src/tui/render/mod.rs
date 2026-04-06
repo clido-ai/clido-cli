@@ -349,7 +349,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         );
     }
 
-    // ── Plan / todo strip (above status; visibility: /plan on|off|auto) ──
+    // ── Progress strip (above status; visibility: /progress or /plan on|off|auto) ──
     if plan_h > 0 {
         let plines = build_plan_todo_strip_lines(app, &plan_steps, plan_area.width);
         frame.render_widget(Paragraph::new(plines), plan_area);

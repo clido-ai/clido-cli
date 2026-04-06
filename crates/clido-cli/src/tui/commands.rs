@@ -964,6 +964,45 @@ pub(super) fn cmd_rollback(app: &mut App, cmd: &str) {
     }
 }
 
+/// Toggle or show visibility for the progress strip (`/progress` …). Same state as `/plan on|off|auto`.
+pub(super) fn cmd_progress_strip(app: &mut App, cmd: &str) {
+    let sub = cmd.trim_start_matches("/progress").trim();
+    match sub {
+        "on" => {
+            app.plan_panel_visibility = PlanPanelVisibility::On;
+            app.push(ChatLine::Info(
+                "  Progress strip: on — always when the terminal fits (even if empty).".into(),
+            ));
+        }
+        "off" => {
+            app.plan_panel_visibility = PlanPanelVisibility::Off;
+            app.push(ChatLine::Info("  Progress strip: off.".into()));
+        }
+        "auto" => {
+            app.plan_panel_visibility = PlanPanelVisibility::Auto;
+            app.push(ChatLine::Info(
+                "  Progress strip: auto — only when there is content and the terminal is tall enough."
+                    .into(),
+            ));
+        }
+        "" => {
+            let vis = match app.plan_panel_visibility {
+                PlanPanelVisibility::On => "on",
+                PlanPanelVisibility::Off => "off",
+                PlanPanelVisibility::Auto => "auto",
+            };
+            app.push(ChatLine::Info(format!(
+                "  Progress strip: {vis}  ·  /progress on | off | auto  (same as /plan on|off|auto)"
+            )));
+        }
+        _ => {
+            app.push(ChatLine::Info(
+                "  Usage: /progress  or  /progress on | off | auto".into(),
+            ));
+        }
+    }
+}
+
 pub(super) fn cmd_plan(app: &mut App, cmd: &str) {
     let sub = cmd.trim_start_matches("/plan").trim().to_string();
     match sub.as_str() {
@@ -1082,17 +1121,20 @@ pub(super) fn cmd_plan(app: &mut App, cmd: &str) {
         "on" => {
             app.plan_panel_visibility = PlanPanelVisibility::On;
             app.push(ChatLine::Info(
-                "  Plan/todo panel: on — shown whenever the terminal is large enough.".into(),
+                "  Progress strip: on — always shown when the terminal fits (even if empty). Same as /progress on."
+                    .into(),
             ));
         }
         "off" => {
             app.plan_panel_visibility = PlanPanelVisibility::Off;
-            app.push(ChatLine::Info("  Plan/todo panel: off.".into()));
+            app.push(ChatLine::Info(
+                "  Progress strip: off. Same as /progress off.".into(),
+            ));
         }
         "auto" => {
             app.plan_panel_visibility = PlanPanelVisibility::Auto;
             app.push(ChatLine::Info(
-                "  Plan/todo panel: auto — shown only on larger terminals when there is progress to show."
+                "  Progress strip: auto — only on larger terminals when there is something to list. Same as /progress auto."
                     .into(),
             ));
         }
@@ -2494,6 +2536,7 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
         _ if cmd == "/skills" || cmd.starts_with("/skills ") => cmd_skills(app, cmd),
         "/undo" => cmd_undo(app),
         _ if cmd == "/rollback" || cmd.starts_with("/rollback ") => cmd_rollback(app, cmd),
+        _ if cmd == "/progress" || cmd.starts_with("/progress ") => cmd_progress_strip(app, cmd),
         _ if cmd == "/plan" || cmd.starts_with("/plan ") => cmd_plan(app, cmd),
         _ if cmd == "/branch" || cmd.starts_with("/branch ") => cmd_branch(app, cmd),
         "/sync" => cmd_sync(app),

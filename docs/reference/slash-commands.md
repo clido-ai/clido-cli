@@ -69,15 +69,25 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 | `/undo` | Undo the last committed change | `/undo` | Runs `git reset HEAD~1`; shows what was undone |
 | `/rollback [id]` | Restore to a checkpoint or commit | `/rollback ck_abc123` | Accepts checkpoint ID (`ck_…`) or git commit hash |
 
-### Plan
+### Progress (strip above status)
+
+The **Progress** strip lists **TodoWrite** items, planner snapshots, harness tasks, or the live agent step — not “plans” only.
 
 | Command | Description | Example | Notes |
 |---------|-------------|---------|-------|
-| `/plan` | Show the current plan (snapshot or simple list) | `/plan` | If no plan yet, prints usage for `/plan <task>` |
+| `/progress` | Show current strip visibility (`on` / `off` / `auto`) | `/progress` | |
+| `/progress on` | Always show the strip when the terminal fits, **even if empty** | `/progress on` | See [TUI](/docs/guide/tui) |
+| `/progress off` | Hide the strip | `/progress off` | |
+| `/progress auto` | Show only on larger terminals when there is something to list (default) | `/progress auto` | |
+
+`/plan on`, `/plan off`, and `/plan auto` are **aliases** for the same visibility (legacy names).
+
+### Planning
+
+| Command | Description | Example | Notes |
+|---------|-------------|---------|-------|
+| `/plan` | Show the current structured plan (snapshot or simple list) | `/plan` | If no plan yet, prints usage for `/plan <task>` |
 | `/plan <task>` | Ask the agent for a **structured plan** (Goal → Risks) and **TodoWrite**; agent stops for your confirmation | `/plan migrate auth` | Does not run implementation until you confirm |
-| `/plan on` | Always show the **plan/todo** strip when the terminal is large enough | `/plan on` | User preference; see [TUI](/docs/guide/tui) |
-| `/plan off` | Hide the plan/todo strip | `/plan off` | |
-| `/plan auto` | Show the strip only on **large** terminals when there is something to show (default) | `/plan auto` | Avoids clutter on small windows |
 | `/plan edit` | Open the plan text editor | `/plan edit` | Requires an existing plan |
 | `/plan save` | Save the current plan to `.clido/plans/` | `/plan save` | Use with `clido plan run` etc. |
 | `/plan list` | List saved plans on disk | `/plan list` | |

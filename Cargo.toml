@@ -12,6 +12,7 @@ members = [
   "crates/clido-workflows",
   "crates/clido-cli",
   "crates/clido-checkpoint",
+  "crates/clido-harness",
 ]
 resolver = "2"
 

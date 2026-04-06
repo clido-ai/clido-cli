@@ -132,6 +132,10 @@ pub struct Cli {
     #[arg(long)]
     pub plan_no_edit: bool,
 
+    /// Enable harness mode: `.clido/harness/` JSON tasks, progress log, `HarnessControl` tool, strict verify-before-pass protocol.
+    #[arg(long, env = "CLIDO_HARNESS")]
+    pub harness: bool,
+
     /// Skip all CLIDO.md / rules file injection for this invocation.
     #[arg(long)]
     pub no_rules: bool,

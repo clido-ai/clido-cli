@@ -9,6 +9,7 @@ pub mod file_tracker;
 mod git_tool;
 mod glob_tool;
 mod grep_tool;
+mod harness_control;
 mod ls_tool;
 pub mod mcp;
 mod multi_edit;
@@ -38,6 +39,7 @@ pub use file_tracker::FileTracker;
 pub use git_tool::GitTool;
 pub use glob_tool::GlobTool;
 pub use grep_tool::GrepTool;
+pub use harness_control::HarnessControlTool;
 pub use ls_tool::LsTool;
 pub use mcp::{
     load_mcp_config, McpClient, McpConfig, McpHttpClient, McpServerConfig, McpTool, McpToolDef,

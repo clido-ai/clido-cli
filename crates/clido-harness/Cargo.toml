@@ -1,0 +1,11 @@
+[package]
+name = "clido-harness"
+version = "0.1.0-beta.5"
+edition = "2021"
+description = "Structured harness state: JSON tasks, progress log, verification rules"
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

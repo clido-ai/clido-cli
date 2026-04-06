@@ -355,6 +355,8 @@ pub(crate) fn build_full_tool_registry(
     ),
     anyhow::Error,
 > {
+    let harness_active = cli.harness || loaded.agent.harness;
+
     let (mut registry, todo_store) = build_registry(
         cli,
         loaded,
@@ -363,10 +365,22 @@ pub(crate) fn build_full_tool_registry(
         allowed_external_paths,
     )?;
     registry = load_mcp_tools(cli, registry);
+    if harness_active {
+        registry.register(clido_tools::HarnessControlTool::new(
+            workspace_root.to_path_buf(),
+        ));
+    }
 
     let permission_mode = parse_permission_mode(cli.permission_mode.as_deref());
 
     let mut system_prompt = assemble_system_prompt(cli)?;
+    if harness_active {
+        system_prompt = format!(
+            "{}\n\n{}",
+            clido_agent::prompts::bundled_harness_protocol(),
+            system_prompt
+        );
+    }
 
     let clido_md_path = workspace_root.join(".clido.md");
     if clido_md_path.is_file() {
@@ -461,6 +475,7 @@ pub(crate) fn build_full_tool_registry(
             reviewer_config,
             workspace_root.to_path_buf(),
             reviewer_enabled,
+            harness_active,
         ));
     }
 

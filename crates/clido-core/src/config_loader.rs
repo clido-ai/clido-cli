@@ -75,6 +75,9 @@ pub struct AgentSection {
     /// Maximum tokens the model may produce per response. None = provider default (8192).
     #[serde(default)]
     pub max_output_tokens: Option<u32>,
+    /// Enable harness mode: structured `.clido/harness/` tasks + `HarnessControl` tool + strict protocol.
+    #[serde(default)]
+    pub harness: bool,
 }
 
 impl Default for AgentSection {
@@ -90,6 +93,7 @@ impl Default for AgentSection {
             auto_checkpoint: true,
             max_checkpoints_per_session: 50,
             max_output_tokens: None,
+            harness: false,
         }
     }
 }
@@ -393,6 +397,7 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
             .agent
             .max_output_tokens
             .or(base.agent.max_output_tokens),
+        harness: later.agent.harness || base.agent.harness,
     };
     let tools = ToolsSection {
         allowed: if later.tools.allowed.is_empty() {

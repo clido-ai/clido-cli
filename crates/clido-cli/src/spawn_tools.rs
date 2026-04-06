@@ -14,12 +14,18 @@ use clido_tools::{default_registry_with_options, Tool, ToolOutput};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-fn subagent_registry(workspace: &std::path::Path) -> clido_tools::ToolRegistry {
+fn subagent_registry(workspace: &std::path::Path, harness: bool) -> clido_tools::ToolRegistry {
     // Mirror main agent safety rule: never expose the global config file to tools.
     let blocked = clido_core::global_config_path()
         .into_iter()
         .collect::<Vec<_>>();
-    default_registry_with_options(workspace.to_path_buf(), blocked, false)
+    let mut reg = default_registry_with_options(workspace.to_path_buf(), blocked, false);
+    if harness {
+        reg.register(clido_tools::HarnessControlTool::new(
+            workspace.to_path_buf(),
+        ));
+    }
+    reg
 }
 
 /// Spawn a worker sub-agent for mechanical subtasks (filtering, summarizing, extracting, formatting).
@@ -117,7 +123,7 @@ impl Tool for SpawnWorkerTool {
             output_format, context, task
         );
 
-        let worker_registry = subagent_registry(&self.workspace);
+        let worker_registry = subagent_registry(&self.workspace, false);
         let mut sub =
             clido_agent::SubAgent::new(self.provider.clone(), worker_registry, self.config.clone());
 
@@ -138,6 +144,8 @@ pub struct SpawnReviewerTool {
     workspace: std::path::PathBuf,
     /// Runtime toggle shared with the TUI. `false` → return a "disabled" response immediately.
     enabled: Arc<AtomicBool>,
+    /// When true, reviewer sub-agent can call `HarnessControl` (evaluator_mark_pass).
+    harness: bool,
 }
 
 impl SpawnReviewerTool {
@@ -146,12 +154,14 @@ impl SpawnReviewerTool {
         config: AgentConfig,
         workspace: std::path::PathBuf,
         enabled: Arc<AtomicBool>,
+        harness: bool,
     ) -> Self {
         Self {
             provider,
             config,
             workspace,
             enabled,
+            harness,
         }
     }
 }
@@ -209,6 +219,11 @@ impl Tool for SpawnReviewerTool {
             criteria.len()
         );
 
+        let harness_note = if self.harness {
+            "\n\nHarness mode: You also have the `HarnessControl` tool. If you output PASS and every acceptance criterion is satisfied with real evidence (commands run), you may call `HarnessControl` with op `evaluator_mark_pass` for the task_id the main agent names, including `verification.commands_executed` and `verification.acceptance_results` (criterion strings must match tasks.json exactly). If you output FAIL or cannot verify, do not mark pass.\n"
+        } else {
+            ""
+        };
         let prompt = format!(
             "You are a reviewer sub-agent inside a larger engineering assistant called clido.\n\
              Your job is to perform a focused quality check on completed work.\n\
@@ -220,15 +235,18 @@ impl Tool for SpawnReviewerTool {
              - Do not restate the output. Do not add praise or filler.\n\
              - You have access to file system tools (Read, Grep, Glob) to verify claims if needed.\n\
              - Focus only on the criteria given. Do not invent new requirements.\n\
+             {harness_note}\
              \n\
-             Criteria: {}\n\
+             Criteria: {criteria}\n\
              \n\
              Output to review:\n\
-             {}",
-            criteria, output
+             {output}",
+            harness_note = harness_note,
+            criteria = criteria,
+            output = output,
         );
 
-        let reviewer_registry = subagent_registry(&self.workspace);
+        let reviewer_registry = subagent_registry(&self.workspace, self.harness);
         let mut sub = clido_agent::SubAgent::new(
             self.provider.clone(),
             reviewer_registry,
@@ -320,6 +338,7 @@ mod tests {
             dummy_config(),
             std::path::PathBuf::from("."),
             Arc::new(AtomicBool::new(true)),
+            false,
         );
         assert_eq!(t.name(), "SpawnReviewer");
     }
@@ -331,6 +350,7 @@ mod tests {
             dummy_config(),
             std::path::PathBuf::from("."),
             Arc::new(AtomicBool::new(true)),
+            false,
         );
         assert!(t.is_read_only());
     }
@@ -342,6 +362,7 @@ mod tests {
             dummy_config(),
             std::path::PathBuf::from("."),
             Arc::new(AtomicBool::new(true)),
+            false,
         );
         let schema = t.schema();
         let required = schema["required"]
@@ -365,6 +386,7 @@ mod tests {
             dummy_config(),
             std::path::PathBuf::from("."),
             Arc::new(AtomicBool::new(true)),
+            false,
         );
         assert!(!t.description().is_empty());
     }
@@ -392,6 +414,7 @@ mod tests {
             dummy_config(),
             std::path::PathBuf::from("."),
             Arc::new(AtomicBool::new(false)), // disabled
+            false,
         );
         let result = t
             .execute(serde_json::json!({ "output": "some code", "criteria": "correctness" }))
@@ -410,6 +433,7 @@ mod tests {
             dummy_config(),
             std::path::PathBuf::from("."),
             Arc::new(AtomicBool::new(true)),
+            false,
         );
         let result = t
             .execute(serde_json::json!({ "criteria": "correctness" }))

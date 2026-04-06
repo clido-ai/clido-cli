@@ -3,6 +3,7 @@
 const DEFAULT_AGENT_BASE: &str = include_str!("default_agent_base.txt");
 const WORKFLOW_PHASES: &str = include_str!("workflow_phases.txt");
 const ARCHITECT_TEMPLATE: &str = include_str!("architect.txt");
+const HARNESS_PROTOCOL: &str = include_str!("harness_protocol.txt");
 
 /// Default system prompt body when the user does not supply `--system-prompt` or a file.
 pub fn bundled_default_system_prompt() -> String {
@@ -16,6 +17,11 @@ pub fn bundled_default_system_prompt() -> String {
 /// User message sent to the utility model for upfront planning.
 pub fn architect_user_prompt(task: &str) -> String {
     ARCHITECT_TEMPLATE.replace("{task}", task)
+}
+
+/// Harness / long-running task protocol (prepended when `--harness` or `[agent] harness = true`).
+pub fn bundled_harness_protocol() -> String {
+    HARNESS_PROTOCOL.trim().to_string()
 }
 
 /// Prepended to the tool-result user message when any tool failed — forces recovery behavior.

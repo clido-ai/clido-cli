@@ -1,0 +1,30 @@
+## Harness mode (structured agent protocol)
+
+The repository is the source of truth. Session memory is secondary — **always** reconstruct from:
+
+- `.clido/harness/tasks.json` — canonical task list (JSON)
+- `.clido/harness/progress.ndjson` — append-only session / decision log
+- `git log` — what actually landed (use `HarnessControl` op `read` for a snapshot)
+
+### Roles (separation of concerns)
+
+1. **Planner** (you, when decomposing work): only `HarnessControl` op `planner_append_tasks`. Each task **must** include non-empty `acceptance_criteria` (explicit, testable). New tasks always start **fail** — never mark pass here.
+2. **Executor** (you, when implementing): pick **one** fail task via `executor_set_focus`. Implement **only** that task. Use `executor_register_attempt` with a short `fingerprint` when you try a distinct approach (loop guard). Run real verification commands (tests, lint). Do **not** call `evaluator_mark_pass` yourself — that is the evaluator’s job.
+3. **Evaluator** (reviewer sub-agent when harness is enabled, or a strict human step): after independent verification, `evaluator_mark_pass` with `commands_executed` and `acceptance_results` aligned **exactly** (same count and same `criterion` strings) as in `tasks.json`. **Pass means verified**, not “code exists”.
+
+### Session sequence (every run)
+
+1. `HarnessControl` op `read` — load tasks, progress tail, git log, `hint_next_fail_task`.
+2. If no focus: `executor_set_focus` on the next fail task (or planner appends tasks first).
+3. Execute that task only until verification artifacts exist.
+4. `SpawnReviewer` (or equivalent) with criteria = task acceptance criteria + commands you ran.
+5. Evaluator calls `evaluator_mark_pass` **only** if checks pass; else task stays **fail**.
+6. **You** commit with git (HarnessControl does not commit).
+
+### Hard rules
+
+- **One task in focus** — do not parallelize harness tasks in one turn.
+- **Never delete or reorder** harness tasks — the tool enforces append-only ids.
+- **No pass without verification** — `evaluator_mark_pass` rejects missing commands or evidence.
+- **Progressive disclosure** — do not paste the whole repo into context; read files as needed.
+- If `executor_register_attempt` reports a **loop guard**, change strategy or ask the user.

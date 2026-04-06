@@ -582,6 +582,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "clido-harness"
+version = "0.1.0-beta.5"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "clido-index"
 version = "0.1.0-beta.5"
 dependencies = [
@@ -653,8 +663,10 @@ version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "clido-context",
  "clido-core",
+ "clido-harness",
  "clido-index",
  "clido-memory",
  "directories",

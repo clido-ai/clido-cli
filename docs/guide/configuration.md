@@ -106,6 +106,7 @@ directory = ".clido/workflows"   # Default workflow search path. Default: .clido
 #                  CLIDO_TOOL_IS_ERROR, CLIDO_TOOL_DURATION_MS
 
 [hooks]
+# Each hook runs via `sh -c` with a 60s timeout; non-zero exit and spawn errors are logged (stderr captured).
 pre_tool_use  = ""   # e.g. "echo Tool $CLIDO_TOOL_NAME >> ~/clido-hooks.log"
 post_tool_use = ""   # e.g. "notify-send clido $CLIDO_TOOL_NAME"
 

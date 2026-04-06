@@ -178,8 +178,9 @@ pub struct AgentConfig {
     /// Suppress spinner, tool lifecycle output, and cost footer.
     #[serde(default)]
     pub quiet: bool,
-    /// Reserved for future use. The agent loop runs tools **sequentially** per model turn so
-    /// permissions, hooks, and validation stay consistent.
+    /// When the model requests multiple **read-only** tools in one turn, run up to this many
+    /// concurrently (semaphore). Batches that include any write-capable tool run sequentially
+    /// through the gated path (permissions, hooks).
     /// Config key is `max_concurrent_tools` (per spec); CLI flag/env use `max_parallel_tools`.
     #[serde(default = "default_max_parallel_tools", alias = "max_concurrent_tools")]
     pub max_parallel_tools: u32,

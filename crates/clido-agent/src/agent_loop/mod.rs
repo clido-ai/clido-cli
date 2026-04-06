@@ -32,6 +32,7 @@ use clido_tools::{ToolOutput, ToolRegistry, ACCESS_DENIED_OUTSIDE_WORKSPACE};
 use futures::future::join_all;
 use similar::TextDiff;
 use std::collections::HashMap;
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -900,7 +901,7 @@ impl AgentLoop {
     }
 
     /// Execute a batch of tools with automatic retry for failed calls.
-    /// Uses parallel execution when all tools are read-only and there is more than one.
+    /// Uses parallel execution when every tool's `parallel_safe_in_model_batch` is true (see `clido_tools::Tool`) and there is more than one.
     async fn execute_tool_batch_with_retry(
         &mut self,
         tool_uses: &[(String, String, serde_json::Value)],
@@ -1578,14 +1579,14 @@ impl AgentLoop {
                         )?;
                     }
 
-                    let all_read_only = tool_uses.iter().all(|(_, name, _)| {
+                    let parallel_batch = tool_uses.iter().all(|(_, name, _)| {
                         self.tools
                             .get(name)
-                            .map(|t| t.is_read_only())
+                            .map(|t| t.parallel_safe_in_model_batch())
                             .unwrap_or(false)
                     });
 
-                    let outputs: Vec<(ToolOutput, u64)> = if all_read_only && tool_uses.len() > 1 {
+                    let outputs: Vec<(ToolOutput, u64)> = if parallel_batch && tool_uses.len() > 1 {
                         if let Some(ref e) = self.emit {
                             for (id, name, input) in &tool_uses {
                                 e.on_tool_start(id, name, input).await;
@@ -1603,7 +1604,8 @@ impl AgentLoop {
                                                 &serde_json::to_string(input).unwrap_or_default(),
                                             ),
                                         ],
-                                    );
+                                    )
+                                    .await;
                                 }
                             }
                         }
@@ -1642,7 +1644,8 @@ impl AgentLoop {
                                             ),
                                             ("CLIDO_TOOL_DURATION_MS", &batch_ms.to_string()),
                                         ],
-                                    );
+                                    )
+                                    .await;
                                 }
                             }
                         }
@@ -1664,7 +1667,8 @@ impl AgentLoop {
                                                 &serde_json::to_string(input).unwrap_or_default(),
                                             ),
                                         ],
-                                    );
+                                    )
+                                    .await;
                                 }
                             }
                             let t0 = std::time::Instant::now();
@@ -1699,7 +1703,8 @@ impl AgentLoop {
                                             ),
                                             ("CLIDO_TOOL_DURATION_MS", &duration_ms.to_string()),
                                         ],
-                                    );
+                                    )
+                                    .await;
                                 }
                             }
                             outputs.push((output, duration_ms));
@@ -2139,20 +2144,21 @@ impl AgentLoop {
         }
     }
 
-    /// Execute a batch of tool calls, using parallel execution if all are read-only.
+    /// Execute a batch of tool calls, using parallel execution when every tool opts in via
+    /// [`Tool::parallel_safe_in_model_batch`] (see `clido_tools::Tool`).
     /// Returns results in the same order as the input `tool_uses` slice.
     async fn execute_tool_batch(
         &self,
         tool_uses: &[(String, String, serde_json::Value)],
     ) -> Vec<ToolOutput> {
-        let all_read_only = tool_uses.iter().all(|(_, name, _)| {
+        let parallel_batch = tool_uses.iter().all(|(_, name, _)| {
             self.tools
                 .get(name)
-                .map(|t| t.is_read_only())
+                .map(|t| t.parallel_safe_in_model_batch())
                 .unwrap_or(false)
         });
 
-        if all_read_only && tool_uses.len() > 1 {
+        if parallel_batch && tool_uses.len() > 1 {
             let max_parallel = self.config.max_parallel_tools.max(1) as usize;
             let semaphore = Arc::new(Semaphore::new(max_parallel));
             let tools = &self.tools;
@@ -2175,6 +2181,12 @@ impl AgentLoop {
                                 return ToolOutput::err("internal: semaphore closed".to_string());
                             }
                         };
+                        if let Some(category) = detect_injection(&input) {
+                            warn!(
+                                "Potential prompt injection detected in {} args: {}",
+                                name, category
+                            );
+                        }
                         match tools.get(&name) {
                             Some(tool) => {
                                 let schema = tool.schema();
@@ -2326,20 +2338,37 @@ async fn open_in_editor_blocking(proposed: &str, file_path: &std::path::Path) ->
 /// stdio is redirected to /dev/null so hook output never corrupts the TUI's
 /// alternate screen. The spawned child is not waited on — it runs detached.
 /// Zombie reaping is handled by the OS when the parent process exits.
-fn run_hook(cmd: &str, env_vars: &[(&str, &str)]) {
-    use std::process::Stdio;
-    let mut command = std::process::Command::new("sh");
-    command
-        .arg("-c")
-        .arg(cmd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+/// Run a shell hook with a hard timeout; logs non-success exits and spawn failures.
+async fn run_hook(cmd: &str, env_vars: &[(&str, &str)]) {
+    const HOOK_TIMEOUT_SECS: u64 = 60;
+    let mut command = tokio::process::Command::new("sh");
+    command.arg("-c").arg(cmd).stdin(Stdio::null());
     for (k, v) in env_vars {
         command.env(k, v);
     }
-    if let Err(e) = command.spawn() {
-        warn!("hook spawn failed (cmd={:?}): {}", cmd, e);
+    match tokio::time::timeout(
+        Duration::from_secs(HOOK_TIMEOUT_SECS),
+        command.output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) => {
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(
+                    hook_cmd = %cmd,
+                    code = ?output.status.code(),
+                    stderr = %stderr.chars().take(500).collect::<String>(),
+                    "hook exited with non-success status"
+                );
+            }
+        }
+        Ok(Err(e)) => warn!(hook_cmd = %cmd, error = %e, "hook spawn or wait failed"),
+        Err(_) => warn!(
+            hook_cmd = %cmd,
+            timeout_secs = HOOK_TIMEOUT_SECS,
+            "hook timed out"
+        ),
     }
 }
 #[cfg(test)]
@@ -3462,11 +3491,10 @@ mod tests {
 
     // ── run_hook ────────────────────────────────────────────────────────────
 
-    #[test]
-    fn run_hook_executes_without_panic() {
-        // Just test that run_hook doesn't panic (fire-and-forget)
-        run_hook("true", &[("MY_VAR", "hello")]);
-        run_hook("echo $CLIDO_TOOL_NAME", &[("CLIDO_TOOL_NAME", "Read")]);
+    #[tokio::test]
+    async fn run_hook_executes_without_panic() {
+        run_hook("true", &[("MY_VAR", "hello")]).await;
+        run_hook("echo $CLIDO_TOOL_NAME", &[("CLIDO_TOOL_NAME", "Read")]).await;
     }
 
     // ── with_hooks integration ─────────────────────────────────────────────

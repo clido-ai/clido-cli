@@ -206,7 +206,7 @@ Expressions are rendered before the step runs. Referencing an incomplete step is
 
 Steps with no shared dependencies run in parallel when marked with `parallel: true` in the workflow YAML. In the example above, `security` and `style` both depend only on `diff`, so they can run concurrently.
 
-That parallelism is implemented in the **workflow executor** (separate agent runs per step), not the in-session `--max-parallel-tools` flag (which is reserved and does not batch tools inside a single model turn).
+That parallelism is implemented in the **workflow executor** (separate agent runs per step). Separately, within one agent session, a model turn that requests **only read-only** tools can execute those tools in parallel up to `[agent] max-concurrent-tools` / `--max-parallel-tools`; turns that include any write-capable tool run tools one at a time.
 
 ## Workflow storage
 

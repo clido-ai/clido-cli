@@ -282,6 +282,14 @@ pub trait Tool: Send + Sync {
     fn is_read_only(&self) -> bool {
         false
     }
+    /// When **every** tool in a model batch returns true here and there are multiple tools,
+    /// the agent may execute those calls concurrently (bounded by `max_parallel_tools`).
+    ///
+    /// Override to `false` when `is_read_only` is true but the tool still needs strict ordering
+    /// with siblings (e.g. mutates agent permission mode, or runs a nested agent loop).
+    fn parallel_safe_in_model_batch(&self) -> bool {
+        self.is_read_only()
+    }
     async fn execute(&self, input: serde_json::Value) -> ToolOutput;
 }
 

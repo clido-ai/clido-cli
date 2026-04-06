@@ -84,7 +84,7 @@ AgentLoop
   9. If stop_reason == ToolUse:
      a. Validate each tool input against JSON Schema (before committing assistant text)
      b. Emit on_tool_start events
-     c. Execute tool calls **in order** through the gated path; classify failures; retry with backoff when policy allows
+     c. Execute tools: batches where every tool opts into `parallel_safe_in_model_batch` (typically read-only tools, excluding e.g. `ExitPlanMode` and nested-agent tools) run in parallel up to `max_parallel_tools`; otherwise sequentially through the gated path; classify failures; retry with backoff when policy allows
      d. Observe doom / stall across batches; enforce max_tool_calls_per_turn and per-turn wall time
      e. Emit on_tool_done events
      f. Append AssistantMessage + ToolResult to history
@@ -173,9 +173,9 @@ The compaction strategy summarises the oldest turns in the conversation into a s
 
 ## Concurrency model
 
-The agent loop runs in a single Tokio async task. **Tool calls in one model turn run sequentially** in declaration order: each invocation goes through the same path (permissions, hooks, JSON Schema validation, `execute_tool_with_retry`, audit). This matches interactive gating and avoids behavior drift between “parallel read-only” and “sequential” paths.
+The agent loop runs in a single Tokio async task. When a turn ends with **tool_use** and **every** tool reports `parallel_safe_in_model_batch` (see `clido_tools::Tool`; this is `true` for most read-only tools but `false` for tools that must not race siblings, such as `ExitPlanMode` and sub-agent spawns), those calls run **in parallel** (bounded by `tokio::sync::Semaphore` with capacity `max_parallel_tools`), with schema validation, timeouts, truncation, injection warnings, and batch-level retry for failures. Pre/post hooks run with a **60s timeout** and log non-success exits. Post-tool hooks see the same wall-clock duration for the whole batch in that path.
 
-The config field `max_parallel_tools` / `max-concurrent-tools` is retained for compatibility but is **not used** by the main loop today.
+Otherwise, invocations run **sequentially** in declaration order through `execute_tool_with_retry` / `execute_tool_maybe_gated` (permissions, pre/post hooks, audit per call).
 
 ## Agent loop hardening
 

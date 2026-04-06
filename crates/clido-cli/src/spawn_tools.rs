@@ -91,6 +91,10 @@ impl Tool for SpawnWorkerTool {
         true
     }
 
+    fn parallel_safe_in_model_batch(&self) -> bool {
+        false
+    }
+
     async fn execute(&self, input: serde_json::Value) -> ToolOutput {
         let task = match input["task"].as_str() {
             Some(t) => t.to_string(),
@@ -200,6 +204,10 @@ impl Tool for SpawnReviewerTool {
 
     fn is_read_only(&self) -> bool {
         true
+    }
+
+    fn parallel_safe_in_model_batch(&self) -> bool {
+        false
     }
 
     async fn execute(&self, input: serde_json::Value) -> ToolOutput {

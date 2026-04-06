@@ -45,16 +45,45 @@ pub async fn collect_stream_to_model_response(
                 }
             }
             StreamEvent::ToolUseStart { id, name } => {
+                if id.is_empty() {
+                    return Err(ClidoError::MalformedModelOutput {
+                        detail: "streaming tool_use: empty tool id on tool_use_start".into(),
+                    });
+                }
+                if name.trim().is_empty() {
+                    return Err(ClidoError::MalformedModelOutput {
+                        detail: format!("streaming tool_use: empty tool name on start (id={id})"),
+                    });
+                }
                 flush_text(&mut content, &mut text_buf);
                 tool_name.insert(id.clone(), name);
                 tool_json.insert(id, String::new());
             }
             StreamEvent::ToolUseDelta { id, partial_json } => {
-                tool_json.entry(id).or_default().push_str(&partial_json);
+                let Some(buf) = tool_json.get_mut(&id) else {
+                    return Err(ClidoError::MalformedModelOutput {
+                        detail: format!(
+                            "streaming tool_use: delta for unknown id={id} (missing tool_use_start)"
+                        ),
+                    });
+                };
+                buf.push_str(&partial_json);
             }
             StreamEvent::ToolUseEnd { id } => {
-                let name = tool_name.remove(&id).unwrap_or_default();
-                let json_str = tool_json.remove(&id).unwrap_or_else(|| "{}".to_string());
+                let Some(name) = tool_name.remove(&id) else {
+                    return Err(ClidoError::MalformedModelOutput {
+                        detail: format!(
+                            "streaming tool_use: end for unknown or duplicate id={id} (missing matching start)"
+                        ),
+                    });
+                };
+                let Some(json_str) = tool_json.remove(&id) else {
+                    return Err(ClidoError::MalformedModelOutput {
+                        detail: format!(
+                            "streaming tool_use: internal state missing json buffer for id={id}"
+                        ),
+                    });
+                };
                 let input = serde_json::from_str::<serde_json::Value>(&json_str).map_err(|e| {
                     ClidoError::MalformedModelOutput {
                         detail: format!(
@@ -84,6 +113,15 @@ pub async fn collect_stream_to_model_response(
     }
 
     flush_text(&mut content, &mut text_buf);
+
+    if !tool_name.is_empty() || !tool_json.is_empty() {
+        return Err(ClidoError::MalformedModelOutput {
+            detail: format!(
+                "stream ended with incomplete tool_use block(s): {} tool call(s) missing tool_use end",
+                tool_name.len()
+            ),
+        });
+    }
 
     if !saw_message_delta {
         return Err(ClidoError::Provider(
@@ -164,5 +202,84 @@ mod tests {
             }
             other => panic!("wrong error: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn stream_rejects_tool_use_end_without_start() {
+        let events = vec![
+            Ok(StreamEvent::ToolUseEnd {
+                id: "tu_x".to_string(),
+            }),
+            Ok(StreamEvent::MessageDelta {
+                stop_reason: clido_core::StopReason::ToolUse,
+                usage: Default::default(),
+            }),
+        ];
+        let st = box_stream(stream::iter(events));
+        let r = collect_stream_to_model_response(st, "m".to_string(), None, None).await;
+        assert!(r.is_err(), "expected error, got {r:?}");
+    }
+
+    #[tokio::test]
+    async fn stream_rejects_delta_before_start() {
+        let events = vec![
+            Ok(StreamEvent::ToolUseDelta {
+                id: "tu_1".to_string(),
+                partial_json: "{}".to_string(),
+            }),
+            Ok(StreamEvent::MessageDelta {
+                stop_reason: clido_core::StopReason::ToolUse,
+                usage: Default::default(),
+            }),
+        ];
+        let st = box_stream(stream::iter(events));
+        let r = collect_stream_to_model_response(st, "m".to_string(), None, None).await;
+        assert!(r.is_err(), "expected error, got {r:?}");
+    }
+
+    #[tokio::test]
+    async fn stream_rejects_incomplete_tool_at_eof() {
+        let events = vec![
+            Ok(StreamEvent::ToolUseStart {
+                id: "tu_1".to_string(),
+                name: "Read".to_string(),
+            }),
+            Ok(StreamEvent::MessageDelta {
+                stop_reason: clido_core::StopReason::ToolUse,
+                usage: Default::default(),
+            }),
+        ];
+        let st = box_stream(stream::iter(events));
+        let r = collect_stream_to_model_response(st, "m".to_string(), None, None).await;
+        assert!(r.is_err(), "expected error, got {r:?}");
+        match r.unwrap_err() {
+            ClidoError::MalformedModelOutput { detail } => {
+                assert!(
+                    detail.contains("incomplete") || detail.contains("missing tool_use end"),
+                    "detail={detail}"
+                );
+            }
+            other => panic!("wrong err: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_rejects_empty_tool_name_on_start() {
+        let events = vec![
+            Ok(StreamEvent::ToolUseStart {
+                id: "tu_1".to_string(),
+                name: "  ".to_string(),
+            }),
+            Ok(StreamEvent::ToolUseEnd {
+                id: "tu_1".to_string(),
+            }),
+            Ok(StreamEvent::MessageDelta {
+                stop_reason: clido_core::StopReason::ToolUse,
+                usage: Default::default(),
+            }),
+        ];
+        let st = box_stream(stream::iter(events));
+        let r = collect_stream_to_model_response(st, "m".to_string(), None, None).await;
+        assert!(r.is_err(), "expected error, got {r:?}");
     }
 }

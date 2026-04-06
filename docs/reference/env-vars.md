@@ -47,7 +47,7 @@ These variables mirror CLI flags. CLI flags take precedence over environment var
 | `CLIDO_PERMISSION_MODE` | `--permission-mode` | Permission mode (`default`, `accept-all`, `plan`) |
 | `CLIDO_OUTPUT_FORMAT` | `--output-format` | Output format (`text`, `json`, `stream-json`) |
 | `CLIDO_INPUT_FORMAT` | `--input-format` | Input format (`text`, `stream-json`) |
-| `CLIDO_MAX_PARALLEL_TOOLS` | `--max-parallel-tools` | Reserved (ignored for in-turn tool batching) |
+| `CLIDO_MAX_PARALLEL_TOOLS` | `--max-parallel-tools` | Max concurrent read-only tool calls in one model turn |
 | `CLIDO_SYSTEM_PROMPT` | `--system-prompt` | System prompt override |
 
 ## Display and UI

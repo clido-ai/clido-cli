@@ -265,7 +265,7 @@ Optional fast/cheap provider for utility tasks (title generation, summaries, com
 | `max-turns` | integer | `200` | Maximum turns per session |
 | `max-budget-usd` | float \| omitted | none | Session spend cap in USD (accumulates across outer turns until history replace) |
 | `max-budget-usd-per-turn` | float \| omitted | none | Optional cap on model spend within one user turn (`completion_loop_run`) |
-| `max-concurrent-tools` | integer | `4` | Reserved (agent runs tools sequentially per turn; value ignored) |
+| `max-concurrent-tools` | integer | `4` | Max concurrent read-only tool calls when the model batches only read-only tools in one turn |
 | `quiet` | boolean | `false` | Less verbose agent output |
 | `no-rules` | boolean | `false` | Skip hierarchical rules / CLIDO injection |
 | `rules-file` | string | none | Use a single rules file instead of discovery |

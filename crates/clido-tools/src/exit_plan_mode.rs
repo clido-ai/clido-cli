@@ -29,6 +29,10 @@ impl Tool for ExitPlanModeTool {
         true
     }
 
+    fn parallel_safe_in_model_batch(&self) -> bool {
+        false
+    }
+
     async fn execute(&self, _input: serde_json::Value) -> ToolOutput {
         ToolOutput::ok(
             "Switched to agent mode. State-changing tools are now available.".to_string(),
@@ -44,6 +48,12 @@ mod tests {
     fn is_read_only_returns_true() {
         let tool = ExitPlanModeTool;
         assert!(tool.is_read_only());
+    }
+
+    #[test]
+    fn not_parallel_safe_in_batch() {
+        let tool = ExitPlanModeTool;
+        assert!(!tool.parallel_safe_in_model_batch());
     }
 
     #[tokio::test]

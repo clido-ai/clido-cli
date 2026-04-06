@@ -76,7 +76,11 @@ fn home_directory() -> Option<PathBuf> {
         .or_else(|| std::env::var("USERPROFILE").ok().map(PathBuf::from))
 }
 
-fn append_extra_skill_root(out: &mut Vec<(PathBuf, SkillSourceKind)>, workspace_root: &Path, raw: &str) {
+fn append_extra_skill_root(
+    out: &mut Vec<(PathBuf, SkillSourceKind)>,
+    workspace_root: &Path,
+    raw: &str,
+) {
     let raw = raw.trim();
     if raw.is_empty() {
         return;
@@ -102,9 +106,7 @@ fn fill_manifest_defaults(m: &mut SkillManifest, stem: &str, body_hint: Option<&
             .purpose
             .lines()
             .find(|l| !l.trim().is_empty())
-            .or_else(|| {
-                body_hint.and_then(|b| b.lines().find(|l| !l.trim().is_empty()))
-            })
+            .or_else(|| body_hint.and_then(|b| b.lines().find(|l| !l.trim().is_empty())))
             .unwrap_or("")
             .trim();
         m.description = if first.len() > 160 {
@@ -140,8 +142,7 @@ pub fn parse_skill_document(raw: &str, stem: &str) -> Result<(SkillManifest, Str
 }
 
 fn is_skill_file(path: &Path) -> bool {
-    path
-        .extension()
+    path.extension()
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("txt"))
         .unwrap_or(false)
@@ -171,10 +172,7 @@ pub fn resolve_skill_directories(
         SkillSourceKind::Workspace,
     ));
     if let Some(home) = home_directory() {
-        out.push((
-            home.join(".clido").join("skills"),
-            SkillSourceKind::Global,
-        ));
+        out.push((home.join(".clido").join("skills"), SkillSourceKind::Global));
     }
     for p in extra_paths {
         append_extra_skill_root(&mut out, workspace_root, p);
@@ -205,14 +203,10 @@ pub fn discover_skills(
     let dirs = resolve_skill_directories(workspace_root, extra_paths);
     let mut by_id: HashMap<String, LoadedSkill> = HashMap::new();
     for (dir, source) in dirs {
-        let paths = list_skill_paths(&dir).map_err(|e| {
-            format!("read skills dir {}: {e}", dir.display())
-        })?;
+        let paths = list_skill_paths(&dir)
+            .map_err(|e| format!("read skills dir {}: {e}", dir.display()))?;
         for path in paths {
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("skill");
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("skill");
             let raw = std::fs::read_to_string(&path)
                 .map_err(|e| format!("read {}: {e}", path.display()))?;
             let (manifest, body) = parse_skill_document(&raw, stem)?;
@@ -275,11 +269,7 @@ fn format_one_skill(s: &LoadedSkill) -> String {
     let mut head = format!(
         "### skill: {} · {}\n",
         m.id,
-        if m.name.is_empty() {
-            &m.id
-        } else {
-            &m.name
-        }
+        if m.name.is_empty() { &m.id } else { &m.name }
     );
     if !m.version.is_empty() {
         head.push_str(&format!("- **version:** {}\n", m.version));
@@ -327,9 +317,7 @@ pub fn build_skills_prompt_block(skills: &[LoadedSkill], auto_suggest: bool) -> 
         .map(format_one_skill)
         .collect::<Vec<_>>()
         .join("\n\n---\n\n");
-    Some(format!(
-        "{guide}\n<skills>\n{body}\n</skills>"
-    ))
+    Some(format!("{guide}\n<skills>\n{body}\n</skills>"))
 }
 
 /// Discover, filter, and format in one step (agent startup).

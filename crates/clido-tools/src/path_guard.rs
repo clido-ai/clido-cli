@@ -225,11 +225,19 @@ mod tests {
 
     #[test]
     fn path_outside_root_denied() {
-        let tmp = std::env::temp_dir().join("clido_path_guard_test_2");
-        std::fs::create_dir_all(&tmp).unwrap();
-        let res = PathGuard::new(tmp.clone()).resolve_and_check("../../../etc/passwd");
-        assert!(res.is_err());
-        assert!(res.unwrap_err().contains("Access denied"));
+        let workspace = std::env::temp_dir().join("clido_path_guard_test_2");
+        std::fs::create_dir_all(&workspace).unwrap();
+        // Absolute path outside the workspace (stable regardless of how many `..` segments exist).
+        let outside = std::env::temp_dir().join("clido_path_guard_outside_file.txt");
+        std::fs::write(&outside, b"x").unwrap();
+        let outside_s = outside.to_string_lossy();
+        let res = PathGuard::new(workspace).resolve_and_check(outside_s.as_ref());
+        assert!(res.is_err(), "expected err, got {res:?}");
+        let msg = res.unwrap_err();
+        assert!(
+            msg.contains("Access denied"),
+            "unexpected error message: {msg}"
+        );
     }
 
     #[test]

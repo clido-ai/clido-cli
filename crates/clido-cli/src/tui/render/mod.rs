@@ -12,6 +12,7 @@ pub(super) use welcome::*;
 pub(super) use widgets::*;
 
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::Ordering;
 
 use pulldown_cmark::Parser;
 use ratatui::{
@@ -236,6 +237,12 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             hline2.push(Span::styled(
                 format!("{TUI_SEP}session: {}  {}{}", cost_str, tok_str, ctx_str),
                 dim,
+            ));
+        }
+        if app.ui_emit_unhealthy.load(Ordering::Relaxed) {
+            hline2.push(Span::styled(
+                format!("{TUI_SEP}UI channel issue"),
+                Color::Yellow,
             ));
         }
     } else if let Some(budget) = app.max_budget_usd {

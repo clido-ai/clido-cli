@@ -383,6 +383,7 @@ pub(super) async fn agent_task(
     mut note_rx: mpsc::UnboundedReceiver<String>,
     path_permission_rx: mpsc::UnboundedReceiver<std::path::PathBuf>,
     mut profile_switch_rx: mpsc::UnboundedReceiver<String>,
+    ui_emit_unhealthy: Arc<AtomicBool>,
 ) {
     // Session-scoped paths outside workspace (also passed into AgentSetup on rebuild).
     let mut allowed_external_paths: Vec<std::path::PathBuf> = Vec::new();
@@ -479,6 +480,7 @@ pub(super) async fn agent_task(
 
     let emitter: Arc<dyn EventEmitter> = Arc::new(TuiEmitter {
         tx: event_tx.clone(),
+        unhealthy: ui_emit_unhealthy,
     });
 
     let planner_mode = cli.planner;
@@ -1685,6 +1687,7 @@ pub(super) fn start_agent_runtime(
     cancel: Arc<AtomicBool>,
     image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>>,
     reviewer_enabled: Arc<AtomicBool>,
+    ui_emit_unhealthy: Arc<AtomicBool>,
 ) -> AgentRuntimeHandles {
     let (prompt_tx, prompt_rx) = mpsc::unbounded_channel::<AgentUserInput>();
     let (resume_tx, resume_rx) = mpsc::unbounded_channel::<String>();
@@ -1724,6 +1727,7 @@ pub(super) fn start_agent_runtime(
         note_rx,
         path_permission_rx,
         profile_switch_rx,
+        ui_emit_unhealthy,
     ));
 
     AgentRuntimeHandles {
@@ -1884,6 +1888,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
 
     // Reviewer is always available (sub-agents always registered now).
     let reviewer_enabled = Arc::new(AtomicBool::new(true));
+    let ui_emit_unhealthy = Arc::new(AtomicBool::new(false));
     let mut runtime = start_agent_runtime(
         cli.clone(),
         workspace_root.clone(),
@@ -1892,6 +1897,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         cancel.clone(),
         image_state.clone(),
         reviewer_enabled.clone(),
+        ui_emit_unhealthy.clone(),
     );
 
     // Install a panic hook so the terminal is always restored even on crash.
@@ -1996,6 +2002,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         base_url.clone(),
         tui_utility_provider,
         tui_utility_model,
+        ui_emit_unhealthy.clone(),
     );
     // Kick off a live model-list fetch from the provider API immediately at startup.
     // Results arrive as AgentEvent::ModelsLoaded and update app.known_models.
@@ -2055,6 +2062,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
                     app.cancel.clone(),
                     app.image_state.clone(),
                     app.reviewer_enabled.clone(),
+                    app.ui_emit_unhealthy.clone(),
                 );
                 app.channels.prompt_tx = runtime.prompt_tx.clone();
                 app.channels.resume_tx = runtime.resume_tx.clone();

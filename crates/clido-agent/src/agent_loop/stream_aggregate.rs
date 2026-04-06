@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use clido_core::{ClidoError, ContentBlock, ModelResponse, Result, StopReason, Usage};
@@ -16,6 +17,7 @@ pub async fn collect_stream_to_model_response(
     mut stream: Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>,
     model_id: String,
     emit: Option<Arc<dyn EventEmitter>>,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> Result<ModelResponse> {
     let mut text_buf = String::new();
     let mut content: Vec<ContentBlock> = Vec::new();
@@ -26,6 +28,13 @@ pub async fn collect_stream_to_model_response(
     let mut saw_message_delta = false;
 
     while let Some(ev) = stream.next().await {
+        if cancel
+            .as_ref()
+            .map(|c| c.load(Ordering::Relaxed))
+            .unwrap_or(false)
+        {
+            return Err(ClidoError::Interrupted);
+        }
         match ev? {
             StreamEvent::TextDelta(t) => {
                 if !t.is_empty() {
@@ -143,7 +152,7 @@ mod tests {
             }),
         ];
         let st = box_stream(stream::iter(events));
-        let r = collect_stream_to_model_response(st, "test-model".to_string(), None).await;
+        let r = collect_stream_to_model_response(st, "test-model".to_string(), None, None).await;
         assert!(r.is_err(), "expected error, got {r:?}");
         let err = r.unwrap_err();
         match err {

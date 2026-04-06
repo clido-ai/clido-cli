@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -54,26 +55,35 @@ pub(super) struct PermRequest {
 
 pub(super) struct TuiEmitter {
     pub(super) tx: mpsc::Sender<AgentEvent>,
+    pub(super) unhealthy: Arc<AtomicBool>,
+}
+
+impl TuiEmitter {
+    async fn send_ev(&self, ev: AgentEvent) {
+        if self.tx.send(ev).await.is_err() {
+            tracing::warn!(
+                target: "clido::tui",
+                "failed to send AgentEvent to TUI (channel closed)"
+            );
+            self.unhealthy.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 #[async_trait]
 impl EventEmitter for TuiEmitter {
     async fn on_tool_start(&self, tool_use_id: &str, name: &str, input: &serde_json::Value) {
         let detail = format_tool_input(name, input);
-        let _ = self
-            .tx
-            .send(AgentEvent::RunState(
-                super::app_state::AppRunState::RunningTools,
-            ))
-            .await;
-        let _ = self
-            .tx
-            .send(AgentEvent::ToolStart {
-                tool_use_id: tool_use_id.to_string(),
-                name: name.to_string(),
-                detail,
-            })
-            .await;
+        self.send_ev(AgentEvent::RunState(
+            super::app_state::AppRunState::RunningTools,
+        ))
+        .await;
+        self.send_ev(AgentEvent::ToolStart {
+            tool_use_id: tool_use_id.to_string(),
+            name: name.to_string(),
+            detail,
+        })
+        .await;
     }
     async fn on_tool_done(
         &self,
@@ -82,49 +92,38 @@ impl EventEmitter for TuiEmitter {
         is_error: bool,
         diff: Option<String>,
     ) {
-        let _ = self
-            .tx
-            .send(AgentEvent::ToolDone {
-                tool_use_id: tool_use_id.to_string(),
-                is_error,
-                diff,
-            })
-            .await;
-        let _ = self
-            .tx
-            .send(AgentEvent::RunState(
-                super::app_state::AppRunState::Generating,
-            ))
-            .await;
+        self.send_ev(AgentEvent::ToolDone {
+            tool_use_id: tool_use_id.to_string(),
+            is_error,
+            diff,
+        })
+        .await;
+        self.send_ev(AgentEvent::RunState(
+            super::app_state::AppRunState::Generating,
+        ))
+        .await;
     }
     async fn on_assistant_text(&self, text: &str) {
         if !text.trim().is_empty() {
-            let _ = self
-                .tx
-                .send(AgentEvent::Thinking(text.to_string()))
-                .await;
+            self.send_ev(AgentEvent::Thinking(text.to_string())).await;
         }
     }
 
     async fn on_budget_warning(&self, pct: u8, spent_usd: f64, limit_usd: f64) {
-        let _ = self
-            .tx
-            .send(AgentEvent::BudgetWarning {
-                percent: pct,
-                cost: spent_usd,
-                limit: limit_usd,
-            })
-            .await;
+        self.send_ev(AgentEvent::BudgetWarning {
+            percent: pct,
+            cost: spent_usd,
+            limit: limit_usd,
+        })
+        .await;
     }
 
     async fn on_path_permission_request(&self, path: &std::path::Path, tool_name: &str) {
-        let _ = self
-            .tx
-            .send(AgentEvent::PathPermissionRequest {
-                path: path.to_path_buf(),
-                tool_name: tool_name.to_string(),
-            })
-            .await;
+        self.send_ev(AgentEvent::PathPermissionRequest {
+            path: path.to_path_buf(),
+            tool_name: tool_name.to_string(),
+        })
+        .await;
     }
 }
 

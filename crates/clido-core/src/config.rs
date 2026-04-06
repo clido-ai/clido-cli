@@ -148,7 +148,14 @@ pub enum PermissionMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     pub max_turns: u32,
+    /// Total USD spend cap for the agent instance across all outer turns until history is replaced
+    /// (e.g. session resume load).
+    /// `None` = unlimited.
     pub max_budget_usd: Option<f64>,
+    /// Optional cap on model spend **within one outer user turn** (one `completion_loop_run`).
+    /// Checked after each provider completion. `None` = no per-turn cap (session cap still applies).
+    #[serde(default)]
+    pub max_budget_usd_per_turn: Option<f64>,
     pub model: String,
     #[serde(default)]
     pub system_prompt: Option<String>,
@@ -206,6 +213,10 @@ pub struct AgentConfig {
     /// Auto-retries per tool call for transient failures (network, etc.).
     #[serde(default = "default_max_tool_retries")]
     pub max_tool_retries: u32,
+    /// Max **retry scheduling events** (not counting the first attempt) summed across all tools in
+    /// one outer user turn. Stops retry storms when combined with per-tool `max_tool_retries`.
+    #[serde(default = "default_max_tool_retry_budget_per_turn")]
+    pub max_tool_retry_budget_per_turn: u32,
     /// Upper bound on exponential backoff delay between retries (milliseconds).
     #[serde(default = "default_retry_backoff_max_ms")]
     pub retry_backoff_max_ms: u64,
@@ -258,6 +269,10 @@ fn default_max_tool_retries() -> u32 {
     3
 }
 
+fn default_max_tool_retry_budget_per_turn() -> u32 {
+    64
+}
+
 fn default_retry_backoff_max_ms() -> u64 {
     10_000
 }
@@ -279,6 +294,7 @@ impl Default for AgentConfig {
         Self {
             max_turns: 200,
             max_budget_usd: None,
+            max_budget_usd_per_turn: None,
             model: String::new(),
             system_prompt: None,
             permission_mode: PermissionMode::Default,
@@ -299,6 +315,7 @@ impl Default for AgentConfig {
             doom_same_args_window: default_doom_window(),
             doom_same_args_min: default_doom_same_args_min(),
             max_tool_retries: default_max_tool_retries(),
+            max_tool_retry_budget_per_turn: default_max_tool_retry_budget_per_turn(),
             retry_backoff_max_ms: default_retry_backoff_max_ms(),
             retry_jitter_numerator: default_retry_jitter_numerator(),
             provider_min_request_interval_ms: 0,

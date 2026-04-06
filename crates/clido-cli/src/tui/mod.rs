@@ -245,6 +245,7 @@ mod tests {
             )
             .expect("test provider"),
             "test-model".to_string(),
+            Arc::new(AtomicBool::new(false)),
         )
     }
 

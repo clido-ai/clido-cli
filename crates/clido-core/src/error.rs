@@ -42,6 +42,10 @@ pub enum ClidoError {
     #[error("budget exceeded")]
     BudgetExceeded,
 
+    /// Model spend for the current outer user turn exceeded `max_budget_usd_per_turn`.
+    #[error("per-turn budget exceeded (limit ${limit_usd:.4} USD)")]
+    PerTurnBudgetExceeded { limit_usd: f64 },
+
     /// Agent called the same tool with identical failing output 3+ times in a row.
     /// This indicates a stuck loop that would otherwise spend tokens indefinitely.
     #[error(
@@ -122,6 +126,7 @@ impl ClidoError {
             | ClidoError::SessionLoadInvalid { .. } => false,
             ClidoError::MaxTurnsExceeded
             | ClidoError::BudgetExceeded
+            | ClidoError::PerTurnBudgetExceeded { .. }
             | ClidoError::MaxWallTimeExceeded
             | ClidoError::MaxToolCallsPerTurnExceeded
             | ClidoError::StallDetected { .. } => {
@@ -144,6 +149,7 @@ impl ClidoError {
         match self {
             ClidoError::MaxTurnsExceeded => "max_turns_reached",
             ClidoError::BudgetExceeded => "budget_exceeded",
+            ClidoError::PerTurnBudgetExceeded { .. } => "per_turn_budget_exceeded",
             ClidoError::MaxWallTimeExceeded => "max_wall_time_exceeded",
             ClidoError::MaxToolCallsPerTurnExceeded => "max_tool_calls_per_turn",
             ClidoError::StallDetected { .. } => "stall_detected",

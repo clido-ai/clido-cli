@@ -45,7 +45,9 @@ use security::{detect_injection, enhanced_edit_error};
 
 use doom::DoomTracker;
 use metrics::{AgentMetrics, NoopAgentMetrics};
-use retry_policy::{backoff_delay_ms, classify_retry, RetryStrategy};
+use retry_policy::{
+    backoff_delay_ms, classify_retry, RetryDecisionSource, RetryStrategy,
+};
 use stall::StallTracker;
 use validation::SchemaCache;
 /// Budget warning thresholds (percentage of limit consumed).
@@ -226,6 +228,11 @@ pub struct AgentLoop {
     /// Used as the base for memory injection so repeated turns don't accumulate
     /// memory blocks on top of an already-injected prompt.
     base_system_prompt: Option<String>,
+    /// Effective system prompt for provider calls (base + memories + git). Stored separately so
+    /// `config.system_prompt` stays the profile default.
+    effective_system_prompt: Option<String>,
+    /// Retry scheduling events used in the current outer turn (see `max_tool_retry_budget_per_turn`).
+    tool_retry_events_this_turn: u32,
     /// When true, the agent will emit a planning step on the first turn (--planner flag).
     /// The plan is purely informational: the reactive loop still drives execution.
     pub planner_mode: bool,
@@ -290,6 +297,8 @@ impl AgentLoop {
             memory: None,
             planner_mode: false,
             base_system_prompt,
+            effective_system_prompt: None,
+            tool_retry_events_this_turn: 0,
             doom: DoomTracker::new(doom_window),
             stall: StallTracker::new(),
             schema_cache: Arc::new(Mutex::new(SchemaCache::new())),
@@ -354,6 +363,8 @@ impl AgentLoop {
             memory: None,
             planner_mode: false,
             base_system_prompt,
+            effective_system_prompt: None,
+            tool_retry_events_this_turn: 0,
             doom: DoomTracker::new(doom_window),
             stall: StallTracker::new(),
             schema_cache: Arc::new(Mutex::new(SchemaCache::new())),
@@ -428,6 +439,7 @@ impl AgentLoop {
         self.provider = provider;
         self.config = config;
         self.base_system_prompt = self.config.system_prompt.clone();
+        self.effective_system_prompt = None;
         self.tools = tools;
         if let Ok(mut g) = self.schema_cache.lock() {
             g.clear();
@@ -609,9 +621,9 @@ impl AgentLoop {
         })
     }
 
-    /// Rebuild `config.system_prompt` from the stored base prompt, memory retrieval, and git.
-    /// Call at the start of every outer user turn and [`run_continue`] so injected blocks stay
-    /// current and do not stack across `run_next_turn` or go stale after `run_continue`.
+    /// Rebuild the effective system prompt (stored in `effective_system_prompt`) from the base
+    /// prompt, memory retrieval, and git. Call at the start of every outer user turn and
+    /// [`run_continue`] so injected blocks stay current.
     fn refresh_system_prompt_for_outer_turn(&mut self, memory_hint: Option<&str>) {
         let search_key = memory_hint
             .filter(|s| !s.is_empty())
@@ -627,7 +639,31 @@ impl AgentLoop {
         let final_prompt = self
             .inject_git_context(&after_mem)
             .unwrap_or(after_mem);
-        self.config.system_prompt = Some(final_prompt);
+        self.effective_system_prompt = Some(final_prompt);
+    }
+
+    fn system_prompt_for_token_estimate(&self) -> Option<String> {
+        self.effective_system_prompt
+            .clone()
+            .or_else(|| self.base_system_prompt.clone())
+    }
+
+    fn completion_request_config(&self) -> AgentConfig {
+        let mut c = self.config.clone();
+        c.system_prompt = self
+            .effective_system_prompt
+            .clone()
+            .or_else(|| self.base_system_prompt.clone());
+        c
+    }
+
+    fn check_per_turn_budget(&self, turn_spent_usd: f64) -> Result<()> {
+        if let Some(limit) = self.config.max_budget_usd_per_turn {
+            if turn_spent_usd > limit {
+                return Err(ClidoError::PerTurnBudgetExceeded { limit_usd: limit });
+            }
+        }
+        Ok(())
     }
 
     /// Turn count from last run (for session result line).
@@ -658,6 +694,7 @@ impl AgentLoop {
         self.cumulative_output_tokens = 0;
         self.cumulative_cache_read_tokens = 0;
         self.cumulative_cache_creation_tokens = 0;
+        self.effective_system_prompt = None;
         self.doom.clear();
         self.budget_warned_pcts.clear();
     }
@@ -796,7 +833,16 @@ impl AgentLoop {
 
             // Check if this error is retryable (typed kind first, then legacy strings).
             match classify_retry(output.failure_kind, name, &output.content) {
-                Some(strategy) => {
+                Some(classified) => {
+                    if self.tool_retry_events_this_turn
+                        >= self.config.max_tool_retry_budget_per_turn
+                    {
+                        return output;
+                    }
+                    self.tool_retry_events_this_turn += 1;
+                    if classified.source == RetryDecisionSource::LegacyHeuristic {
+                        self.metrics.tool_retry_legacy_heuristic(name);
+                    }
                     let key = format!(
                         "{}:{}",
                         name,
@@ -819,7 +865,7 @@ impl AgentLoop {
                     }
 
                     // Apply retry strategy (capped backoff + jitter)
-                    match strategy {
+                    match classified.strategy {
                         RetryStrategy::WaitAndRetry { delay_ms } => {
                             let d = backoff_delay_ms(
                                 delay_ms,
@@ -878,8 +924,7 @@ impl AgentLoop {
     pub async fn compact_history_now(&mut self) -> Result<(usize, usize)> {
         let before = self.history.len();
         let sys_tokens = self
-            .config
-            .system_prompt
+            .system_prompt_for_token_estimate()
             .as_ref()
             .map(|s| estimate_tokens_str(s))
             .unwrap_or(0);
@@ -922,7 +967,8 @@ impl AgentLoop {
                 text: prompt.to_string(),
             }],
         }];
-        let response = self.provider.complete(&messages, &[], &self.config).await?;
+        let cfg = self.completion_request_config();
+        let response = self.provider.complete(&messages, &[], &cfg).await?;
         let text = response
             .content
             .iter()
@@ -1104,7 +1150,8 @@ impl AgentLoop {
 
     /// Run until stop_reason is EndTurn or max_turns reached.
     /// If `session` is Some, writes UserMessage, AssistantMessage, ToolCall, ToolResult each turn.
-    /// If `pricing` is Some, uses it for cost and budget; updates self.cumulative_cost_usd.
+    /// If `pricing` is Some, uses it for cost; updates session `cumulative_*` counters and checks
+    /// `max_budget_usd` / `max_budget_usd_per_turn`.
     pub async fn run(
         &mut self,
         user_input: &str,
@@ -1280,18 +1327,14 @@ impl AgentLoop {
         let in_plan_mode = effective_mode == PermissionMode::PlanOnly;
         let schemas = self.tools.schemas_for_context(in_plan_mode);
         let mut turns = 0;
-        self.cumulative_cost_usd = 0.0;
-        self.cumulative_input_tokens = 0;
-        self.cumulative_output_tokens = 0;
-        self.cumulative_cache_read_tokens = 0;
-        self.cumulative_cache_creation_tokens = 0;
         self.doom.clear();
         self.stall.reset();
-        self.budget_warned_pcts.clear();
+        self.tool_retry_events_this_turn = 0;
         const DEFAULT_INPUT_USD_PER_1M: f64 = 3.0;
         const DEFAULT_OUTPUT_USD_PER_1M: f64 = 15.0;
 
         let mut tool_calls_this_turn: u32 = 0;
+        let mut turn_spent_usd: f64 = 0.0;
         let turn_deadline = if self.config.max_wall_time_per_turn_sec > 0 {
             Some(Instant::now() + Duration::from_secs(self.config.max_wall_time_per_turn_sec))
         } else {
@@ -1321,8 +1364,7 @@ impl AgentLoop {
             // with 1-sentence summaries to delay full compaction.
             {
                 let sys_tok = self
-                    .config
-                    .system_prompt
+                    .system_prompt_for_token_estimate()
                     .as_ref()
                     .map(|s| estimate_tokens_str(s))
                     .unwrap_or(0);
@@ -1350,8 +1392,7 @@ impl AgentLoop {
             }
 
             let system_tokens = self
-                .config
-                .system_prompt
+                .system_prompt_for_token_estimate()
                 .as_ref()
                 .map(|s| estimate_tokens_str(s))
                 .unwrap_or(0);
@@ -1374,13 +1415,15 @@ impl AgentLoop {
             )
             .await?;
 
+            let req_config = self.completion_request_config();
             let response = completion::invoke_model_completion(
                 Arc::clone(&self.provider),
                 &to_send,
                 &schemas,
-                &self.config,
+                &req_config,
                 self.emit.clone(),
                 &mut self.last_complete_end,
+                cancel.clone(),
             )
             .await?;
 
@@ -1410,9 +1453,11 @@ impl AgentLoop {
                 response.usage.cache_read_input_tokens.unwrap_or(0);
             self.cumulative_cache_creation_tokens +=
                 response.usage.cache_creation_input_tokens.unwrap_or(0);
+            turn_spent_usd += turn_cost;
 
-            // Budget hard stop
+            // Budget hard stop (session + per outer turn)
             self.check_budget_exceeded()?;
+            self.check_per_turn_budget(turn_spent_usd)?;
             // Budget warnings at 50%, 80%, 90% of limit
             if let (Some(limit), Some(ref e)) = (self.config.max_budget_usd, &self.emit) {
                 let pct_used = (self.cumulative_cost_usd / limit * 100.0).floor() as u8;
@@ -2047,11 +2092,14 @@ impl AgentLoop {
             );
         };
         let schema = tool.schema();
-        if let Ok(mut guard) = self.schema_cache.lock() {
-            if let Err(msg) = guard.validate(name, &schema, input) {
-                self.metrics.validation_rejected(name);
-                return ToolOutput::err_kind(msg, ToolFailureKind::ValidationInput);
-            }
+        if let Err(o) = validation::validate_tool_json_or_tool_error(
+            &self.schema_cache,
+            &self.metrics,
+            name,
+            &schema,
+            input,
+        ) {
+            return o;
         }
         let to = self.tool_timeout();
         let out = match tokio::time::timeout(to, tool.execute(input.clone())).await {
@@ -2135,14 +2183,14 @@ impl AgentLoop {
                         match tools.get(&name) {
                             Some(tool) => {
                                 let schema = tool.schema();
-                                if let Ok(mut g) = cache.lock() {
-                                    if let Err(msg) = g.validate(&name, &schema, &input) {
-                                        metrics.validation_rejected(&name);
-                                        return ToolOutput::err_kind(
-                                            msg,
-                                            ToolFailureKind::ValidationInput,
-                                        );
-                                    }
+                                if let Err(o) = validation::validate_tool_json_or_tool_error(
+                                    &cache,
+                                    &metrics,
+                                    &name,
+                                    &schema,
+                                    &input,
+                                ) {
+                                    return o;
                                 }
                                 match tokio::time::timeout(tool_to, tool.execute(input)).await {
                                     Ok(output) => output,
@@ -2892,6 +2940,34 @@ mod tests {
         let mut agent = AgentLoop::new(provider, empty_registry(), cfg, None);
         let result = agent.run("hi", None, None, None).await;
         assert!(matches!(result, Err(ClidoError::BudgetExceeded)));
+    }
+
+    #[tokio::test]
+    async fn session_budget_accumulates_across_outer_turns() {
+        let provider = Arc::new(MockProvider::new("ok"));
+        let mut cfg = mock_config();
+        // Two mock turns default to ~0.000105 USD each (see completion_loop default pricing).
+        cfg.max_budget_usd = Some(0.00015);
+        let mut agent = AgentLoop::new(provider, empty_registry(), cfg, None);
+        agent.run_next_turn("first", None, None, None).await.unwrap();
+        let err = agent
+            .run_next_turn("second", None, None, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ClidoError::BudgetExceeded));
+    }
+
+    #[tokio::test]
+    async fn per_turn_budget_stops_mid_completion_loop() {
+        let provider = Arc::new(MockProvider::new("ok"));
+        let mut cfg = mock_config();
+        cfg.max_budget_usd_per_turn = Some(0.00009);
+        let mut agent = AgentLoop::new(provider, empty_registry(), cfg, None);
+        let err = agent.run("hi", None, None, None).await.unwrap_err();
+        assert!(
+            matches!(err, ClidoError::PerTurnBudgetExceeded { .. }),
+            "expected per-turn budget, got {err:?}"
+        );
     }
 
     // ── run_continue ──────────────────────────────────────────────────────

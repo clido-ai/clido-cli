@@ -8,20 +8,40 @@ pub(crate) enum RetryStrategy {
     WaitAndRetry { delay_ms: u64 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetryDecisionSource {
+    TypedKind,
+    LegacyHeuristic,
+}
+
+pub(crate) struct ClassifiedRetry {
+    pub strategy: RetryStrategy,
+    pub source: RetryDecisionSource,
+}
+
 pub(crate) fn classify_retry(
     kind: Option<ToolFailureKind>,
     tool_name: &str,
     message: &str,
-) -> Option<RetryStrategy> {
+) -> Option<ClassifiedRetry> {
     match kind {
         Some(ToolFailureKind::Transport | ToolFailureKind::RateLimited) => {
-            return Some(RetryStrategy::WaitAndRetry { delay_ms: 1000 });
+            return Some(ClassifiedRetry {
+                strategy: RetryStrategy::WaitAndRetry { delay_ms: 1000 },
+                source: RetryDecisionSource::TypedKind,
+            });
         }
         Some(ToolFailureKind::Timeout) => {
-            return Some(RetryStrategy::WaitAndRetry { delay_ms: 800 });
+            return Some(ClassifiedRetry {
+                strategy: RetryStrategy::WaitAndRetry { delay_ms: 800 },
+                source: RetryDecisionSource::TypedKind,
+            });
         }
         Some(ToolFailureKind::Io) => {
-            return Some(RetryStrategy::WaitAndRetry { delay_ms: 400 });
+            return Some(ClassifiedRetry {
+                strategy: RetryStrategy::WaitAndRetry { delay_ms: 400 },
+                source: RetryDecisionSource::TypedKind,
+            });
         }
         Some(
             ToolFailureKind::ValidationInput
@@ -32,7 +52,10 @@ pub(crate) fn classify_retry(
         Some(ToolFailureKind::Unknown) | None => {}
     }
 
-    legacy_string_retry(tool_name, message)
+    legacy_string_retry(tool_name, message).map(|strategy| ClassifiedRetry {
+        strategy,
+        source: RetryDecisionSource::LegacyHeuristic,
+    })
 }
 
 fn legacy_string_retry(tool_name: &str, error: &str) -> Option<RetryStrategy> {

@@ -287,6 +287,8 @@ pub(super) struct App {
     pub(super) toasts: Vec<Toast>,
     /// Last time we showed a "agent seems stuck" warning to avoid spamming.
     pub(super) last_stall_warning: Option<std::time::Instant>,
+    /// Set when the agent fails to deliver an `AgentEvent` to the TUI (channel closed).
+    pub(super) ui_emit_unhealthy: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl App {
@@ -311,6 +313,7 @@ impl App {
         base_url: Option<String>,
         utility_provider: Arc<dyn clido_providers::ModelProvider>,
         utility_model: String,
+        ui_emit_unhealthy: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let budget = clido_core::load_config(&workspace_root)
             .ok()
@@ -407,12 +410,30 @@ impl App {
             toasts: Vec::new(),
             last_stall_warning: None,
             selection_mode: false,
+            ui_emit_unhealthy,
         };
         app.messages.push(ChatLine::WelcomeSplash);
         app
     }
 
     pub(super) fn push(&mut self, line: ChatLine) {
+        const MAX_THINKING_COALESCE: usize = 24_000;
+        match (&line, self.messages.last_mut()) {
+            (ChatLine::Thinking(new_t), Some(ChatLine::Thinking(prev))) => {
+                if !new_t.is_empty() {
+                    if !prev.is_empty() {
+                        prev.push('\n');
+                    }
+                    prev.push_str(new_t);
+                    if prev.len() > MAX_THINKING_COALESCE {
+                        prev.truncate(MAX_THINKING_COALESCE);
+                        prev.push_str("\n… [truncated]");
+                    }
+                }
+                return;
+            }
+            _ => {}
+        }
         self.messages.push(line);
         // scroll position is computed at render time when following=true
     }

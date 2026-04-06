@@ -7,6 +7,8 @@ pub trait AgentMetrics: Send + Sync {
     fn model_turn_completed(&self, _turn_index: u32) {}
     fn tool_call_finished(&self, _name: &str, _is_error: bool, _kind: Option<ToolFailureKind>) {}
     fn tool_retry_scheduled(&self, _name: &str, _attempt: u32) {}
+    /// Retry was chosen from legacy substring heuristics (not `ToolFailureKind` alone).
+    fn tool_retry_legacy_heuristic(&self, _name: &str) {}
     fn validation_rejected(&self, _tool: &str) {}
     fn stall_detected(&self) {}
     fn doom_detected(&self, _tool: &str) {}
@@ -42,6 +44,14 @@ impl AgentMetrics for TracingAgentMetrics {
             event = "tool_retry_scheduled",
             tool = name,
             attempt
+        );
+    }
+
+    fn tool_retry_legacy_heuristic(&self, name: &str) {
+        tracing::debug!(
+            target: "clido::metrics",
+            event = "tool_retry_legacy_heuristic",
+            tool = name
         );
     }
 

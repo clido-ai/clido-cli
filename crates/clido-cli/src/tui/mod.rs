@@ -123,6 +123,26 @@ pub(super) const TUI_CODE_FG: Color = Color::Rgb(212, 220, 235);
 /// Elevated / inset surface (tool error strip, code-adjacent panels) — same family as code bg.
 pub(super) const TUI_SURFACE_INSET: Color = TUI_CODE_BG;
 
+// ── Zoned layout surfaces (L0–L3) — obvious separation between regions ─────
+/// Full-window canvas behind all panels (darkest plane).
+pub(super) const TUI_SURFACE_APP: Color = Color::Rgb(12, 14, 20);
+/// Header chrome — session, model, paths (lifted above app).
+pub(super) const TUI_SURFACE_CHROME: Color = Color::Rgb(28, 32, 44);
+/// Main transcript / reading well (inset vs chrome).
+pub(super) const TUI_SURFACE_CONTENT: Color = Color::Rgb(17, 19, 27);
+/// Progress strip — todos, planner, harness, live step (focus lane).
+pub(super) const TUI_SURFACE_FOCUS: Color = Color::Rgb(34, 38, 54);
+/// Tool status + queue (instrumentation band).
+pub(super) const TUI_SURFACE_STATUS: Color = Color::Rgb(22, 25, 35);
+/// Shortcut hint row under queue.
+pub(super) const TUI_SURFACE_HINT: Color = Color::Rgb(20, 22, 30);
+/// Input dock — cool lift, distinct from transcript (`L3`).
+pub(super) const TUI_SURFACE_ACTION: Color = Color::Rgb(32, 36, 52);
+/// Permission / approval emphasis (warm dark tint on dock).
+pub(super) const TUI_SURFACE_WARN_BG: Color = Color::Rgb(42, 36, 26);
+/// Rate-limit / hold state (amber-neutral dock tint).
+pub(super) const TUI_SURFACE_HOLD_BG: Color = Color::Rgb(38, 34, 28);
+
 // ── Layout & copy rhythm (single gutter system for the whole TUI) ─────────────
 /// Primary left margin for chat rows, info lines, and chrome that aligns with transcript text.
 pub(super) const TUI_GUTTER: &str = "  ";

@@ -14,7 +14,7 @@ use crate::tui::state::StatusEntry;
 use crate::tui::{
     TUI_ACCENT, TUI_BORDER_UI, TUI_GUTTER, TUI_MUTED, TUI_ROW_DIM, TUI_SELECTION_BG, TUI_SEP,
     TUI_SOFT_ACCENT, TUI_STATE_ERR, TUI_STATE_INFO, TUI_STATE_OK, TUI_STATUS_RUN,
-    TUI_SURFACE_INSET, TUI_TEXT,
+    TUI_SURFACE_INSET, TUI_TEXT, TUI_TOAST_BG,
 };
 
 // ── Modal component helpers ───────────────────────────────────────────────────
@@ -100,6 +100,7 @@ pub(crate) fn session_wall_clock(ts: &str) -> String {
 /// Styled popup block — same structure for every modal.
 pub(crate) fn modal_block(title: &str, border_color: Color) -> Block<'static> {
     Block::default()
+        .style(Style::default().bg(TUI_TOAST_BG))
         .title(title.to_string())
         .title_alignment(Alignment::Left)
         .border_type(BorderType::Rounded)
@@ -114,6 +115,7 @@ pub(crate) fn modal_block_with_hint(
 ) -> Block<'static> {
     let hint_trim = hint.trim();
     Block::default()
+        .style(Style::default().bg(TUI_TOAST_BG))
         .title(title.to_string())
         .title_alignment(Alignment::Left)
         .title_bottom(Line::from(Span::styled(

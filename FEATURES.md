@@ -83,7 +83,7 @@ Type `/` for autocomplete. The **authoritative list** with arguments and notes i
 
 `docs/reference/slash-commands.md`
 
-Examples: `/sessions`, `/skills list`, `/plan`, `/plan <task>`, `/plan on|off|auto`, `/workflow`, `/memory`, `/git`-related shortcuts (`/ship`, `/pr`, …), `/profile`, `/models`.
+Examples: `/sessions`, `/skills list`, `/plan`, `/plan <task>`, `/progress on|off|auto`, `/workflow`, `/memory`, `/git`-related shortcuts (`/ship`, `/pr`, …), `/profile`, `/models`.
 
 ---
 
@@ -101,7 +101,7 @@ Examples: `/sessions`, `/skills list`, `/plan`, `/plan <task>`, `/plan on|off|au
 
 - **Header** — brand, model, profile, workspace path, session id/title, cost/tokens when shown.
 - **Chat** — scrollable transcript.
-- **Plan/todo strip** (optional) — TodoWrite / plan steps; `/plan on|off|auto`.
+- **Progress strip** (optional) — todos / planner / harness; `/progress on|off|auto`.
 - **Status strip** — short activity log + spinner.
 - **Queue / thinking** — current step line and queued messages when relevant.
 - **Hint line** — context shortcuts.

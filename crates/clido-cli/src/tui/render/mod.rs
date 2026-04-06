@@ -1,6 +1,7 @@
 mod diff;
 mod plan;
 mod profile;
+mod surfaces;
 mod welcome;
 mod widgets;
 
@@ -100,6 +101,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         render_plan_editor(frame, app, area);
         return;
     }
+
+    surfaces::paint_app_canvas(frame, area);
 
     // ── Header spans (built before layout so we can measure and pick height) ──
     let version = env!("CARGO_PKG_VERSION");
@@ -311,62 +314,82 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let l2 = fit_spans(hline2, w);
         Paragraph::new(vec![Line::from(l1), Line::from(l2)])
     };
-    frame.render_widget(header_para, header_area);
+    {
+        let hb = surfaces::header_zone_block();
+        let h_inner = hb.inner(header_area);
+        frame.render_widget(hb, header_area);
+        frame.render_widget(header_para, h_inner);
+    }
 
     // ── Chat ──
     // Store chat area bounds for mouse selection handlers.
     app.layout.chat_area_y = (chat_area.y, chat_area.y + chat_area.height);
     app.layout.chat_area_width = chat_area.width;
 
-    if is_welcome_only(app) {
-        render_welcome(frame, app, chat_area);
-    } else {
-        // Use ratatui's own line_count() so the scroll calculation matches actual rendering.
-        let lines = build_lines_w(app, chat_area.width as usize);
-        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
-        let total_height = para.line_count(chat_area.width) as u32;
-        let max_scroll = total_height.saturating_sub(chat_area.height as u32);
-        // Store for use in handle_key (Up/PageUp need the current max_scroll).
-        app.layout.max_scroll = max_scroll;
-        // If a resize just occurred, restore scroll to the saved ratio.
-        if let Some(ratio) = app.pending_scroll_ratio.take() {
-            app.scroll = ((ratio * max_scroll as f64).round() as u32).min(max_scroll);
-        }
-        let prev_max = app.chat_render_prev_max_scroll;
-        app.chat_render_prev_max_scroll = max_scroll;
-        if app.following && prev_max > 0 && max_scroll > prev_max.saturating_add(10) {
-            app.suppress_next_chat_scroll_up = true;
-        }
-        let scroll = if app.following {
-            max_scroll
+    {
+        let cb = surfaces::content_zone_block();
+        let chat_inner = cb.inner(chat_area);
+        frame.render_widget(cb, chat_area);
+        if is_welcome_only(app) {
+            render_welcome(frame, app, chat_inner);
         } else {
-            app.scroll.min(max_scroll)
-        };
-        // ratatui's scroll() takes (u16, u16); clamp to u16::MAX before casting.
-        frame.render_widget(
-            para.scroll((scroll.min(u16::MAX as u32) as u16, 0)),
-            chat_area,
-        );
+            // Use ratatui's own line_count() so the scroll calculation matches actual rendering.
+            let inner_w = chat_inner.width as usize;
+            let lines = build_lines_w(app, inner_w);
+            let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+            let total_height = para.line_count(chat_inner.width) as u32;
+            let max_scroll = total_height.saturating_sub(chat_inner.height as u32);
+            // Store for use in handle_key (Up/PageUp need the current max_scroll).
+            app.layout.max_scroll = max_scroll;
+            // If a resize just occurred, restore scroll to the saved ratio.
+            if let Some(ratio) = app.pending_scroll_ratio.take() {
+                app.scroll = ((ratio * max_scroll as f64).round() as u32).min(max_scroll);
+            }
+            let prev_max = app.chat_render_prev_max_scroll;
+            app.chat_render_prev_max_scroll = max_scroll;
+            if app.following && prev_max > 0 && max_scroll > prev_max.saturating_add(10) {
+                app.suppress_next_chat_scroll_up = true;
+            }
+            let scroll = if app.following {
+                max_scroll
+            } else {
+                app.scroll.min(max_scroll)
+            };
+            // ratatui's scroll() takes (u16, u16); clamp to u16::MAX before casting.
+            frame.render_widget(
+                para.scroll((scroll.min(u16::MAX as u32) as u16, 0)),
+                chat_inner,
+            );
+        }
     }
 
-    // ── Progress strip (above status; visibility: /progress or /plan on|off|auto) ──
+    // ── Progress strip (above status; visibility: /progress on|off|auto) ──
     if plan_h > 0 {
-        let plines = build_plan_todo_strip_lines(app, &plan_steps, plan_area.width);
-        frame.render_widget(Paragraph::new(plines), plan_area);
+        let pb = surfaces::focus_lane_zone_block();
+        let p_inner = pb.inner(plan_area);
+        frame.render_widget(pb, plan_area);
+        let plines = build_plan_todo_strip_lines(app, &plan_steps, p_inner.width);
+        frame.render_widget(Paragraph::new(plines), p_inner);
     }
 
     // ── Status strip ──
-    {
+    if status_area.height > 0 {
+        let sb = surfaces::status_zone_block();
+        let s_inner = sb.inner(status_area);
+        frame.render_widget(sb, status_area);
         let spinner = SPINNER[app.spinner_tick];
-        let slines = status_strip_lines(&app.status_log, status_area.width, spinner);
-        frame.render_widget(Paragraph::new(slines), status_area);
+        let slines = status_strip_lines(&app.status_log, s_inner.width, spinner);
+        frame.render_widget(Paragraph::new(slines), s_inner);
     }
 
     // ── Queue strip ──
     // When the agent is thinking with queued items: show thinking step + queued list.
     // When idle with queued items: show queued list with count header.
     // When thinking alone: just the step text.
-    {
+    if queue_area.height > 0 {
+        let qb = surfaces::queue_zone_block();
+        let q_inner = qb.inner(queue_area);
+
         let mut queue_lines: Vec<Line> = Vec::new();
 
         let has_thinking = app.current_step.is_some();
@@ -405,16 +428,16 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 )));
             }
 
-            // Each queued item on its own line — dynamic based on queue_area height
+            // Each queued item on its own line — dynamic based on inner height (queue block top rule).
             let header_lines = if has_thinking { 2 } else { 1 };
-            let max_items = queue_area.height.saturating_sub(header_lines) as usize;
+            let max_items = (q_inner.height as usize).saturating_sub(header_lines);
             let effective_max = if max_items > 0 { max_items } else { 5 };
 
             for (idx, item) in app.queued.iter().enumerate().take(effective_max) {
                 let first_line = item.lines().next().unwrap_or(item.as_str());
                 let prefix = format!("{TUI_GUTTER_DEEP}{:>2}. ", idx + 1);
                 let prefix_len = prefix.chars().count();
-                let max_width = queue_area.width as usize;
+                let max_width = q_inner.width as usize;
                 let available = max_width.saturating_sub(prefix_len);
                 let truncated = if first_line.chars().count() > available {
                     format!(
@@ -447,7 +470,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             queue_lines.push(Line::raw(""));
         }
 
-        frame.render_widget(Paragraph::new(queue_lines), queue_area);
+        frame.render_widget(qb, queue_area);
+        frame.render_widget(Paragraph::new(queue_lines), q_inner);
     }
 
     // ── Input box (always rendered, even when permission popup is showing) ──
@@ -539,6 +563,10 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             TUI_BORDER_UI
         };
         let block = Block::default()
+            .style(surfaces::input_dock_fill_style(
+                app.pending_perm.is_some(),
+                false,
+            ))
             .title(title_line)
             .border_type(BorderType::Rounded)
             .borders(Borders::ALL)
@@ -581,6 +609,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             ),
         ]);
         let block = Block::default()
+            .style(surfaces::input_dock_fill_style(false, true))
             .title(title_line)
             .border_type(BorderType::Rounded)
             .borders(Borders::ALL)
@@ -601,6 +630,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             ),
         ]);
         let block = Block::default()
+            .style(surfaces::input_dock_fill_style(false, false))
             .title(idle_title)
             .border_type(BorderType::Rounded)
             .borders(Borders::ALL)
@@ -611,7 +641,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // ── Hint line — hidden when terminal is very narrow ──
-    if area.width >= 40 {
+    if hint_area.height > 0 && area.width >= 40 {
         let hint_dim = Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM);
         // Mode indicator: show active overlay/picker name
         let mode_label = if !app.overlay_stack.is_empty() {
@@ -669,9 +699,12 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
             ));
         }
-        let hint_spans = fit_spans(hint_spans, hint_area.width as usize);
+        let hintb = surfaces::hint_zone_block();
+        let hint_inner = hintb.inner(hint_area);
+        let hint_spans = fit_spans(hint_spans, hint_inner.width as usize);
+        frame.render_widget(hintb, hint_area);
         let hint = Paragraph::new(Line::from(hint_spans));
-        frame.render_widget(hint, hint_area);
+        frame.render_widget(hint, hint_inner);
     }
 
     // ── "↓ new messages" scroll indicator ──

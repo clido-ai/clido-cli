@@ -119,6 +119,7 @@ pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
     let panel_area = Rect::new(x, y, panel_w, panel_h);
 
     let block = Block::default()
+        .style(Style::default().bg(TUI_TOAST_BG))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border_color))

@@ -28,7 +28,7 @@ In harness mode, **`TodoWrite` is not registered**. Use harness tasks only, so t
 
 ## TUI
 
-With harness enabled, the plan strip defaults to **on** and shows task ids, descriptions, and focus (`›` on the focused failing task). Toggle visibility with `/plan` as usual.
+With harness enabled, the progress strip defaults to **on** and shows task ids, descriptions, and focus (`›` on the focused failing task). Toggle visibility with **`/progress on|off|auto`**.
 
 ## Limits (honest)
 

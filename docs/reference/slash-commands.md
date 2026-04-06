@@ -80,8 +80,6 @@ The **Progress** strip lists **TodoWrite** items, planner snapshots, harness tas
 | `/progress off` | Hide the strip | `/progress off` | |
 | `/progress auto` | Show only on larger terminals when there is something to list (default) | `/progress auto` | |
 
-`/plan on`, `/plan off`, and `/plan auto` are **aliases** for the same visibility (legacy names).
-
 ### Planning
 
 | Command | Description | Example | Notes |

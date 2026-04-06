@@ -964,7 +964,7 @@ pub(super) fn cmd_rollback(app: &mut App, cmd: &str) {
     }
 }
 
-/// Toggle or show visibility for the progress strip (`/progress` …). Same state as `/plan on|off|auto`.
+/// Toggle or show visibility for the progress strip (`/progress` …).
 pub(super) fn cmd_progress_strip(app: &mut App, cmd: &str) {
     let sub = cmd.trim_start_matches("/progress").trim();
     match sub {
@@ -992,7 +992,7 @@ pub(super) fn cmd_progress_strip(app: &mut App, cmd: &str) {
                 PlanPanelVisibility::Auto => "auto",
             };
             app.push(ChatLine::Info(format!(
-                "  Progress strip: {vis}  ·  /progress on | off | auto  (same as /plan on|off|auto)"
+                "  Progress strip: {vis}  ·  /progress on | off | auto"
             )));
         }
         _ => {
@@ -1118,25 +1118,10 @@ pub(super) fn cmd_plan(app: &mut App, cmd: &str) {
                     ))));
             }
         },
-        "on" => {
-            app.plan_panel_visibility = PlanPanelVisibility::On;
-            app.push(ChatLine::Info(
-                "  Progress strip: on — always shown when the terminal fits (even if empty). Same as /progress on."
-                    .into(),
-            ));
-        }
-        "off" => {
-            app.plan_panel_visibility = PlanPanelVisibility::Off;
-            app.push(ChatLine::Info(
-                "  Progress strip: off. Same as /progress off.".into(),
-            ));
-        }
-        "auto" => {
-            app.plan_panel_visibility = PlanPanelVisibility::Auto;
-            app.push(ChatLine::Info(
-                "  Progress strip: auto — only on larger terminals when there is something to list. Same as /progress auto."
-                    .into(),
-            ));
+        "on" | "off" | "auto" => {
+            app.push(ChatLine::Info(format!(
+                "  Use `/progress {sub}` for the progress strip — `/plan` is only for planning (e.g. `/plan <task>`)."
+            )));
         }
         "" => {
             // /plan with no task — show existing plan if any

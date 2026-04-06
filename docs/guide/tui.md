@@ -19,6 +19,8 @@ clido --resume abc123     # resume a specific session by ID prefix
 
 ## Layout
 
+Regions use **different background tones** so you can tell header, transcript, activity strips, hints, and input apart at a glance (still readable on common dark terminals).
+
 ```
 ╭─ header: brand · model · profile · session … ───────────────────────────────╮
 │  [chat]  conversation, tools, markdown, code blocks                           │
@@ -38,9 +40,9 @@ clido --resume abc123     # resume a specific session by ID prefix
 |------|-------------|
 | **Header** | Model, profile, workspace path, session id/title, token/cost hints. |
 | **Chat pane** | Scrollable conversation: user, assistant, tools, errors. |
-| **Plan / todo strip** | Optional panel between chat and status: **TodoWrite** steps (or plan snapshot), with ○ / › / ✓ markers. Controlled with `/plan on`, `/plan off`, `/plan auto` (default: **auto** hides on small terminals). |
+| **Progress strip** | Optional panel between chat and status: todos, planner snapshot, harness, live step — ○ / › / ✓ markers. **`/progress on`**, **`off`**, or **`auto`** (default **auto**); **`on`** keeps the strip visible even when empty. |
 | **Status strip** | Short activity log and current tool; complements the header. |
-| **Input** | Multiline draft (grows up to a few lines); **Enter** sends, **Shift+Enter** newline. |
+| **Input** | Multiline draft (grows up to a few lines); **Enter** sends, **Shift+Enter** newline. Slightly different dock background; **permission** and **rate-limit** states use a warm tint so they stand out. |
 
 See [Slash commands](/docs/reference/slash-commands) for the full command list (Git, plan, skills, workflows, etc.).
 
@@ -100,7 +102,8 @@ Common shortcuts:
 | `/help` | Key bindings + slash commands in chat |
 | `/sessions` | Session picker |
 | `/skills list` | Skills on disk and whether each is active |
-| `/plan` / `/plan <task>` | Show plan or ask the agent to plan first |
+| `/progress on` / `off` / `auto` | Progress strip visibility (default **auto**) |
+| `/plan` / `/plan <task>` | Show saved plan or ask the agent to plan first |
 | `/todo` | Current TodoWrite list |
 | `/stop` | Cancel the current agent turn |
 | `/quit` | Exit clido |

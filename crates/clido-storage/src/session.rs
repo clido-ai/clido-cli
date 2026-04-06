@@ -204,6 +204,10 @@ impl SessionWriter {
 
     /// Write a session line and log any I/O error to stderr (non-fatal).
     /// Preferred over `let _ = write_line(...)` to avoid silent data loss.
+    ///
+    /// Agent rollback uses [`Self::end_offset`] captured before a burst of `log_write_line` calls;
+    /// if a write fails here, the on-disk file may not include that line while memory might — the
+    /// error is still logged so operators can notice drift.
     pub fn log_write_line(&mut self, line: &SessionLine) {
         if let Err(e) = self.write_line(line) {
             eprintln!("[clido] session write error: {e}");

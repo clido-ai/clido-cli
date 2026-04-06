@@ -2,6 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
+/// Stable message when a path is outside the workspace and not allow-listed.
+/// The agent matches on this for interactive `/allow-path` recovery — keep in sync with callers.
+pub const ACCESS_DENIED_OUTSIDE_WORKSPACE: &str = "Access denied: path outside working directory.";
+
 /// Path-access guard: restricts operations to workspace_root and rejects blocked paths.
 /// Also allows access to explicitly permitted external paths outside the workspace.
 #[derive(Clone)]
@@ -84,7 +88,7 @@ impl PathGuard {
             return Ok(canonical);
         }
 
-        Err("Access denied: path outside working directory.".to_string())
+        Err(ACCESS_DENIED_OUTSIDE_WORKSPACE.to_string())
     }
 
     /// Resolve path for write: file may not exist yet.
@@ -119,7 +123,7 @@ impl PathGuard {
                 return Ok(canonical);
             }
 
-            return Err("Access denied: path outside working directory.".to_string());
+            return Err(ACCESS_DENIED_OUTSIDE_WORKSPACE.to_string());
         }
 
         // For new files, check parent directory
@@ -143,7 +147,7 @@ impl PathGuard {
                         }
                         return Ok(joined);
                     }
-                    return Err("Access denied: path outside working directory.".to_string());
+                    return Err(ACCESS_DENIED_OUTSIDE_WORKSPACE.to_string());
                 }
             };
 
@@ -171,7 +175,7 @@ impl PathGuard {
                 return Ok(joined);
             }
 
-            return Err("Access denied: path outside working directory.".to_string());
+            return Err(ACCESS_DENIED_OUTSIDE_WORKSPACE.to_string());
         }
 
         Ok(joined)

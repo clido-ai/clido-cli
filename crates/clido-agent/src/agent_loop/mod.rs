@@ -19,7 +19,7 @@ use clido_core::{ClidoError, PricingTable, Result};
 use clido_memory::MemoryStore;
 use clido_providers::ModelProvider;
 use clido_storage::{AuditEntry, AuditLog, SessionLine, SessionWriter};
-use clido_tools::{ToolOutput, ToolRegistry};
+use clido_tools::{ToolOutput, ToolRegistry, ACCESS_DENIED_OUTSIDE_WORKSPACE};
 use futures::future::join_all;
 use similar::TextDiff;
 use std::collections::{HashMap, VecDeque};
@@ -689,25 +689,18 @@ impl AgentLoop {
                 return output;
             }
 
-            // Check for "path outside working directory" error - request interactive permission
-            if output.content.contains("path outside working directory")
-                || output.content.contains("Access denied: path outside")
-            {
+            // Path outside workspace (see `clido_tools::ACCESS_DENIED_OUTSIDE_WORKSPACE`) — optional interactive allow-list.
+            if output.content.contains(ACCESS_DENIED_OUTSIDE_WORKSPACE) {
                 if let Some(ref mut rx) = self.path_permission_rx {
-                    // Extract the path from the error or input
                     let requested_path = Self::extract_path_from_input(input).unwrap_or_default();
 
-                    // Emit request to TUI (modal y/n/a), not only as "thinking" text.
                     if let Some(ref e) = self.emit {
                         e.on_path_permission_request(&requested_path, name).await;
                     }
 
-                    // Wait for user response (with timeout)
                     match tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv()).await
                     {
                         Ok(Some(granted_path)) if !granted_path.as_os_str().is_empty() => {
-                            // User granted permission - the TUI will have updated allowed paths
-                            // and rebuilt the tools. We need to retry with the new registry.
                             if let Some(ref e) = self.emit {
                                 let _ = e
                                     .on_assistant_text(&format!(
@@ -716,19 +709,8 @@ impl AgentLoop {
                                     ))
                                     .await;
                             }
-                            // Return a special output indicating we need to retry with new tools
-                            // The caller (execute_tool_batch_with_retry) will handle the actual retry
-                            return ToolOutput {
-                                content: format!(
-                                    "External path access granted by user. Retrying with: {}",
-                                    granted_path.display()
-                                ),
-                                is_error: false,
-                                path: None,
-                                content_hash: None,
-                                mtime_nanos: None,
-                                diff: None,
-                            };
+                            // TUI updates allowed paths and rebuilds tools — run the tool again for real output.
+                            return self.execute_tool_maybe_gated(name, input).await;
                         }
                         Ok(Some(_)) => {
                             // User denied (empty path means denial)
@@ -1028,7 +1010,13 @@ impl AgentLoop {
         pricing: Option<&PricingTable>,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
-        let schemas = self.tools.schemas();
+        let effective_mode = self
+            .permission_mode_override
+            .unwrap_or(self.config.permission_mode);
+        let in_plan_mode = effective_mode == PermissionMode::PlanOnly;
+        let schemas = self.tools.schemas_for_context(in_plan_mode);
+        self.doom_monitor.clear();
+        self.budget_warned_pcts.clear();
         let mut turns = 0;
         self.cumulative_cost_usd = 0.0;
         self.cumulative_input_tokens = 0;
@@ -1139,6 +1127,26 @@ impl AgentLoop {
                 response.usage.cache_creation_input_tokens.unwrap_or(0);
 
             self.check_budget_exceeded()?;
+            if let (Some(limit), Some(ref e)) = (self.config.max_budget_usd, &self.emit) {
+                let pct_used = (self.cumulative_cost_usd / limit * 100.0).floor() as u8;
+                for &threshold_pct in BUDGET_WARNING_PCTS {
+                    if pct_used >= threshold_pct
+                        && !self.budget_warned_pcts.contains(&threshold_pct)
+                    {
+                        self.budget_warned_pcts.push(threshold_pct);
+                        e.on_budget_warning(threshold_pct, self.cumulative_cost_usd, limit)
+                            .await;
+                    }
+                }
+            }
+
+            debug!(
+                "continue turn {} stop_reason={:?} usage={}/{}",
+                turns,
+                response.stop_reason,
+                response.usage.input_tokens,
+                response.usage.output_tokens
+            );
 
             self.history.push(Message {
                 role: Role::Assistant,

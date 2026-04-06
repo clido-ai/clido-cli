@@ -44,7 +44,7 @@ pub use mcp::{
     McpTransport, McpTransportClient,
 };
 pub use multi_edit::MultiEditTool;
-pub use path_guard::PathGuard;
+pub use path_guard::{PathGuard, ACCESS_DENIED_OUTSIDE_WORKSPACE};
 pub use read::ReadTool;
 pub use registry::ToolRegistry;
 pub use semantic_search::SemanticSearchTool;

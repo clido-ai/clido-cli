@@ -82,6 +82,9 @@ impl ClidoError {
     ///   possibly tool) content this turn, we **keep** it so auto-continue and budget handling
     ///   still see a consistent transcript. If the turn never got past the new user line
     ///   (`history_len == history_before_turn + 1`), we truncate like a bare failure.
+    ///   The same check applies to `run_continue`: `history_before_turn` is the length at
+    ///   continue-entry; truncate only when exactly one message was appended since then (e.g. one
+    ///   assistant reply before hitting the limit).
     #[must_use]
     pub fn should_truncate_history_after_failed_run(
         &self,

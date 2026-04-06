@@ -97,15 +97,21 @@ Examples: `/sessions`, `/skills list`, `/plan`, `/plan <task>`, `/progress on|of
 
 ---
 
-## Layout (summary)
+## Layout and surfaces
 
-- **Header** — brand, model, profile, workspace path, session id/title, cost/tokens when shown.
-- **Chat** — scrollable transcript.
-- **Progress strip** (optional) — todos / planner / harness; `/progress on|off|auto`.
-- **Status strip** — short activity log + spinner.
-- **Queue / thinking** — current step line and queued messages when relevant.
-- **Hint line** — context shortcuts.
-- **Input** — multiline draft; Enter sends, Shift+Enter newline.
+The full-screen TUI is organized as **stacked horizontal zones**, each with its own background so you can scan structure quickly (header vs conversation vs tooling vs input).
+
+| Zone | Role |
+|------|------|
+| **App canvas** | Darkest full-frame fill; every other region sits on top of it. |
+| **Header** | Model, profile, workspace path, session id/title, cost/tokens when shown. |
+| **Chat** | Scrollable transcript (markdown, code blocks, tool output). |
+| **Progress strip** | Optional: TodoWrite, planner snapshot, harness tasks, or live step — `/progress on`, `off`, or `auto`. |
+| **Status + queue** | Activity log, spinner, thinking line, queued messages when relevant. |
+| **Hint row** | Shortcut summary (hidden on very narrow terminals). |
+| **Input dock** | Multiline composer; border and background shift for **permission wait**, **rate limit**, and **prompt enhancement**. |
+
+Popups (pickers, errors, permissions) and the **welcome** card use a dedicated elevated panel color so they are visually separate from the chat well.
 
 ---
 

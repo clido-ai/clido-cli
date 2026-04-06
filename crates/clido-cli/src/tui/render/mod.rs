@@ -254,7 +254,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         2
     };
 
-    // Layout: header | chat | plan/todo (0–N) | status (2) | queue (1) | hint (1) | input
+    // Layout: header | chat | progress strip (0–N) | status (2) | queue (1) | hint (1) | input
     // Input grows with content: 1 line of text = 3 rows (2 borders + 1), capped at 12.
     // When very narrow (< 40), collapse optional rows to avoid layout panics.
     let input_line_count = app.text_input.text.matches('\n').count() + 1;
@@ -272,7 +272,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     // Queue area: height = header + items, but reserve enough chat space (min 10 lines).
     // Dynamic — fills available vertical space on tall terminals.
     let min_chat_h = 10u16;
-    let reserved_h = header_h + plan_h + status_h + hint_h + input_h + 2; // chat borders
+    let reserved_h = header_h + plan_h + status_h + hint_h + input_h + 2; // slack for transcript wrap / resize
     let available_for_queue = area.height.saturating_sub(min_chat_h + reserved_h);
     let queue_h = if app.current_step.is_some() && !app.queued.is_empty() {
         let total = 1 + 1 + app.queued.len();
@@ -566,6 +566,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             .style(surfaces::input_dock_fill_style(
                 app.pending_perm.is_some(),
                 false,
+                app.enhancing,
             ))
             .title(title_line)
             .border_type(BorderType::Rounded)
@@ -609,7 +610,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             ),
         ]);
         let block = Block::default()
-            .style(surfaces::input_dock_fill_style(false, true))
+            .style(surfaces::input_dock_fill_style(false, true, false))
             .title(title_line)
             .border_type(BorderType::Rounded)
             .borders(Borders::ALL)
@@ -630,7 +631,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             ),
         ]);
         let block = Block::default()
-            .style(surfaces::input_dock_fill_style(false, false))
+            .style(surfaces::input_dock_fill_style(false, false, false))
             .title(idle_title)
             .border_type(BorderType::Rounded)
             .borders(Borders::ALL)

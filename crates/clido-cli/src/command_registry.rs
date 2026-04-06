@@ -335,7 +335,7 @@ pub static COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "/progress",
         section: "Progress",
-        description: "show strip visibility, or /progress on|off|auto",
+        description: "show or set progress strip visibility: on, off, or auto (default)",
         usage: Some("/progress [on|off|auto]"),
         takes_args: true,
         requires_idle: false,
@@ -365,7 +365,7 @@ pub static COMMANDS: &[SlashCommand] = &[
         takes_args: false,
         requires_idle: false,
     },
-    // ── Planning (structured plan workflow; mirrors /progress for on|off|auto) ──
+    // ── Planning (structured plan workflow; strip visibility is `/progress` only) ──
     SlashCommand {
         name: "/plan",
         section: "Planning",

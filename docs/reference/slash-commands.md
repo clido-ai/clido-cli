@@ -80,6 +80,8 @@ The **Progress** strip lists **TodoWrite** items, planner snapshots, harness tas
 | `/progress off` | Hide the strip | `/progress off` | |
 | `/progress auto` | Show only on larger terminals when there is something to list (default) | `/progress auto` | |
 
+Strip visibility is controlled **only** with `/progress`. If you run `/plan on`, `/plan off`, or `/plan auto`, clido replies with a short reminder to use `/progress` — `/plan` remains for planning, not the strip.
+
 ### Planning
 
 | Command | Description | Example | Notes |

@@ -981,7 +981,7 @@ pub(super) fn cmd_progress_strip(app: &mut App, cmd: &str) {
         "auto" => {
             app.plan_panel_visibility = PlanPanelVisibility::Auto;
             app.push(ChatLine::Info(
-                "  Progress strip: auto — only when there is content and the terminal is tall enough."
+                "  Progress strip: auto — show on larger terminals when there is something to list (default)."
                     .into(),
             ));
         }
@@ -1120,7 +1120,7 @@ pub(super) fn cmd_plan(app: &mut App, cmd: &str) {
         },
         "on" | "off" | "auto" => {
             app.push(ChatLine::Info(format!(
-                "  Use `/progress {sub}` for the progress strip — `/plan` is only for planning (e.g. `/plan <task>`)."
+                "  Progress strip visibility uses `/progress {sub}` — `/plan` is for planning only (e.g. `/plan <task>`)."
             )));
         }
         "" => {

@@ -97,7 +97,7 @@ pub(super) const TUI_TEXT_DIM: Color = TUI_MUTED;
 
 /// Selected row in lists / completions.
 pub(super) const TUI_SELECTION_BG: Color = Color::Rgb(44, 54, 74);
-/// Toast / overlay chrome backing.
+/// Toast / modal / welcome card — elevated above `TUI_SURFACE_CONTENT`, below the brightest chrome.
 pub(super) const TUI_TOAST_BG: Color = Color::Rgb(48, 54, 68);
 
 /// Agent busy / queued input chrome (soft lavender, not loud).
@@ -142,6 +142,8 @@ pub(super) const TUI_SURFACE_ACTION: Color = Color::Rgb(32, 36, 52);
 pub(super) const TUI_SURFACE_WARN_BG: Color = Color::Rgb(42, 36, 26);
 /// Rate-limit / hold state (amber-neutral dock tint).
 pub(super) const TUI_SURFACE_HOLD_BG: Color = Color::Rgb(38, 34, 28);
+/// Prompt enhancement in progress — cool tint aligned with `TUI_SOFT_ACCENT` border on the dock.
+pub(super) const TUI_SURFACE_ENHANCE_BG: Color = Color::Rgb(26, 36, 48);
 
 // ── Layout & copy rhythm (single gutter system for the whole TUI) ─────────────
 /// Primary left margin for chat rows, info lines, and chrome that aligns with transcript text.

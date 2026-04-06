@@ -1391,7 +1391,8 @@ pub(super) fn handle_app_action(app: &mut App, action: AppAction) {
             let _ = app.channels.resume_tx.send(session_id);
         }
         AppAction::GrantPermission(_grant) => {
-            // TODO: wire when permission overlay is migrated
+            // Handled through the permission modal and `pending_perm` in the main loop; this
+            // variant is reserved for programmatic flows that send `AppAction` directly.
         }
         AppAction::ShowError(msg) => {
             app.overlay_stack

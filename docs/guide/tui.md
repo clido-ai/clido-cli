@@ -42,7 +42,11 @@ Regions use **different background tones** so you can tell header, transcript, a
 | **Chat pane** | Scrollable conversation: user, assistant, tools, errors. |
 | **Progress strip** | Optional panel between chat and status: todos, planner snapshot, harness, live step — ○ / › / ✓ markers. **`/progress on`**, **`off`**, or **`auto`** (default **auto**); **`on`** keeps the strip visible even when empty. |
 | **Status strip** | Short activity log and current tool; complements the header. |
-| **Input** | Multiline draft (grows up to a few lines); **Enter** sends, **Shift+Enter** newline. Slightly different dock background; **permission** and **rate-limit** states use a warm tint so they stand out. |
+| **Input** | Multiline draft (grows up to a few lines); **Enter** sends, **Shift+Enter** newline. The input dock uses its own surface; **permission**, **rate-limit**, and **prompt enhancement** states change both border color and dock background. |
+
+### Visual design
+
+The TUI theme assumes a **dark terminal** with **24-bit color** (typical modern terminals). Horizontal bands use **background fills** instead of border lines so single-line headers and short queue areas keep their full height. Modal dialogs and the welcome card use a slightly **brighter panel** surface so they read as floating above the transcript. If your emulator is limited to 16 colors, region separation may be subtler but layout and borders on the input dock remain.
 
 See [Slash commands](/docs/reference/slash-commands) for the full command list (Git, plan, skills, workflows, etc.).
 

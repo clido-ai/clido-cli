@@ -159,9 +159,9 @@ pub(crate) struct SessionStats {
     pub(crate) session_turn_count: u32,
 }
 
-// ── Plan / todo panel (TUI) ───────────────────────────────────────────────────
+// ── Progress strip (TUI) ──────────────────────────────────────────────────────
 
-/// User preference for the plan & todo strip above the status line.
+/// User preference for the progress strip (todos, planner, harness, live step) above the status line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum PlanPanelVisibility {
     /// Show the panel only when the terminal is large enough and there is content.

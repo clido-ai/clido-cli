@@ -229,11 +229,7 @@ pub(crate) fn build_plan_todo_strip_lines(
         PlanPanelVisibility::On => "on",
         PlanPanelVisibility::Off => "off",
     };
-    let header_title = if app.harness_mode {
-        "Harness"
-    } else {
-        "Tasks"
-    };
+    let header_title = if app.harness_mode { "Harness" } else { "Tasks" };
     let mut out: Vec<Line<'static>> = Vec::new();
     if with_strip_title_row {
         out.push(Line::from(vec![
@@ -252,7 +248,9 @@ pub(crate) fn build_plan_todo_strip_lines(
                 dim,
             )]));
             out.push(Line::from(vec![Span::styled(
-                format!("{TUI_GUTTER}.clido/harness/tasks.json  ·  HarnessControl planner_append_tasks"),
+                format!(
+                    "{TUI_GUTTER}.clido/harness/tasks.json  ·  HarnessControl planner_append_tasks"
+                ),
                 dim,
             )]));
         } else if matches!(app.plan_panel_visibility, PlanPanelVisibility::On) {

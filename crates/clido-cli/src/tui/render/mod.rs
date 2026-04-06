@@ -6,9 +6,9 @@ mod surfaces;
 mod welcome;
 mod widgets;
 
-pub(super) use status_panel::{STATUS_RAIL_MIN_TERM_WIDTH, STATUS_RAIL_MIN_TERM_WIDTH_ON};
 pub(super) use plan::*;
 pub(super) use profile::*;
+pub(super) use status_panel::{STATUS_RAIL_MIN_TERM_WIDTH, STATUS_RAIL_MIN_TERM_WIDTH_ON};
 pub(super) use welcome::*;
 pub(super) use widgets::*;
 

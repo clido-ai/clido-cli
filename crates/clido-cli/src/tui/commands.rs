@@ -1046,8 +1046,7 @@ pub(super) fn cmd_panel(app: &mut App, cmd: &str) {
             let tasks = task_strip_vis_label(app.plan_panel_visibility);
             app.push(ChatLine::Info(format!(
                 "  Side panel: {rail}  ·  /panel on|off|auto   (auto ≥{} cols, on ≥{})",
-                STATUS_RAIL_MIN_TERM_WIDTH,
-                STATUS_RAIL_MIN_TERM_WIDTH_ON
+                STATUS_RAIL_MIN_TERM_WIDTH, STATUS_RAIL_MIN_TERM_WIDTH_ON
             )));
             app.push(ChatLine::Info(format!(
                 "  Task list: {tasks}  ·  /tasks on|off|auto   (alias /progress)"

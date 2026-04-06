@@ -564,8 +564,8 @@ pub(super) async fn agent_task(
     // First-line heuristic title already pushed to the UI for this session.
     let mut heuristic_title_sent = false;
     // Auto-continue counter: when the turn limit is hit mid-task, clido automatically
-                                                    // injects "please continue" so the agent never stops mid-work. We cap this at
-                                                    // MAX_AUTO_CONTINUES to avoid infinite loops on genuinely stuck agents.
+    // injects "please continue" so the agent never stops mid-work. We cap this at
+    // MAX_AUTO_CONTINUES to avoid infinite loops on genuinely stuck agents.
     const MAX_AUTO_CONTINUES: u32 = 5;
     let mut auto_continue_count: u32 = 0;
 
@@ -663,11 +663,7 @@ pub(super) async fn agent_task(
                 if let Some(t) = persisted_session_title(&lines) {
                     title_generated = true;
                     heuristic_title_sent = true;
-                    if event_tx
-                        .send(AgentEvent::TitleGenerated(t))
-                        .await
-                        .is_err()
-                    {
+                    if event_tx.send(AgentEvent::TitleGenerated(t)).await.is_err() {
                         return;
                     }
                 }
@@ -1015,9 +1011,7 @@ pub(super) async fn agent_task(
                 if !title_generated && !heuristic_title_sent && !prompt.trim().is_empty() {
                     heuristic_title_sent = true;
                     let h = heuristic_session_title_from_prompt(&prompt);
-                    let _ = event_tx
-                        .send(AgentEvent::TitleGenerated(h))
-                        .await;
+                    let _ = event_tx.send(AgentEvent::TitleGenerated(h)).await;
                 }
 
                 // When --planner is active and this is the first turn, attempt to parse
@@ -1269,13 +1263,13 @@ pub(super) async fn agent_task(
                                     let title = heuristic_session_title_from_prompt(&title_prompt);
                                     if !title.is_empty() {
                                         if let Some(ref mut w) = title_writer {
-                                            let _ = w.write_line(&clido_storage::SessionLine::Title {
-                                                title: title.clone(),
-                                            });
+                                            let _ =
+                                                w.write_line(&clido_storage::SessionLine::Title {
+                                                    title: title.clone(),
+                                                });
                                         }
-                                        let _ = title_tx
-                                            .send(AgentEvent::TitleGenerated(title))
-                                            .await;
+                                        let _ =
+                                            title_tx.send(AgentEvent::TitleGenerated(title)).await;
                                     }
                                 }
                             });

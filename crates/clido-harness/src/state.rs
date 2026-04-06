@@ -202,9 +202,9 @@ impl HarnessState {
                     crit
                 )));
             }
-            if r.evidence.trim().len() < 8 {
+            if r.evidence.trim().len() < 24 {
                 return Err(HarnessError::VerificationRejected(format!(
-                    "criterion {:?}: evidence too short — cite command output or file:line",
+                    "criterion {:?}: evidence too short (min 24 chars) — cite concrete command output or file:line",
                     crit
                 )));
             }

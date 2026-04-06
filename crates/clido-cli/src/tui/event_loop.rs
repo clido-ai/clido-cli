@@ -1858,6 +1858,12 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
             .unwrap_or(false)
     };
 
+    let harness_mode = cli.harness
+        || loaded_config
+            .as_ref()
+            .map(|c| c.agent.harness)
+            .unwrap_or(false);
+
     let cancel = std::sync::Arc::new(AtomicBool::new(false));
     let image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -1969,6 +1975,8 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         model_prefs,
         current_profile,
         reviewer_enabled,
+        cli.harness,
+        harness_mode,
         runtime.todo_store.clone(),
         api_key.clone(),
         base_url.clone(),
@@ -2594,6 +2602,11 @@ pub(super) async fn event_loop(
                     Some(AgentEvent::WorkdirSwitched { path }) => {
                         last_agent_activity = std::time::Instant::now();
                         app.workspace_root = path.clone();
+                        app.harness_mode = app.harness_from_cli
+                            || clido_core::load_config(&path)
+                                .ok()
+                                .map(|c| c.agent.harness)
+                                .unwrap_or(false);
                         // Reset the app-side AllowAll override — the agent's override was
                         // already reset in agent_task when replace_tools was called.
                         app.permission_mode_override = None;

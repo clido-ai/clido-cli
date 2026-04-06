@@ -39,7 +39,7 @@ pub use file_tracker::FileTracker;
 pub use git_tool::GitTool;
 pub use glob_tool::GlobTool;
 pub use grep_tool::GrepTool;
-pub use harness_control::HarnessControlTool;
+pub use harness_control::{HarnessControlMode, HarnessControlTool};
 pub use ls_tool::LsTool;
 pub use mcp::{
     load_mcp_config, McpClient, McpConfig, McpHttpClient, McpServerConfig, McpTool, McpToolDef,
@@ -71,6 +71,7 @@ pub fn default_registry_with_allowed_paths(
         Vec::new(),
         false,
         allowed_external,
+        true,
     )
     .0
 }
@@ -89,7 +90,7 @@ pub fn default_registry_with_options(
     blocked: Vec<PathBuf>,
     sandbox: bool,
 ) -> ToolRegistry {
-    default_registry_with_todo_store(workspace_root, blocked, sandbox).0
+    default_registry_with_todo_store(workspace_root, blocked, sandbox, true).0
 }
 
 /// Build registry with allowed external paths.
@@ -98,6 +99,7 @@ pub fn default_registry_with_options_and_allowed_paths(
     blocked: Vec<PathBuf>,
     sandbox: bool,
     allowed_external: Vec<PathBuf>,
+    include_todo_write: bool,
 ) -> (
     ToolRegistry,
     std::sync::Arc<std::sync::Mutex<Vec<TodoItem>>>,
@@ -125,9 +127,14 @@ pub fn default_registry_with_options_and_allowed_paths(
         guard.clone(),
         tracker.clone(),
     ));
-    let todo_tool = TodoWriteTool::new();
-    let todo_store = todo_tool.store();
-    r.register(todo_tool);
+    let todo_store = if include_todo_write {
+        let todo_tool = TodoWriteTool::new();
+        let s = todo_tool.store();
+        r.register(todo_tool);
+        s
+    } else {
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()))
+    };
     r.register(GlobTool::new_with_guard(guard.clone()));
     r.register(LsTool::new_with_guard(guard.clone()));
     r.register(ApplyPatchTool::new(guard.clone()));
@@ -148,6 +155,7 @@ pub fn default_registry_with_todo_store(
     workspace_root: PathBuf,
     blocked: Vec<PathBuf>,
     sandbox: bool,
+    include_todo_write: bool,
 ) -> (
     ToolRegistry,
     std::sync::Arc<std::sync::Mutex<Vec<TodoItem>>>,
@@ -173,9 +181,14 @@ pub fn default_registry_with_todo_store(
         guard.clone(),
         tracker.clone(),
     ));
-    let todo_tool = TodoWriteTool::new();
-    let todo_store = todo_tool.store();
-    r.register(todo_tool);
+    let todo_store = if include_todo_write {
+        let todo_tool = TodoWriteTool::new();
+        let s = todo_tool.store();
+        r.register(todo_tool);
+        s
+    } else {
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()))
+    };
     r.register(GlobTool::new_with_guard(guard.clone()));
     r.register(LsTool::new_with_guard(guard.clone()));
     r.register(ApplyPatchTool::new(guard.clone()));

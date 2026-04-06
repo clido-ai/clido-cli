@@ -10,13 +10,34 @@ use clido_harness::{
 
 use crate::{Tool, ToolOutput};
 
+/// Which harness operations this tool instance may perform (enforced in code, not only prompts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HarnessControlMode {
+    /// Main agent: plan, execute, progress — **not** [`evaluator_mark_pass`].
+    Executor,
+    /// SpawnReviewer sub-agent: [`read`] + [`evaluator_mark_pass`] only.
+    Evaluator,
+}
+
 pub struct HarnessControlTool {
     workspace: std::path::PathBuf,
+    mode: HarnessControlMode,
 }
 
 impl HarnessControlTool {
     pub fn new(workspace: std::path::PathBuf) -> Self {
-        Self { workspace }
+        Self::with_mode(workspace, HarnessControlMode::Executor)
+    }
+
+    pub fn with_mode(workspace: std::path::PathBuf, mode: HarnessControlMode) -> Self {
+        Self { workspace, mode }
+    }
+
+    fn op_allowed(&self, op: &str) -> bool {
+        match self.mode {
+            HarnessControlMode::Executor => op != "evaluator_mark_pass",
+            HarnessControlMode::Evaluator => matches!(op, "read" | "evaluator_mark_pass"),
+        }
     }
 }
 
@@ -27,32 +48,47 @@ impl Tool for HarnessControlTool {
     }
 
     fn description(&self) -> &str {
-        "Structured harness: durable JSON tasks under `.clido/harness/tasks.json` and append-only \
-         `progress.ndjson`. Task order is never reordered or deleted — only status fail→pass after \
-         verification. Operations: read | planner_append_tasks | executor_set_focus | executor_clear_focus | \
-         executor_register_attempt | progress_append | evaluator_mark_pass. \
-         Planner appends new tasks (all start fail). Executor sets focus to ONE fail task, implements it, \
-         runs real tests/commands, then SpawnReviewer (or human) must verify. Evaluator (reviewer sub-agent \
-         when harness is on) calls evaluator_mark_pass with commands_executed + per-criterion evidence. \
-         Do not mark pass without running checks listed in acceptance_criteria."
+        match self.mode {
+            HarnessControlMode::Executor => {
+                "Structured harness (executor): JSON tasks under `.clido/harness/tasks.json`, append-only \
+                 `progress.ndjson`. Ops: read | planner_append_tasks | executor_set_focus | executor_clear_focus | \
+                 executor_register_attempt | progress_append. You **cannot** call evaluator_mark_pass — only the \
+                 SpawnReviewer sub-agent has that op after independent verification. New tasks start fail; pass \
+                 only via reviewer + structured evidence."
+            }
+            HarnessControlMode::Evaluator => {
+                "Harness evaluator (reviewer only): ops read | evaluator_mark_pass. Read tasks.json + progress, \
+                 verify acceptance criteria with real checks, then mark pass with commands_executed + \
+                 acceptance_results (criterion strings must match tasks.json exactly)."
+            }
+        }
     }
 
     fn schema(&self) -> serde_json::Value {
+        let ops: Vec<&str> = match self.mode {
+            HarnessControlMode::Executor => vec![
+                "read",
+                "planner_append_tasks",
+                "executor_set_focus",
+                "executor_clear_focus",
+                "executor_register_attempt",
+                "progress_append",
+            ],
+            HarnessControlMode::Evaluator => vec!["read", "evaluator_mark_pass"],
+        };
+        let op_desc = match self.mode {
+            HarnessControlMode::Executor => {
+                "read = snapshot; planner_append_tasks; executor_* ; progress_append — no evaluator_mark_pass"
+            }
+            HarnessControlMode::Evaluator => "read = snapshot; evaluator_mark_pass after verification only",
+        };
         serde_json::json!({
             "type": "object",
             "properties": {
                 "op": {
                     "type": "string",
-                    "enum": [
-                        "read",
-                        "planner_append_tasks",
-                        "executor_set_focus",
-                        "executor_clear_focus",
-                        "executor_register_attempt",
-                        "progress_append",
-                        "evaluator_mark_pass"
-                    ],
-                    "description": "read = snapshot state + progress tail + git log; planner_append_tasks = add tasks; executor_* = session focus / loop guard; progress_append = append NDJSON event; evaluator_mark_pass = verified pass only"
+                    "enum": ops,
+                    "description": op_desc
                 },
                 "tasks": {
                     "type": "array",
@@ -85,6 +121,19 @@ impl Tool for HarnessControlTool {
             Some(o) => o,
             None => return ToolOutput::err("HarnessControl: missing op"),
         };
+
+        if !self.op_allowed(op) {
+            return ToolOutput::err(match self.mode {
+                HarnessControlMode::Executor => {
+                    "HarnessControl (executor): `evaluator_mark_pass` is not available on this tool — \
+                     only the SpawnReviewer sub-agent can mark pass after independent verification."
+                        .to_string()
+                }
+                HarnessControlMode::Evaluator => format!(
+                    "HarnessControl (evaluator): op `{op}` is not allowed — use only `read` or `evaluator_mark_pass`."
+                ),
+            });
+        }
 
         let mut state = match read_state(&self.workspace) {
             Ok(s) => s,
@@ -338,8 +387,11 @@ mod tests {
     #[tokio::test]
     async fn harness_append_and_pass() {
         let dir = tempdir().unwrap();
-        let tool = HarnessControlTool::new(dir.path().to_path_buf());
-        let r = tool
+        let exec =
+            HarnessControlTool::with_mode(dir.path().to_path_buf(), HarnessControlMode::Executor);
+        let eval =
+            HarnessControlTool::with_mode(dir.path().to_path_buf(), HarnessControlMode::Evaluator);
+        let r = exec
             .execute(json!({
                 "op": "planner_append_tasks",
                 "tasks": [{
@@ -351,7 +403,7 @@ mod tests {
             }))
             .await;
         assert!(!r.is_error, "{}", r.content);
-        let r2 = tool.execute(json!({ "op": "read" })).await;
+        let r2 = exec.execute(json!({ "op": "read" })).await;
         assert!(r2.content.contains("t1"));
         let ver = VerificationPayload {
             commands_executed: vec!["cargo test -p x".into()],
@@ -359,17 +411,17 @@ mod tests {
                 AcceptanceResult {
                     criterion: "tests pass".into(),
                     passed: true,
-                    evidence: "cargo test -p x: ok 12 passed".into(),
+                    evidence: "cargo test -p x: ok 12 passed (integration)".into(),
                 },
                 AcceptanceResult {
                     criterion: "no clippy warnings".into(),
                     passed: true,
-                    evidence: "cargo clippy -p x -- -D warnings: exit 0".into(),
+                    evidence: "cargo clippy -p x -- -D warnings: exit 0 clean".into(),
                 },
             ],
             reviewer_summary: Some("LGTM".into()),
         };
-        let r3 = tool
+        let r3 = eval
             .execute(json!({
                 "op": "evaluator_mark_pass",
                 "task_id": "t1",
@@ -377,5 +429,39 @@ mod tests {
             }))
             .await;
         assert!(!r3.is_error, "{}", r3.content);
+    }
+
+    #[tokio::test]
+    async fn harness_executor_cannot_mark_pass() {
+        let dir = tempdir().unwrap();
+        let exec =
+            HarnessControlTool::with_mode(dir.path().to_path_buf(), HarnessControlMode::Executor);
+        let r = exec
+            .execute(json!({
+                "op": "evaluator_mark_pass",
+                "task_id": "x",
+                "verification": { "commands_executed": ["c"], "acceptance_results": [] }
+            }))
+            .await;
+        assert!(r.is_error);
+        assert!(r.content.contains("SpawnReviewer"));
+    }
+
+    #[tokio::test]
+    async fn harness_evaluator_cannot_append_tasks() {
+        let dir = tempdir().unwrap();
+        let eval =
+            HarnessControlTool::with_mode(dir.path().to_path_buf(), HarnessControlMode::Evaluator);
+        let r = eval
+            .execute(json!({
+                "op": "planner_append_tasks",
+                "tasks": [{
+                    "id": "t1",
+                    "description": "x",
+                    "acceptance_criteria": ["c"]
+                }]
+            }))
+            .await;
+        assert!(r.is_error);
     }
 }

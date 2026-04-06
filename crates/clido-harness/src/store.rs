@@ -76,7 +76,11 @@ pub fn touch_meta_timestamp(state: &mut HarnessState) {
     state.meta.updated_at_rfc3339 = Some(chrono::Utc::now().to_rfc3339());
 }
 
-/// Ensure `task_order` contains every task id (append missing); drop stale ids.
+/// Repair `task_order` against `tasks`: drop order entries whose id no longer exists in `tasks`,
+/// append any task id missing from `task_order` at the end.
+///
+/// This does **not** remove rows from `tasks` — only fixes the order list after manual file edits.
+/// Normal tool operations never delete tasks.
 pub fn reconcile_order(state: &mut HarnessState) {
     let ids: std::collections::HashSet<&str> = state.tasks.iter().map(|t| t.id.as_str()).collect();
     state.task_order.retain(|id| ids.contains(id.as_str()));

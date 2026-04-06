@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
 };
 
+use clido_harness::{read_state, reconcile_order, TaskPassState};
 use clido_planner::{Complexity, Plan, TaskStatus};
 use clido_tools::TodoStatus;
 
@@ -31,8 +32,49 @@ pub(crate) enum PlanPanelStepStatus {
     Blocked,
 }
 
-/// Collect steps to show: live `TodoWrite` list wins, then planner snapshot, then fallbacks.
+fn gather_harness_panel_steps(workspace_root: &std::path::Path) -> Vec<PlanPanelStep> {
+    let Ok(mut state) = read_state(workspace_root) else {
+        return vec![PlanPanelStep {
+            status: PlanPanelStepStatus::Blocked,
+            text: "Harness: cannot read .clido/harness/tasks.json".to_string(),
+        }];
+    };
+    reconcile_order(&mut state);
+    if state.tasks.is_empty() {
+        return vec![PlanPanelStep {
+            status: PlanPanelStepStatus::Pending,
+            text: "Harness: no tasks — use HarnessControl planner_append_tasks".to_string(),
+        }];
+    }
+    let focus = state.meta.current_focus_task_id.clone();
+    let mut out = Vec::new();
+    for id in &state.task_order {
+        let Some(t) = state.tasks.iter().find(|x| x.id == *id) else {
+            continue;
+        };
+        let st = match t.status {
+            TaskPassState::Pass => PlanPanelStepStatus::Completed,
+            TaskPassState::Fail => {
+                if focus.as_deref() == Some(t.id.as_str()) {
+                    PlanPanelStepStatus::Active
+                } else {
+                    PlanPanelStepStatus::Pending
+                }
+            }
+        };
+        out.push(PlanPanelStep {
+            status: st,
+            text: format!("{} — {}", t.id, t.description),
+        });
+    }
+    out
+}
+
+/// Collect steps to show: harness tasks (when harness mode), else live `TodoWrite`, planner snapshot, fallbacks.
 pub(crate) fn gather_plan_panel_steps(app: &App) -> Vec<PlanPanelStep> {
+    if app.harness_mode {
+        return gather_harness_panel_steps(&app.workspace_root);
+    }
     if let Ok(todos) = app.todo_store.lock() {
         if !todos.is_empty() {
             return todos
@@ -119,6 +161,7 @@ pub(crate) fn plan_panel_height_for_layout(
     term_w: u16,
     term_h: u16,
     steps: &[PlanPanelStep],
+    harness_mode: bool,
 ) -> u16 {
     if matches!(vis, PlanPanelVisibility::Off) {
         return 0;
@@ -142,7 +185,12 @@ pub(crate) fn plan_panel_height_for_layout(
     match vis {
         PlanPanelVisibility::Off => 0,
         PlanPanelVisibility::Auto => {
-            if term_h < MIN_TERM_H_AUTO || empty {
+            let min_term_h = if harness_mode {
+                MIN_TERM_H_AUTO.saturating_sub(4).max(20)
+            } else {
+                MIN_TERM_H_AUTO
+            };
+            if term_h < min_term_h || empty {
                 return 0;
             }
             HEADER_ROWS + body_rows
@@ -173,17 +221,23 @@ pub(crate) fn build_plan_todo_strip_lines(
         PlanPanelVisibility::On => "on",
         PlanPanelVisibility::Off => "off",
     };
+    let header_title = if app.harness_mode { "Harness" } else { "Plan" };
     let mut out: Vec<Line<'static>> = vec![Line::from(vec![
         Span::styled(
-            format!("{TUI_GUTTER}Plan"),
+            format!("{TUI_GUTTER}{header_title}"),
             dim.add_modifier(Modifier::BOLD),
         ),
         Span::styled(format!("  ·  {header_note}"), dim),
     ])];
 
     if steps.is_empty() {
+        let hint = if app.harness_mode {
+            "No harness rows — tasks live in .clido/harness/tasks.json"
+        } else {
+            "No active steps — use /plan <task> or let the agent set todos."
+        };
         out.push(Line::from(vec![Span::styled(
-            format!("{TUI_GUTTER}No active steps — use /plan <task> or let the agent set todos."),
+            format!("{TUI_GUTTER}{hint}"),
             dim,
         )]));
         return out;
@@ -865,7 +919,7 @@ mod plan_panel_tests {
     fn panel_off_always_zero_height() {
         let steps = sample_steps(3);
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::Off, 80, 40, &steps),
+            plan_panel_height_for_layout(PlanPanelVisibility::Off, 80, 40, &steps, false),
             0
         );
     }
@@ -874,12 +928,12 @@ mod plan_panel_tests {
     fn auto_requires_tall_terminal_and_content() {
         let steps = sample_steps(1);
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 27, &steps),
+            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 27, &steps, false),
             0
         );
-        assert!(plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 28, &steps) > 0);
+        assert!(plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 28, &steps, false) > 0);
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 40, &[]),
+            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 40, &[], false),
             0
         );
     }
@@ -887,11 +941,11 @@ mod plan_panel_tests {
     #[test]
     fn on_shows_placeholder_when_empty() {
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 22, &[]),
+            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 22, &[], false),
             2
         );
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 21, &[]),
+            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 21, &[], false),
             0
         );
     }
@@ -900,7 +954,7 @@ mod plan_panel_tests {
     fn narrow_terminal_hides_panel() {
         let steps = sample_steps(2);
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::On, 50, 30, &steps),
+            plan_panel_height_for_layout(PlanPanelVisibility::On, 50, 30, &steps, false),
             0
         );
     }

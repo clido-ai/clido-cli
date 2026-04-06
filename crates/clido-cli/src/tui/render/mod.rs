@@ -264,6 +264,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         area.width,
         area.height,
         &plan_steps,
+        app.harness_mode,
     );
     // Queue area: height = header + items, but reserve enough chat space (min 10 lines).
     // Dynamic — fills available vertical space on tall terminals.

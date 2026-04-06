@@ -9,8 +9,12 @@ The repository is the source of truth. Session memory is secondary — **always*
 ### Roles (separation of concerns)
 
 1. **Planner** (you, when decomposing work): only `HarnessControl` op `planner_append_tasks`. Each task **must** include non-empty `acceptance_criteria` (explicit, testable). New tasks always start **fail** — never mark pass here.
-2. **Executor** (you, when implementing): pick **one** fail task via `executor_set_focus`. Implement **only** that task. Use `executor_register_attempt` with a short `fingerprint` when you try a distinct approach (loop guard). Run real verification commands (tests, lint). Do **not** call `evaluator_mark_pass` yourself — that is the evaluator’s job.
-3. **Evaluator** (reviewer sub-agent when harness is enabled, or a strict human step): after independent verification, `evaluator_mark_pass` with `commands_executed` and `acceptance_results` aligned **exactly** (same count and same `criterion` strings) as in `tasks.json`. **Pass means verified**, not “code exists”.
+2. **Executor** (you, when implementing): pick **one** fail task via `executor_set_focus`. Implement **only** that task. Use `executor_register_attempt` with a short `fingerprint` when you try a distinct approach (loop guard). Run real verification commands (tests, lint). Your `HarnessControl` tool **cannot** call `evaluator_mark_pass` (the API rejects it) — verification is never self-graded by the executor.
+3. **Evaluator** (SpawnReviewer sub-agent when harness is enabled): has a **separate** `HarnessControl` instance with only `read` + `evaluator_mark_pass`. After independent checks (Read/Grep/Bash as needed), call `evaluator_mark_pass` with `commands_executed` and `acceptance_results` aligned **exactly** (same count and same `criterion` strings) as in `tasks.json`. **Pass means verified**, not “code exists”.
+
+### TodoWrite
+
+Harness mode **disables** the `TodoWrite` tool — the canonical task list is `.clido/harness/tasks.json` only. Do not use markdown or ad-hoc todo lists for tracked work.
 
 ### Session sequence (every run)
 
@@ -24,7 +28,7 @@ The repository is the source of truth. Session memory is secondary — **always*
 ### Hard rules
 
 - **One task in focus** — do not parallelize harness tasks in one turn.
-- **Never delete or reorder** harness tasks — the tool enforces append-only ids.
+- **Never delete or reorder** harness tasks — tools only append tasks and move fail→pass; `task_order` may be auto-repaired if the JSON was hand-edited.
 - **No pass without verification** — `evaluator_mark_pass` rejects missing commands or evidence.
 - **Progressive disclosure** — do not paste the whole repo into context; read files as needed.
 - If `executor_register_attempt` reports a **loop guard**, change strategy or ask the user.

@@ -204,6 +204,10 @@ pub(super) struct App {
     /// The step number most recently seen while the agent was executing a plan.
     /// Used after agent finishes to show which steps remain.
     pub(super) last_executed_step_num: Option<usize>,
+    /// `--harness` only (session flag). Combined with each workspace's `[agent] harness` after workdir switch.
+    pub(super) harness_from_cli: bool,
+    /// Effective harness mode for this workspace: `harness_from_cli` OR loaded `[agent] harness`.
+    pub(super) harness_mode: bool,
     /// Shared todo list written by the agent via the TodoWrite tool.
     pub(super) todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
     /// Whether to show the plan/todo strip (`/plan on|off|auto`).
@@ -283,6 +287,8 @@ impl App {
         model_prefs: clido_core::ModelPrefs,
         current_profile: String,
         reviewer_enabled: Arc<AtomicBool>,
+        harness_from_cli: bool,
+        harness_mode: bool,
         todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
         api_key: String,
         base_url: Option<String>,
@@ -350,8 +356,14 @@ impl App {
             current_step: None,
             last_executed_step_num: None,
             plan_dry_run,
+            harness_from_cli,
+            harness_mode,
             todo_store,
-            plan_panel_visibility: PlanPanelVisibility::default(),
+            plan_panel_visibility: if harness_mode {
+                PlanPanelVisibility::On
+            } else {
+                PlanPanelVisibility::default()
+            },
             empty_input_hint_shown: false,
             pending_enhance: None,
             enhancing: false,

@@ -206,6 +206,8 @@ mod tests {
             clido_core::ModelPrefs::default(),
             "default".to_string(),
             Arc::new(AtomicBool::new(false)),
+            false,
+            false,
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             String::new(),
             None,

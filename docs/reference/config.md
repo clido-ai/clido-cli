@@ -133,6 +133,10 @@ max-turns = 200
 # Type: integer  Default: 4
 max-concurrent-tools = 4
 
+# Structured harness: JSON tasks under .clido/harness/, TodoWrite disabled, reviewer-only pass.
+# Type: boolean  Default: false
+# harness = true
+
 # ─────────────────────────────────────────────────────────────────────────────
 # [context]
 # ─────────────────────────────────────────────────────────────────────────────
@@ -255,6 +259,7 @@ Optional fast/cheap provider for utility tasks (title generation, summaries, com
 | `auto-checkpoint` | boolean | `true` | Checkpoint before file-mutating turns |
 | `max-checkpoints-per-session` | integer | `50` | Retention cap for checkpoints |
 | `max-output-tokens` | integer | none | Cap model output tokens per response |
+| `harness` | boolean | `false` | Harness mode: `.clido/harness/` tasks, split `HarnessControl` tools, no `TodoWrite` |
 
 ### `[context]`
 

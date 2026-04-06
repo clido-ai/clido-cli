@@ -22,6 +22,7 @@ Flags can also be set via environment variables — see the `Env` column.
 | `--resume-ignore-stale` | — | flag | false | — | Skip stale file check when resuming |
 | `--mcp-config` | — | path | — | — | Path to MCP server config (JSON) |
 | `--sandbox` | — | flag | false | — | Enable Bash sandboxing |
+| `--harness` | — | flag | false | `CLIDO_HARNESS` | Structured harness: `.clido/harness/` tasks, reviewer-only `evaluator_mark_pass`, no `TodoWrite` |
 | `--planner` / `--plan` | — | flag | false | — | Enable interactive plan mode: decompose task into editable DAG before executing |
 | `--plan-dry-run` | — | flag | false | — | With `--plan`: show editor but never execute |
 | `--plan-no-edit` | — | flag | false | — | With `--plan`: skip editor, execute immediately (CI-friendly) |

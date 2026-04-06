@@ -10,7 +10,9 @@
 use async_trait::async_trait;
 use clido_core::AgentConfig;
 use clido_providers::ModelProvider;
-use clido_tools::{default_registry_with_options, Tool, ToolOutput};
+use clido_tools::{
+    default_registry_with_options, HarnessControlMode, HarnessControlTool, Tool, ToolOutput,
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -21,8 +23,9 @@ fn subagent_registry(workspace: &std::path::Path, harness: bool) -> clido_tools:
         .collect::<Vec<_>>();
     let mut reg = default_registry_with_options(workspace.to_path_buf(), blocked, false);
     if harness {
-        reg.register(clido_tools::HarnessControlTool::new(
+        reg.register(HarnessControlTool::with_mode(
             workspace.to_path_buf(),
+            HarnessControlMode::Evaluator,
         ));
     }
     reg
@@ -220,7 +223,7 @@ impl Tool for SpawnReviewerTool {
         );
 
         let harness_note = if self.harness {
-            "\n\nHarness mode: You also have the `HarnessControl` tool. If you output PASS and every acceptance criterion is satisfied with real evidence (commands run), you may call `HarnessControl` with op `evaluator_mark_pass` for the task_id the main agent names, including `verification.commands_executed` and `verification.acceptance_results` (criterion strings must match tasks.json exactly). If you output FAIL or cannot verify, do not mark pass.\n"
+            "\n\nHarness mode: You have a **reviewer-only** `HarnessControl` tool (ops: `read`, `evaluator_mark_pass` only). Call `read` first if you need the live `tasks.json` snapshot. If your verdict is PASS and every criterion is satisfied with real evidence (commands the executor claimed to run), call `evaluator_mark_pass` with `task_id` and `verification` (`commands_executed`, `acceptance_results` with criterion strings **exactly** as in tasks.json). If FAIL or you cannot verify, do **not** call `evaluator_mark_pass`. The main agent cannot mark pass — only you.\n"
         } else {
             ""
         };

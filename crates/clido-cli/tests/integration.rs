@@ -245,6 +245,18 @@ fn cli_quiet_flag_in_help() {
 }
 
 #[test]
+fn cli_harness_flag_in_help() {
+    let out = clido_bin().arg("--help").output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("--harness"),
+        "expected --harness in help; stdout: {}",
+        stdout
+    );
+}
+
+#[test]
 fn cli_output_format_json_in_help() {
     let out = clido_bin().arg("--help").output().unwrap();
     assert!(out.status.success());

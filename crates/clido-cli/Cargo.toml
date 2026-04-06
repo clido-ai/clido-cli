@@ -1,6 +1,6 @@
 [package]
 name = "clido-cli"
-version = "0.1.0-beta.7"
+version = "0.1.0-beta.8"
 edition = "2021"
 
 [[bin]]
@@ -40,6 +40,7 @@ clido-storage = { path = "../clido-storage" }
 clido-tools = { path = "../clido-tools" }
 clido-workflows = { path = "../clido-workflows" }
 clido-checkpoint = { path = "../clido-checkpoint" }
+clido-harness = { path = "../clido-harness" }
 clap = { workspace = true, features = ["derive", "env"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

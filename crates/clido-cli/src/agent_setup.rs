@@ -363,11 +363,13 @@ pub(crate) fn build_full_tool_registry(
         workspace_root,
         external_todo_store,
         allowed_external_paths,
+        harness_active,
     )?;
     registry = load_mcp_tools(cli, registry);
     if harness_active {
-        registry.register(clido_tools::HarnessControlTool::new(
+        registry.register(clido_tools::HarnessControlTool::with_mode(
             workspace_root.to_path_buf(),
+            clido_tools::HarnessControlMode::Executor,
         ));
     }
 
@@ -720,6 +722,7 @@ fn build_registry(
     workspace_root: &Path,
     external_todo_store: Option<TodoStore>,
     allowed_external_paths: &[std::path::PathBuf],
+    harness_active: bool,
 ) -> Result<(ToolRegistry, TodoStore), anyhow::Error> {
     let allowed = cli
         .allowed_tools
@@ -749,20 +752,28 @@ fn build_registry(
         .into_iter()
         .collect::<Vec<_>>();
     let sandbox = cli.sandbox;
+    let include_todo_write = !harness_active;
     let (mut registry, mut todo_store) = if allowed_external_paths.is_empty() {
-        default_registry_with_todo_store(workspace_root.to_path_buf(), blocked, sandbox)
+        default_registry_with_todo_store(
+            workspace_root.to_path_buf(),
+            blocked,
+            sandbox,
+            include_todo_write,
+        )
     } else {
         clido_tools::default_registry_with_options_and_allowed_paths(
             workspace_root.to_path_buf(),
             blocked,
             sandbox,
             allowed_external_paths.to_vec(),
+            include_todo_write,
         )
     };
     // If an external store was provided, replace so the TUI and agent share the same Arc.
     if let Some(ext) = external_todo_store {
-        // Re-register TodoWriteTool with the external store.
-        registry.register(clido_tools::TodoWriteTool::with_store(ext.clone()));
+        if include_todo_write {
+            registry.register(clido_tools::TodoWriteTool::with_store(ext.clone()));
+        }
         todo_store = ext;
     }
     let registry = registry.with_filters(allowed, disallowed);

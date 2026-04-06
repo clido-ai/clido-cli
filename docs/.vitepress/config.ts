@@ -47,6 +47,7 @@ export default defineConfig({
             { text: 'Workflows', link: '/guide/workflows' },
             { text: 'MCP Servers', link: '/guide/mcp' },
             { text: 'Planner (experimental)', link: '/guide/planner' },
+            { text: 'Harness mode', link: '/guide/harness' },
             { text: 'Audit Log', link: '/guide/audit' },
           ],
         },

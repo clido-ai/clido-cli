@@ -491,7 +491,7 @@ pub(super) fn cmd_copy(app: &mut App, cmd: &str) {
             if *is_user {
                 buf.push_str("You: ");
             } else {
-                buf.push_str("Assistant: ");
+                buf.push_str("clido: "); // keep clido, don't change it to assistant!
             }
             buf.push_str(text);
             buf.push_str("\n\n");

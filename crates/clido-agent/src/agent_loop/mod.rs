@@ -1345,7 +1345,12 @@ impl AgentLoop {
         let result = self.run_completion_loop(session, pricing, cancel).await;
         match &result {
             Ok(_) => self.prune_memory_if_needed(),
-            Err(e) if e.should_truncate_history_after_failed_run(self.history.len(), history_before) => {
+            Err(e)
+                if e.should_truncate_history_after_failed_run(
+                    self.history.len(),
+                    history_before,
+                ) =>
+            {
                 self.history.truncate(history_before);
             }
             Err(_) => {}
@@ -1410,7 +1415,12 @@ impl AgentLoop {
         let result = self.run_completion_loop(session, pricing, cancel).await;
         match &result {
             Ok(_) => self.prune_memory_if_needed(),
-            Err(e) if e.should_truncate_history_after_failed_run(self.history.len(), history_before) => {
+            Err(e)
+                if e.should_truncate_history_after_failed_run(
+                    self.history.len(),
+                    history_before,
+                ) =>
+            {
                 self.history.truncate(history_before);
             }
             Err(_) => {}
@@ -1461,7 +1471,12 @@ impl AgentLoop {
         let result = self.run_completion_loop(session, pricing, cancel).await;
         match &result {
             Ok(_) => self.prune_memory_if_needed(),
-            Err(e) if e.should_truncate_history_after_failed_run(self.history.len(), history_before) => {
+            Err(e)
+                if e.should_truncate_history_after_failed_run(
+                    self.history.len(),
+                    history_before,
+                ) =>
+            {
                 self.history.truncate(history_before);
             }
             Err(_) => {}
@@ -1504,7 +1519,12 @@ impl AgentLoop {
         let result = self.run_completion_loop(session, pricing, cancel).await;
         match &result {
             Ok(_) => self.prune_memory_if_needed(),
-            Err(e) if e.should_truncate_history_after_failed_run(self.history.len(), history_before) => {
+            Err(e)
+                if e.should_truncate_history_after_failed_run(
+                    self.history.len(),
+                    history_before,
+                ) =>
+            {
                 self.history.truncate(history_before);
             }
             Err(_) => {}
@@ -2439,7 +2459,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use clido_core::{
-        AgentConfig, ContentBlock, ModelResponse, Message, PermissionMode, Role, StopReason,
+        AgentConfig, ContentBlock, Message, ModelResponse, PermissionMode, Role, StopReason,
         ToolSchema, Usage,
     };
     use clido_providers::ModelProvider;
@@ -2511,12 +2531,12 @@ mod tests {
         }
     }
 
-    /// First `complete` returns rate-limited; later calls succeed (simulates retry / resume).
-    struct RateLimitedThenOkProvider {
+    /// `complete` call #0 succeeds; call #1 rate-limits; later calls succeed (resume after limit).
+    struct RateLimitedOnSecondCallProvider {
         calls: AtomicU32,
     }
 
-    impl RateLimitedThenOkProvider {
+    impl RateLimitedOnSecondCallProvider {
         fn new() -> Self {
             Self {
                 calls: AtomicU32::new(0),
@@ -2525,7 +2545,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl ModelProvider for RateLimitedThenOkProvider {
+    impl ModelProvider for RateLimitedOnSecondCallProvider {
         async fn complete(
             &self,
             _messages: &[Message],
@@ -2533,7 +2553,7 @@ mod tests {
             _config: &AgentConfig,
         ) -> clido_core::Result<ModelResponse> {
             let n = self.calls.fetch_add(1, Ordering::SeqCst);
-            if n == 0 {
+            if n == 1 {
                 return Err(ClidoError::RateLimited {
                     message: "too many requests".into(),
                     retry_after_secs: Some(1),
@@ -2905,7 +2925,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_next_turn_preserves_history_when_rate_limited() {
-        let provider = Arc::new(RateLimitedThenOkProvider::new());
+        let provider = Arc::new(RateLimitedOnSecondCallProvider::new());
         let mut agent = AgentLoop::new(provider, empty_registry(), mock_config(), None);
         agent.run("first", None, None, None).await.unwrap();
         let len_after_first = agent.history.len();
@@ -2921,7 +2941,10 @@ mod tests {
             "user line for the rate-limited turn must stay in history for resume"
         );
 
-        let r2 = agent.run_next_turn("continue", None, None, None).await.unwrap();
+        let r2 = agent
+            .run_next_turn("continue", None, None, None)
+            .await
+            .unwrap();
         assert_eq!(r2, "after rate limit");
     }
 

@@ -8,7 +8,7 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::agent_setup::AgentSetup;
+use crate::agent_setup::{AgentSetup, with_optional_trace_metrics};
 use crate::cli::Cli;
 use crate::errors::CliError;
 use crate::git_context::GitContext;
@@ -248,9 +248,11 @@ pub async fn run_repl(cli: Cli) -> Result<(), anyhow::Error> {
     let git_fn: Box<dyn Fn() -> Option<String> + Send + Sync> =
         Box::new(move || GitContext::discover(&git_wr).map(|ctx| ctx.to_prompt_section()));
     let provider_name = setup.provider_name.clone();
-    let mut loop_ = AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
-        .with_fast_provider(setup.fast_provider, setup.fast_config)
-        .with_git_context_fn(git_fn);
+    let mut loop_ = with_optional_trace_metrics(
+        AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
+            .with_fast_provider(setup.fast_provider, setup.fast_config)
+            .with_git_context_fn(git_fn),
+    );
     let mut first_turn = true;
     let mut total_turns: u32 = 0;
     let mut total_cost_usd: f64 = 0.0;

@@ -11,7 +11,7 @@ This document tracks the **production-readiness initiative** (audit → code). S
 
 ## Phase 1 — Agent loop clarity
 
-- [x] `TurnContext` — correlation id + history marker for each outer user invocation.
+- [x] Per-turn **`turn_correlation_id`** (UUID) refreshed at each outer user invocation / continue / resume entry.
 - [x] `stream_aggregate` module — single place to fold `StreamEvent` → `ModelResponse`.
 - [x] `invoke_model_completion` in `completion.rs` — throttle + streaming or batch call.
 
@@ -32,13 +32,13 @@ This document tracks the **production-readiness initiative** (audit → code). S
 
 ## Phase 5 — TUI run state
 
-- [x] `AppRunState` (`Idle` / `Generating` / `RunningTools`) on `App`, updated from the agent task.
+- [x] `AppRunState` (`Idle` / `Generating` / `RunningTools`) on `App`, driven by `AgentEvent::RunState`, send paths (`Generating`), `TuiEmitter` tool start/done, and `on_agent_done` / resume (`Idle`).
 - [ ] Bounded `AgentEvent` channels — **deferred** (unbounded retained; document risk).
 
 ## Phase 6 — Observability
 
 - [x] `TracingAgentMetrics` — `tracing::debug!` for metrics hook points.
-- [x] `CLIDO_TRACE_METRICS=1` env in `agent_setup` selects tracing metrics.
+- [x] `CLIDO_TRACE_METRICS=1` enables `TracingAgentMetrics` via `with_optional_trace_metrics` in `agent_setup.rs` for **run**, **TUI**, **REPL**, **`clido workflow`**, and **`clido commit`**.
 
 ## Runbook (operators)
 

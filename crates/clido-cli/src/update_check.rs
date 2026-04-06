@@ -13,7 +13,7 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Spawn a background task that checks for a newer release at most once per 24h.
 /// If a newer version is found, sends `AgentEvent::UpdateAvailable { version }`.
 /// Set `force` to true to bypass the rate limit (for `/update` command).
-pub(crate) fn spawn_update_check(tx: mpsc::UnboundedSender<AgentEvent>, force: bool) {
+pub(crate) fn spawn_update_check(tx: mpsc::Sender<AgentEvent>, force: bool) {
     tokio::spawn(async move {
         if !force && !should_check() {
             return;
@@ -24,7 +24,9 @@ pub(crate) fn spawn_update_check(tx: mpsc::UnboundedSender<AgentEvent>, force: b
         // Only record a successful check after we actually got a version from the API.
         mark_checked();
         if remote_is_newer(&latest, CURRENT_VERSION) {
-            let _ = tx.send(AgentEvent::UpdateAvailable { version: latest });
+            let _ = tx
+                .send(AgentEvent::UpdateAvailable { version: latest })
+                .await;
         }
     });
 }
@@ -34,35 +36,38 @@ pub(crate) fn spawn_update_check(tx: mpsc::UnboundedSender<AgentEvent>, force: b
 /// Spawn a task for the `/update` slash command.
 /// Checks for the latest version, then downloads and replaces the running binary.
 /// Progress is reported via `AgentEvent::UpdateStatus` messages.
-pub(crate) fn spawn_do_update(
-    known_version: Option<String>,
-    tx: mpsc::UnboundedSender<AgentEvent>,
-) {
+pub(crate) fn spawn_do_update(known_version: Option<String>, tx: mpsc::Sender<AgentEvent>) {
     tokio::spawn(async move {
         // Resolve latest version: use what we already know, or fetch fresh.
         let version = if let Some(v) = known_version {
             v
         } else {
             let Some(v) = fetch_latest_version().await else {
-                let _ = tx.send(AgentEvent::UpdateStatus(
-                    "✗ Could not reach github.com — check your connection.".into(),
-                ));
+                let _ = tx
+                    .send(AgentEvent::UpdateStatus(
+                        "✗ Could not reach github.com — check your connection.".into(),
+                    ))
+                    .await;
                 return;
             };
             if !remote_is_newer(&v, CURRENT_VERSION) {
-                let _ = tx.send(AgentEvent::UpdateStatus(format!(
-                    "✓ Already on the latest version ({}).",
-                    CURRENT_VERSION
-                )));
+                let _ = tx
+                    .send(AgentEvent::UpdateStatus(format!(
+                        "✓ Already on the latest version ({}).",
+                        CURRENT_VERSION
+                    )))
+                    .await;
                 return;
             }
             v
         };
 
         let Some(artifact) = platform_artifact() else {
-            let _ = tx.send(AgentEvent::UpdateStatus(
-                "✗ Unsupported platform — self-update not available here.".into(),
-            ));
+            let _ = tx
+                .send(AgentEvent::UpdateStatus(
+                    "✗ Unsupported platform — self-update not available here.".into(),
+                ))
+                .await;
             return;
         };
 
@@ -70,20 +75,26 @@ pub(crate) fn spawn_do_update(
             "https://github.com/{}/releases/download/{}/{}",
             GITHUB_REPO, version, artifact
         );
-        let _ = tx.send(AgentEvent::UpdateStatus(format!(
-            "↓ Downloading {} ...",
-            version
-        )));
+        let _ = tx
+            .send(AgentEvent::UpdateStatus(format!(
+                "↓ Downloading {} ...",
+                version
+            )))
+            .await;
 
         match download_and_replace(&url).await {
             Ok(()) => {
-                let _ = tx.send(AgentEvent::UpdateStatus(format!(
-                    "✓ Updated to {}. Restart clido to apply.",
-                    version
-                )));
+                let _ = tx
+                    .send(AgentEvent::UpdateStatus(format!(
+                        "✓ Updated to {}. Restart clido to apply.",
+                        version
+                    )))
+                    .await;
             }
             Err(e) => {
-                let _ = tx.send(AgentEvent::UpdateStatus(format!("✗ Update failed: {}", e)));
+                let _ = tx
+                    .send(AgentEvent::UpdateStatus(format!("✗ Update failed: {}", e)))
+                    .await;
             }
         }
     });

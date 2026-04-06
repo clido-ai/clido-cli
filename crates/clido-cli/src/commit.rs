@@ -3,6 +3,8 @@
 use std::path::Path;
 use std::process::Command;
 
+use crate::agent_setup::with_optional_trace_metrics;
+
 /// Run `clido commit`.
 ///
 /// 1. Check `git diff --staged` — exit with clear error if nothing staged.
@@ -50,7 +52,7 @@ pub async fn run_commit(
         .as_ref()
         .map(|c| c.model.clone())
         .unwrap_or_else(|| setup.config.model.clone());
-    let agent = clido_agent::AgentLoop::new(
+    let agent = with_optional_trace_metrics(clido_agent::AgentLoop::new(
         commit_provider,
         setup.registry,
         clido_core::AgentConfig {
@@ -60,7 +62,7 @@ pub async fn run_commit(
             ..setup.config
         },
         None, // no ask_user for commit
-    );
+    ));
 
     let commit_message = agent
         .complete_simple(&user_prompt)

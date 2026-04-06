@@ -63,7 +63,7 @@ These variables mirror CLI flags. CLI flags take precedence over environment var
 |----------|---------|-------------|
 | `CLIDO_LOG` | `info` | Log filter for [tracing](https://docs.rs/tracing). Examples: `debug`, `clido_agent=debug`, `warn`. |
 | `RUST_LOG` | — | Standard Rust log filter (fallback when `CLIDO_LOG` is not set). |
-| `CLIDO_TRACE_METRICS` | unset | Set to `1` to emit agent-loop metric events at `tracing` **DEBUG** (target `clido::metrics`) for CLI and TUI runs. |
+| `CLIDO_TRACE_METRICS` | unset | Set to `1` to emit agent-loop metric events at `tracing` **DEBUG** (target `clido::metrics`) for run, TUI, REPL, workflow steps, and `clido commit`. |
 
 ## Examples
 

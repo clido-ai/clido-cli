@@ -1,7 +1,7 @@
 //! Single-shot agent execution.
 
 use async_trait::async_trait;
-use clido_agent::{try_session_lines_to_messages, AgentLoop, EventEmitter, TracingAgentMetrics};
+use clido_agent::{try_session_lines_to_messages, AgentLoop, EventEmitter};
 use clido_core::ClidoError;
 use clido_storage::{
     list_sessions, stale_paths, AuditLog, SessionLine, SessionReader, SessionWriter,
@@ -11,18 +11,11 @@ use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::agent_setup::AgentSetup;
+use crate::agent_setup::{AgentSetup, with_optional_trace_metrics};
 use crate::cli::Cli;
 use crate::errors::CliError;
 use crate::git_context::GitContext;
 use crate::ui::{ansi, cli_use_color};
-
-fn with_optional_trace_metrics(mut loop_: AgentLoop) -> AgentLoop {
-    if std::env::var("CLIDO_TRACE_METRICS").ok().as_deref() == Some("1") {
-        loop_ = loop_.with_metrics(Arc::new(TracingAgentMetrics));
-    }
-    loop_
-}
 
 /// EventEmitter that writes stream-json events to stdout as the agent runs.
 /// Attached to the agent loop when --output-format stream-json is active.

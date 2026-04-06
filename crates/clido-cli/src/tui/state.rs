@@ -225,7 +225,8 @@ pub(crate) struct AgentChannels {
     /// Channel to trigger immediate context compaction in agent_task.
     pub(crate) compact_now_tx: mpsc::UnboundedSender<()>,
     /// Channel to send AgentEvents from background tasks (e.g. model fetch) to the TUI loop.
-    pub(crate) fetch_tx: mpsc::UnboundedSender<AgentEvent>,
+    /// Bounded for backpressure — slow UI applies pressure instead of unbounded memory growth.
+    pub(crate) fetch_tx: mpsc::Sender<AgentEvent>,
     /// Channel to force abort the agent task immediately (for /stop command).
     pub(crate) kill_tx: mpsc::UnboundedSender<()>,
     /// Channel to update allowed external paths for this session.

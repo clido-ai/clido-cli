@@ -8,7 +8,6 @@ use clido_core::{ClidoError, ContentBlock, ModelResponse, Result, StopReason, Us
 use clido_providers::StreamEvent;
 use futures::Stream;
 use futures::StreamExt;
-use tracing::warn;
 
 use super::EventEmitter;
 
@@ -47,13 +46,14 @@ pub async fn collect_stream_to_model_response(
             StreamEvent::ToolUseEnd { id } => {
                 let name = tool_name.remove(&id).unwrap_or_default();
                 let json_str = tool_json.remove(&id).unwrap_or_else(|| "{}".to_string());
-                let input = match serde_json::from_str::<serde_json::Value>(&json_str) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!(tool_use_id = %id, error = %e, "stream tool JSON parse failed; using {{}}");
-                        serde_json::json!({})
+                let input = serde_json::from_str::<serde_json::Value>(&json_str).map_err(|e| {
+                    ClidoError::MalformedModelOutput {
+                        detail: format!(
+                            "streaming tool_use id={id} name={name:?}: invalid arguments JSON ({e}); raw_len={} bytes",
+                            json_str.len()
+                        ),
                     }
-                };
+                })?;
                 content.push(ContentBlock::ToolUse { id, name, input });
             }
             StreamEvent::MessageDelta {

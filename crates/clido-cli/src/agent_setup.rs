@@ -806,6 +806,16 @@ pub fn parse_permission_mode(s: Option<&str>) -> PermissionMode {
     }
 }
 
+/// When `CLIDO_TRACE_METRICS=1`, attach [`clido_agent::TracingAgentMetrics`] (DEBUG, target `clido::metrics`).
+pub(crate) fn with_optional_trace_metrics(
+    mut loop_: clido_agent::AgentLoop,
+) -> clido_agent::AgentLoop {
+    if std::env::var("CLIDO_TRACE_METRICS").ok().as_deref() == Some("1") {
+        loop_ = loop_.with_metrics(Arc::new(clido_agent::TracingAgentMetrics));
+    }
+    loop_
+}
+
 fn assemble_system_prompt(cli: &Cli) -> Result<String, anyhow::Error> {
     let base = if let Some(ref path) = cli.system_prompt_file {
         std::fs::read_to_string(path)

@@ -199,7 +199,9 @@ mod tests {
         let (model_switch_tx, _model_switch_rx) = mpsc::unbounded_channel();
         let (workdir_tx, _workdir_rx) = mpsc::unbounded_channel();
         let (compact_now_tx, _compact_now_rx) = mpsc::unbounded_channel();
-        let (fetch_tx, _fetch_rx) = mpsc::unbounded_channel();
+        let (fetch_tx, fetch_rx) = mpsc::channel::<crate::tui::events::AgentEvent>(256);
+        // Keep the channel open for sync unit tests (no async runtime drain task).
+        std::mem::forget(fetch_rx);
         let (kill_tx, _kill_rx) = mpsc::unbounded_channel();
         let (allowed_paths_tx, _allowed_paths_rx) = mpsc::unbounded_channel();
         let (note_tx, _note_rx) = mpsc::unbounded_channel();

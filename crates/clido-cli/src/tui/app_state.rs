@@ -94,7 +94,7 @@ fn line_display_width(line: &str) -> usize {
 
 /// High-level agent activity (complements `busy` for IDE-like status awareness).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(super) enum AppRunState {
+pub(crate) enum AppRunState {
     #[default]
     Idle,
     /// Waiting on the model (batch or stream aggregate).

@@ -1,5 +1,6 @@
 //! SubAgent: isolated agent instance with separate history and session.
 
+use crate::agent_loop::metrics::TracingAgentMetrics;
 use crate::agent_loop::AgentLoop;
 use clido_core::{AgentConfig, Result};
 use clido_providers::ModelProvider;
@@ -17,9 +18,11 @@ impl SubAgent {
         registry: ToolRegistry,
         config: AgentConfig,
     ) -> Self {
-        Self {
-            inner: AgentLoop::new(provider, registry, config, None),
+        let mut inner = AgentLoop::new(provider, registry, config, None);
+        if std::env::var("CLIDO_TRACE_METRICS").ok().as_deref() == Some("1") {
+            inner = inner.with_metrics(Arc::new(TracingAgentMetrics));
         }
+        Self { inner }
     }
 
     /// Run the sub-agent on a prompt, returning text output.

@@ -6,7 +6,7 @@ use clido_memory::MemoryStore;
 use crate::list_picker::ListPicker;
 use crate::overlay::{ErrorOverlay, OverlayKind, ReadOnlyOverlay};
 
-use super::state::PlanPanelVisibility;
+use super::state::{PlanPanelVisibility, StatusRailVisibility};
 use super::*;
 
 /// Switch the default profile on disk, tell the agent to rebuild provider/tools in-process,
@@ -964,42 +964,143 @@ pub(super) fn cmd_rollback(app: &mut App, cmd: &str) {
     }
 }
 
-/// Toggle or show visibility for the progress strip (`/progress` …).
-pub(super) fn cmd_progress_strip(app: &mut App, cmd: &str) {
-    let sub = cmd.trim_start_matches("/progress").trim();
+fn task_strip_vis_label(vis: PlanPanelVisibility) -> &'static str {
+    match vis {
+        PlanPanelVisibility::On => "on",
+        PlanPanelVisibility::Off => "off",
+        PlanPanelVisibility::Auto => "auto",
+    }
+}
+
+fn status_rail_vis_label(vis: StatusRailVisibility) -> &'static str {
+    match vis {
+        StatusRailVisibility::On => "on",
+        StatusRailVisibility::Off => "off",
+        StatusRailVisibility::Auto => "auto",
+    }
+}
+
+fn apply_task_strip_mode(app: &mut App, sub: &str) {
     match sub {
         "on" => {
             app.plan_panel_visibility = PlanPanelVisibility::On;
             app.push(ChatLine::Info(
-                "  Progress strip: on — always when the terminal fits (even if empty).".into(),
+                "  Task list: on — always when the layout fits, even if empty.".into(),
             ));
         }
         "off" => {
             app.plan_panel_visibility = PlanPanelVisibility::Off;
-            app.push(ChatLine::Info("  Progress strip: off.".into()));
+            app.push(ChatLine::Info("  Task list: off.".into()));
         }
         "auto" => {
             app.plan_panel_visibility = PlanPanelVisibility::Auto;
             app.push(ChatLine::Info(
-                "  Progress strip: auto — show on larger terminals when there is something to list (default)."
+                "  Task list: auto — on larger terminals when there is something to list (default)."
                     .into(),
             ));
         }
-        "" => {
-            let vis = match app.plan_panel_visibility {
-                PlanPanelVisibility::On => "on",
-                PlanPanelVisibility::Off => "off",
-                PlanPanelVisibility::Auto => "auto",
-            };
-            app.push(ChatLine::Info(format!(
-                "  Progress strip: {vis}  ·  /progress on | off | auto"
-            )));
-        }
         _ => {
             app.push(ChatLine::Info(
-                "  Usage: /progress  or  /progress on | off | auto".into(),
+                "  Usage: /tasks on | off | auto   (same as /panel tasks …)".into(),
             ));
         }
+    }
+}
+
+fn apply_status_rail_mode(app: &mut App, sub: &str) {
+    match sub {
+        "on" => {
+            app.status_rail_visibility = StatusRailVisibility::On;
+            app.push(ChatLine::Info(
+                "  Side panel: on — right column from a slightly lower width than auto.".into(),
+            ));
+        }
+        "off" => {
+            app.status_rail_visibility = StatusRailVisibility::Off;
+            app.push(ChatLine::Info(
+                "  Side panel: off — full-width chat; status, tasks, and queue stack at the bottom."
+                    .into(),
+            ));
+        }
+        "auto" => {
+            app.status_rail_visibility = StatusRailVisibility::Auto;
+            app.push(ChatLine::Info(
+                "  Side panel: auto — right column when the terminal is wide enough (default)."
+                    .into(),
+            ));
+        }
+        _ => {
+            app.push(ChatLine::Info("  Usage: /panel on | off | auto".into()));
+        }
+    }
+}
+
+/// Right-hand status column: session, git, agent, queue, task block, tools (`/panel`).
+pub(super) fn cmd_panel(app: &mut App, cmd: &str) {
+    use crate::tui::render::{STATUS_RAIL_MIN_TERM_WIDTH, STATUS_RAIL_MIN_TERM_WIDTH_ON};
+    let rest = cmd.trim_start_matches("/panel").trim();
+    let parts: Vec<&str> = rest.split_whitespace().collect();
+    match parts.as_slice() {
+        [] => {
+            let rail = status_rail_vis_label(app.status_rail_visibility);
+            let tasks = task_strip_vis_label(app.plan_panel_visibility);
+            app.push(ChatLine::Info(format!(
+                "  Side panel: {rail}  ·  /panel on|off|auto   (auto ≥{} cols, on ≥{})",
+                STATUS_RAIL_MIN_TERM_WIDTH,
+                STATUS_RAIL_MIN_TERM_WIDTH_ON
+            )));
+            app.push(ChatLine::Info(format!(
+                "  Task list: {tasks}  ·  /tasks on|off|auto   (alias /progress)"
+            )));
+        }
+        ["tasks"] => {
+            let tasks = task_strip_vis_label(app.plan_panel_visibility);
+            app.push(ChatLine::Info(format!(
+                "  Task list: {tasks}  ·  /tasks on | off | auto"
+            )));
+        }
+        ["tasks", sub] => apply_task_strip_mode(app, sub),
+        ["side"] | ["rail"] => {
+            let rail = status_rail_vis_label(app.status_rail_visibility);
+            app.push(ChatLine::Info(format!(
+                "  Side panel: {rail}  ·  /panel on | off | auto"
+            )));
+        }
+        ["side", sub] | ["rail", sub] => apply_status_rail_mode(app, sub),
+        [sub] => apply_status_rail_mode(app, sub),
+        _ => {
+            app.push(ChatLine::Info(
+                "  Usage: /panel   ·  /panel on|off|auto   ·  /panel tasks on|off|auto".into(),
+            ));
+        }
+    }
+}
+
+/// Task list strip only — todos, planner snapshot, harness, live step (`/tasks`).
+pub(super) fn cmd_tasks(app: &mut App, cmd: &str) {
+    let sub = cmd.trim_start_matches("/tasks").trim();
+    match sub {
+        "" => {
+            let vis = task_strip_vis_label(app.plan_panel_visibility);
+            app.push(ChatLine::Info(format!(
+                "  Task list: {vis}  ·  /tasks on | off | auto"
+            )));
+        }
+        _ => apply_task_strip_mode(app, sub),
+    }
+}
+
+/// Back-compat alias for [`cmd_tasks`] (`/progress` …).
+pub(super) fn cmd_progress_strip(app: &mut App, cmd: &str) {
+    let sub = cmd.trim_start_matches("/progress").trim();
+    match sub {
+        "" => {
+            let vis = task_strip_vis_label(app.plan_panel_visibility);
+            app.push(ChatLine::Info(format!(
+                "  Task list: {vis}  ·  /tasks on|off|auto   ·  /panel toggles the whole side column"
+            )));
+        }
+        _ => apply_task_strip_mode(app, sub),
     }
 }
 
@@ -1120,7 +1221,7 @@ pub(super) fn cmd_plan(app: &mut App, cmd: &str) {
         },
         "on" | "off" | "auto" => {
             app.push(ChatLine::Info(format!(
-                "  Progress strip visibility uses `/progress {sub}` — `/plan` is for planning only (e.g. `/plan <task>`)."
+                "  `/plan` is for planning (e.g. `/plan <task>`). For layout: `/panel` (side column) or `/tasks` (task strip) — not `/plan {sub}`."
             )));
         }
         "" => {
@@ -2521,6 +2622,8 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
         _ if cmd == "/skills" || cmd.starts_with("/skills ") => cmd_skills(app, cmd),
         "/undo" => cmd_undo(app),
         _ if cmd == "/rollback" || cmd.starts_with("/rollback ") => cmd_rollback(app, cmd),
+        _ if cmd == "/panel" || cmd.starts_with("/panel ") => cmd_panel(app, cmd),
+        _ if cmd == "/tasks" || cmd.starts_with("/tasks ") => cmd_tasks(app, cmd),
         _ if cmd == "/progress" || cmd.starts_with("/progress ") => cmd_progress_strip(app, cmd),
         _ if cmd == "/plan" || cmd.starts_with("/plan ") => cmd_plan(app, cmd),
         _ if cmd == "/branch" || cmd.starts_with("/branch ") => cmd_branch(app, cmd),

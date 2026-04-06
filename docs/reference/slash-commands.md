@@ -70,18 +70,27 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 | `/undo` | Undo the last committed change | `/undo` | Runs `git reset HEAD~1`; shows what was undone |
 | `/rollback [id]` | Restore to a checkpoint or commit | `/rollback ck_abc123` | Accepts checkpoint ID (`ck_…`) or git commit hash |
 
-### Progress (strip above status)
+### Layout (side panel + task strip)
 
-The **Progress** strip lists **TodoWrite** items, planner snapshots, harness tasks, or the live agent step — not “plans” only.
+Two separate toggles:
+
+- **`/panel`** — the **entire right-hand status column** on wide terminals (session, git, agent, queue, task block, tools). **`/panel off`** gives a full-width chat with the same information stacked along the bottom, even on a wide terminal.
+- **`/tasks`** — the **task list strip** only (TodoWrite, planner snapshot, harness rows, live step). On wide layouts it lives inside the side panel; on narrow layouts it stacks above the status line. **`/progress`** is a backward-compatible alias for **`/tasks`** (it does **not** control the whole side panel).
 
 | Command | Description | Example | Notes |
 |---------|-------------|---------|-------|
-| `/progress` | Show current strip visibility (`on` / `off` / `auto`) | `/progress` | |
-| `/progress on` | Always show the strip when the terminal fits, **even if empty** | `/progress on` | See [TUI](/docs/guide/tui) |
-| `/progress off` | Hide the strip | `/progress off` | |
-| `/progress auto` | Show only on larger terminals when there is something to list (default) | `/progress auto` | |
+| `/panel` | Show current **side panel** and **task list** settings | `/panel` | |
+| `/panel on` | Prefer the side panel from a slightly lower width than auto | `/panel on` | See [TUI](/docs/guide/tui) |
+| `/panel off` | Never use the side panel; stacked bottom layout | `/panel off` | |
+| `/panel auto` | Side panel when the terminal is wide enough (default) | `/panel auto` | |
+| `/panel tasks …` | Same as `/tasks …` | `/panel tasks off` | |
+| `/tasks` | Show current task strip visibility | `/tasks` | |
+| `/tasks on` | Always show the task strip when the layout fits, even if empty | `/tasks on` | |
+| `/tasks off` | Hide the task strip | `/tasks off` | |
+| `/tasks auto` | Task strip only when there is something to list (default) | `/tasks auto` | |
+| `/progress …` | Alias for `/tasks …` | `/progress off` | Prefer `/tasks` for clarity |
 
-Strip visibility is controlled **only** with `/progress`. If you run `/plan on`, `/plan off`, or `/plan auto`, clido replies with a short reminder to use `/progress` — `/plan` remains for planning, not the strip.
+If you run **`/plan on`**, **`/plan off`**, or **`/plan auto`**, clido reminds you that **`/plan`** is for planning — use **`/panel`** or **`/tasks`** for layout.
 
 ### Planning
 

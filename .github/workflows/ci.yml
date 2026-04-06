@@ -57,7 +57,7 @@ jobs:
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin
 
-      - name: Coverage
+      - name: Coverage (min 70% per tarpaulin.toml)
         run: cargo tarpaulin --workspace --config tarpaulin.toml --out Xml
 
       - name: Upload coverage report

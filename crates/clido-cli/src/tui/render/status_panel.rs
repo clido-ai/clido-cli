@@ -1,5 +1,6 @@
-//! Right-hand **status rail** (IDE-style): agent state, task list, repo context, queue, and tool
-//! activity. Shown when the terminal is wide enough; narrow terminals keep the stacked strips.
+//! Right-hand **status rail** (IDE-style): session and repo context first, then agent/queue, then
+//! task strip and tool activity (sections that grow are lower). Shown when the terminal is wide
+//! enough; narrow terminals keep the stacked strips.
 
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
@@ -10,15 +11,26 @@ use ratatui::{
 };
 
 use crate::tui::app_state::AppRunState;
-use crate::tui::state::PlanPanelVisibility;
+use crate::tui::state::{PlanPanelVisibility, StatusRailVisibility};
 use crate::tui::*;
 
 use super::plan::{build_plan_todo_strip_lines, gather_plan_panel_steps};
 use super::widgets::{status_strip_lines, truncate_chars};
 use super::SPINNER;
 
-/// Minimum terminal width (columns) to show the status rail beside the transcript.
+/// Minimum terminal width (columns) to show the status rail beside the transcript (`/panel auto`).
 pub(crate) const STATUS_RAIL_MIN_TERM_WIDTH: u16 = 118;
+/// Lower threshold when `/panel on` — show the rail a bit earlier than auto.
+pub(crate) const STATUS_RAIL_MIN_TERM_WIDTH_ON: u16 = 108;
+
+/// Whether the layout should allocate the right-hand status rail for this terminal width.
+pub(crate) fn status_rail_wanted(vis: StatusRailVisibility, term_width: u16) -> bool {
+    match vis {
+        StatusRailVisibility::Off => false,
+        StatusRailVisibility::Auto => term_width >= STATUS_RAIL_MIN_TERM_WIDTH,
+        StatusRailVisibility::On => term_width >= STATUS_RAIL_MIN_TERM_WIDTH_ON,
+    }
+}
 /// Minimum rail width (columns); [`status_rail_width`] may grow this on wider terminals.
 pub(crate) const STATUS_RAIL_WIDTH_MIN: u16 = 28;
 /// Upper cap so the rail does not dominate ultra-wide layouts.
@@ -61,7 +73,58 @@ pub(crate) fn build_status_rail_lines(
     let dim = Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM);
     let mut lines: Vec<Line<'static>> = Vec::new();
 
+    // ── SESSION (compact; header still has full model/profile) ──────────────
+    lines.push(rail_section_title("SESSION"));
+    if let Some(ref sid) = app.current_session_id {
+        let short = sid[..sid.len().min(8)].to_string();
+        let turns = if app.stats.session_turn_count > 0 {
+            format!(" · {} turns", app.stats.session_turn_count)
+        } else {
+            String::new()
+        };
+        lines.push(Line::from(vec![
+            Span::styled(" #", Style::default().fg(TUI_MARK)),
+            Span::styled(short, Style::default().fg(TUI_BRAND_TEXT)),
+            Span::styled(turns, dim),
+        ]));
+        if let Some(ref title) = app.session_title {
+            lines.push(Line::from(vec![Span::styled(
+                format!(" {}", truncate_chars(title, w.saturating_sub(2) as usize)),
+                dim,
+            )]));
+        }
+    } else {
+        lines.push(Line::from(vec![Span::styled(" (no session)", dim)]));
+    }
+
+    // ── CONTEXT ────────────────────────────────────────────────────────────
+    lines.push(Line::raw(""));
+    lines.push(rail_section_title("CONTEXT"));
+    if let Some(ref git) = app.tui_git_snapshot {
+        let dirty = if git.status_short.is_empty() {
+            "clean"
+        } else {
+            "dirty"
+        };
+        lines.push(Line::from(vec![
+            Span::styled(" ⎇ ", Style::default().fg(TUI_MARK)),
+            Span::styled(
+                truncate_chars(&git.branch, w.saturating_sub(8) as usize),
+                Style::default().fg(TUI_BRAND_TEXT),
+            ),
+            Span::styled(format!(" · {dirty}"), dim),
+        ]));
+    } else {
+        lines.push(Line::from(vec![Span::styled(" (not a git repo)", dim)]));
+    }
+    let wd = shorten_workdir(&app.workspace_root);
+    lines.push(Line::from(vec![Span::styled(
+        format!(" {}", truncate_chars(&wd, w.saturating_sub(2) as usize)),
+        dim,
+    )]));
+
     // ── AGENT ───────────────────────────────────────────────────────────────
+    lines.push(Line::raw(""));
     lines.push(rail_section_title("AGENT"));
     let agent_line = if app.pending_perm.is_some() {
         Line::from(vec![
@@ -108,70 +171,6 @@ pub(crate) fn build_status_rail_lines(
         ]));
     }
 
-    // ── SESSION (compact; header still has full model/profile) ──────────────
-    lines.push(Line::raw(""));
-    lines.push(rail_section_title("SESSION"));
-    if let Some(ref sid) = app.current_session_id {
-        let short = sid[..sid.len().min(8)].to_string();
-        let turns = if app.stats.session_turn_count > 0 {
-            format!(" · {} turns", app.stats.session_turn_count)
-        } else {
-            String::new()
-        };
-        lines.push(Line::from(vec![
-            Span::styled(" #", Style::default().fg(TUI_MARK)),
-            Span::styled(short, Style::default().fg(TUI_BRAND_TEXT)),
-            Span::styled(turns, dim),
-        ]));
-        if let Some(ref title) = app.session_title {
-            lines.push(Line::from(vec![Span::styled(
-                format!(" {}", truncate_chars(title, w.saturating_sub(2) as usize)),
-                dim,
-            )]));
-        }
-    } else {
-        lines.push(Line::from(vec![Span::styled(" (no session)", dim)]));
-    }
-
-    // ── TASK (todos / planner / harness) ───────────────────────────────────
-    lines.push(Line::raw(""));
-    lines.push(rail_section_title("TASK"));
-    let plan_steps = gather_plan_panel_steps(app);
-    if matches!(app.plan_panel_visibility, PlanPanelVisibility::Off) && !app.harness_mode {
-        lines.push(Line::from(vec![Span::styled(
-            format!(" {}{}", "Strip off — ", "/progress on"),
-            dim,
-        )]));
-    } else {
-        lines.extend(build_plan_todo_strip_lines(app, &plan_steps, w, 10, false));
-    }
-
-    // ── CONTEXT ────────────────────────────────────────────────────────────
-    lines.push(Line::raw(""));
-    lines.push(rail_section_title("CONTEXT"));
-    if let Some(ref git) = app.tui_git_snapshot {
-        let dirty = if git.status_short.is_empty() {
-            "clean"
-        } else {
-            "dirty"
-        };
-        lines.push(Line::from(vec![
-            Span::styled(" ⎇ ", Style::default().fg(TUI_MARK)),
-            Span::styled(
-                truncate_chars(&git.branch, w.saturating_sub(8) as usize),
-                Style::default().fg(TUI_BRAND_TEXT),
-            ),
-            Span::styled(format!(" · {dirty}"), dim),
-        ]));
-    } else {
-        lines.push(Line::from(vec![Span::styled(" (not a git repo)", dim)]));
-    }
-    let wd = shorten_workdir(&app.workspace_root);
-    lines.push(Line::from(vec![Span::styled(
-        format!(" {}", truncate_chars(&wd, w.saturating_sub(2) as usize)),
-        dim,
-    )]));
-
     // ── QUEUE ───────────────────────────────────────────────────────────────
     lines.push(Line::raw(""));
     lines.push(rail_section_title("QUEUE"));
@@ -210,13 +209,24 @@ pub(crate) fn build_status_rail_lines(
         }
     }
 
-    // ── TOOLS (activity) ───────────────────────────────────────────────────
+    // ── TASK (todos / planner / harness; often many lines) ─────────────────
+    lines.push(Line::raw(""));
+    lines.push(rail_section_title("TASK"));
+    let plan_steps = gather_plan_panel_steps(app);
+    if matches!(app.plan_panel_visibility, PlanPanelVisibility::Off) && !app.harness_mode {
+        lines.push(Line::from(vec![Span::styled(" Strip off", dim)]));
+        lines.push(Line::from(vec![Span::styled(" /tasks on", dim)]));
+    } else {
+        lines.extend(build_plan_todo_strip_lines(app, &plan_steps, w, 10, false));
+    }
+
+    // ── TOOLS (activity; grows with tool calls) ────────────────────────────
     lines.push(Line::raw(""));
     lines.push(rail_section_title("TOOLS"));
     if app.status_log.is_empty() {
         lines.push(Line::from(vec![Span::styled(" —", dim)]));
     } else {
-        // Cap rows so TASK/QUEUE stay reachable without excessive scrolling.
+        // Cap rows so SESSION/AGENT stay visible without excessive scrolling.
         lines.extend(status_strip_lines(&app.status_log, w, spinner, Some(14)));
     }
 

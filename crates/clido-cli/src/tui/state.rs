@@ -130,7 +130,7 @@ pub(crate) struct LayoutInfo {
     pub(crate) chat_area_width: u16,
     /// Maximum scroll offset for the chat content (total_lines − visible_lines).
     pub(crate) max_scroll: u32,
-    /// Right-hand status rail is active (wide terminal).
+    /// True when the layout allocated the right-hand status rail this frame (wide terminal + `/panel`).
     pub(crate) status_rail_active: bool,
     /// Max scroll for the status rail (`0` when all lines fit).
     pub(crate) status_panel_max_scroll: u16,
@@ -165,9 +165,24 @@ pub(crate) struct SessionStats {
     pub(crate) session_turn_count: u32,
 }
 
-// ── Progress strip (TUI) ──────────────────────────────────────────────────────
+// ── Side panel & task strip (TUI) ────────────────────────────────────────────
 
-/// User preference for the progress strip (todos, planner, harness, live step) above the status line.
+/// User preference for the **right status column** (session, git, agent, queue, tasks, tools).
+/// `/panel on|off|auto` — independent of the stacked task strip on narrow layouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum StatusRailVisibility {
+    /// Show the rail when the terminal is wide enough ([`crate::tui::render::status_panel::STATUS_RAIL_MIN_TERM_WIDTH`]).
+    #[default]
+    Auto,
+    /// Prefer the rail from a slightly lower width ([`crate::tui::render::status_panel::STATUS_RAIL_MIN_TERM_WIDTH_ON`]).
+    On,
+    /// Never use the side rail; use the stacked bottom layout even on wide terminals.
+    Off,
+}
+
+/// User preference for the **task list** strip: todos, planner snapshot, harness rows, live agent step.
+/// On wide layouts this appears inside the side panel; on narrow layouts it stacks above the status line.
+/// `/tasks on|off|auto` (alias: `/progress`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum PlanPanelVisibility {
     /// Show the panel only when the terminal is large enough and there is content.

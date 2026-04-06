@@ -130,7 +130,7 @@ pub(super) const TUI_SURFACE_APP: Color = Color::Rgb(12, 14, 20);
 pub(super) const TUI_SURFACE_CHROME: Color = Color::Rgb(28, 32, 44);
 /// Main transcript / reading well (inset vs chrome).
 pub(super) const TUI_SURFACE_CONTENT: Color = Color::Rgb(17, 19, 27);
-/// Progress strip — todos, planner, harness, live step (focus lane).
+/// Task strip — todos, planner, harness, live step (focus lane).
 pub(super) const TUI_SURFACE_FOCUS: Color = Color::Rgb(34, 38, 54);
 /// Tool status + queue (instrumentation band).
 pub(super) const TUI_SURFACE_STATUS: Color = Color::Rgb(22, 25, 35);
@@ -499,7 +499,7 @@ mod tests {
         assert!(headers.contains(&"Git"));
         assert!(headers.contains(&"Model"));
         assert!(headers.contains(&"Context"));
-        assert!(headers.contains(&"Progress"));
+        assert!(headers.contains(&"Layout"));
         assert!(headers.contains(&"Planning"));
         assert!(headers.contains(&"Project"));
     }

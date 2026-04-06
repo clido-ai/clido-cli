@@ -15,7 +15,7 @@ use crate::tui::*;
 
 use super::widgets::truncate_chars;
 
-// ── Progress strip (main layout, above status): todos, planner snapshot, harness, live step ──
+// ── Task strip (main layout, above status): todos, planner snapshot, harness, live step ──
 
 /// One row in the plan/todo panel (todos, planner snapshot, or status hint).
 #[derive(Debug, Clone)]
@@ -213,7 +213,7 @@ pub(crate) fn plan_panel_height_for_layout(
 
 /// Build wrapped lines for the progress strip (`plan_h` rows from [`plan_panel_height_for_layout`]).
 /// `max_step_lines` caps listed steps (horizontal strip uses ~5; status rail uses more).
-/// When `with_strip_title_row` is false (status rail), omit the "Progress · auto" title row — the rail
+/// When `with_strip_title_row` is false (status rail), omit the "Tasks · auto" title row — the rail
 /// draws its own section header.
 pub(crate) fn build_plan_todo_strip_lines(
     app: &App,
@@ -232,7 +232,7 @@ pub(crate) fn build_plan_todo_strip_lines(
     let header_title = if app.harness_mode {
         "Harness"
     } else {
-        "Progress"
+        "Tasks"
     };
     let mut out: Vec<Line<'static>> = Vec::new();
     if with_strip_title_row {
@@ -248,25 +248,33 @@ pub(crate) fn build_plan_todo_strip_lines(
     if steps.is_empty() {
         if app.harness_mode {
             out.push(Line::from(vec![Span::styled(
-                format!("{TUI_GUTTER}No harness tasks yet — .clido/harness/tasks.json"),
+                format!("{TUI_GUTTER}No harness tasks yet"),
                 dim,
             )]));
             out.push(Line::from(vec![Span::styled(
-                format!("{TUI_GUTTER}Agent uses HarnessControl planner_append_tasks when harness is on."),
+                format!("{TUI_GUTTER}.clido/harness/tasks.json  ·  HarnessControl planner_append_tasks"),
                 dim,
             )]));
         } else if matches!(app.plan_panel_visibility, PlanPanelVisibility::On) {
             out.push(Line::from(vec![Span::styled(
-                format!("{TUI_GUTTER}Nothing listed yet — todos, saved planner steps, or the live agent step show here."),
+                format!("{TUI_GUTTER}Nothing listed yet"),
                 dim,
             )]));
             out.push(Line::from(vec![Span::styled(
-                format!("{TUI_GUTTER}/plan <task> for a written plan  ·  /progress on|off|auto for this strip"),
+                format!("{TUI_GUTTER}Todos, planner steps, or live agent step"),
+                dim,
+            )]));
+            out.push(Line::from(vec![Span::styled(
+                format!("{TUI_GUTTER}/plan <task>  ·  /tasks on|off|auto"),
                 dim,
             )]));
         } else {
             out.push(Line::from(vec![Span::styled(
-                format!("{TUI_GUTTER}No rows — use /plan <task> or let the agent set todos."),
+                format!("{TUI_GUTTER}No rows"),
+                dim,
+            )]));
+            out.push(Line::from(vec![Span::styled(
+                format!("{TUI_GUTTER}/plan <task>  ·  or agent todos"),
                 dim,
             )]));
         }

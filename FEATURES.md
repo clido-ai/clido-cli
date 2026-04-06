@@ -83,7 +83,7 @@ Type `/` for autocomplete. The **authoritative list** with arguments and notes i
 
 `docs/reference/slash-commands.md`
 
-Examples: `/sessions`, `/skills list`, `/plan`, `/plan <task>`, `/progress on|off|auto`, `/workflow`, `/memory`, `/git`-related shortcuts (`/ship`, `/pr`, …), `/profile`, `/models`.
+Examples: `/sessions`, `/skills list`, `/plan`, `/plan <task>`, `/panel on|off|auto`, `/tasks on|off|auto`, `/workflow`, `/memory`, `/git`-related shortcuts (`/ship`, `/pr`, …), `/profile`, `/models`.
 
 ---
 
@@ -106,7 +106,8 @@ The full-screen TUI is organized as **stacked horizontal zones**, each with its 
 | **App canvas** | Darkest full-frame fill; every other region sits on top of it. |
 | **Header** | Model, profile, workspace path, session id/title, cost/tokens when shown. |
 | **Chat** | Scrollable transcript (markdown, code blocks, tool output). |
-| **Progress strip** | Optional: TodoWrite, planner snapshot, harness tasks, or live step — `/progress on`, `off`, or `auto`. |
+| **Side panel** | Optional right column on wide terminals — `/panel on`, `off`, or `auto`. |
+| **Task strip** | TodoWrite, planner snapshot, harness, live step — `/tasks on`, `off`, or `auto` (`/progress` = alias for `/tasks` only). |
 | **Status + queue** | Activity log, spinner, thinking line, queued messages when relevant. |
 | **Hint row** | Shortcut summary (hidden on very narrow terminals). |
 | **Input dock** | Multiline composer; border and background shift for **permission wait**, **rate limit**, and **prompt enhancement**. |

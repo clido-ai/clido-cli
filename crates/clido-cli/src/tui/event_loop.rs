@@ -344,6 +344,53 @@ pub(super) fn read_clipboard() -> Result<String, String> {
     }
 }
 
+// ── Session title helpers (persisted `Title` line + immediate heuristic) ───
+
+fn session_lines_have_user_message(lines: &[clido_storage::SessionLine]) -> bool {
+    lines
+        .iter()
+        .any(|l| matches!(l, clido_storage::SessionLine::UserMessage { .. }))
+}
+
+fn persisted_session_title(lines: &[clido_storage::SessionLine]) -> Option<String> {
+    lines.iter().find_map(|l| {
+        if let clido_storage::SessionLine::Title { title } = l {
+            let t = title.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        } else {
+            None
+        }
+    })
+}
+
+/// Short label from the user's first line (shown until the LLM title is written).
+fn heuristic_session_title_from_prompt(prompt: &str) -> String {
+    let one_line = prompt
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    let collapsed: String = one_line.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX: usize = 52;
+    if collapsed.is_empty() {
+        "New chat".to_string()
+    } else if collapsed.chars().count() > MAX {
+        format!(
+            "{}…",
+            collapsed
+                .chars()
+                .take(MAX.saturating_sub(1))
+                .collect::<String>()
+        )
+    } else {
+        collapsed
+    }
+}
+
 // ── Agent background task ─────────────────────────────────────────────────────
 
 pub(super) enum AgentAction {
@@ -511,8 +558,11 @@ pub(super) async fn agent_task(
     );
 
     let mut first_turn = true;
-    let mut title_generated = cli.resume.is_some(); // skip title gen for resumed sessions
-                                                    // Auto-continue counter: when the turn limit is hit mid-task, clido automatically
+    // True once a `Title` line exists on disk or the LLM/heuristic path has finalized.
+    let mut title_generated = false;
+    // First-line heuristic title already pushed to the UI for this session.
+    let mut heuristic_title_sent = false;
+    // Auto-continue counter: when the turn limit is hit mid-task, clido automatically
                                                     // injects "please continue" so the agent never stops mid-work. We cap this at
                                                     // MAX_AUTO_CONTINUES to avoid infinite loops on genuinely stuck agents.
     const MAX_AUTO_CONTINUES: u32 = 5;
@@ -608,7 +658,18 @@ pub(super) async fn agent_task(
                         _ => {}
                     }
                 }
-                first_turn = false;
+                first_turn = !session_lines_have_user_message(&lines);
+                if let Some(t) = persisted_session_title(&lines) {
+                    title_generated = true;
+                    heuristic_title_sent = true;
+                    if event_tx
+                        .send(AgentEvent::TitleGenerated(t))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
                 if event_tx
                     .send(AgentEvent::ResumedSession { messages: msgs })
                     .await
@@ -950,6 +1011,14 @@ pub(super) async fn agent_task(
                 let run_start = std::time::Instant::now();
                 cancel.store(false, std::sync::atomic::Ordering::Relaxed);
 
+                if !title_generated && !heuristic_title_sent && !prompt.trim().is_empty() {
+                    heuristic_title_sent = true;
+                    let h = heuristic_session_title_from_prompt(&prompt);
+                    let _ = event_tx
+                        .send(AgentEvent::TitleGenerated(h))
+                        .await;
+                }
+
                 // When --planner is active and this is the first turn, attempt to parse
                 // a plan from the prompt. On success, emit PlanCreated so the TUI can
                 // display the planned steps. On any failure, fall back to the reactive loop
@@ -1166,7 +1235,7 @@ pub(super) async fn agent_task(
                                     ..Default::default()
                                 };
                                 if let Ok(resp) = tp.complete(&msgs, &[], &cfg).await {
-                                    let title = resp
+                                    let mut title = resp
                                         .content
                                         .iter()
                                         .find_map(|b| {
@@ -1177,6 +1246,9 @@ pub(super) async fn agent_task(
                                             }
                                         })
                                         .unwrap_or_default();
+                                    if title.is_empty() {
+                                        title = heuristic_session_title_from_prompt(&title_prompt);
+                                    }
                                     if !title.is_empty() {
                                         if let Some(ref mut w) = title_writer {
                                             let _ =
@@ -1191,6 +1263,18 @@ pub(super) async fn agent_task(
                                         {
                                             tracing::debug!("title channel closed");
                                         }
+                                    }
+                                } else {
+                                    let title = heuristic_session_title_from_prompt(&title_prompt);
+                                    if !title.is_empty() {
+                                        if let Some(ref mut w) = title_writer {
+                                            let _ = w.write_line(&clido_storage::SessionLine::Title {
+                                                title: title.clone(),
+                                            });
+                                        }
+                                        let _ = title_tx
+                                            .send(AgentEvent::TitleGenerated(title))
+                                            .await;
                                     }
                                 }
                             });
@@ -1590,7 +1674,15 @@ pub(super) async fn agent_task(
                                 _ => {}
                             }
                         }
-                        first_turn = false; // already have history
+                        first_turn = !session_lines_have_user_message(&lines);
+                        if let Some(t) = persisted_session_title(&lines) {
+                            title_generated = true;
+                            heuristic_title_sent = true;
+                            let _ = event_tx.send(AgentEvent::TitleGenerated(t)).await;
+                        } else {
+                            title_generated = false;
+                            heuristic_title_sent = false;
+                        }
                         if event_tx
                             .send(AgentEvent::ResumedSession { messages: msgs })
                             .await
@@ -2734,6 +2826,7 @@ pub(super) async fn event_loop(
                     Some(AgentEvent::SessionStarted(id)) => {
                         last_agent_activity = std::time::Instant::now();
                         app.current_session_id = Some(id);
+                        app.session_title = None;
                     }
                     Some(AgentEvent::Interrupted) => {
                         last_agent_activity = std::time::Instant::now();

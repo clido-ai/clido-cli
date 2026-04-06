@@ -6,6 +6,7 @@ mod surfaces;
 mod welcome;
 mod widgets;
 
+pub(super) use status_panel::{STATUS_RAIL_MIN_TERM_WIDTH, STATUS_RAIL_MIN_TERM_WIDTH_ON};
 pub(super) use plan::*;
 pub(super) use profile::*;
 pub(super) use welcome::*;
@@ -269,7 +270,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     let input_h = (input_line_count as u16 + 2).clamp(3, 8);
     let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
     let plan_steps = gather_plan_panel_steps(app);
-    let use_rail = area.width >= status_panel::STATUS_RAIL_MIN_TERM_WIDTH;
+    let use_rail = status_panel::status_rail_wanted(app.status_rail_visibility, area.width);
     app.layout.status_rail_active = use_rail;
     let mut stacked_plan_h: u16 = 0;
 
@@ -411,7 +412,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     if let Some(rail_area) = rail_area_opt {
         status_panel::render_status_rail(frame, app, rail_area);
     } else {
-        // ── Progress strip (above status; visibility: /progress on|off|auto) ──
+        // ── Task strip (above status; /tasks on|off|auto; hidden when /panel off uses this layout) ──
         if stacked_plan_h > 0 {
             let pb = surfaces::focus_lane_zone_block();
             let p_inner = pb.inner(plan_area);

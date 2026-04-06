@@ -331,41 +331,104 @@ pub static COMMANDS: &[SlashCommand] = &[
         takes_args: true,
         requires_idle: false,
     },
-    // ── Progress (strip above status: todos, planner, harness, live step) ──
+    // ── Layout (side panel + task strip) ─────────────────────────────────────
+    SlashCommand {
+        name: "/panel",
+        section: "Layout",
+        description: "show or set the right status column: on, off, or auto (default)",
+        usage: Some("/panel [on|off|auto|tasks …]"),
+        takes_args: true,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/panel on",
+        section: "Layout",
+        description: "show the side panel from a slightly lower width than auto",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/panel off",
+        section: "Layout",
+        description: "hide the side panel — full-width chat, stacked status at the bottom",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/panel auto",
+        section: "Layout",
+        description: "side panel when the terminal is wide enough (default)",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/tasks",
+        section: "Layout",
+        description: "show or set task list strip (todos, plan, harness): on, off, or auto",
+        usage: Some("/tasks [on|off|auto]"),
+        takes_args: true,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/tasks on",
+        section: "Layout",
+        description: "always show the task strip when the layout fits (even if empty)",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/tasks off",
+        section: "Layout",
+        description: "hide the task list strip",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/tasks auto",
+        section: "Layout",
+        description: "show the task strip only when there is something to list (default)",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
     SlashCommand {
         name: "/progress",
-        section: "Progress",
-        description: "show or set progress strip visibility: on, off, or auto (default)",
+        section: "Layout",
+        description: "alias for /tasks (task strip only, not the whole side panel)",
         usage: Some("/progress [on|off|auto]"),
         takes_args: true,
         requires_idle: false,
     },
     SlashCommand {
         name: "/progress on",
-        section: "Progress",
-        description: "always show the progress strip when the terminal fits (even if empty)",
+        section: "Layout",
+        description: "alias for /tasks on",
         usage: None,
         takes_args: false,
         requires_idle: false,
     },
     SlashCommand {
         name: "/progress off",
-        section: "Progress",
-        description: "hide the progress strip",
+        section: "Layout",
+        description: "alias for /tasks off",
         usage: None,
         takes_args: false,
         requires_idle: false,
     },
     SlashCommand {
         name: "/progress auto",
-        section: "Progress",
-        description:
-            "show the strip only on large terminals when there is something to list (default)",
+        section: "Layout",
+        description: "alias for /tasks auto",
         usage: None,
         takes_args: false,
         requires_idle: false,
     },
-    // ── Planning (structured plan workflow; strip visibility is `/progress` only) ──
+    // ── Planning (structured plan workflow) ───────────────────────────────────
     SlashCommand {
         name: "/plan",
         section: "Planning",
@@ -702,6 +765,7 @@ mod tests {
         assert!(secs.contains(&"Session"));
         assert!(secs.contains(&"Git"));
         assert!(secs.contains(&"Model"));
+        assert!(secs.contains(&"Layout"));
     }
 
     #[test]

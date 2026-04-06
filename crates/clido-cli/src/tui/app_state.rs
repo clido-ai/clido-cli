@@ -227,8 +227,10 @@ pub(super) struct App {
     pub(super) harness_mode: bool,
     /// Shared todo list written by the agent via the TodoWrite tool.
     pub(super) todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
-    /// Whether to show the progress strip: todos, planner snapshot, harness, live step (`/progress on|off|auto`).
+    /// Task list strip: todos, planner snapshot, harness, live step (`/tasks on|off|auto`, alias `/progress`).
     pub(super) plan_panel_visibility: PlanPanelVisibility,
+    /// Right-hand status column: session, context, agent, queue, tasks, tools (`/panel on|off|auto`).
+    pub(super) status_rail_visibility: StatusRailVisibility,
     /// Track whether we have already shown the empty-input hint this session.
     pub(super) empty_input_hint_shown: bool,
     /// Pending `/enhance` request — set by cmd_enhance, consumed by event_loop.
@@ -387,6 +389,7 @@ impl App {
             } else {
                 PlanPanelVisibility::default()
             },
+            status_rail_visibility: StatusRailVisibility::default(),
             empty_input_hint_shown: false,
             pending_enhance: None,
             enhancing: false,

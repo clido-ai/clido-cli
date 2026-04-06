@@ -25,8 +25,8 @@ Regions use **different background tones** so you can tell header, transcript, a
 ╭─ header: brand · model · profile · session … ───────────────────────────────╮
 │  [chat]  conversation, tools, markdown, code blocks                           │
 │  …                                                                            │
-├─ progress (optional) ─────────────────────────────────────────────────────────┤
-│  Progress · auto   ○ todo   › active   ✓ done   (todos / planner / harness)   │
+├─ tasks (optional) ──────────────────────────────────────────────────────────────┤
+│  Tasks · auto   ○ todo   › active   ✓ done   (todos / planner / harness)      │
 ├─ status strip ────────────────────────────────────────────────────────────────┤
 │  activity log / tool line · spinner                                            │
 ├─ queue (optional) ─────────────────────────────────────────────────────────────┤
@@ -36,13 +36,14 @@ Regions use **different background tones** so you can tell header, transcript, a
 ╰─ multiline input ─────────────────────────────────────────────────────────────╯
 ```
 
-**Wide terminals (118+ columns):** the progress strip, status strip, and queue move into a **right-hand status rail** beside the chat (sections: **AGENT**, **SESSION**, **TASK**, **CONTEXT** — Git + cwd — **QUEUE**, **TOOLS**). Rail width scales slightly with terminal size (about 26% of the main row, capped). When the rail scrolls, a **footer** shows visible line range and total (`1–12/40 · Alt+Pg`). **Alt+Page Up** / **Alt+Page Down** scroll the rail. Model and profile stay in the **header** to avoid duplicating them in the rail. Narrower terminals keep the stacked layout above.
+**Wide terminals (118+ columns by default):** session, git, agent, queue, tasks, and tools move into a **right-hand status rail** beside the chat. Use **`/panel off`** to hide that column and use the stacked bottom layout even on a wide screen. **`/panel on`** enables the rail from a slightly lower width (108+ columns). Rail width scales slightly with terminal size (about 26% of the main row, capped). When the rail scrolls, a **footer** shows visible line range and total (`1–12/40 · Alt+Pg`). **Alt+Page Up** / **Alt+Page Down** scroll the rail. Model and profile stay in the **header**. Narrower terminals always use the stacked layout above.
 
 | Area | Description |
 |------|-------------|
 | **Header** | Model, profile, workspace path, session id/title, token/cost hints. |
 | **Chat pane** | Scrollable conversation: user, assistant, tools, errors. |
-| **Progress strip** | Optional panel between chat and status: todos, planner snapshot, harness, live step — ○ / › / ✓ markers. **`/progress on`**, **`off`**, or **`auto`** (default **auto**); **`on`** keeps the strip visible even when empty. |
+| **Task strip** | Optional todos, planner snapshot, harness, live step — ○ / › / ✓ markers. **`/tasks on`**, **`off`**, or **`auto`** (default **auto**). **`/progress`** is an alias for **`/tasks`** (task strip only, not the whole side panel). |
+| **Side panel** | On wide terminals, the **right column** is toggled with **`/panel on`**, **`off`**, or **`auto`** (default **auto**). **`/panel off`** = full-width chat plus stacked status at the bottom. |
 | **Status strip** | Short activity log and current tool; complements the header. |
 | **Input** | Multiline draft (grows up to a few lines); **Enter** sends, **Shift+Enter** newline. The input dock uses its own surface; **permission**, **rate-limit**, and **prompt enhancement** states change both border color and dock background. |
 
@@ -109,7 +110,8 @@ Common shortcuts:
 | `/help` | Key bindings + slash commands in chat |
 | `/sessions` | Session picker |
 | `/skills list` | Skills on disk and whether each is active |
-| `/progress on` / `off` / `auto` | Progress strip visibility (default **auto**) |
+| `/panel on` / `off` / `auto` | Side column visibility (default **auto**) |
+| `/tasks on` / `off` / `auto` | Task strip only (default **auto**; **`/progress`** = alias) |
 | `/plan` / `/plan <task>` | Show saved plan or ask the agent to plan first |
 | `/todo` | Current TodoWrite list |
 | `/stop` | Cancel the current agent turn |

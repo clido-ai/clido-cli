@@ -91,7 +91,8 @@ See [Slash commands](/docs/reference/slash-commands) for the full command list (
 | `Up` / `Down` | Move selection |
 | `Enter` | Open selected session |
 | `Escape` | Close picker |
-| `/` + text | Filter sessions by ID or preview text |
+| Type | Filter sessions by ID, title, or preview (any letters) |
+| `Ctrl+D` | Delete selected session (while picker is open; otherwise `Ctrl+D` still quits) |
 
 ### Error modal
 

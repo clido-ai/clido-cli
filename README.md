@@ -397,10 +397,10 @@ Type `/` in the input bar to see completions. Commands are grouped by category:
 | `Enter` | Select / confirm |
 | `Esc` | Close overlay |
 | Type to filter | Narrows results in model/session/profile pickers |
-| `f` | Toggle favorite (model picker) |
+| `Ctrl+F` | Toggle favorite (model picker) |
 | `Ctrl+S` | Save as default (model picker) |
-| `n` / `e` | New / edit (profile picker) |
-| `d` | Delete (session picker) |
+| `Ctrl+N` / `Ctrl+E` | New / edit (profile picker) |
+| `Ctrl+D` | Delete (session picker) |
 
 **Permission prompts**
 

@@ -1414,13 +1414,17 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     use KeyCode::*;
     use KeyModifiers as Km;
 
-    // Ctrl+C / Ctrl+D always quits
-    if matches!(
-        (event.modifiers, event.code),
-        (Km::CONTROL, Char('c')) | (Km::CONTROL, Char('d'))
-    ) {
+    // Ctrl+C always quits. Ctrl+D quits except in the session picker, where it deletes
+    // the selected session (plain `d` is reserved for the filter).
+    if matches!((event.modifiers, event.code), (Km::CONTROL, Char('c'))) {
         app.quit = true;
         return;
+    }
+    if matches!((event.modifiers, event.code), (Km::CONTROL, Char('d'))) {
+        if app.session_picker.is_none() {
+            app.quit = true;
+            return;
+        }
     }
 
     // Ctrl+/ interrupts the current run without sending follow-up input.
@@ -1579,35 +1583,54 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     // ── Model picker (modal) ─────────────────────────────────────────────────
     if app.model_picker.is_some() {
         const VISIBLE: usize = 14;
-        // Ctrl+S: save selected model as default in config
+        // Ctrl+S: save default · Ctrl+F: toggle favorite (letters go to filter)
         if event.modifiers == Km::CONTROL {
-            if let KeyCode::Char('s') = event.code {
-                if let Some(picker) = &app.model_picker {
-                    let filtered = picker.filtered();
-                    if !filtered.is_empty() {
-                        let model_id = filtered[picker.selected].id.clone();
-                        drop(filtered);
-                        let config_path = clido_core::global_config_path()
-                            .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
-                        match save_default_model_to_config(
-                            &config_path,
-                            &model_id,
-                            &app.current_profile,
-                        ) {
-                            Ok(()) => {
-                                app.push(ChatLine::Info(format!(
-                                    "  ✓ {} saved as default model",
-                                    model_id
-                                )));
+            match event.code {
+                KeyCode::Char('s') | KeyCode::Char('S') => {
+                    if let Some(picker) = &app.model_picker {
+                        let filtered = picker.filtered();
+                        if !filtered.is_empty() {
+                            let model_id = filtered[picker.selected].id.clone();
+                            drop(filtered);
+                            let config_path = clido_core::global_config_path()
+                                .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
+                            match save_default_model_to_config(
+                                &config_path,
+                                &model_id,
+                                &app.current_profile,
+                            ) {
+                                Ok(()) => {
+                                    app.push(ChatLine::Info(format!(
+                                        "  ✓ {} saved as default model",
+                                        model_id
+                                    )));
+                                }
+                                Err(e) => {
+                                    app.push(ChatLine::Info(format!("  ✗ could not save: {}", e)));
+                                }
                             }
-                            Err(e) => {
-                                app.push(ChatLine::Info(format!("  ✗ could not save: {}", e)));
-                            }
+                            app.model_picker = None;
                         }
-                        app.model_picker = None;
                     }
+                    return;
                 }
-                return;
+                KeyCode::Char('f') | KeyCode::Char('F') => {
+                    if let Some(picker) = &mut app.model_picker {
+                        let filtered = picker.filtered();
+                        if !filtered.is_empty() {
+                            let model_id = filtered[picker.selected].id.clone();
+                            drop(filtered);
+                            app.model_prefs.toggle_favorite(&model_id);
+                            app.model_prefs.save();
+                            let (pricing, _) = clido_core::load_pricing();
+                            app.known_models = build_model_list(&pricing, &app.model_prefs);
+                            picker.models = app.known_models.clone();
+                            picker.clamp();
+                        }
+                    }
+                    return;
+                }
+                _ => {}
             }
         }
         match event.code {
@@ -1645,22 +1668,6 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         app.model_prefs.push_recent(&entry.id);
                         app.model_prefs.save();
                         app.push(ChatLine::Info(format!("  ✓ Model: {}", entry.id)));
-                    }
-                }
-            }
-            KeyCode::Char('f') | KeyCode::Char('F') => {
-                if let Some(picker) = &mut app.model_picker {
-                    let filtered = picker.filtered();
-                    if !filtered.is_empty() {
-                        let model_id = filtered[picker.selected].id.clone();
-                        drop(filtered);
-                        app.model_prefs.toggle_favorite(&model_id);
-                        app.model_prefs.save();
-                        // Rebuild known_models with updated favorites.
-                        let (pricing, _) = clido_core::load_pricing();
-                        app.known_models = build_model_list(&pricing, &app.model_prefs);
-                        picker.models = app.known_models.clone();
-                        picker.clamp();
                     }
                 }
             }
@@ -1704,6 +1711,25 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
 
     // ── Session picker (modal) ────────────────────────────────────────────────
     if app.session_picker.is_some() {
+        if event.modifiers == Km::CONTROL {
+            if let KeyCode::Char('d') | KeyCode::Char('D') = event.code {
+                if let Some(picker) = &mut app.session_picker {
+                    if let Some(orig_idx) = picker.picker.selected_original_index() {
+                        let sid = picker.picker.items()[orig_idx].session_id.clone();
+                        if app.current_session_id.as_deref() == Some(&sid) {
+                            app.push(ChatLine::Info("  Cannot delete the active session".into()));
+                        } else if clido_storage::delete_session(&app.workspace_root, &sid).is_ok() {
+                            picker.picker.items_mut().remove(orig_idx);
+                            picker.picker.apply_filter();
+                            if picker.picker.items().is_empty() {
+                                app.session_picker = None;
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+        }
         match event.code {
             Enter => {
                 if let Some(picker) = app.session_picker.take() {
@@ -1724,22 +1750,6 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.text_input.text.clear();
                 app.text_input.cursor = 0;
             }
-            Char('d') | Char('D') => {
-                if let Some(picker) = &mut app.session_picker {
-                    if let Some(orig_idx) = picker.picker.selected_original_index() {
-                        let sid = picker.picker.items()[orig_idx].session_id.clone();
-                        if app.current_session_id.as_deref() == Some(&sid) {
-                            app.push(ChatLine::Info("  Cannot delete the active session".into()));
-                        } else if clido_storage::delete_session(&app.workspace_root, &sid).is_ok() {
-                            picker.picker.items_mut().remove(orig_idx);
-                            picker.picker.apply_filter();
-                            if picker.picker.items().is_empty() {
-                                app.session_picker = None;
-                            }
-                        }
-                    }
-                }
-            }
             _ => {
                 if let Some(picker) = &mut app.session_picker {
                     picker.picker.handle_key(event);
@@ -1751,6 +1761,42 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
 
     // ── Profile picker (modal) ────────────────────────────────────────────────
     if app.profile_picker.is_some() {
+        if event.modifiers == Km::CONTROL {
+            match event.code {
+                KeyCode::Char('n') | KeyCode::Char('N') => {
+                    app.profile_picker = None;
+                    let config_path = clido_core::global_config_path()
+                        .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
+                    let all_profiles = clido_core::load_config(&app.workspace_root)
+                        .map(|c| c.profiles)
+                        .unwrap_or_default();
+                    app.profile_overlay =
+                        Some(ProfileOverlayState::for_create(config_path, &all_profiles));
+                    return;
+                }
+                KeyCode::Char('e') | KeyCode::Char('E') => {
+                    if let Some(picker) = app.profile_picker.take() {
+                        if let Some((name, entry)) = picker.picker.selected_item() {
+                            let name = name.clone();
+                            let entry_clone = entry.clone();
+                            let config_path = clido_core::global_config_path()
+                                .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
+                            let all_profiles = clido_core::load_config(&app.workspace_root)
+                                .map(|c| c.profiles)
+                                .unwrap_or_default();
+                            app.profile_overlay = Some(ProfileOverlayState::for_edit(
+                                name,
+                                &entry_clone,
+                                config_path,
+                                &all_profiles,
+                            ));
+                        }
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
         match event.code {
             Enter => {
                 if let Some(picker) = app.profile_picker.take() {
@@ -1768,35 +1814,6 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Esc => {
                 app.profile_picker = None;
-            }
-            KeyCode::Char('n') => {
-                app.profile_picker = None;
-                let config_path = clido_core::global_config_path()
-                    .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
-                let all_profiles = clido_core::load_config(&app.workspace_root)
-                    .map(|c| c.profiles)
-                    .unwrap_or_default();
-                app.profile_overlay =
-                    Some(ProfileOverlayState::for_create(config_path, &all_profiles));
-            }
-            KeyCode::Char('e') => {
-                if let Some(picker) = app.profile_picker.take() {
-                    if let Some((name, entry)) = picker.picker.selected_item() {
-                        let name = name.clone();
-                        let entry_clone = entry.clone();
-                        let config_path = clido_core::global_config_path()
-                            .unwrap_or_else(|| app.workspace_root.join(".clido/config.toml"));
-                        let all_profiles = clido_core::load_config(&app.workspace_root)
-                            .map(|c| c.profiles)
-                            .unwrap_or_default();
-                        app.profile_overlay = Some(ProfileOverlayState::for_edit(
-                            name,
-                            &entry_clone,
-                            config_path,
-                            &all_profiles,
-                        ));
-                    }
-                }
             }
             _ => {
                 if let Some(picker) = &mut app.profile_picker {

@@ -182,7 +182,7 @@ Press Enter to execute. Commands that produce output render it as a system messa
 │     gpt-4o                         openai      2.50  10.00  128k              │
 │     mistralai/mistral-large        openrouter  2.00   6.00   32k              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-  ↑/↓ navigate  Enter select  f favorite  Escape cancel  Type to filter
+  ↑/↓ navigate  Enter select  Ctrl+F favorite  Escape cancel  Type to filter
 ```
 
 Columns: ★ (favorited), model ID, provider, in$/mtok, out$/mtok, context window, role.
@@ -191,7 +191,7 @@ Columns: ★ (favorited), model ID, provider, in$/mtok, out$/mtok, context windo
 |-----|--------|
 | `Up` / `Down` | Move selection |
 | `Enter` | Switch to the selected model |
-| `f` | Toggle favorite on the highlighted model |
+| `Ctrl+F` | Toggle favorite on the highlighted model |
 | `Escape` | Close the picker without switching |
 | Any text | Live-filter models by ID or provider |
 | `Backspace` | Delete last filter character |

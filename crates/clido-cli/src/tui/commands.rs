@@ -237,11 +237,11 @@ pub(super) fn cmd_keys(app: &mut App) {
             1-9                jump to first 9 matches (/ commands menu)\n\
             Type               filter long lists (model, profile, session pickers)\n\
             Backspace          remove filter char\n\
-            f                  toggle favorite (model picker)\n\
+            Ctrl+F             toggle favorite (model picker)\n\
             Ctrl+S             save as default (model picker)\n\
-            d                  delete selected session (session picker)\n\
-            n                  new (profile picker)\n\
-            e                  edit (profile picker)"
+            Ctrl+D             delete selected session (session picker)\n\
+            Ctrl+N             new profile (profile picker)\n\
+            Ctrl+E             edit profile (profile picker)"
                 .into(),
         ),
         (

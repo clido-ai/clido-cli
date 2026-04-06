@@ -1004,7 +1004,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
         let total = filtered.len();
         let picker_title = format!(" Sessions — {} total ", total);
-        let hint = " ↑↓ navigate · Enter resume · d delete · type to filter (id, title, preview) · Esc close ";
+        let hint = " ↑↓ navigate · Enter resume · Ctrl+D delete · type to filter (id, title, preview) · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block_with_hint(
@@ -1146,7 +1146,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         } else {
             format!(" Models — {} found ", total)
         };
-        let hint = " ↑↓ navigate · Enter select · Ctrl+S save default · f fav · type to filter · Esc close ";
+        let hint = " ↑↓ navigate · Enter select · Ctrl+S save default · Ctrl+F favorite · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block_with_hint(&title, hint, TUI_MARK)),
@@ -1219,7 +1219,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         }
 
         let title = format!(" Profiles — {} ", picker.active);
-        let hint = " ↑↓ navigate · Enter switch · n new · e edit · type to filter · Esc close ";
+        let hint =
+            " ↑↓ navigate · Enter switch · Ctrl+N new · Ctrl+E edit · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block_with_hint(

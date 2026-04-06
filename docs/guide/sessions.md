@@ -161,7 +161,7 @@ Open the session picker inside the TUI with `/sessions`:
 ╰─────────────────────────────────────────────────────────────────────────────╯
 ```
 
-Press `Up` / `Down` to select, `Enter` to open, `Escape` to close.
+Press `Up` / `Down` to select, `Enter` to open, `Escape` to close. Type to filter by id, title, or preview; `Ctrl+D` deletes the selected session (not plain `d`, so filter text can include any letter).
 
 ## Session JSONL format
 

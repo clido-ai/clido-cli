@@ -421,6 +421,47 @@ impl AgentLoop {
         Ok(())
     }
 
+    /// Rewind in-memory history and (if provided) the session JSONL file to `session_checkpoint`
+    /// when [`ClidoError::should_truncate_history_after_failed_run`] says so.
+    fn apply_failed_turn_rollback(
+        &mut self,
+        session: &mut Option<&mut SessionWriter>,
+        session_checkpoint: Option<u64>,
+        history_before: usize,
+        err: &ClidoError,
+    ) {
+        if !err.should_truncate_history_after_failed_run(self.history.len(), history_before) {
+            return;
+        }
+        self.history.truncate(history_before);
+        if let (Some(w), Some(off)) = (session.as_mut(), session_checkpoint) {
+            if let Err(e) = w.truncate_to(off) {
+                eprintln!("[clido] session file truncate after rolled-back turn: {e}");
+            }
+        }
+    }
+
+    /// Whether the **next** prompt from the UI should use `run` (first-turn semantics: git inject,
+    /// architect, memories) vs `run_next_turn`.
+    pub fn next_prompt_should_use_run_instead_of_run_next(
+        &self,
+        outcome: &Result<String>,
+        history_len_before_turn: usize,
+    ) -> bool {
+        match outcome {
+            Ok(_) => false,
+            Err(e)
+                if !e.should_truncate_history_after_failed_run(
+                    self.history.len(),
+                    history_len_before_turn,
+                ) =>
+            {
+                false
+            }
+            Err(_) => self.history.is_empty(),
+        }
+    }
+
     /// Return the provider + config to use for utility tasks (summarization, title, planning).
     /// If a fast provider is configured, uses that; otherwise falls back to the main provider.
     /// Returns owned `Arc` so the caller can borrow other fields of `self` mutably.
@@ -490,6 +531,11 @@ impl AgentLoop {
     /// Turn count from last run (for session result line).
     pub fn turn_count(&self) -> u32 {
         self.last_turn_count
+    }
+
+    /// Number of messages in the in-memory conversation (for TUI turn-boundary bookkeeping).
+    pub fn history_len(&self) -> usize {
+        self.history.len()
     }
 
     /// Set the path permission receiver for interactive external path access.
@@ -1330,6 +1376,12 @@ impl AgentLoop {
         };
         self.history.push(user_msg.clone());
 
+        let session_checkpoint = session
+            .as_mut()
+            .map(|w| w.end_offset())
+            .transpose()
+            .map_err(ClidoError::from)?;
+
         if let Some(ref mut w) = session {
             let content: Vec<serde_json::Value> = user_msg
                 .content
@@ -1342,18 +1394,19 @@ impl AgentLoop {
             });
         }
 
-        let result = self.run_completion_loop(session, pricing, cancel).await;
+        let result = self
+            .run_completion_loop(&mut session, pricing, cancel)
+            .await;
         match &result {
             Ok(_) => self.prune_memory_if_needed(),
-            Err(e)
-                if e.should_truncate_history_after_failed_run(
-                    self.history.len(),
+            Err(e) => {
+                self.apply_failed_turn_rollback(
+                    &mut session,
+                    session_checkpoint,
                     history_before,
-                ) =>
-            {
-                self.history.truncate(history_before);
+                    e,
+                );
             }
-            Err(_) => {}
         }
         result
     }
@@ -1400,6 +1453,12 @@ impl AgentLoop {
         };
         self.history.push(user_msg.clone());
 
+        let session_checkpoint = session
+            .as_mut()
+            .map(|w| w.end_offset())
+            .transpose()
+            .map_err(ClidoError::from)?;
+
         if let Some(ref mut w) = session {
             let content: Vec<serde_json::Value> = user_msg
                 .content
@@ -1412,18 +1471,19 @@ impl AgentLoop {
             });
         }
 
-        let result = self.run_completion_loop(session, pricing, cancel).await;
+        let result = self
+            .run_completion_loop(&mut session, pricing, cancel)
+            .await;
         match &result {
             Ok(_) => self.prune_memory_if_needed(),
-            Err(e)
-                if e.should_truncate_history_after_failed_run(
-                    self.history.len(),
+            Err(e) => {
+                self.apply_failed_turn_rollback(
+                    &mut session,
+                    session_checkpoint,
                     history_before,
-                ) =>
-            {
-                self.history.truncate(history_before);
+                    e,
+                );
             }
-            Err(_) => {}
         }
         result
     }
@@ -1456,6 +1516,12 @@ impl AgentLoop {
         };
         self.history.push(user_msg.clone());
 
+        let session_checkpoint = session
+            .as_mut()
+            .map(|w| w.end_offset())
+            .transpose()
+            .map_err(ClidoError::from)?;
+
         if let Some(ref mut w) = session {
             let content_json: Vec<serde_json::Value> = user_msg
                 .content
@@ -1468,18 +1534,19 @@ impl AgentLoop {
             });
         }
 
-        let result = self.run_completion_loop(session, pricing, cancel).await;
+        let result = self
+            .run_completion_loop(&mut session, pricing, cancel)
+            .await;
         match &result {
             Ok(_) => self.prune_memory_if_needed(),
-            Err(e)
-                if e.should_truncate_history_after_failed_run(
-                    self.history.len(),
+            Err(e) => {
+                self.apply_failed_turn_rollback(
+                    &mut session,
+                    session_checkpoint,
                     history_before,
-                ) =>
-            {
-                self.history.truncate(history_before);
+                    e,
+                );
             }
-            Err(_) => {}
         }
         result
     }
@@ -1504,6 +1571,12 @@ impl AgentLoop {
         };
         self.history.push(user_msg.clone());
 
+        let session_checkpoint = session
+            .as_mut()
+            .map(|w| w.end_offset())
+            .transpose()
+            .map_err(ClidoError::from)?;
+
         if let Some(ref mut w) = session {
             let content_json: Vec<serde_json::Value> = user_msg
                 .content
@@ -1516,25 +1589,26 @@ impl AgentLoop {
             });
         }
 
-        let result = self.run_completion_loop(session, pricing, cancel).await;
+        let result = self
+            .run_completion_loop(&mut session, pricing, cancel)
+            .await;
         match &result {
             Ok(_) => self.prune_memory_if_needed(),
-            Err(e)
-                if e.should_truncate_history_after_failed_run(
-                    self.history.len(),
+            Err(e) => {
+                self.apply_failed_turn_rollback(
+                    &mut session,
+                    session_checkpoint,
                     history_before,
-                ) =>
-            {
-                self.history.truncate(history_before);
+                    e,
+                );
             }
-            Err(_) => {}
         }
         result
     }
 
     async fn run_completion_loop(
         &mut self,
-        mut session: Option<&mut SessionWriter>,
+        session: &mut Option<&mut SessionWriter>,
         pricing: Option<&PricingTable>,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
@@ -1687,7 +1761,7 @@ impl AgentLoop {
                 content: response.content.clone(),
             });
 
-            if let Some(ref mut w) = session {
+            if let Some(w) = session.as_mut() {
                 let content: Vec<serde_json::Value> = response
                     .content
                     .iter()
@@ -1744,7 +1818,7 @@ impl AgentLoop {
                         })
                         .collect();
 
-                    if let Some(ref mut w) = session {
+                    if let Some(w) = session.as_mut() {
                         for (id, name, input) in &tool_uses {
                             w.log_write_line(&SessionLine::ToolCall {
                                 tool_use_id: id.clone(),
@@ -1888,7 +1962,7 @@ impl AgentLoop {
                     for ((id, name, input), (output, duration_ms)) in
                         tool_uses.iter().zip(outputs.iter())
                     {
-                        if let Some(ref mut w) = session {
+                        if let Some(w) = session.as_mut() {
                             w.log_write_line(&SessionLine::ToolResult {
                                 tool_use_id: id.clone(),
                                 content: output.content.clone(),

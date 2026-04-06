@@ -170,7 +170,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn make_test_app() -> App {
-        let (prompt_tx, _prompt_rx) = mpsc::unbounded_channel();
+        let (prompt_tx, _prompt_rx) = mpsc::unbounded_channel::<AgentUserInput>();
         let (resume_tx, _resume_rx) = mpsc::unbounded_channel();
         let (model_switch_tx, _model_switch_rx) = mpsc::unbounded_channel();
         let (workdir_tx, _workdir_rx) = mpsc::unbounded_channel();

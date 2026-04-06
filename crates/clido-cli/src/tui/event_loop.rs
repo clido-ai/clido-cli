@@ -166,6 +166,8 @@ fn format_tool_detail(name: &str, input: &str) -> String {
 use clido_agent::AgentLoop;
 use clido_core::ClidoError;
 use clido_storage::SessionWriter;
+
+use super::state::AgentUserInput;
 use crossterm::{
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -342,6 +344,8 @@ pub(super) fn read_clipboard() -> Result<String, String> {
 
 pub(super) enum AgentAction {
     Run(String),
+    /// Resume with `AgentLoop::run_continue` (no new user message).
+    ContinueTurn,
     Resume(String),
     SwitchModel(String),
     SetWorkspace(std::path::PathBuf),
@@ -359,7 +363,7 @@ pub(super) async fn agent_task(
     mut workspace_root: std::path::PathBuf,
     preloaded_config: Option<clido_core::LoadedConfig>,
     preloaded_pricing: clido_core::PricingTable,
-    mut prompt_rx: mpsc::UnboundedReceiver<String>,
+    mut prompt_rx: mpsc::UnboundedReceiver<AgentUserInput>,
     mut resume_rx: mpsc::UnboundedReceiver<String>,
     mut model_switch_rx: mpsc::UnboundedReceiver<String>,
     mut workdir_rx: mpsc::UnboundedReceiver<std::path::PathBuf>,
@@ -626,7 +630,8 @@ pub(super) async fn agent_task(
         let action = tokio::select! {
             msg = prompt_rx.recv() => {
                 match msg {
-                    Some(prompt) => AgentAction::Run(prompt),
+                    Some(AgentUserInput::Prompt(prompt)) => AgentAction::Run(prompt),
+                    Some(AgentUserInput::ContinueTurn) => AgentAction::ContinueTurn,
                     None => break,
                 }
             }
@@ -970,6 +975,8 @@ pub(super) async fn agent_task(
                     }
                 }
 
+                let history_before_run = agent.history_len();
+
                 // Drain any pending image attached via /image before this turn.
                 let pending_img = image_state.lock().ok().and_then(|mut g| g.take());
                 let extra_blocks: Vec<clido_core::ContentBlock> =
@@ -1039,7 +1046,8 @@ pub(super) async fn agent_task(
                         .await
                 };
                 heartbeat.abort();
-                first_turn = false;
+                first_turn = agent
+                    .next_prompt_should_use_run_instead_of_run_next(&result, history_before_run);
 
                 // Emit token usage before response/error so TUI updates cost display.
                 if event_tx
@@ -1251,6 +1259,181 @@ pub(super) async fn agent_task(
                     duration_ms: run_start.elapsed().as_millis() as u64,
                 });
             }
+            AgentAction::ContinueTurn => {
+                let history_before_run = agent.history_len();
+                let run_start = std::time::Instant::now();
+                cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+
+                let hb_tx = event_tx.clone();
+                let heartbeat = tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                    interval.tick().await;
+                    loop {
+                        interval.tick().await;
+                        if hb_tx.send(AgentEvent::Heartbeat).is_err() {
+                            break;
+                        }
+                    }
+                });
+
+                let result = agent
+                    .run_continue(
+                        Some(&mut writer),
+                        Some(&setup.pricing_table),
+                        Some(cancel.clone()),
+                    )
+                    .await;
+                heartbeat.abort();
+                first_turn = agent
+                    .next_prompt_should_use_run_instead_of_run_next(&result, history_before_run);
+
+                if event_tx
+                    .send(AgentEvent::TokenUsage {
+                        input_tokens: agent.cumulative_input_tokens,
+                        output_tokens: agent.cumulative_output_tokens,
+                        cost_usd: agent.cumulative_cost_usd,
+                        context_max_tokens,
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+
+                let mut session_exit: &str = "success";
+
+                match result {
+                    Ok(text) => {
+                        auto_continue_count = 0;
+                        if event_tx.send(AgentEvent::Response(text.clone())).is_err() {
+                            return;
+                        }
+                    }
+                    Err(ClidoError::Interrupted) => {
+                        auto_continue_count = 0;
+                        session_exit = "interrupted";
+                        if event_tx.send(AgentEvent::Interrupted).is_err() {
+                            return;
+                        }
+                    }
+                    Err(ClidoError::MaxTurnsExceeded) => {
+                        auto_continue_count += 1;
+                        if auto_continue_count <= MAX_AUTO_CONTINUES {
+                            if event_tx
+                                .send(AgentEvent::Thinking(
+                                    "↻ Continuing (turn limit reached)…".to_string(),
+                                ))
+                                .is_err()
+                            {
+                                return;
+                            }
+                            let hb_tx2 = event_tx.clone();
+                            let hb2 = tokio::spawn(async move {
+                                let mut iv =
+                                    tokio::time::interval(std::time::Duration::from_secs(15));
+                                iv.tick().await;
+                                loop {
+                                    iv.tick().await;
+                                    if hb_tx2.send(AgentEvent::Heartbeat).is_err() {
+                                        break;
+                                    }
+                                }
+                            });
+                            let continue_result = agent
+                                .run_next_turn(
+                                    "Please continue where you left off.",
+                                    Some(&mut writer),
+                                    Some(&setup.pricing_table),
+                                    Some(cancel.clone()),
+                                )
+                                .await;
+                            hb2.abort();
+                            if event_tx
+                                .send(AgentEvent::TokenUsage {
+                                    input_tokens: agent.cumulative_input_tokens,
+                                    output_tokens: agent.cumulative_output_tokens,
+                                    cost_usd: agent.cumulative_cost_usd,
+                                    context_max_tokens,
+                                })
+                                .is_err()
+                            {
+                                return;
+                            }
+                            match continue_result {
+                                Ok(text) => {
+                                    auto_continue_count = 0;
+                                    if event_tx.send(AgentEvent::Response(text)).is_err() {
+                                        return;
+                                    }
+                                }
+                                Err(ClidoError::Interrupted) => {
+                                    auto_continue_count = 0;
+                                    session_exit = "interrupted";
+                                    if event_tx.send(AgentEvent::Interrupted).is_err() {
+                                        return;
+                                    }
+                                }
+                                Err(e) => {
+                                    session_exit = "error";
+                                    if event_tx.send(AgentEvent::Err(format!("{e}"))).is_err() {
+                                        return;
+                                    }
+                                }
+                            }
+                        } else {
+                            session_exit = "error";
+                            if event_tx
+                                .send(AgentEvent::Err(format!(
+                                    "Reached the turn limit {} times without finishing.\n\
+                                 History is intact — type \"continue\" to keep going,\n\
+                                 or start a new task.",
+                                    MAX_AUTO_CONTINUES
+                                )))
+                                .is_err()
+                            {
+                                return;
+                            }
+                            auto_continue_count = 0;
+                        }
+                    }
+                    Err(ClidoError::BudgetExceeded) => {
+                        if event_tx.send(AgentEvent::Response(
+                            "  ⚠ budget limit reached (set via --max-budget-usd or config). \
+                             You can keep sending messages; raise or remove the limit to suppress this warning."
+                                .to_string(),
+                        )).is_err() { return; }
+                    }
+                    Err(ClidoError::RateLimited {
+                        message,
+                        retry_after_secs,
+                        is_subscription_limit,
+                    }) => {
+                        session_exit = "rate_limited";
+                        if event_tx
+                            .send(AgentEvent::RateLimited {
+                                message,
+                                retry_after_secs,
+                                is_subscription_limit,
+                            })
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        session_exit = "error";
+                        if event_tx.send(AgentEvent::Err(format!("{e}"))).is_err() {
+                            return;
+                        }
+                    }
+                }
+
+                let _ = writer.write_line(&clido_storage::SessionLine::Result {
+                    exit_status: session_exit.to_string(),
+                    total_cost_usd: agent.cumulative_cost_usd,
+                    num_turns: agent.turn_count(),
+                    duration_ms: run_start.elapsed().as_millis() as u64,
+                });
+            }
             AgentAction::Resume(resume_session_id) => {
                 match clido_storage::SessionReader::load(&workspace_root, &resume_session_id) {
                     Err(e) => {
@@ -1398,7 +1581,7 @@ pub(crate) fn run_tui(
 }
 
 pub(super) struct AgentRuntimeHandles {
-    prompt_tx: mpsc::UnboundedSender<String>,
+    prompt_tx: mpsc::UnboundedSender<AgentUserInput>,
     resume_tx: mpsc::UnboundedSender<String>,
     model_switch_tx: mpsc::UnboundedSender<String>,
     workdir_tx: mpsc::UnboundedSender<std::path::PathBuf>,
@@ -1489,7 +1672,7 @@ pub(super) fn start_agent_runtime(
     image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>>,
     reviewer_enabled: Arc<AtomicBool>,
 ) -> AgentRuntimeHandles {
-    let (prompt_tx, prompt_rx) = mpsc::unbounded_channel::<String>();
+    let (prompt_tx, prompt_rx) = mpsc::unbounded_channel::<AgentUserInput>();
     let (resume_tx, resume_rx) = mpsc::unbounded_channel::<String>();
     let (model_switch_tx, model_switch_rx) = mpsc::unbounded_channel::<String>();
     let (workdir_tx, workdir_rx) = mpsc::unbounded_channel::<std::path::PathBuf>();
@@ -2048,9 +2231,7 @@ pub(super) async fn event_loop(
                             app.push(ChatLine::Info(
                                 "  ▶ Rate limit reset — resuming automatically…".into(),
                             ));
-                            app.send_silent(
-                                "continue where you left off — you were interrupted by a rate limit, pick up from where you stopped".to_string(),
-                            );
+                            app.send_agent_continue_turn();
                         }
                     }
                 }
@@ -2631,9 +2812,7 @@ pub(super) async fn event_loop(
                                 "  ▶ API reachable again — resuming automatically…".into(),
                             ));
                             if !app.busy {
-                                app.send_silent(
-                                    "continue where you left off — you were interrupted by a rate limit, pick up from where you stopped".to_string(),
-                                );
+                                app.send_agent_continue_turn();
                             }
                         }
                         if !ids.is_empty() {

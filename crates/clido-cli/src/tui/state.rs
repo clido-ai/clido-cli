@@ -198,9 +198,18 @@ pub(crate) struct PlanState {
 
 // ── Agent channels ────────────────────────────────────────────────────────────
 
+/// Message to the background agent task (replaces a bare `String` prompt).
+#[derive(Debug, Clone)]
+pub(crate) enum AgentUserInput {
+    /// Normal user or `/plan` prompt → `run` / `run_next_turn`.
+    Prompt(String),
+    /// Call `AgentLoop::run_continue` — no new user line; used after rate-limit recovery.
+    ContinueTurn,
+}
+
 /// mpsc senders used to communicate with the background agent task.
 pub(crate) struct AgentChannels {
-    pub(crate) prompt_tx: mpsc::UnboundedSender<String>,
+    pub(crate) prompt_tx: mpsc::UnboundedSender<AgentUserInput>,
     /// Channel to request session resume in agent_task.
     pub(crate) resume_tx: mpsc::UnboundedSender<String>,
     /// Channel to switch the session model in agent_task.

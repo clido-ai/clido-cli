@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use crate::paths;
@@ -208,6 +208,29 @@ impl SessionWriter {
         if let Err(e) = self.write_line(line) {
             eprintln!("[clido] session write error: {e}");
         }
+    }
+
+    /// Byte length of the session file after flushing — call **before** appending lines you may
+    /// need to roll back if the agent turn fails on disk.
+    pub fn end_offset(&mut self) -> std::io::Result<u64> {
+        self.file.flush()?;
+        Ok(self.file.metadata()?.len())
+    }
+
+    /// Truncate the session file to `byte_len` bytes (must be ≤ current length). Used when the
+    /// agent rolls back an in-memory turn so JSONL stays aligned with `AgentLoop.history`.
+    pub fn truncate_to(&mut self, byte_len: u64) -> std::io::Result<()> {
+        self.file.flush()?;
+        let len = self.file.metadata()?.len();
+        if byte_len > len {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("truncate_to: byte_len {byte_len} exceeds file length {len}"),
+            ));
+        }
+        self.file.set_len(byte_len)?;
+        self.file.seek(SeekFrom::Start(byte_len))?;
+        Ok(())
     }
 }
 
@@ -500,6 +523,27 @@ mod tests {
         drop(w);
         let lines = SessionReader::load(project_path, id).unwrap();
         assert!(lines.len() >= 2);
+        assert!(matches!(lines[0], SessionLine::Meta { .. }));
+    }
+
+    #[test]
+    fn session_writer_end_offset_and_truncate_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_path = dir.path();
+        let id = "trunc-test";
+        let mut w = SessionWriter::create(project_path, id).unwrap();
+        let after_meta = w.end_offset().unwrap();
+        w.write_line(&SessionLine::UserMessage {
+            role: "user".into(),
+            content: vec![serde_json::json!({"type": "text", "text": "a"})],
+        })
+        .unwrap();
+        let after_user = w.end_offset().unwrap();
+        assert!(after_user > after_meta);
+        w.truncate_to(after_meta).unwrap();
+        drop(w);
+        let lines = SessionReader::load(project_path, id).unwrap();
+        assert_eq!(lines.len(), 1, "user line should be gone");
         assert!(matches!(lines[0], SessionLine::Meta { .. }));
     }
 

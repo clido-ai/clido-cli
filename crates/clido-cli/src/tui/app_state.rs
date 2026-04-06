@@ -462,7 +462,24 @@ impl App {
     /// If input starts with `@model-name prompt`, applies a per-turn model override.
     /// Sends `prompt` to the agent without showing anything in the chat.
     pub(super) fn send_silent(&mut self, prompt: String) {
-        let _ = self.channels.prompt_tx.send(prompt);
+        let _ = self.channels.prompt_tx.send(AgentUserInput::Prompt(prompt));
+        self.turn_tool_tally.clear();
+        self.text_input.text.clear();
+        self.text_input.cursor = 0;
+        self.busy = true;
+        self.following = true;
+        self.turn_start = Some(std::time::Instant::now());
+        self.text_input.history_idx = None;
+        self.text_input.history_draft.clear();
+    }
+
+    /// Resume the model turn with `run_continue` (no extra user message or session user line).
+    /// Shows a short info line so the transcript matches what the agent is doing.
+    pub(super) fn send_agent_continue_turn(&mut self) {
+        self.push(ChatLine::Info(
+            "  ▶ Resuming from saved context (rate-limit recovery — no new user message)".into(),
+        ));
+        let _ = self.channels.prompt_tx.send(AgentUserInput::ContinueTurn);
         self.turn_tool_tally.clear();
         self.text_input.text.clear();
         self.text_input.cursor = 0;
@@ -499,11 +516,13 @@ impl App {
             )));
             self.push(ChatLine::User(actual_prompt.clone()));
             self.text_input.push_history(&text);
-            self.channels.prompt_tx.send(actual_prompt)
+            self.channels
+                .prompt_tx
+                .send(AgentUserInput::Prompt(actual_prompt))
         } else {
             self.push(ChatLine::User(text.clone()));
             self.text_input.push_history(&text);
-            self.channels.prompt_tx.send(text)
+            self.channels.prompt_tx.send(AgentUserInput::Prompt(text))
         };
 
         if send_result.is_err() {

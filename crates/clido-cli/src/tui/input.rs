@@ -2352,7 +2352,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         }
         (_, PageDown) => {
             if app.layout.status_rail_active && event.modifiers.contains(Km::ALT) {
-                app.status_panel_scroll = (app.status_panel_scroll + 3).min(app.layout.status_panel_max_scroll);
+                app.status_panel_scroll =
+                    (app.status_panel_scroll + 3).min(app.layout.status_panel_max_scroll);
             } else {
                 scroll_down(app, 3);
             }

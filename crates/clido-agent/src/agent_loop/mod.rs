@@ -1,5 +1,6 @@
 //! Minimal agent loop: history, provider call, tool execution, repeat.
 
+mod completion;
 mod context;
 mod doom;
 pub mod history;
@@ -9,10 +10,9 @@ mod planning;
 mod retry_policy;
 mod security;
 mod stall;
+mod stream_aggregate;
 mod throttle;
 mod validation;
-mod stream_aggregate;
-mod completion;
 
 use async_trait::async_trait;
 use clido_context::{
@@ -40,15 +40,13 @@ use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
 use context::{compact_for_model_request, CONTEXT_OUTPUT_RESERVE, PROACTIVE_SUMMARIZE_THRESHOLD};
-pub use history::{session_lines_to_messages, try_session_lines_to_messages};
 pub use history::content_blocks_to_json_values;
+pub use history::{session_lines_to_messages, try_session_lines_to_messages};
 use security::{detect_injection, enhanced_edit_error};
 
 use doom::DoomTracker;
 use metrics::{AgentMetrics, NoopAgentMetrics};
-use retry_policy::{
-    backoff_delay_ms, classify_retry, RetryDecisionSource, RetryStrategy,
-};
+use retry_policy::{backoff_delay_ms, classify_retry, RetryDecisionSource, RetryStrategy};
 use stall::StallTracker;
 use validation::SchemaCache;
 /// Budget warning thresholds (percentage of limit consumed).
@@ -480,9 +478,10 @@ impl AgentLoop {
         }
         self.history.truncate(history_before);
         if let (Some(w), Some(off)) = (session.as_mut(), session_checkpoint) {
-            w.truncate_to(off).map_err(|e| ClidoError::SessionPersistence {
-                message: format!("session rollback truncate failed: {e}"),
-            })?;
+            w.truncate_to(off)
+                .map_err(|e| ClidoError::SessionPersistence {
+                    message: format!("session rollback truncate failed: {e}"),
+                })?;
         }
         Ok(())
     }
@@ -492,9 +491,10 @@ impl AgentLoop {
         line: &SessionLine,
     ) -> Result<()> {
         if let Some(w) = session.as_mut() {
-            w.write_line(line).map_err(|e| ClidoError::SessionPersistence {
-                message: e.to_string(),
-            })?;
+            w.write_line(line)
+                .map_err(|e| ClidoError::SessionPersistence {
+                    message: e.to_string(),
+                })?;
         }
         Ok(())
     }
@@ -604,22 +604,26 @@ impl AgentLoop {
     }
 
     fn default_base_prompt_text(&self) -> String {
-        self.base_system_prompt.clone().unwrap_or_else(|| {
-            "You are a helpful coding assistant.".to_string()
-        })
+        self.base_system_prompt
+            .clone()
+            .unwrap_or_else(|| "You are a helpful coding assistant.".to_string())
     }
 
     /// Text of the most recent user message (first text block), for memory search on continue.
     fn first_user_text_from_last_user_message(&self) -> Option<String> {
-        self.history.iter().rev().find(|m| m.role == Role::User).and_then(|m| {
-            m.content.iter().find_map(|b| {
-                if let ContentBlock::Text { text } = b {
-                    Some(text.clone())
-                } else {
-                    None
-                }
+        self.history
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::User)
+            .and_then(|m| {
+                m.content.iter().find_map(|b| {
+                    if let ContentBlock::Text { text } = b {
+                        Some(text.clone())
+                    } else {
+                        None
+                    }
+                })
             })
-        })
     }
 
     /// Rebuild the effective system prompt (stored in `effective_system_prompt`) from the base
@@ -637,9 +641,7 @@ impl AgentLoop {
         } else {
             self.default_base_prompt_text()
         };
-        let final_prompt = self
-            .inject_git_context(&after_mem)
-            .unwrap_or(after_mem);
+        let final_prompt = self.inject_git_context(&after_mem).unwrap_or(after_mem);
         self.effective_system_prompt = Some(final_prompt);
     }
 
@@ -1479,26 +1481,25 @@ impl AgentLoop {
             );
 
             let stop = response.stop_reason;
-            let tool_uses_parsed: Option<Vec<(String, String, serde_json::Value)>> =
-                if stop == StopReason::ToolUse {
-                    let u = parse::tool_uses_from_assistant_content(&response.content).map_err(
-                        |d| ClidoError::MalformedModelOutput { detail: d },
-                    )?;
-                    if u.is_empty() {
-                        return Err(ClidoError::MalformedModelOutput {
-                            detail: "stop_reason was ToolUse but no tool_use blocks".into(),
-                        });
-                    }
-                    let add = u.len() as u32;
-                    if tool_calls_this_turn.saturating_add(add) > self.config.max_tool_calls_per_turn
-                    {
-                        return Err(ClidoError::MaxToolCallsPerTurnExceeded);
-                    }
-                    tool_calls_this_turn = tool_calls_this_turn.saturating_add(add);
-                    Some(u)
-                } else {
-                    None
-                };
+            let tool_uses_parsed: Option<Vec<(String, String, serde_json::Value)>> = if stop
+                == StopReason::ToolUse
+            {
+                let u = parse::tool_uses_from_assistant_content(&response.content)
+                    .map_err(|d| ClidoError::MalformedModelOutput { detail: d })?;
+                if u.is_empty() {
+                    return Err(ClidoError::MalformedModelOutput {
+                        detail: "stop_reason was ToolUse but no tool_use blocks".into(),
+                    });
+                }
+                let add = u.len() as u32;
+                if tool_calls_this_turn.saturating_add(add) > self.config.max_tool_calls_per_turn {
+                    return Err(ClidoError::MaxToolCallsPerTurnExceeded);
+                }
+                tool_calls_this_turn = tool_calls_this_turn.saturating_add(add);
+                Some(u)
+            } else {
+                None
+            };
 
             self.metrics.model_turn_completed(turns);
 
@@ -1514,8 +1515,7 @@ impl AgentLoop {
                 content: response.content.clone(),
             });
 
-            let assistant_line_content =
-                history::content_blocks_to_json_values(&response.content)?;
+            let assistant_line_content = history::content_blocks_to_json_values(&response.content)?;
             if let Err(e) = Self::persist_session_line(
                 session,
                 &SessionLine::AssistantMessage {
@@ -1745,7 +1745,8 @@ impl AgentLoop {
                         if output.is_error {
                             had_errors = true;
                         }
-                        self.metrics.tool_call_finished(name, output.is_error, output.failure_kind);
+                        self.metrics
+                            .tool_call_finished(name, output.is_error, output.failure_kind);
 
                         tool_results.push(ContentBlock::ToolResult {
                             tool_use_id: id.clone(),
@@ -2191,11 +2192,7 @@ impl AgentLoop {
                             Some(tool) => {
                                 let schema = tool.schema();
                                 if let Err(o) = validation::validate_tool_json_or_tool_error(
-                                    &cache,
-                                    &metrics,
-                                    &name,
-                                    &schema,
-                                    &input,
+                                    &cache, &metrics, &name, &schema, &input,
                                 ) {
                                     return o;
                                 }
@@ -2346,12 +2343,7 @@ async fn run_hook(cmd: &str, env_vars: &[(&str, &str)]) {
     for (k, v) in env_vars {
         command.env(k, v);
     }
-    match tokio::time::timeout(
-        Duration::from_secs(HOOK_TIMEOUT_SECS),
-        command.output(),
-    )
-    .await
-    {
+    match tokio::time::timeout(Duration::from_secs(HOOK_TIMEOUT_SECS), command.output()).await {
         Ok(Ok(output)) => {
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2972,7 +2964,10 @@ mod tests {
         // Two mock turns default to ~0.000105 USD each (see completion_loop default pricing).
         cfg.max_budget_usd = Some(0.00015);
         let mut agent = AgentLoop::new(provider, empty_registry(), cfg, None);
-        agent.run_next_turn("first", None, None, None).await.unwrap();
+        agent
+            .run_next_turn("first", None, None, None)
+            .await
+            .unwrap();
         let err = agent
             .run_next_turn("second", None, None, None)
             .await

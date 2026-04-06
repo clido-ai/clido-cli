@@ -3,10 +3,7 @@
 use std::time::{Duration, Instant};
 
 /// Sleep if needed so at least `min_interval_ms` passes since `last_end` (previous call completion).
-pub(crate) async fn throttle_before_complete(
-    last_end: &mut Option<Instant>,
-    min_interval_ms: u32,
-) {
+pub(crate) async fn throttle_before_complete(last_end: &mut Option<Instant>, min_interval_ms: u32) {
     if min_interval_ms == 0 {
         return;
     }

@@ -370,7 +370,7 @@ pub static COMMANDS: &[SlashCommand] = &[
         name: "/plan",
         section: "Planning",
         description: "show current plan, or /plan <task> to have the agent plan before executing",
-        usage: Some("/plan [task|edit|save|list|view|text|raw]"),
+        usage: Some("/plan [task|edit|save|list]"),
         takes_args: true,
         requires_idle: false,
     },

@@ -180,7 +180,7 @@ use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::sync::mpsc;
 
-use crate::agent_setup::{AgentSetup, with_optional_trace_metrics};
+use crate::agent_setup::{with_optional_trace_metrics, AgentSetup};
 use crate::cli::Cli;
 use crate::git_context::GitContext;
 use clido_planner::PlanEditor;
@@ -522,7 +522,9 @@ pub(super) async fn agent_task(
         match clido_storage::SessionReader::load(&workspace_root, &resume_session_id) {
             Err(e) => {
                 if event_tx
-                    .send(AgentEvent::Err(format!("resume failed: {}", e))).await.is_err()
+                    .send(AgentEvent::Err(format!("resume failed: {}", e)))
+                    .await
+                    .is_err()
                 {
                     return;
                 }
@@ -534,7 +536,9 @@ pub(super) async fn agent_task(
                         if event_tx
                             .send(AgentEvent::Err(format!(
                                 "Session file is invalid or incompatible (strict load failed): {e}"
-                            ))).await.is_err()
+                            )))
+                            .await
+                            .is_err()
                         {
                             return;
                         }
@@ -548,7 +552,9 @@ pub(super) async fn agent_task(
                     }
                     Err(e) => {
                         if event_tx
-                            .send(AgentEvent::Err(format!("resume writer: {}", e))).await.is_err()
+                            .send(AgentEvent::Err(format!("resume writer: {}", e)))
+                            .await
+                            .is_err()
                         {
                             return;
                         }
@@ -604,7 +610,9 @@ pub(super) async fn agent_task(
                 }
                 first_turn = false;
                 if event_tx
-                    .send(AgentEvent::ResumedSession { messages: msgs }).await.is_err()
+                    .send(AgentEvent::ResumedSession { messages: msgs })
+                    .await
+                    .is_err()
                 {
                     return;
                 }
@@ -636,14 +644,18 @@ pub(super) async fn agent_task(
                     if event_tx
                         .send(AgentEvent::WorkdirSwitched {
                             path: new_workspace,
-                        }).await.is_err()
+                        })
+                        .await
+                        .is_err()
                     {
                         return;
                     }
                 }
                 Err(e) => {
                     if event_tx
-                        .send(AgentEvent::Err(format!("workdir switch failed: {}", e))).await.is_err()
+                        .send(AgentEvent::Err(format!("workdir switch failed: {}", e)))
+                        .await
+                        .is_err()
                     {
                         return;
                     }
@@ -715,7 +727,9 @@ pub(super) async fn agent_task(
                 if event_tx
                     .send(AgentEvent::ModelSwitched {
                         to_model: model_name,
-                    }).await.is_err()
+                    })
+                    .await
+                    .is_err()
                 {
                     return;
                 }
@@ -741,14 +755,17 @@ pub(super) async fn agent_task(
                         if event_tx
                             .send(AgentEvent::WorkdirSwitched {
                                 path: new_workspace,
-                            }).await.is_err()
+                            })
+                            .await
+                            .is_err()
                         {
                             return;
                         }
                     }
                     Err(e) => {
-                        let _ =
-                            event_tx.send(AgentEvent::Err(format!("workdir switch failed: {}", e))).await;
+                        let _ = event_tx
+                            .send(AgentEvent::Err(format!("workdir switch failed: {}", e)))
+                            .await;
                     }
                 }
             }
@@ -756,7 +773,9 @@ pub(super) async fn agent_task(
                 match agent.compact_history_now().await {
                     Ok((before, after)) => {
                         if event_tx
-                            .send(AgentEvent::Compacted { before, after }).await.is_err()
+                            .send(AgentEvent::Compacted { before, after })
+                            .await
+                            .is_err()
                         {
                             return;
                         }
@@ -767,14 +786,18 @@ pub(super) async fn agent_task(
                                 output_tokens: agent.cumulative_output_tokens,
                                 cost_usd: agent.cumulative_cost_usd,
                                 context_max_tokens,
-                            }).await.is_err()
+                            })
+                            .await
+                            .is_err()
                         {
                             return;
                         }
                     }
                     Err(e) => {
                         if event_tx
-                            .send(AgentEvent::Err(format!("compact: {}", e))).await.is_err()
+                            .send(AgentEvent::Err(format!("compact: {}", e)))
+                            .await
+                            .is_err()
                         {
                             return;
                         }
@@ -804,20 +827,26 @@ pub(super) async fn agent_task(
                                     "External paths updated: {} path(s) allowed",
                                     path_count
                                 ),
-                            }).await.is_err()
+                            })
+                            .await
+                            .is_err()
                         {
                             return;
                         }
                     }
                     Ok(Err(e)) => {
-                        let _ = event_tx.send(AgentEvent::Err(format!(
-                            "external paths update failed: {e}"
-                        ))).await;
+                        let _ = event_tx
+                            .send(AgentEvent::Err(format!(
+                                "external paths update failed: {e}"
+                            )))
+                            .await;
                     }
                     Err(e) => {
-                        let _ = event_tx.send(AgentEvent::Err(format!(
-                            "external paths update failed: {e}"
-                        ))).await;
+                        let _ = event_tx
+                            .send(AgentEvent::Err(format!(
+                                "external paths update failed: {e}"
+                            )))
+                            .await;
                     }
                 }
             }
@@ -828,7 +857,9 @@ pub(super) async fn agent_task(
                 if event_tx
                     .send(AgentEvent::Info {
                         message: "Note received — agent will see it immediately".to_string(),
-                    }).await.is_err()
+                    })
+                    .await
+                    .is_err()
                 {
                     return;
                 }
@@ -844,17 +875,21 @@ pub(super) async fn agent_task(
                 let loaded = match loaded_res.ok().and_then(|r| r.ok()) {
                     Some(l) => l,
                     _ => {
-                        let _ = event_tx.send(AgentEvent::Err(
-                            "profile switch: could not reload config from disk".into(),
-                        )).await;
+                        let _ = event_tx
+                            .send(AgentEvent::Err(
+                                "profile switch: could not reload config from disk".into(),
+                            ))
+                            .await;
                         continue;
                     }
                 };
                 if !loaded.profiles.contains_key(&profile_name) {
-                    let _ = event_tx.send(AgentEvent::Err(format!(
-                        "profile switch: profile '{}' not found in config",
-                        profile_name
-                    ))).await;
+                    let _ = event_tx
+                        .send(AgentEvent::Err(format!(
+                            "profile switch: profile '{}' not found in config",
+                            profile_name
+                        )))
+                        .await;
                     continue;
                 }
                 let mut try_cli = cli.clone();
@@ -888,20 +923,26 @@ pub(super) async fn agent_task(
                         if event_tx
                             .send(AgentEvent::Info {
                                 message: format!("Switched to profile '{}'", profile_name),
-                            }).await.is_err()
+                            })
+                            .await
+                            .is_err()
                         {
                             return;
                         }
                         if event_tx
                             .send(AgentEvent::ModelSwitched {
                                 to_model: switched_model,
-                            }).await.is_err()
+                            })
+                            .await
+                            .is_err()
                         {
                             return;
                         }
                     }
                     Err(e) => {
-                        let _ = event_tx.send(AgentEvent::Err(format!("profile switch: {e}"))).await;
+                        let _ = event_tx
+                            .send(AgentEvent::Err(format!("profile switch: {e}")))
+                            .await;
                     }
                 }
             }
@@ -939,7 +980,9 @@ pub(super) async fn agent_task(
                                 output_tokens: plan_usage.output_tokens,
                                 cost_usd: plan_cost,
                                 context_max_tokens,
-                            }).await.is_err()
+                            })
+                            .await
+                            .is_err()
                         {
                             return;
                         }
@@ -978,7 +1021,9 @@ pub(super) async fn agent_task(
                                 if event_tx
                                     .send(AgentEvent::PlanCreated {
                                         tasks: task_descriptions,
-                                    }).await.is_err()
+                                    })
+                                    .await
+                                    .is_err()
                                 {
                                     return;
                                 }
@@ -1017,7 +1062,9 @@ pub(super) async fn agent_task(
                     }
                 });
 
-                let _ = event_tx.send(AgentEvent::RunState(AppRunState::Generating)).await;
+                let _ = event_tx
+                    .send(AgentEvent::RunState(AppRunState::Generating))
+                    .await;
 
                 let result = if extra_blocks.is_empty() {
                     if first_turn {
@@ -1071,7 +1118,9 @@ pub(super) async fn agent_task(
                         output_tokens: agent.cumulative_output_tokens,
                         cost_usd: agent.cumulative_cost_usd,
                         context_max_tokens,
-                    }).await.is_err()
+                    })
+                    .await
+                    .is_err()
                 {
                     return;
                 }
@@ -1081,7 +1130,11 @@ pub(super) async fn agent_task(
                 match result {
                     Ok(text) => {
                         auto_continue_count = 0; // reset on clean completion
-                        if event_tx.send(AgentEvent::Response(text.clone())).await.is_err() {
+                        if event_tx
+                            .send(AgentEvent::Response(text.clone()))
+                            .await
+                            .is_err()
+                        {
                             return;
                         }
 
@@ -1131,7 +1184,10 @@ pub(super) async fn agent_task(
                                                     title: title.clone(),
                                                 });
                                         }
-                                        if title_tx.send(AgentEvent::TitleGenerated(title)).await.is_err()
+                                        if title_tx
+                                            .send(AgentEvent::TitleGenerated(title))
+                                            .await
+                                            .is_err()
                                         {
                                             tracing::debug!("title channel closed");
                                         }
@@ -1155,7 +1211,9 @@ pub(super) async fn agent_task(
                             if event_tx
                                 .send(AgentEvent::Thinking(
                                     "↻ Continuing (turn limit reached)…".to_string(),
-                                )).await.is_err()
+                                ))
+                                .await
+                                .is_err()
                             {
                                 return;
                             }
@@ -1173,7 +1231,9 @@ pub(super) async fn agent_task(
                                 }
                             });
                             // Call run_next_turn directly with a continue message.
-                            let _ = event_tx.send(AgentEvent::RunState(AppRunState::Generating)).await;
+                            let _ = event_tx
+                                .send(AgentEvent::RunState(AppRunState::Generating))
+                                .await;
                             let continue_result = agent
                                 .run_next_turn(
                                     "Please continue where you left off.",
@@ -1189,7 +1249,9 @@ pub(super) async fn agent_task(
                                     output_tokens: agent.cumulative_output_tokens,
                                     cost_usd: agent.cumulative_cost_usd,
                                     context_max_tokens,
-                                }).await.is_err()
+                                })
+                                .await
+                                .is_err()
                             {
                                 return;
                             }
@@ -1209,7 +1271,11 @@ pub(super) async fn agent_task(
                                 }
                                 Err(e) => {
                                     session_exit = e.agent_exit_status();
-                                    if event_tx.send(AgentEvent::Err(format!("{e}"))).await.is_err() {
+                                    if event_tx
+                                        .send(AgentEvent::Err(format!("{e}")))
+                                        .await
+                                        .is_err()
+                                    {
                                         return;
                                     }
                                 }
@@ -1223,7 +1289,9 @@ pub(super) async fn agent_task(
                                  History is intact — type \"continue\" to keep going,\n\
                                  or start a new task.",
                                     MAX_AUTO_CONTINUES
-                                ))).await.is_err()
+                                )))
+                                .await
+                                .is_err()
                             {
                                 return;
                             }
@@ -1250,14 +1318,20 @@ pub(super) async fn agent_task(
                                 message,
                                 retry_after_secs,
                                 is_subscription_limit,
-                            }).await.is_err()
+                            })
+                            .await
+                            .is_err()
                         {
                             return;
                         }
                     }
                     Err(e) => {
                         session_exit = e.agent_exit_status();
-                        if event_tx.send(AgentEvent::Err(format!("{e}"))).await.is_err() {
+                        if event_tx
+                            .send(AgentEvent::Err(format!("{e}")))
+                            .await
+                            .is_err()
+                        {
                             return;
                         }
                     }
@@ -1287,7 +1361,9 @@ pub(super) async fn agent_task(
                     }
                 });
 
-                let _ = event_tx.send(AgentEvent::RunState(AppRunState::Generating)).await;
+                let _ = event_tx
+                    .send(AgentEvent::RunState(AppRunState::Generating))
+                    .await;
 
                 let result = agent
                     .run_continue(
@@ -1306,7 +1382,9 @@ pub(super) async fn agent_task(
                         output_tokens: agent.cumulative_output_tokens,
                         cost_usd: agent.cumulative_cost_usd,
                         context_max_tokens,
-                    }).await.is_err()
+                    })
+                    .await
+                    .is_err()
                 {
                     return;
                 }
@@ -1447,14 +1525,15 @@ pub(super) async fn agent_task(
                 match clido_storage::SessionReader::load(&workspace_root, &resume_session_id) {
                     Err(e) => {
                         if event_tx
-                            .send(AgentEvent::Err(format!("resume failed: {}", e))).await.is_err()
+                            .send(AgentEvent::Err(format!("resume failed: {}", e)))
+                            .await
+                            .is_err()
                         {
                             return;
                         }
                     }
                     Ok(lines) => {
-                        let new_history = match clido_agent::try_session_lines_to_messages(&lines)
-                        {
+                        let new_history = match clido_agent::try_session_lines_to_messages(&lines) {
                             Ok(h) => h,
                             Err(e) => {
                                 let _ = event_tx.send(AgentEvent::Err(format!(
@@ -1470,8 +1549,9 @@ pub(super) async fn agent_task(
                                 writer = new_writer;
                             }
                             Err(e) => {
-                                let _ =
-                                    event_tx.send(AgentEvent::Err(format!("resume writer: {}", e))).await;
+                                let _ = event_tx
+                                    .send(AgentEvent::Err(format!("resume writer: {}", e)))
+                                    .await;
                             }
                         }
                         // Collect display messages for the TUI (user + assistant).
@@ -1512,7 +1592,9 @@ pub(super) async fn agent_task(
                         }
                         first_turn = false; // already have history
                         if event_tx
-                            .send(AgentEvent::ResumedSession { messages: msgs }).await.is_err()
+                            .send(AgentEvent::ResumedSession { messages: msgs })
+                            .await
+                            .is_err()
                         {
                             return;
                         }
@@ -1768,10 +1850,12 @@ pub(super) fn spawn_model_fetch(
             .filter(|m| m.available)
             .map(|m| m.id)
             .collect();
-        let _ = tx.send(AgentEvent::ModelsLoaded {
-            ids,
-            provider: provider_for_event,
-        }).await;
+        let _ = tx
+            .send(AgentEvent::ModelsLoaded {
+                ids,
+                provider: provider_for_event,
+            })
+            .await;
     });
 }
 
@@ -2998,15 +3082,19 @@ pub(super) async fn event_loop(
                         if !enhanced.is_empty() {
                             let _ = enhance_tx.send(AgentEvent::EnhancedPrompt(enhanced)).await;
                         } else {
-                            let _ = enhance_tx.send(AgentEvent::Err(
-                                "Enhancement returned empty response".into(),
-                            )).await;
+                            let _ = enhance_tx
+                                .send(AgentEvent::Err(
+                                    "Enhancement returned empty response".into(),
+                                ))
+                                .await;
                         }
                     }
                     Err(e) => {
-                        let _ = enhance_tx.send(AgentEvent::Err(format!(
-                            "Enhancement failed: {e} — sending original prompt"
-                        ))).await;
+                        let _ = enhance_tx
+                            .send(AgentEvent::Err(format!(
+                                "Enhancement failed: {e} — sending original prompt"
+                            )))
+                            .await;
                     }
                 }
             });

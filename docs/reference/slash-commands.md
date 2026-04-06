@@ -9,14 +9,15 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 | Command | Description | Example | Notes |
 |---------|-------------|---------|-------|
 | `/clear` | Clear the chat display | `/clear` | The session JSONL file is not modified; history is preserved |
-| `/sessions` | Open the session picker | `/sessions` | Use arrow keys to select, Enter to resume |
+| `/sessions` | List and resume recent sessions (opens picker) | `/sessions` | Arrow keys + Enter to resume |
 | `/session` | Show the current session ID | `/session` | |
-| `/help` | Display all key bindings and slash commands | `/help` | Output appears in the chat pane |
+| `/help` | Show key bindings and all slash commands | `/help` | Output appears in the chat pane |
 | `/keys` | Open the keybindings overlay | `/keys` | Same shortcuts as **Ctrl+K** |
 | `/quit` | Exit clido | `/quit` | Equivalent to pressing `Ctrl+C` when idle |
-| `/init` | Re-run setup wizard | `/init` | Reconfigure provider, model, API key, and roles |
+| `/init` | Reconfigure the current profile (in-TUI profile editor) | `/init` | Provider, model, API key, roles |
 | `/search <query>` | Search conversation history | `/search auth bug` | Highlights matching messages |
-| `/export` | Save conversation to a markdown file | `/export` | Saves to current directory |
+| `/export` | Save this conversation to a markdown file | `/export` | Saves to current directory |
+| `/note <text>` | Send a hint or correction to the agent | `/note use serde_json` | Injected into the next context window; interrupts current run |
 
 ### Settings
 
@@ -53,7 +54,7 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 | Command | Description | Example | Notes |
 |---------|-------------|---------|-------|
 | `/skills` or `/skills list` | List skills found on disk and whether each is **active** | `/skills` | Active = not disabled by config and passes whitelist rules; see [Skills](/docs/guide/skills) |
-| `/skills paths` | Show skill search directories | `/skills paths` | Includes `[skills] extra-paths` and `CLIDO_SKILL_PATHS` |
+| `/skills paths` | Show skill search directories (and configured registry URLs) | `/skills paths` | Includes `[skills] extra-paths` and `CLIDO_SKILL_PATHS` |
 | `/skills disable <id>` | Add a skill id to project `[skills].disabled` | `/skills disable risky` | Writes `.clido/config.toml` under the workspace root |
 | `/skills enable <id>` | Remove a skill id from the disabled list | `/skills enable risky` | Restart the session to refresh the system prompt |
 
@@ -111,8 +112,8 @@ With **`--planner`** or **`--plan`**, clido can also drive the **graph planner**
 | Command | Description | Example | Notes |
 |---------|-------------|---------|-------|
 | `/agents` | Show current agent configuration | `/agents` | Lists main provider and fast provider (if configured) |
-| `/profiles` | List all profiles | `/profiles` | Shows active model per slot for each profile |
-| `/profile` | Open profile picker | `/profile` | Switch, create, or edit profiles interactively |
+| `/profiles` | Open interactive profile picker | `/profiles` | Switch profiles; shows models per slot |
+| `/profile` | Open profile picker — switch, create, or edit | `/profile` | Usage: `/profile [name \| new \| edit [name]]` |
 | `/profile new` | Create a new profile | `/profile new` | Launches the guided setup wizard |
 | `/profile edit [name]` | Edit a profile | `/profile edit cheap` | Edit provider, model, and API key for the named profile |
 | `/profile delete <name>` | Delete a profile | `/profile delete old-profile` | Cannot delete the currently active profile |
@@ -121,11 +122,17 @@ With **`--planner`** or **`--plan`**, clido can also drive the **graph planner**
 | `/index` | Show repo index stats | `/index` | Build with `clido index build` |
 | `/rules` | Show active project rules files | `/rules` | Lists discovered CLIDO / rules content |
 | `/image <path>` | Attach an image to the next message | `/image screenshot.png` | Supports PNG, JPEG, GIF, WebP |
-| `/stop` | Interrupt current run | `/stop` | Cancels the in-progress agent turn without exiting |
-| `/copy` | Copy last assistant message to clipboard | `/copy` | Uses OSC 52 escape sequence; requires terminal support |
+| `/stop` | Interrupt current run without sending a message | `/stop` | Cancels the in-progress agent turn without exiting |
+| `/copy [all\|<n>]` | Copy messages to clipboard | `/copy` or `/copy 3` | `all` = full transcript where supported; uses OSC 52 when available |
 | `/notify [on\|off]` | Toggle desktop notifications | `/notify on` | When enabled, notifies when a turn completes |
 | `/allow-path <path>` | Allow one-off access outside the workspace | `/allow-path /tmp/log.txt` | Session-scoped |
 | `/allowed-paths` | List paths allowed for this session | `/allowed-paths` | |
+
+### Update
+
+| Command | Description | Example | Notes |
+|---------|-------------|---------|-------|
+| `/update` | Check for updates and install the latest version | `/update` | Requires network; may restart the binary |
 
 ## Using slash commands
 

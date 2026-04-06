@@ -283,11 +283,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         input_area,
         rail_area_opt,
     ) = if use_rail {
-        let [h_area, below_header] = Layout::vertical([
-            Constraint::Length(header_h),
-            Constraint::Min(0),
-        ])
-        .areas(area);
+        let [h_area, below_header] =
+            Layout::vertical([Constraint::Length(header_h), Constraint::Min(0)]).areas(area);
         let [mid_area, hint_a, input_a] = Layout::vertical([
             Constraint::Min(0),
             Constraint::Length(hint_h),
@@ -295,11 +292,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         ])
         .areas(below_header);
         let rail_w = status_panel::status_rail_width(mid_area.width);
-        let [chat_a, rail_a] = Layout::horizontal([
-            Constraint::Min(0),
-            Constraint::Length(rail_w),
-        ])
-        .areas(mid_area);
+        let [chat_a, rail_a] =
+            Layout::horizontal([Constraint::Min(0), Constraint::Length(rail_w)]).areas(mid_area);
         (
             h_area,
             chat_a,
@@ -332,26 +326,18 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         } else {
             0
         };
-        let [h_area, ch_area, pl_area, st_area, qu_area, hi_area, inp_area] =
-            Layout::vertical([
-                Constraint::Length(header_h),
-                Constraint::Min(0),
-                Constraint::Length(stacked_plan_h),
-                Constraint::Length(status_h),
-                Constraint::Length(queue_h),
-                Constraint::Length(hint_h),
-                Constraint::Length(input_h),
-            ])
-            .areas(area);
+        let [h_area, ch_area, pl_area, st_area, qu_area, hi_area, inp_area] = Layout::vertical([
+            Constraint::Length(header_h),
+            Constraint::Min(0),
+            Constraint::Length(stacked_plan_h),
+            Constraint::Length(status_h),
+            Constraint::Length(queue_h),
+            Constraint::Length(hint_h),
+            Constraint::Length(input_h),
+        ])
+        .areas(area);
         (
-            h_area,
-            ch_area,
-            pl_area,
-            st_area,
-            qu_area,
-            hi_area,
-            inp_area,
-            None,
+            h_area, ch_area, pl_area, st_area, qu_area, hi_area, inp_area, None,
         )
     };
 
@@ -430,13 +416,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let pb = surfaces::focus_lane_zone_block();
             let p_inner = pb.inner(plan_area);
             frame.render_widget(pb, plan_area);
-            let plines = build_plan_todo_strip_lines(
-                app,
-                &plan_steps,
-                p_inner.width,
-                5,
-                true,
-            );
+            let plines = build_plan_todo_strip_lines(app, &plan_steps, p_inner.width, 5, true);
             frame.render_widget(Paragraph::new(plines), p_inner);
         }
 
@@ -451,95 +431,95 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         }
 
         // ── Queue strip ──
-    // When the agent is thinking with queued items: show thinking step + queued list.
-    // When idle with queued items: show queued list with count header.
-    // When thinking alone: just the step text.
-    if queue_area.height > 0 {
-        let qb = surfaces::queue_zone_block();
-        let q_inner = qb.inner(queue_area);
+        // When the agent is thinking with queued items: show thinking step + queued list.
+        // When idle with queued items: show queued list with count header.
+        // When thinking alone: just the step text.
+        if queue_area.height > 0 {
+            let qb = surfaces::queue_zone_block();
+            let q_inner = qb.inner(queue_area);
 
-        let mut queue_lines: Vec<Line> = Vec::new();
+            let mut queue_lines: Vec<Line> = Vec::new();
 
-        let has_thinking = app.current_step.is_some();
-        let has_queue = !app.queued.is_empty();
+            let has_thinking = app.current_step.is_some();
+            let has_queue = !app.queued.is_empty();
 
-        if has_thinking {
-            queue_lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{TUI_GUTTER}▶ "),
-                    Style::default()
-                        .fg(TUI_SOFT_ACCENT)
-                        .add_modifier(Modifier::DIM),
-                ),
-                Span::styled(
-                    truncate_chars(app.current_step.as_ref().unwrap(), 80),
-                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-                ),
-            ]));
-        }
-
-        if has_queue {
             if has_thinking {
-                // Agent is active — compact divider before queued items
-                queue_lines.push(Line::raw(""));
-                queue_lines.push(Line::from(Span::styled(
-                    format!("{TUI_GUTTER_SUB}Queued — runs after current step"),
-                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-                )));
-            } else {
-                // Agent is idle — header with count
-                queue_lines.push(Line::from(Span::styled(
-                    format!("{TUI_GUTTER_SUB}{} queued — sent next", app.queued.len()),
-                    Style::default()
-                        .fg(TUI_STATE_WARN)
-                        .add_modifier(Modifier::DIM),
-                )));
+                queue_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{TUI_GUTTER}▶ "),
+                        Style::default()
+                            .fg(TUI_SOFT_ACCENT)
+                            .add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled(
+                        truncate_chars(app.current_step.as_ref().unwrap(), 80),
+                        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                    ),
+                ]));
             }
 
-            // Each queued item on its own line — dynamic based on inner height (queue block top rule).
-            let header_lines = if has_thinking { 2 } else { 1 };
-            let max_items = (q_inner.height as usize).saturating_sub(header_lines);
-            let effective_max = if max_items > 0 { max_items } else { 5 };
-
-            for (idx, item) in app.queued.iter().enumerate().take(effective_max) {
-                let first_line = item.lines().next().unwrap_or(item.as_str());
-                let prefix = format!("{TUI_GUTTER_DEEP}{:>2}. ", idx + 1);
-                let prefix_len = prefix.chars().count();
-                let max_width = q_inner.width as usize;
-                let available = max_width.saturating_sub(prefix_len);
-                let truncated = if first_line.chars().count() > available {
-                    format!(
-                        "{}…",
-                        first_line
-                            .chars()
-                            .take(available.saturating_sub(1))
-                            .collect::<String>()
-                    )
+            if has_queue {
+                if has_thinking {
+                    // Agent is active — compact divider before queued items
+                    queue_lines.push(Line::raw(""));
+                    queue_lines.push(Line::from(Span::styled(
+                        format!("{TUI_GUTTER_SUB}Queued — runs after current step"),
+                        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                    )));
                 } else {
-                    first_line.to_string()
-                };
+                    // Agent is idle — header with count
+                    queue_lines.push(Line::from(Span::styled(
+                        format!("{TUI_GUTTER_SUB}{} queued — sent next", app.queued.len()),
+                        Style::default()
+                            .fg(TUI_STATE_WARN)
+                            .add_modifier(Modifier::DIM),
+                    )));
+                }
 
-                queue_lines.push(Line::from(Span::styled(
-                    format!("{}{}", prefix, truncated),
-                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-                )));
+                // Each queued item on its own line — dynamic based on inner height (queue block top rule).
+                let header_lines = if has_thinking { 2 } else { 1 };
+                let max_items = (q_inner.height as usize).saturating_sub(header_lines);
+                let effective_max = if max_items > 0 { max_items } else { 5 };
+
+                for (idx, item) in app.queued.iter().enumerate().take(effective_max) {
+                    let first_line = item.lines().next().unwrap_or(item.as_str());
+                    let prefix = format!("{TUI_GUTTER_DEEP}{:>2}. ", idx + 1);
+                    let prefix_len = prefix.chars().count();
+                    let max_width = q_inner.width as usize;
+                    let available = max_width.saturating_sub(prefix_len);
+                    let truncated = if first_line.chars().count() > available {
+                        format!(
+                            "{}…",
+                            first_line
+                                .chars()
+                                .take(available.saturating_sub(1))
+                                .collect::<String>()
+                        )
+                    } else {
+                        first_line.to_string()
+                    };
+
+                    queue_lines.push(Line::from(Span::styled(
+                        format!("{}{}", prefix, truncated),
+                        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                    )));
+                }
+
+                let more_count = app.queued.len().saturating_sub(effective_max);
+                if more_count > 0 {
+                    queue_lines.push(Line::from(Span::styled(
+                        format!("{TUI_GUTTER_SUB}… and {more_count} more"),
+                        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                    )));
+                }
             }
 
-            let more_count = app.queued.len().saturating_sub(effective_max);
-            if more_count > 0 {
-                queue_lines.push(Line::from(Span::styled(
-                    format!("{TUI_GUTTER_SUB}… and {more_count} more"),
-                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-                )));
+            if queue_lines.is_empty() {
+                queue_lines.push(Line::raw(""));
             }
-        }
 
-        if queue_lines.is_empty() {
-            queue_lines.push(Line::raw(""));
-        }
-
-        frame.render_widget(qb, queue_area);
-        frame.render_widget(Paragraph::new(queue_lines), q_inner);
+            frame.render_widget(qb, queue_area);
+            frame.render_widget(Paragraph::new(queue_lines), q_inner);
         }
     }
 

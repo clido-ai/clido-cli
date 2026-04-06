@@ -329,18 +329,14 @@ mod tests {
 
     #[test]
     fn truncate_policy_malformed_when_only_user_line() {
-        let e = ClidoError::MalformedModelOutput {
-            detail: "x".into(),
-        };
+        let e = ClidoError::MalformedModelOutput { detail: "x".into() };
         assert!(e.should_truncate_history_after_failed_run(1, 0));
         assert!(!e.should_truncate_history_after_failed_run(3, 0));
     }
 
     #[test]
     fn truncate_policy_stall_like_max_turns() {
-        let e = ClidoError::StallDetected {
-            reason: "x".into(),
-        };
+        let e = ClidoError::StallDetected { reason: "x".into() };
         assert!(e.should_truncate_history_after_failed_run(1, 0));
         assert!(!e.should_truncate_history_after_failed_run(3, 0));
     }
@@ -352,10 +348,7 @@ mod tests {
             "max_wall_time_exceeded"
         );
         assert_eq!(
-            ClidoError::MalformedModelOutput {
-                detail: "x".into()
-            }
-            .agent_exit_status(),
+            ClidoError::MalformedModelOutput { detail: "x".into() }.agent_exit_status(),
             "malformed_model_output"
         );
         assert_eq!(
@@ -366,6 +359,9 @@ mod tests {
             .agent_exit_status(),
             "doom_loop"
         );
-        assert_eq!(ClidoError::Provider("x".into()).agent_exit_status(), "error");
+        assert_eq!(
+            ClidoError::Provider("x".into()).agent_exit_status(),
+            "error"
+        );
     }
 }

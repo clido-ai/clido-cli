@@ -43,9 +43,8 @@ pub async fn run_sessions_show(id: &str) -> anyhow::Result<()> {
 pub async fn run_sessions_verify(id: &str) -> anyhow::Result<()> {
     let cwd = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let lines = SessionReader::load(&cwd, id)?;
-    let msgs = try_session_lines_to_messages(&lines).map_err(|e| {
-        anyhow::anyhow!("session {id}: strict load failed — {e}")
-    })?;
+    let msgs = try_session_lines_to_messages(&lines)
+        .map_err(|e| anyhow::anyhow!("session {id}: strict load failed — {e}"))?;
     println!(
         "OK: session {} strict-loads as {} message(s).",
         id,

@@ -105,7 +105,8 @@ impl WorkflowStepRunner for CliWorkflowRunner {
         let session_id = format!("{}_{}", self.run_id, request.step_id);
         let mut writer = SessionWriter::create(&self.workspace_root, &session_id)
             .map_err(|e| ClidoError::Workflow(e.to_string()))?;
-        let mut loop_ = with_optional_trace_metrics(AgentLoop::new(provider, registry, config, None));
+        let mut loop_ =
+            with_optional_trace_metrics(AgentLoop::new(provider, registry, config, None));
         let start = std::time::Instant::now();
         let result = loop_
             .run(

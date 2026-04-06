@@ -135,20 +135,22 @@ cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warni
 
 ## Test coverage
 
-Coverage reports use [cargo-tarpaulin](https://github.com/xd009642/tarpaulin):
+Coverage reports use [cargo-tarpaulin](https://github.com/xd009642/tarpaulin) with repository settings in `tarpaulin.toml` (excluded paths and **`fail-under = 70.0`** — the command exits with an error if line coverage drops below 70%).
 
 ```bash
 cargo install cargo-tarpaulin
-cargo tarpaulin --workspace --out Html --output-dir target/coverage
+cargo tarpaulin --workspace --config tarpaulin.toml --out Html --output-dir target/coverage
 open target/coverage/tarpaulin-report.html
 ```
 
-::: tip
-Tarpaulin does not support macOS on Apple Silicon. On macOS, use [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) instead:
+Quick summary to the terminal:
+
 ```bash
-cargo install cargo-llvm-cov
-cargo llvm-cov --workspace --html
+cargo tarpaulin --workspace --config tarpaulin.toml --out Stdout
 ```
+
+::: tip
+If tarpaulin fails on your platform, try [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) for a local HTML report (CI still uses tarpaulin with `tarpaulin.toml`).
 :::
 
 ## Benchmarks
@@ -163,17 +165,17 @@ Results are written to `target/criterion/`.
 
 ## CI pipeline
 
-GitHub Actions runs the following on every pull request:
+GitHub Actions runs the following on every pull request (see `.github/workflows/ci.yml`):
 
-| Job | Command | When |
-|-----|---------|------|
-| format | `cargo fmt --all -- --check` | Always |
-| clippy | `cargo clippy --workspace -- -D warnings` | Always |
-| test | `cargo test --workspace` | Always |
-| test (integration) | `cargo test --test '*' -- --include-ignored` | With secrets |
-| build (release) | `cargo build --release` | On merge to master |
+| Job | Command | Notes |
+|-----|---------|--------|
+| format | `cargo fmt --check` | Workspace root |
+| clippy | `cargo clippy --workspace -- -D warnings` | |
+| test | `cargo nextest run --workspace` | Parallel test runner |
+| build (release) | `cargo build --workspace --release` | |
+| coverage | `cargo tarpaulin --workspace --config tarpaulin.toml --out Xml` | Min **70%** line coverage via `tarpaulin.toml`; uploads to Codecov |
 
-The workflow files are in `.github/workflows/`.
+Some integration tests that need live APIs stay `#[ignore]` unless you opt in with `--include-ignored` and secrets.
 
 ## Makefile targets
 

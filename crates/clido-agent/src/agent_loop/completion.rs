@@ -19,16 +19,11 @@ pub async fn invoke_model_completion(
     last_complete_end: &mut Option<std::time::Instant>,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<ModelResponse> {
-    throttle::throttle_before_complete(
-        last_complete_end,
-        config.provider_min_request_interval_ms,
-    )
-    .await;
+    throttle::throttle_before_complete(last_complete_end, config.provider_min_request_interval_ms)
+        .await;
 
     let response = if config.stream_model_completion {
-        let stream = provider
-            .complete_stream(messages, tools, config)
-            .await?;
+        let stream = provider.complete_stream(messages, tools, config).await?;
         let r = stream_aggregate::collect_stream_to_model_response(
             stream,
             config.model.clone(),

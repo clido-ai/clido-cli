@@ -8,7 +8,7 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::agent_setup::{AgentSetup, with_optional_trace_metrics};
+use crate::agent_setup::{with_optional_trace_metrics, AgentSetup};
 use crate::cli::Cli;
 use crate::errors::CliError;
 use crate::git_context::GitContext;

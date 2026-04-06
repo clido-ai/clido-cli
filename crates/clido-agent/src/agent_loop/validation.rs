@@ -104,13 +104,7 @@ mod tests {
         assert!(r.is_err());
         let schema = serde_json::json!({"type": "object"});
         let input = serde_json::json!({});
-        let v = validate_tool_json_or_tool_error(
-            cache.as_ref(),
-            &metrics,
-            "T",
-            &schema,
-            &input,
-        );
+        let v = validate_tool_json_or_tool_error(cache.as_ref(), &metrics, "T", &schema, &input);
         assert!(v.is_err());
         let err = v.unwrap_err();
         assert!(err.is_error);

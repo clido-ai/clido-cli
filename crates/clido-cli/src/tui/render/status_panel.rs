@@ -26,10 +26,8 @@ pub(crate) const STATUS_RAIL_WIDTH_MAX: u16 = 48;
 
 /// Pick rail width from the horizontal slice under the header (chat+rail), before the split.
 pub(crate) fn status_rail_width(mid_area_width: u16) -> u16 {
-    let pct = (mid_area_width as u32 * 26 / 100).clamp(
-        STATUS_RAIL_WIDTH_MIN as u32,
-        STATUS_RAIL_WIDTH_MAX as u32,
-    ) as u16;
+    let pct = (mid_area_width as u32 * 26 / 100)
+        .clamp(STATUS_RAIL_WIDTH_MIN as u32, STATUS_RAIL_WIDTH_MAX as u32) as u16;
     pct.min(mid_area_width.saturating_sub(52))
         .max(STATUS_RAIL_WIDTH_MIN)
 }
@@ -54,7 +52,11 @@ fn shorten_workdir(path: &std::path::Path) -> String {
 }
 
 /// All lines for the rail (before vertical scroll).
-pub(crate) fn build_status_rail_lines(app: &App, inner_w: u16, spinner: &str) -> Vec<Line<'static>> {
+pub(crate) fn build_status_rail_lines(
+    app: &App,
+    inner_w: u16,
+    spinner: &str,
+) -> Vec<Line<'static>> {
     let w = inner_w.max(8);
     let dim = Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM);
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -83,7 +85,10 @@ pub(crate) fn build_status_rail_lines(app: &App, inner_w: u16, spinner: &str) ->
             AppRunState::Idle => "Agent running",
         };
         Line::from(vec![
-            Span::styled(format!(" {} ", spinner), Style::default().fg(TUI_STATE_BUSY)),
+            Span::styled(
+                format!(" {} ", spinner),
+                Style::default().fg(TUI_STATE_BUSY),
+            ),
             Span::styled(phase, dim),
         ])
     } else {
@@ -134,21 +139,11 @@ pub(crate) fn build_status_rail_lines(app: &App, inner_w: u16, spinner: &str) ->
     let plan_steps = gather_plan_panel_steps(app);
     if matches!(app.plan_panel_visibility, PlanPanelVisibility::Off) && !app.harness_mode {
         lines.push(Line::from(vec![Span::styled(
-            format!(
-                " {}{}",
-                "Strip off — ",
-                "/progress on"
-            ),
+            format!(" {}{}", "Strip off — ", "/progress on"),
             dim,
         )]));
     } else {
-        lines.extend(build_plan_todo_strip_lines(
-            app,
-            &plan_steps,
-            w,
-            10,
-            false,
-        ));
+        lines.extend(build_plan_todo_strip_lines(app, &plan_steps, w, 10, false));
     }
 
     // ── CONTEXT ────────────────────────────────────────────────────────────
@@ -169,10 +164,7 @@ pub(crate) fn build_status_rail_lines(app: &App, inner_w: u16, spinner: &str) ->
             Span::styled(format!(" · {dirty}"), dim),
         ]));
     } else {
-        lines.push(Line::from(vec![Span::styled(
-            " (not a git repo)",
-            dim,
-        )]));
+        lines.push(Line::from(vec![Span::styled(" (not a git repo)", dim)]));
     }
     let wd = shorten_workdir(&app.workspace_root);
     lines.push(Line::from(vec![Span::styled(
@@ -189,7 +181,9 @@ pub(crate) fn build_status_rail_lines(app: &App, inner_w: u16, spinner: &str) ->
         if !app.queued.is_empty() {
             lines.push(Line::from(vec![Span::styled(
                 format!(" {} pending", app.queued.len()),
-                Style::default().fg(TUI_STATE_WARN).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(TUI_STATE_WARN)
+                    .add_modifier(Modifier::DIM),
             )]));
             for (i, item) in app.queued.iter().take(6).enumerate() {
                 let first = item.lines().next().unwrap_or(item.as_str());
@@ -223,12 +217,7 @@ pub(crate) fn build_status_rail_lines(app: &App, inner_w: u16, spinner: &str) ->
         lines.push(Line::from(vec![Span::styled(" —", dim)]));
     } else {
         // Cap rows so TASK/QUEUE stay reachable without excessive scrolling.
-        lines.extend(status_strip_lines(
-            &app.status_log,
-            w,
-            spinner,
-            Some(14),
-        ));
+        lines.extend(status_strip_lines(&app.status_log, w, spinner, Some(14)));
     }
 
     lines
@@ -260,7 +249,9 @@ pub(crate) fn render_status_rail(frame: &mut Frame, app: &mut App, area: Rect) {
     let visible = content_h;
     let max_scroll = total.saturating_sub(visible);
     app.layout.status_panel_max_scroll = max_scroll as u16;
-    app.status_panel_scroll = app.status_panel_scroll.min(app.layout.status_panel_max_scroll);
+    app.status_panel_scroll = app
+        .status_panel_scroll
+        .min(app.layout.status_panel_max_scroll);
 
     let start = app.status_panel_scroll as usize;
     let end = (start + visible).min(total);

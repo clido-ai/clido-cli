@@ -507,7 +507,8 @@ clido audit --json                 # JSON output
 cargo build --release             # build
 cargo run --release               # interactive TUI
 cargo run --release -- "task"     # one-shot run
-cargo test --workspace            # run all tests
+cargo test --workspace            # run all tests (CI uses `cargo nextest run --workspace`)
+cargo tarpaulin --workspace --config tarpaulin.toml --out Stdout  # line coverage; fails below 70% per tarpaulin.toml
 cargo bench -p clido-cli          # run startup benchmarks
 ```
 

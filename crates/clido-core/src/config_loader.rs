@@ -457,10 +457,7 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
             .agent
             .max_tool_calls_per_turn
             .or(base.agent.max_tool_calls_per_turn),
-        stall_threshold: later
-            .agent
-            .stall_threshold
-            .or(base.agent.stall_threshold),
+        stall_threshold: later.agent.stall_threshold.or(base.agent.stall_threshold),
         doom_consecutive_same_error: later
             .agent
             .doom_consecutive_same_error
@@ -473,10 +470,7 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
             .agent
             .doom_same_args_min
             .or(base.agent.doom_same_args_min),
-        max_tool_retries: later
-            .agent
-            .max_tool_retries
-            .or(base.agent.max_tool_retries),
+        max_tool_retries: later.agent.max_tool_retries.or(base.agent.max_tool_retries),
         max_tool_retry_budget_per_turn: later
             .agent
             .max_tool_retry_budget_per_turn
@@ -493,7 +487,8 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
             .agent
             .provider_min_request_interval_ms
             .or(base.agent.provider_min_request_interval_ms),
-        stream_model_completion: later.agent.stream_model_completion || base.agent.stream_model_completion,
+        stream_model_completion: later.agent.stream_model_completion
+            || base.agent.stream_model_completion,
         tool_timeout_secs: later
             .agent
             .tool_timeout_secs
@@ -819,10 +814,7 @@ pub fn agent_config_from_loaded(
             .agent
             .max_tool_calls_per_turn
             .unwrap_or(def.max_tool_calls_per_turn),
-        stall_threshold: loaded
-            .agent
-            .stall_threshold
-            .unwrap_or(def.stall_threshold),
+        stall_threshold: loaded.agent.stall_threshold.unwrap_or(def.stall_threshold),
         doom_consecutive_same_error: loaded
             .agent
             .doom_consecutive_same_error

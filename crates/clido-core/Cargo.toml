@@ -9,6 +9,7 @@ doctest = false
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 toml = { workspace = true }

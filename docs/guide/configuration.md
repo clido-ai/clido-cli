@@ -52,15 +52,15 @@ base_url  = "http://localhost:11434"
 # ── Agent settings ───────────────────────────────────────────────────────────
 
 [agent]
-max-turns       = 50       # Maximum agent turns per session. Default: 50.
-max-budget-usd  = 5.0      # Maximum spend per session in USD. Default: 5.0.
-max-concurrent-tools = 4   # Max parallel tool calls (read-only). Default: 4.
+max-turns       = 200      # Maximum agent turns per session (default in clido-core: 200).
+max-budget-usd  = 5.0      # Maximum spend per session in USD (optional; omit for no cap).
+max-concurrent-tools = 4   # Max parallel read-only tool calls. Default: 4.
 
 # ── Context settings ─────────────────────────────────────────────────────────
 
 [context]
-compaction-threshold = 0.75   # Compact context when usage > threshold. Default: 0.75.
-max-context-tokens   = 180000 # Override max context window. Default: model-specific.
+compaction-threshold = 0.58   # Compact when usage exceeds this fraction of context (default ~0.58).
+max-context-tokens   = 180000 # Optional: override max context window.
 
 # ── Tools ────────────────────────────────────────────────────────────────────
 
@@ -85,7 +85,20 @@ directory = ".clido/workflows"   # Default workflow search path. Default: .clido
 [hooks]
 pre_tool_use  = ""   # e.g. "echo Tool $CLIDO_TOOL_NAME >> ~/clido-hooks.log"
 post_tool_use = ""   # e.g. "notify-send clido $CLIDO_TOOL_NAME"
+
+# ── Skills (optional) ─────────────────────────────────────────────────────────
+# Reusable agent instructions from .md/.txt under .clido/skills/ and ~/.clido/skills/
+
+[skills]
+# disabled = ["some-id"]
+# enabled = ["only-these"]   # if non-empty, whitelist mode
+# extra-paths = ["~/shared-skills"]
+# no-skills = false
+# auto-suggest = true
+# registry-urls = []         # reserved for future remote discovery
 ```
+
+See **[Skills](/docs/guide/skills)** for file format, CLI, and TUI commands.
 
 ## Viewing the current config
 

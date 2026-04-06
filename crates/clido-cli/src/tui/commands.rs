@@ -4,6 +4,7 @@ use clido_memory::MemoryStore;
 use crate::list_picker::ListPicker;
 use crate::overlay::{ErrorOverlay, OverlayKind, ReadOnlyOverlay};
 
+use super::state::PlanPanelVisibility;
 use super::*;
 
 /// Switch the default profile on disk, tell the agent to rebuild provider/tools in-process,
@@ -231,10 +232,12 @@ pub(super) fn cmd_keys(app: &mut App) {
             "↑↓                 navigate items\n\
             Enter              select / confirm\n\
             Esc                close / cancel\n\
-            Type               filter items (model, provider pickers)\n\
+            1-9                jump to first 9 matches (/ commands menu)\n\
+            Type               filter long lists (model, profile, session pickers)\n\
             Backspace          remove filter char\n\
             f                  toggle favorite (model picker)\n\
             Ctrl+S             save as default (model picker)\n\
+            d                  delete selected session (session picker)\n\
             n                  new (profile picker)\n\
             e                  edit (profile picker)"
                 .into(),
@@ -398,33 +401,10 @@ pub(super) fn cmd_sessions(app: &mut App) {
             ));
         }
         Ok(sessions) => {
-            // Display session list with titles
-            app.push(ChatLine::Info(format!(
-                "  {} session(s) found:",
-                sessions.len()
-            )));
-            for (i, session) in sessions.iter().enumerate() {
-                let marker = if app.current_session_id.as_deref() == Some(&session.session_id) {
-                    "▶ "
-                } else {
-                    "  "
-                };
-                let title_display = session.title.as_ref()
-                    .map(|t| format!(" — {}", t))
-                    .unwrap_or_default();
-                app.push(ChatLine::Info(format!(
-                    "    {}. {}{}{} (${:.4})",
-                    i + 1,
-                    marker,
-                    &session.session_id[..8.min(session.session_id.len())],
-                    title_display,
-                    session.total_cost_usd
-                )));
-            }
-            app.push(ChatLine::Info("".into()));
-            app.push(ChatLine::Info(
-                "  Use /session <id> to resume, /sessions to refresh".into()
-            ));
+            // Interactive picker: resume with Enter, filter by id/title/preview, same as /model.
+            let mut picker = ListPicker::new(sessions, 12);
+            picker.apply_filter();
+            app.session_picker = Some(SessionPickerState { picker });
         }
     }
 }
@@ -434,7 +414,9 @@ pub(super) fn cmd_sessions(app: &mut App) {
 pub(super) fn cmd_note(app: &mut App, cmd: &str) {
     let text = cmd.trim_start_matches("/note").trim();
     if text.is_empty() {
-        app.push(ChatLine::Info("  Usage: /note <text>  — send a hint/correction to the agent".into()));
+        app.push(ChatLine::Info(
+            "  Usage: /note <text>  — send a hint/correction to the agent".into(),
+        ));
         return;
     }
     // Add to chat history immediately.
@@ -774,6 +756,130 @@ pub(super) fn cmd_tokens(app: &mut App) {
     }
 }
 
+pub(super) fn cmd_skills(app: &mut App, cmd: &str) {
+    let sub = cmd.trim_start_matches("/skills").trim();
+    let cfg = clido_core::load_config(&app.workspace_root)
+        .map(|c| c.skills)
+        .unwrap_or_default();
+
+    match sub {
+        "" | "list" => {
+            match clido_core::skills::discover_skills(&app.workspace_root, &cfg.extra_paths) {
+                Ok(skills) if skills.is_empty() => {
+                    app.push(ChatLine::Info(
+                        "  No skills — add .md/.txt under .clido/skills/ or ~/.clido/skills/"
+                            .into(),
+                    ));
+                }
+                Ok(skills) => {
+                    if cfg.no_skills {
+                        app.push(ChatLine::Info(
+                            "  [skills] no-skills is on — nothing is injected.".into(),
+                        ));
+                    }
+                    if !cfg.enabled.is_empty() {
+                        app.push(ChatLine::Info(format!(
+                            "  Whitelist mode: only {:?} may be active.",
+                            cfg.enabled
+                        )));
+                    }
+                    app.push(ChatLine::Info(format!(
+                        "  Skills ({} on disk) — restart session to refresh agent",
+                        skills.len()
+                    )));
+                    for s in skills {
+                        let on =
+                            clido_core::skills::is_skill_active_for_config(&s.manifest.id, &cfg);
+                        let src = match s.source {
+                            clido_core::skills::SkillSourceKind::Workspace => "ws",
+                            clido_core::skills::SkillSourceKind::Global => "global",
+                            clido_core::skills::SkillSourceKind::Extra => "extra",
+                        };
+                        let desc = s.manifest.description.clone();
+                        let short = if desc.chars().count() > 52 {
+                            format!("{}…", desc.chars().take(51).collect::<String>())
+                        } else {
+                            desc
+                        };
+                        app.push(ChatLine::Info(format!(
+                            "  {}  `{}`  [{}]  {}",
+                            if on { "✓" } else { "✗" },
+                            s.manifest.id,
+                            src,
+                            short
+                        )));
+                    }
+                }
+                Err(e) => app.push(ChatLine::Info(format!("  ✗ {e}"))),
+            }
+        }
+        "paths" => {
+            app.push(ChatLine::Info("  Skill search paths:".into()));
+            for (p, k) in
+                clido_core::skills::resolve_skill_directories(&app.workspace_root, &cfg.extra_paths)
+            {
+                let label = match k {
+                    clido_core::skills::SkillSourceKind::Workspace => "workspace",
+                    clido_core::skills::SkillSourceKind::Global => "global",
+                    clido_core::skills::SkillSourceKind::Extra => "extra",
+                };
+                let st = if p.is_dir() { "" } else { " (missing)" };
+                app.push(ChatLine::Info(format!("    [{label}]{st} {}", p.display())));
+            }
+            if !cfg.registry_urls.is_empty() {
+                app.push(ChatLine::Info("  Registry URLs (reserved):".into()));
+                for u in &cfg.registry_urls {
+                    app.push(ChatLine::Info(format!("    {u}")));
+                }
+            }
+        }
+        s if s.starts_with("disable ") => {
+            let id = s.trim_start_matches("disable ").trim();
+            if id.is_empty() {
+                app.push(ChatLine::Info("  Usage: /skills disable <id>".into()));
+                return;
+            }
+            match clido_core::set_skill_disabled_in_project(&app.workspace_root, id, true) {
+                Ok(()) => app.push(ChatLine::Info(format!(
+                    "  ✓ Disabled `{id}` — restart session to apply."
+                ))),
+                Err(e) => app.push(ChatLine::Info(format!("  ✗ {e}"))),
+            }
+        }
+        s if s.starts_with("enable ") => {
+            let id = s.trim_start_matches("enable ").trim();
+            if id.is_empty() {
+                app.push(ChatLine::Info("  Usage: /skills enable <id>".into()));
+                return;
+            }
+            match clido_core::set_skill_disabled_in_project(&app.workspace_root, id, false) {
+                Ok(()) => app.push(ChatLine::Info(format!(
+                    "  ✓ `{id}` no longer disabled — restart session to apply."
+                ))),
+                Err(e) => app.push(ChatLine::Info(format!("  ✗ {e}"))),
+            }
+        }
+        _ => {
+            app.push(ChatLine::Info("  /skills commands:".into()));
+            app.push(ChatLine::Info(
+                "    /skills list          — show discovered skills".into(),
+            ));
+            app.push(ChatLine::Info(
+                "    /skills paths         — show search directories".into(),
+            ));
+            app.push(ChatLine::Info(
+                "    /skills disable <id>  — project config".into(),
+            ));
+            app.push(ChatLine::Info(
+                "    /skills enable <id>   — remove from disabled".into(),
+            ));
+            app.push(ChatLine::Info(
+                "  Config: [skills] in .clido/config.toml (enabled, extra-paths, …)".into(),
+            ));
+        }
+    }
+}
+
 pub(super) fn cmd_todo(app: &mut App) {
     let todos = app.todo_store.lock().map(|g| g.clone()).unwrap_or_default();
     if todos.is_empty() {
@@ -971,6 +1077,23 @@ pub(super) fn cmd_plan(app: &mut App, cmd: &str) {
                     ))));
             }
         },
+        "on" => {
+            app.plan_panel_visibility = PlanPanelVisibility::On;
+            app.push(ChatLine::Info(
+                "  Plan/todo panel: on — shown whenever the terminal is large enough.".into(),
+            ));
+        }
+        "off" => {
+            app.plan_panel_visibility = PlanPanelVisibility::Off;
+            app.push(ChatLine::Info("  Plan/todo panel: off.".into()));
+        }
+        "auto" => {
+            app.plan_panel_visibility = PlanPanelVisibility::Auto;
+            app.push(ChatLine::Info(
+                "  Plan/todo panel: auto — shown only on larger terminals when there is progress to show."
+                    .into(),
+            ));
+        }
         "" => {
             // /plan with no task — show existing plan if any
             if let Some(plan) = app.plan.last_plan_snapshot.clone() {
@@ -1017,11 +1140,16 @@ pub(super) fn cmd_plan(app: &mut App, cmd: &str) {
             let task = task.to_string();
             app.plan.awaiting_plan_response = true;
             let prompt = format!(
-                "Create a detailed step-by-step plan for the following task. \
-                 Number each top-level step as \"Step N: description\". \
-                 You may add sub-bullets or notes under each step for clarity. \
-                 Present the complete plan and then STOP — do not execute anything \
-                 until the user explicitly confirms.\n\nTask: {task}"
+                "Create a plan for the following task using **exactly** these sections (in order):\n\
+                 1. Goal\n\
+                 2. Current State\n\
+                 3. Problems / Gaps\n\
+                 4. Approach\n\
+                 5. Steps — numbered \"Step N: …\" with clear, actionable todos\n\
+                 6. Risks / Edge Cases\n\n\
+                 After section 5, call **TodoWrite** with one todo per step (same order). \
+                 Present the **complete** plan and todos, then **STOP** — do not implement \
+                 anything until the user explicitly confirms.\n\nTask: {task}"
             );
             app.send_silent(prompt);
         }
@@ -1267,13 +1395,15 @@ pub(super) fn cmd_allow_path(app: &mut App, cmd: &str) {
     }
 
     let path = std::path::Path::new(path_str);
-    
+
     // Expand ~ to home directory
-    let expanded: std::path::PathBuf = if path_str.starts_with("~/") {
+    let expanded: std::path::PathBuf = if let Some(rest) = path_str.strip_prefix("~/") {
         if let Some(home) = std::env::home_dir() {
-            home.join(&path_str[2..])
+            home.join(rest)
         } else {
-            app.push(ChatLine::Info("  ✗ Could not determine home directory".into()));
+            app.push(ChatLine::Info(
+                "  ✗ Could not determine home directory".into(),
+            ));
             return;
         }
     } else {
@@ -1322,10 +1452,13 @@ pub(super) fn cmd_allow_path(app: &mut App, cmd: &str) {
 
     // Add to allowed list
     app.allowed_external_paths.push(canonical.clone());
-    
+
     // Send updated paths to agent task
-    let _ = app.channels.allowed_paths_tx.send(app.allowed_external_paths.clone());
-    
+    let _ = app
+        .channels
+        .allowed_paths_tx
+        .send(app.allowed_external_paths.clone());
+
     app.push(ChatLine::Info(format!(
         "  ✓ Allowed external path: {}",
         canonical.display()
@@ -1337,7 +1470,7 @@ pub(super) fn cmd_allowed_paths(app: &mut App) {
     let paths: Vec<std::path::PathBuf> = app.allowed_external_paths.clone();
     if paths.is_empty() {
         app.push(ChatLine::Info(
-            "  No external paths allowed. Use /allow-path <path> to add one.".into()
+            "  No external paths allowed. Use /allow-path <path> to add one.".into(),
         ));
         return;
     }
@@ -1347,15 +1480,11 @@ pub(super) fn cmd_allowed_paths(app: &mut App) {
         paths.len()
     )));
     for (i, path) in paths.iter().enumerate() {
-        app.push(ChatLine::Info(format!(
-            "    {}. {}",
-            i + 1,
-            path.display()
-        )));
+        app.push(ChatLine::Info(format!("    {}. {}", i + 1, path.display())));
     }
     app.push(ChatLine::Info("".into()));
     app.push(ChatLine::Info(
-        "  Use /allow-path <path> to add more, or restart to clear.".into()
+        "  Use /allow-path <path> to add more, or restart to clear.".into(),
     ));
 }
 
@@ -1434,8 +1563,12 @@ pub(super) fn cmd_profile_edit(app: &mut App, cmd: &str) {
             }
             Some(entry) => {
                 let all_profiles = loaded.profiles.clone();
-                app.profile_overlay =
-                    Some(ProfileOverlayState::for_edit(name, &entry, config_path, &all_profiles));
+                app.profile_overlay = Some(ProfileOverlayState::for_edit(
+                    name,
+                    &entry,
+                    config_path,
+                    &all_profiles,
+                ));
             }
         },
     }
@@ -1706,7 +1839,7 @@ pub(super) fn cmd_configure(app: &mut App, cmd: &str) {
             no-rules             = false   # ignore CLIDO.md rules files\n\
             \n\
             [context]\n\
-            compaction-threshold = 0.75    # compress context when 75% full\n\
+            compaction-threshold = 0.58    # compress context when ~58% full (default)\n\
             max-context-tokens   = 100000  # optional hard cap on context size\n\
             \n\
             [index]\n\
@@ -1740,12 +1873,17 @@ pub(super) fn cmd_init(app: &mut App) {
             let all_profiles = loaded.profiles.clone();
             match loaded.profiles.get(&name).cloned() {
                 Some(entry) => {
-                    app.profile_overlay =
-                        Some(ProfileOverlayState::for_edit(name, &entry, config_path, &all_profiles));
+                    app.profile_overlay = Some(ProfileOverlayState::for_edit(
+                        name,
+                        &entry,
+                        config_path,
+                        &all_profiles,
+                    ));
                 }
                 None => {
                     // No matching profile — open a create flow for the default profile
-                    app.profile_overlay = Some(ProfileOverlayState::for_create(config_path, &all_profiles));
+                    app.profile_overlay =
+                        Some(ProfileOverlayState::for_create(config_path, &all_profiles));
                 }
             }
         }
@@ -2278,6 +2416,7 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
             }
         }
         "/todo" => cmd_todo(app),
+        _ if cmd == "/skills" || cmd.starts_with("/skills ") => cmd_skills(app, cmd),
         "/undo" => cmd_undo(app),
         _ if cmd == "/rollback" || cmd.starts_with("/rollback ") => cmd_rollback(app, cmd),
         _ if cmd == "/plan" || cmd.starts_with("/plan ") => cmd_plan(app, cmd),

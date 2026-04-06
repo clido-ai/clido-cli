@@ -25,7 +25,10 @@ fn format_tool_detail(name: &str, input: &str) -> String {
             "Ls" | "ls" => {
                 let path = json.get("path").and_then(|v| v.as_str()).unwrap_or(".");
                 let depth = json.get("depth").and_then(|v| v.as_u64());
-                let hidden = json.get("show_hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+                let hidden = json
+                    .get("show_hidden")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 if let Some(d) = depth {
                     if hidden {
                         format!("{} (depth {}, hidden)", path, d)
@@ -36,29 +39,45 @@ fn format_tool_detail(name: &str, input: &str) -> String {
                     path.to_string()
                 }
             }
-            "Read" | "read" => {
-                json.get("path").and_then(|v| v.as_str()).unwrap_or(input).to_string()
-            }
+            "Read" | "read" => json
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or(input)
+                .to_string(),
             "Write" | "write" => {
-                let path = json.get("file_path").or(json.get("path")).and_then(|v| v.as_str()).unwrap_or(input);
+                let path = json
+                    .get("file_path")
+                    .or(json.get("path"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(input);
                 path.to_string()
             }
-            "Edit" | "edit" => {
-                json.get("file_path").and_then(|v| v.as_str()).unwrap_or(input).to_string()
-            }
-            "Bash" | "bash" | "Shell" | "shell" => {
-                json.get("command").and_then(|v| v.as_str()).unwrap_or(input).to_string()
-            }
-            "Glob" | "glob" => {
-                json.get("pattern").and_then(|v| v.as_str()).unwrap_or(input).to_string()
-            }
+            "Edit" | "edit" => json
+                .get("file_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or(input)
+                .to_string(),
+            "Bash" | "bash" | "Shell" | "shell" => json
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or(input)
+                .to_string(),
+            "Glob" | "glob" => json
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or(input)
+                .to_string(),
             "Grep" | "grep" => {
                 let pattern = json.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
                 let path = json.get("path").and_then(|v| v.as_str()).unwrap_or(".");
                 format!("{} in {}", pattern, path)
             }
             "SemanticSearch" | "semantic_search" => {
-                let q = json.get("query").and_then(|v| v.as_str()).unwrap_or("").trim();
+                let q = json
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
                 let dir = json
                     .get("target_directory")
                     .and_then(|v| v.as_str())
@@ -289,7 +308,7 @@ pub(super) fn read_clipboard() -> Result<String, String> {
         if !out.status.success() {
             return Err("clipboard read failed".into());
         }
-        return String::from_utf8(out.stdout).map_err(|e| format!("clipboard: {e}"));
+        String::from_utf8(out.stdout).map_err(|e| format!("clipboard: {e}"))
     }
 
     #[cfg(target_os = "linux")]
@@ -306,8 +325,7 @@ pub(super) fn read_clipboard() -> Result<String, String> {
                 .output()
             {
                 if out.status.success() && !out.stdout.is_empty() {
-                    return String::from_utf8(out.stdout)
-                        .map_err(|e| format!("clipboard: {e}"));
+                    return String::from_utf8(out.stdout).map_err(|e| format!("clipboard: {e}"));
                 }
             }
         }
@@ -460,11 +478,10 @@ pub(super) async fn agent_task(
         .unwrap_or_else(|| setup.config.model.clone());
     let git_workspace_root = Arc::new(Mutex::new(workspace_root.clone()));
     let gwr = git_workspace_root.clone();
-    let git_context_fn: Box<dyn Fn() -> Option<String> + Send + Sync> =
-        Box::new(move || {
-            let ws = gwr.lock().ok()?;
-            GitContext::discover(ws.as_path()).map(|ctx| ctx.to_prompt_section())
-        });
+    let git_context_fn: Box<dyn Fn() -> Option<String> + Send + Sync> = Box::new(move || {
+        let ws = gwr.lock().ok()?;
+        GitContext::discover(ws.as_path()).map(|ctx| ctx.to_prompt_section())
+    });
     let mut agent = AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
         .with_path_permission_receiver(path_permission_rx)
         .with_fast_provider(setup.fast_provider, setup.fast_config)
@@ -1458,7 +1475,7 @@ pub(super) fn sync_tui_profile_from_disk(app: &mut App, profile_name: &str) {
     };
     app.provider = profile.provider.clone();
     app.model = profile.model.clone();
-    app.api_key = resolve_display_api_key(&profile);
+    app.api_key = resolve_display_api_key(profile);
     app.base_url = profile.base_url.clone();
     app.current_profile = profile_name.to_string();
 }
@@ -1958,14 +1975,14 @@ pub(super) async fn event_loop(
                     app.tick_spinner();
                     dirty = true;
                 }
-                
+
                 // Check for background rate limit ping
                 if app.rate_limit_pinging && !app.rate_limit_cancelled {
                     if let Some(next_ping) = app.rate_limit_next_ping {
                         if std::time::Instant::now() >= next_ping {
                             app.rate_limit_ping_count += 1;
                             let ping_count = app.rate_limit_ping_count;
-                            
+
                             // Send a minimal request to test if API is back
                             // Use the model fetch as a lightweight ping
                             if !app.models_loading && !app.api_key.is_empty() {
@@ -1982,7 +1999,7 @@ pub(super) async fn event_loop(
                                     std::time::Duration::from_secs(3),
                                 );
                             }
-                            
+
                             // Schedule next ping in 15 minutes
                             app.rate_limit_next_ping = Some(
                                 std::time::Instant::now() + std::time::Duration::from_secs(15 * 60)

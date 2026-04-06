@@ -12,8 +12,9 @@ use ratatui::{
 
 use crate::tui::state::StatusEntry;
 use crate::tui::{
-    TUI_ACCENT, TUI_BORDER_UI, TUI_MUTED, TUI_ROW_DIM, TUI_SELECTION_BG, TUI_SOFT_ACCENT,
-    TUI_STATE_ERR, TUI_STATE_INFO, TUI_STATE_OK, TUI_STATUS_RUN, TUI_SURFACE_INSET, TUI_TEXT,
+    TUI_ACCENT, TUI_BORDER_UI, TUI_GUTTER, TUI_MUTED, TUI_ROW_DIM, TUI_SELECTION_BG, TUI_SEP,
+    TUI_SOFT_ACCENT, TUI_STATE_ERR, TUI_STATE_INFO, TUI_STATE_OK, TUI_STATUS_RUN,
+    TUI_SURFACE_INSET, TUI_TEXT,
 };
 
 // ── Modal component helpers ───────────────────────────────────────────────────
@@ -74,6 +75,28 @@ pub(crate) fn relative_time(ts: &str) -> String {
     }
 }
 
+/// Wall-clock start time in local timezone for session lists (explicit calendar context).
+pub(crate) fn session_wall_clock(ts: &str) -> String {
+    use chrono::Local;
+    let parsed = chrono::DateTime::parse_from_rfc3339(ts).or_else(|_| {
+        chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S%.f")
+            .map(|dt: chrono::NaiveDateTime| dt.and_utc().fixed_offset())
+    });
+    match parsed {
+        Ok(dt) => {
+            let local = dt.with_timezone(&Local);
+            local.format("%Y-%m-%d %H:%M").to_string()
+        }
+        Err(_) => {
+            if ts.len() >= 16 {
+                format!("{} {}", &ts[0..10], &ts[11..16])
+            } else {
+                ts.to_string()
+            }
+        }
+    }
+}
+
 /// Styled popup block — same structure for every modal.
 pub(crate) fn modal_block(title: &str, border_color: Color) -> Block<'static> {
     Block::default()
@@ -89,11 +112,12 @@ pub(crate) fn modal_block_with_hint(
     hint: &str,
     border_color: Color,
 ) -> Block<'static> {
+    let hint_trim = hint.trim();
     Block::default()
         .title(title.to_string())
         .title_alignment(Alignment::Left)
         .title_bottom(Line::from(Span::styled(
-            hint.to_string(),
+            format!(" {hint_trim} "),
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )))
         .border_type(BorderType::Rounded)
@@ -105,7 +129,7 @@ pub(crate) fn modal_block_with_hint(
 pub(crate) fn filter_indicator_line(filter_text: &str) -> Line<'static> {
     Line::from(vec![
         Span::styled(
-            "  filter ",
+            format!("{TUI_GUTTER}Filter "),
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ),
         Span::styled(
@@ -128,7 +152,7 @@ pub(crate) fn scroll_indicator_line(above: usize, below: usize) -> Option<Line<'
         parts.push(format!("↓↓ {} more", below));
     }
     Some(Line::from(Span::styled(
-        format!("  {}", parts.join("  ")),
+        format!("{TUI_GUTTER}{}", parts.join(TUI_SEP)),
         Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
     )))
 }
@@ -154,6 +178,7 @@ pub(crate) fn modal_row_two_col(
                 .bg(bg)
                 .add_modifier(Modifier::BOLD),
         ),
+        Span::styled("  ", Style::default().bg(bg)),
         Span::styled(right, Style::default().fg(right_color).bg(bg)),
     ])
 }
@@ -253,13 +278,17 @@ pub(crate) fn status_strip_lines(
             } else {
                 (
                     "✓",
-                    Style::default().fg(TUI_STATE_OK).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(TUI_STATE_OK)
+                        .add_modifier(Modifier::DIM),
                 )
             }
         } else {
             (
                 spinner,
-                Style::default().fg(TUI_STATUS_RUN).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(TUI_STATUS_RUN)
+                    .add_modifier(Modifier::DIM),
             )
         };
 
@@ -315,18 +344,14 @@ pub(crate) fn tool_event_lines(
         "◌"
     };
     let display_name = tool_display_name(name).to_string();
-    let accent = Style::default()
-        .fg(color)
-        .add_modifier(Modifier::BOLD);
-    let detail_style = Style::default()
-        .fg(TUI_ROW_DIM)
-        .add_modifier(Modifier::DIM);
-    let gutter = "  ";
+    let accent = Style::default().fg(color).add_modifier(Modifier::BOLD);
+    let detail_style = Style::default().fg(TUI_ROW_DIM).add_modifier(Modifier::DIM);
+    let gutter = TUI_GUTTER;
 
     let mut lines = Vec::new();
     if is_error {
         lines.push(Line::from(vec![Span::styled(
-            "  tool failed — output may be incomplete",
+            format!("{gutter}Tool failed — output may be incomplete"),
             Style::default()
                 .fg(TUI_STATE_ERR)
                 .bg(TUI_SURFACE_INSET)
@@ -605,5 +630,16 @@ mod tests {
         let result = relative_time("2024-01-15T10:30:00 not-rfc3339");
         // Should fall through to truncation fallback (len >= 16)
         assert!(!result.is_empty());
+    }
+
+    // ── session_wall_clock ──────────────────────────────────────────────────
+
+    #[test]
+    fn session_wall_clock_formats_rfc3339() {
+        let s = session_wall_clock("2025-06-15T14:30:00+00:00");
+        assert!(
+            s.contains("2025") && s.contains(':'),
+            "expected calendar date and time in local formatting, got: {s}"
+        );
     }
 }

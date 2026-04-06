@@ -13,7 +13,7 @@ use super::widgets::{popup_above_input, scroll_indicator_line};
 // ── Profile overlay renderer ──────────────────────────────────────────────────
 
 /// Progress steps for the creation wizard (ordered).
-const CREATE_STEPS: &[&str] = &["Provider", "API key", "Model"];
+const CREATE_STEPS: &[&str] = &["Name", "Provider", "API key", "Model"];
 
 fn step_index_for(step: &ProfileCreateStep) -> usize {
     match step {
@@ -37,7 +37,9 @@ fn render_progress_bar(
     for i in 1..=total_steps {
         let dot = if i <= current_step { "●" } else { "○" };
         let style = if i == current_step && i < total_steps {
-            Style::default().fg(TUI_STATE_WARN).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(TUI_STATE_WARN)
+                .add_modifier(Modifier::BOLD)
         } else if i < current_step {
             Style::default().fg(TUI_STATE_OK)
         } else {
@@ -46,7 +48,9 @@ fn render_progress_bar(
         dots.push(Span::styled(dot, style));
         if i < total_steps {
             let sep_style = if i < current_step {
-                Style::default().fg(TUI_STATE_OK).add_modifier(Modifier::DIM)
+                Style::default()
+                    .fg(TUI_STATE_OK)
+                    .add_modifier(Modifier::DIM)
             } else {
                 Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)
             };
@@ -62,7 +66,9 @@ fn render_progress_bar(
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             bordered_title.as_str(),
-            Style::default().fg(TUI_SOFT_ACCENT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(TUI_SOFT_ACCENT)
+                .add_modifier(Modifier::BOLD),
         ))),
         Rect {
             x: area.x,
@@ -191,9 +197,7 @@ pub(crate) fn render_profile_overview(
         // Label row
         lines.push(Line::from(Span::styled(
             format!("  {}", label),
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )));
         line_count += 1;
 
@@ -247,9 +251,7 @@ pub(crate) fn render_profile_overview(
                 .fg(TUI_STATE_WARN)
                 .add_modifier(Modifier::BOLD)
         } else if selected {
-            Style::default()
-                .fg(TUI_TEXT)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(TUI_STATE_OK)
         };
@@ -260,17 +262,13 @@ pub(crate) fn render_profile_overview(
             spans.push(Span::styled("▌", Style::default().fg(TUI_STATE_WARN)));
             spans.push(Span::styled(
                 "  Esc=cancel  Enter=save",
-                Style::default()
-                    .fg(TUI_MUTED)
-                    .add_modifier(Modifier::DIM),
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
             ));
             editing_line_y = content_area.y + line_count;
         } else if selected {
             spans.push(Span::styled(
                 "  (Enter to edit)",
-                Style::default()
-                    .fg(TUI_MUTED)
-                    .add_modifier(Modifier::DIM),
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
             ));
         }
 
@@ -303,11 +301,7 @@ pub(crate) fn render_profile_overview(
         "↑↓ navigate  ·  Enter=edit field  ·  Ctrl+S=save all  ·  Esc=close"
     };
     frame.render_widget(
-        Paragraph::new(hint).style(
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
-        ),
+        Paragraph::new(hint).style(Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)),
         hint_area,
     );
 
@@ -349,6 +343,119 @@ pub(crate) fn render_profile_create(
             render_profile_model_picker(frame, popup_rect, content_area, hint_area, st);
             return;
         }
+        ProfileCreateStep::Name => {
+            use crate::tui::state::ProfileCreateNameChoice;
+            frame.render_widget(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(TUI_SOFT_ACCENT)),
+                popup_rect,
+            );
+            let auto = st.profile_create_name_choice == ProfileCreateNameChoice::AutoGenerate;
+            let mut lines: Vec<Line<'static>> = vec![
+                Line::raw(""),
+                Line::from(Span::styled(
+                    "  Profile name",
+                    Style::default()
+                        .fg(TUI_SOFT_ACCENT)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::raw(""),
+                Line::from(Span::styled(
+                    "  Pick an option (↑↓) — no typing required for auto-name:",
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                )),
+                Line::raw(""),
+                Line::from(Span::styled(
+                    format!(
+                        "{}Use auto-generated name (from provider)",
+                        if auto { "▶ " } else { "  " }
+                    ),
+                    Style::default()
+                        .fg(if auto { TUI_TEXT } else { TUI_ROW_DIM })
+                        .add_modifier(if auto {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                )),
+                Line::from(Span::styled(
+                    format!(
+                        "{}Type a custom profile name",
+                        if auto { "  " } else { "▶ " }
+                    ),
+                    Style::default()
+                        .fg(if !auto { TUI_TEXT } else { TUI_ROW_DIM })
+                        .add_modifier(if !auto {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                )),
+                Line::raw(""),
+            ];
+            if auto {
+                lines.push(Line::from(Span::styled(
+                    "   Press Enter to continue — you can name it after you pick a provider.",
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                )));
+            } else {
+                let value_line = if st.input.is_empty() {
+                    Line::from(vec![
+                        Span::styled(
+                            "   type name here…",
+                            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                        ),
+                        Span::styled("▌", Style::default().fg(TUI_STATE_WARN)),
+                    ])
+                } else {
+                    Line::from(vec![
+                        Span::styled(
+                            format!("   {}", st.input),
+                            Style::default()
+                                .fg(TUI_STATE_WARN)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled("▌", Style::default().fg(TUI_STATE_WARN)),
+                    ])
+                };
+                lines.push(value_line);
+            }
+            if let Some(ref msg) = st.status {
+                lines.push(Line::raw(""));
+                lines.push(Line::from(Span::styled(
+                    msg.clone(),
+                    Style::default().fg(if msg.starts_with("  ✓") {
+                        TUI_STATE_OK
+                    } else {
+                        TUI_STATE_ERR
+                    }),
+                )));
+            }
+            frame.render_widget(
+                Paragraph::new(lines).wrap(Wrap { trim: false }),
+                content_area,
+            );
+            frame.render_widget(
+                Paragraph::new(
+                    "↑↓ select  ·  Enter=continue  ·  Esc=cancel  ·  or start typing to choose custom name",
+                )
+                .style(
+                    Style::default()
+                        .fg(TUI_MUTED)
+                        .add_modifier(Modifier::DIM),
+                ),
+                hint_area,
+            );
+            if !auto {
+                let input_line_y = content_area.y + 8u16;
+                if input_line_y < content_area.y + content_area.height {
+                    let cursor_x = content_area.x + 3 + st.input_cursor as u16;
+                    frame.set_cursor_position((cursor_x, input_line_y));
+                }
+            }
+            return;
+        }
         _ => {}
     }
 
@@ -360,26 +467,21 @@ pub(crate) fn render_profile_create(
     );
 
     let (step_label, input_placeholder, hint_text) = match step {
-        ProfileCreateStep::Name => (
-            "Name your profile",
-            "optional — Enter to auto-generate from provider",
-            "Enter=continue  ·  Type a name  ·  Esc=cancel",
-        ),
         ProfileCreateStep::ApiKey => (
             "API key",
             if !st.saved_keys.is_empty() {
-                "paste key, or press k to pick a saved key"
+                "paste a new key, or press k to open the saved-key list"
             } else {
                 "paste your API key here"
             },
             if !st.saved_keys.is_empty() {
                 if st.input.is_empty() {
-                    "k=use saved key  ·  Type to enter new key  ·  Enter=next  ·  Esc=cancel"
+                    "k=saved keys (↑↓·Enter)  ·  list also opens automatically after provider  ·  Esc=cancel"
                 } else {
-                    "k=use saved key  ·  Enter=next  ·  Esc=cancel"
+                    "k=saved keys  ·  Enter=next  ·  Esc=cancel"
                 }
             } else {
-                "Type API key  ·  Enter=next  ·  Esc=cancel"
+                "Type or paste API key  ·  Enter=next  ·  Esc=cancel"
             },
         ),
         _ => return,
@@ -397,51 +499,14 @@ pub(crate) fn render_profile_create(
     )));
     lines.push(Line::raw(""));
 
-    // --- Saved key offers (ApiKey step only) ---
+    // ApiKey step: saved keys are chosen in the dedicated picker (↑↓), not listed here.
     if *step == ProfileCreateStep::ApiKey && !st.saved_keys.is_empty() {
         lines.push(Line::from(Span::styled(
-            "  Saved keys from other profiles:",
+            "  Tip: press k for the saved-key list (↑↓·Enter) — it also opened after provider if you needed a key.",
             Style::default()
                 .fg(TUI_MUTED)
                 .add_modifier(Modifier::DIM),
         )));
-
-        for (i, offer) in st.saved_keys.iter().enumerate().take(5) {
-            let is_match = st.provider.is_empty()
-                || offer.provider_id == st.provider;
-            if is_match {
-                let key_short = if offer.display.len() > 28 {
-                    format!("{}…", &offer.display[..28])
-                } else {
-                    offer.display.clone()
-                };
-                let arrow = if i == 0 && st.input.is_empty() {
-                    "▶ "
-                } else {
-                    "   "
-                };
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("  {}{} {}", arrow, key_short, offer.source_profile),
-                        Style::default()
-                            .fg(if i == 0 && st.input.is_empty() {
-                                TUI_STATE_WARN
-                            } else {
-                                TUI_STATE_OK
-                            })
-                            .add_modifier(if i == 0 && st.input.is_empty() {
-                                Modifier::BOLD
-                            } else {
-                                Modifier::empty()
-                            }),
-                    ),
-                    Span::styled(
-                        format!("  ({})", offer.provider_id),
-                        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-                    ),
-                ]));
-            }
-        }
         lines.push(Line::raw(""));
     }
 
@@ -456,9 +521,7 @@ pub(crate) fn render_profile_create(
     let value_display = if display_input.is_empty() {
         Span::styled(
             format!("   {input_placeholder}"),
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )
     } else {
         Span::styled(
@@ -479,8 +542,16 @@ pub(crate) fn render_profile_create(
     if matches!(step, ProfileCreateStep::ApiKey) {
         lines.push(Line::raw(""));
         lines.push(Line::from(vec![
-            Span::styled("  provider  ", Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)),
-            Span::styled(st.provider.clone(), Style::default().fg(TUI_STATE_OK).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  provider  ",
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                st.provider.clone(),
+                Style::default()
+                    .fg(TUI_STATE_OK)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]));
     }
 
@@ -525,11 +596,7 @@ pub(crate) fn render_profile_create(
 
     // Hint footer
     frame.render_widget(
-        Paragraph::new(hint_text).style(
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
-        ),
+        Paragraph::new(hint_text).style(Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)),
         hint_area,
     );
 
@@ -537,12 +604,7 @@ pub(crate) fn render_profile_create(
     // Provider and Model steps return early (handled by separate render functions).
     // Only Name and ApiKey reach here.
     let saved_key_lines = if *step == ProfileCreateStep::ApiKey && !st.saved_keys.is_empty() {
-        // 1 header + matching keys (max 5) + 1 blank separator
-        let matching = st.saved_keys
-            .iter()
-            .filter(|offer| st.provider.is_empty() || offer.provider_id == st.provider)
-            .count();
-        1 + matching + 1
+        2 // tip line + blank
     } else {
         0
     };
@@ -584,58 +646,85 @@ pub(crate) fn render_profile_saved_key_picker(
         popup_rect,
     );
 
-    let selected = if let ProfileOverlayMode::PickingSavedKey { selected } = st.mode {
-        selected
+    let (selected, show_type_new_row) = if let ProfileOverlayMode::PickingSavedKey {
+        selected,
+        show_type_new_row,
+    } = &st.mode
+    {
+        (*selected, *show_type_new_row)
     } else {
-        0
+        (0usize, false)
     };
+
+    let n_keys = st.saved_keys.len();
+    let total_rows = n_keys + usize::from(show_type_new_row);
 
     // Header
     let mut lines: Vec<Line<'static>> = vec![
         Line::from(Span::styled(
-            "  Select a key to reuse from another profile:",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            "  Select a saved key (↑↓) or enter a new one:",
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )),
         Line::raw(""),
     ];
 
-    // Show saved keys with scroll support
-    let visible: usize = (content_area.height as usize).saturating_sub(4).max(2);
+    if n_keys == 0 {
+        lines.push(Line::from(Span::styled(
+            "  No saved keys — choose “type new key” below.",
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+        )));
+        lines.push(Line::raw(""));
+    }
+
+    // Virtual rows: [0..n_keys) = offers, [n_keys] = type new (optional)
+    let visible: usize = (content_area.height as usize).saturating_sub(6).max(3);
     let scroll = if selected >= visible {
-        selected - visible + 1
+        selected.saturating_sub(visible - 1)
     } else {
         0
     };
-    for (i, offer) in st.saved_keys.iter().enumerate().skip(scroll).take(visible) {
-        let is_selected = i == selected;
-        let arrow = if is_selected { "▶ " } else { "   " };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {}{}", arrow, offer.display),
-                Style::default()
-                    .fg(if is_selected {
-                        TUI_STATE_WARN
-                    } else {
-                        TUI_STATE_OK
-                    })
-                    .add_modifier(if is_selected { Modifier::BOLD } else { Modifier::empty() }),
-            ),
-            Span::styled(
-                format!("  ({}, profile: {})", offer.provider_id, offer.source_profile,),
-                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-            ),
-        ]));
-    }
+    let end = (scroll + visible).min(total_rows.max(1));
 
-    if st.saved_keys.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  No saved keys available.",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
-        )));
+    for row in scroll..end {
+        let is_selected = row == selected;
+        let arrow = if is_selected { "▶ " } else { "  " };
+        if row < n_keys {
+            let offer = &st.saved_keys[row];
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{}{}", arrow, offer.display),
+                    Style::default()
+                        .fg(if is_selected {
+                            TUI_STATE_WARN
+                        } else {
+                            TUI_STATE_OK
+                        })
+                        .add_modifier(if is_selected {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                ),
+                Span::styled(
+                    format!(
+                        "  ({}, profile: {})",
+                        offer.provider_id, offer.source_profile
+                    ),
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                ),
+            ]));
+        } else if show_type_new_row {
+            lines.push(Line::from(Span::styled(
+                format!("{}Type or paste a new API key instead…", arrow),
+                Style::default()
+                    .fg(if is_selected { TUI_TEXT } else { TUI_MUTED })
+                    .add_modifier(if is_selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::DIM
+                    }),
+            )));
+        }
     }
 
     frame.render_widget(
@@ -643,15 +732,13 @@ pub(crate) fn render_profile_saved_key_picker(
         content_area,
     );
 
+    let hint = if show_type_new_row {
+        "↑↓=navigate  ·  Enter=confirm  ·  last row=new key  ·  Esc=back to typing"
+    } else {
+        "↑↓=navigate  ·  Enter=use key  ·  Esc=back to typing"
+    };
     frame.render_widget(
-        Paragraph::new(
-            "↑↓=navigate  Enter=use selected key  Esc=cancel & return to manual input",
-        )
-        .style(
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
-        ),
+        Paragraph::new(hint).style(Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)),
         hint_area,
     );
 }
@@ -732,11 +819,8 @@ pub(crate) fn render_profile_provider_picker(
         content_area,
     );
     frame.render_widget(
-        Paragraph::new("↑↓=navigate  Enter=select  type to filter  Esc=cancel").style(
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
-        ),
+        Paragraph::new("↑↓=navigate  Enter=select  type to filter  Esc=cancel")
+            .style(Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)),
         hint_area,
     );
 }
@@ -775,9 +859,7 @@ pub(crate) fn render_profile_model_picker(
                 "  {:<32}  {:<12}  {:>8}  {:>8}  {:>6}",
                 "model", "provider", "$/1M in", "$/1M out", "ctx k"
             ),
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )),
         Line::raw(""),
     ];
@@ -819,11 +901,8 @@ pub(crate) fn render_profile_model_picker(
         content_area,
     );
     frame.render_widget(
-        Paragraph::new("↑↓=navigate  Enter=select  type to filter  Esc=cancel").style(
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
-        ),
+        Paragraph::new("↑↓=navigate  Enter=select  type to filter  Esc=cancel")
+            .style(Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)),
         hint_area,
     );
 }

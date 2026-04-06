@@ -13,6 +13,10 @@ fn char_to_byte(s: &str, char_idx: usize) -> usize {
 
 /// A single-line text input buffer with cursor, editing operations,
 /// optional masking (for API keys), and optional history navigation.
+///
+/// The TUI uses some fields and key paths directly; masking, placeholders, and several
+/// helpers are for other overlays and stay fully covered by unit tests — see `#[allow(dead_code)]`.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct TextInput {
     pub text: String,
@@ -31,6 +35,7 @@ pub struct TextInput {
     pub scroll: usize,
 }
 
+#[allow(dead_code)]
 impl TextInput {
     /// Create a new empty text input.
     pub fn new() -> Self {

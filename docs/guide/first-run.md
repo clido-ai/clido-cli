@@ -106,7 +106,7 @@ model    = "claude-sonnet-4-5"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [agent]
-max-turns      = 50
+max-turns      = 200
 max-budget-usd = 5.0
 ```
 

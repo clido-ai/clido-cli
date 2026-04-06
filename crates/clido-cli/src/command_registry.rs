@@ -3,6 +3,9 @@
 //! Replaces the inline `SLASH_COMMAND_SECTIONS` constant in tui.rs.
 //! Commands are described declaratively; the autocomplete system and `/help`
 //! output derive from this single source of truth.
+//!
+//! Some fields and helpers are reserved for richer `/help` and completion UIs.
+#![allow(dead_code)]
 
 /// A single slash command definition.
 #[derive(Debug, Clone, Copy)]
@@ -287,13 +290,78 @@ pub static COMMANDS: &[SlashCommand] = &[
         takes_args: false,
         requires_idle: false,
     },
+    // ── Skills ────────────────────────────────────────────────────
+    SlashCommand {
+        name: "/skills",
+        section: "Skills",
+        description: "list reusable skills (from .clido/skills/) and active state",
+        usage: Some("/skills [list|paths|disable <id>|enable <id>]"),
+        takes_args: true,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/skills list",
+        section: "Skills",
+        description: "show skills on disk and whether each is active",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/skills paths",
+        section: "Skills",
+        description: "show skill search directories and registry URLs",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/skills disable",
+        section: "Skills",
+        description: "disable a skill in project .clido/config.toml",
+        usage: Some("/skills disable <id>"),
+        takes_args: true,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/skills enable",
+        section: "Skills",
+        description: "remove a skill from the disabled list",
+        usage: Some("/skills enable <id>"),
+        takes_args: true,
+        requires_idle: false,
+    },
     // ── Plan ─────────────────────────────────────────────────────
     SlashCommand {
         name: "/plan",
         section: "Plan",
         description: "show current plan, or /plan <task> to have agent plan first",
-        usage: Some("/plan [task|edit|save|list|view|text|raw]"),
+        usage: Some("/plan [task|on|off|auto|edit|save|list|view|text|raw]"),
         takes_args: true,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/plan on",
+        section: "Plan",
+        description: "always show the plan/todo strip when the terminal fits",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/plan off",
+        section: "Plan",
+        description: "hide the plan/todo strip",
+        usage: None,
+        takes_args: false,
+        requires_idle: false,
+    },
+    SlashCommand {
+        name: "/plan auto",
+        section: "Plan",
+        description: "show plan/todos only on large terminals (default)",
+        usage: None,
+        takes_args: false,
         requires_idle: false,
     },
     SlashCommand {

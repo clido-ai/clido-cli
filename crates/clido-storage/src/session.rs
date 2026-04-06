@@ -370,10 +370,10 @@ pub fn find_recent_session(project_path: &Path, max_age: std::time::Duration) ->
                                 let has_user = lines
                                     .iter()
                                     .any(|l| matches!(l, SessionLine::UserMessage { .. }));
-                                let has_meta = lines
-                                    .iter()
-                                    .any(|l| matches!(l, SessionLine::Meta { .. }));
-                                if has_meta && !has_user
+                                let has_meta =
+                                    lines.iter().any(|l| matches!(l, SessionLine::Meta { .. }));
+                                if has_meta
+                                    && !has_user
                                     && most_recent
                                         .as_ref()
                                         .map(|(t, _)| modified > *t)

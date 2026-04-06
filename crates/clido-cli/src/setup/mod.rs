@@ -291,7 +291,9 @@ pub async fn run_create_profile(initial_name: Option<String>) -> Result<(), anyh
         .ok_or_else(|| CliError::Usage("Could not determine config directory.".into()))?;
 
     // Load config from global path so we see all profiles and credentials
-    let loaded = clido_core::load_config(&config_path).or_else(|_| clido_core::load_config(&PathBuf::from("."))).ok();
+    let loaded = clido_core::load_config(&config_path)
+        .or_else(|_| clido_core::load_config(&PathBuf::from(".")))
+        .ok();
 
     let saved_api_keys = loaded
         .as_ref()
@@ -410,7 +412,9 @@ pub async fn run_edit_profile(
         .unwrap_or_default();
 
     // Load config from global path so we see all profiles
-    let loaded = clido_core::load_config(&config_path).or_else(|_| clido_core::load_config(&PathBuf::from("."))).ok();
+    let loaded = clido_core::load_config(&config_path)
+        .or_else(|_| clido_core::load_config(&PathBuf::from(".")))
+        .ok();
     let saved_api_keys = loaded
         .as_ref()
         .map(|c| build_saved_key_catalog(c, &config_path, Some(name.as_str())))

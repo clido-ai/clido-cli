@@ -4,7 +4,11 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "clido", version = env!("CARGO_PKG_VERSION"), about = "clido — your coding agent")]
+#[command(
+    name = "clido",
+    version = env!("CARGO_PKG_VERSION"),
+    about = "clido — terminal AI coding agent (TUI, sessions, tools, skills, workflows)"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub subcommand: Option<Subcommand>,
@@ -294,6 +298,12 @@ pub enum Subcommand {
         cmd: ProfileCmd,
     },
 
+    /// List and toggle reusable agent skills (`.clido/skills/`, config `[skills]`).
+    Skills {
+        #[command(subcommand)]
+        cmd: SkillsCmd,
+    },
+
     /// Deprecated: use `sessions list` instead.
     #[command(hide = true, name = "list-sessions")]
     ListSessions,
@@ -484,6 +494,24 @@ pub enum ProfileCmd {
         /// Skip confirmation prompt.
         #[arg(long)]
         yes: bool,
+    },
+}
+
+#[derive(clap::Subcommand, Debug, Clone)]
+pub enum SkillsCmd {
+    /// List skills on disk and whether each is active for this workspace.
+    List,
+    /// Print skill search paths (workspace, global, config extras, env).
+    Paths,
+    /// Disable a skill (writes `[skills].disabled` in the project `.clido/config.toml`).
+    Disable {
+        /// Skill id (from YAML `id` or file stem).
+        id: String,
+    },
+    /// Remove a skill from the disabled list.
+    Enable {
+        /// Skill id.
+        id: String,
     },
 }
 

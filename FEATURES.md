@@ -77,30 +77,13 @@ Note: Queue nav happens BEFORE history nav when items are queued.
 
 ---
 
-## Slash Commands
+## Slash commands
 
-Type `/` in input to see autocomplete suggestions:
+Type `/` for autocomplete. The **authoritative list** with arguments and notes is in the repo:
 
-| Command | Description |
-|---------|-------------|
-| `/stop` | Stop current run immediately |
-| `/clear` | Clear chat history |
-| `/sessions` | List available sessions |
-| `/compact` | Force context compaction |
-| `/help` | Show all commands |
-| `/workdir <path>` | Change working directory |
-| `/profile <name>` | Switch to profile |
-| `/model <name>` | Switch model for this turn |
-| `/plan` | Toggle plan mode |
-| `/keys` | Show keybindings |
-| `/enhance <prompt>` | Enhance a prompt (review before sending) |
-| `/reviewer [on\|off]` | Toggle reviewer sub-agent |
-| `/copy [all\|n]` | Copy assistant message to clipboard |
-| `/notify [on\|off]` | Toggle desktop notifications |
-| `/search <query>` | Search conversation history |
-| `/export` | Save conversation to markdown file |
-| `/workflow` | List, create, edit, save, run workflows |
-| `/workflow new <desc>` | AI-guided workflow creation |
+`docs/reference/slash-commands.md`
+
+Examples: `/sessions`, `/skills list`, `/plan`, `/plan <task>`, `/plan on|off|auto`, `/workflow`, `/memory`, `/git`-related shortcuts (`/ship`, `/pr`, …), `/profile`, `/models`.
 
 ---
 
@@ -114,25 +97,15 @@ Type `/` in input to see autocomplete suggestions:
 
 ---
 
-## Status Areas
+## Layout (summary)
 
-### Top (Header)
-- Session ID
-- Current profile
-- Model name
-- Current directory
-
-### Middle (Queue/Thinking)
-- Shows **thinking step** when agent active
-- Shows **queued items** when agent idle but items waiting
-
-### Bottom Strip
-- Tool status (what tool is running)
-- Spinner when busy
-- Tool execution times
-
-### Hint Line (Bottom)
-- Context-aware shortcuts
+- **Header** — brand, model, profile, workspace path, session id/title, cost/tokens when shown.
+- **Chat** — scrollable transcript.
+- **Plan/todo strip** (optional) — TodoWrite / plan steps; `/plan on|off|auto`.
+- **Status strip** — short activity log + spinner.
+- **Queue / thinking** — current step line and queued messages when relevant.
+- **Hint line** — context shortcuts.
+- **Input** — multiline draft; Enter sends, Shift+Enter newline.
 
 ---
 
@@ -142,7 +115,7 @@ Type `/` in input to see autocomplete suggestions:
 1. **Terminal escape sequences** - No more `^[[201~` garbage on startup
 2. **Mouse scrolling** - Works again (was broken, now fixed)
 3. **Queue display** - Each item on separate line
-4. **Input field height** - Max 3 lines for multiline
+4. **Input field height** - Multiline input grows up to a few lines (see TUI render limits)
 5. **Session loss** - Canonicalized paths fix session detection
 6. **Tool timeout** - 60s timeout prevents indefinite hangs
 7. **/stop command** - Actually stops agent immediately

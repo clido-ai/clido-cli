@@ -35,9 +35,9 @@ pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
 
     // Key status
     let key_status = if app.api_key.is_empty() {
-        Span::styled("key ✗", Style::default().fg(TUI_STATE_ERR))
+        Span::styled("API key ✗", Style::default().fg(TUI_STATE_ERR))
     } else {
-        Span::styled("key ✓", dim_green)
+        Span::styled("API key ✓", dim_green)
     };
 
     // Budget display
@@ -63,49 +63,49 @@ pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled("fast ·", muted)
     };
 
-    const L: &str = "    ";
     const LW: usize = 10;
     let lbl = |s: &str| format!("{:<w$}", s, w = LW);
+    let pad = TUI_GUTTER_SUB;
 
     let content: Vec<Line<'static>> = vec![
         Line::raw(""),
         Line::from(vec![
-            Span::styled(format!("{L}{}", lbl("workdir")), muted),
+            Span::styled(format!("{pad}{}", lbl("workdir")), muted),
             Span::styled(workdir, soft),
         ]),
         Line::raw(""),
         Line::from(vec![
-            Span::styled(format!("{L}{}", lbl("profile")), muted),
+            Span::styled(format!("{pad}{}", lbl("profile")), muted),
             Span::styled(
                 app.current_profile.clone(),
                 soft.add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled(format!("{L}{}", lbl("provider")), muted),
+            Span::styled(format!("{pad}{}", lbl("provider")), muted),
             Span::styled(app.provider.clone(), soft),
-            Span::styled("  ·  ".to_string(), muted),
+            Span::styled(TUI_SEP.to_string(), muted),
             Span::styled(app.model.clone(), soft),
         ]),
         Line::from(vec![
-            Span::styled(format!("{L}{}", lbl("status")), muted),
+            Span::styled(format!("{pad}{}", lbl("status")), muted),
             key_status,
-            Span::styled("  ·  ".to_string(), muted),
+            Span::styled(TUI_SEP.to_string(), muted),
             budget_span,
-            Span::styled("  ·  ".to_string(), muted),
+            Span::styled(TUI_SEP.to_string(), muted),
             fast_span,
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            format!("{L}/help · /model · /settings · /config"),
+            format!("{pad}/help{TUI_SEP}/model{TUI_SEP}/settings{TUI_SEP}/config"),
             accent,
         )),
         Line::from(Span::styled(
-            format!("{L}Ctrl+M models · Ctrl+P profiles · Ctrl+K keys · Ctrl+V paste"),
+            format!("{pad}Ctrl+M models{TUI_SEP}Ctrl+P profiles{TUI_SEP}Ctrl+K keys{TUI_SEP}Ctrl+V paste"),
             muted,
         )),
         Line::from(Span::styled(
-            format!("{L}↑↓ history · PgUp/Dn scroll · Shift+Enter newline · Ctrl+/ stop"),
+            format!("{pad}↑↓ history{TUI_SEP}PgUp/Dn scroll{TUI_SEP}Shift+Enter newline{TUI_SEP}Ctrl+/ stop"),
             muted,
         )),
         Line::raw(""),

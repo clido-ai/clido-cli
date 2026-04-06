@@ -53,14 +53,19 @@ pub(crate) fn build_saved_key_catalog(
         let api_key = crate::setup::read_credential(config_path, &entry.provider)
             .or_else(|| {
                 // Fall back to env var
-                entry.api_key_env.as_ref().and_then(|e| std::env::var(e).ok())
+                entry
+                    .api_key_env
+                    .as_ref()
+                    .and_then(|e| std::env::var(e).ok())
             })
             .or_else(|| {
                 // Last resort: inline key (legacy)
                 entry.api_key.clone()
             });
 
-        let Some(k) = api_key else { continue; };
+        let Some(k) = api_key else {
+            continue;
+        };
         if k.is_empty() {
             continue;
         }

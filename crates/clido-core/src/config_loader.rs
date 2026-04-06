@@ -172,6 +172,55 @@ fn default_workflows_directory() -> String {
     ".clido/workflows".to_string()
 }
 
+/// User preferences for Skills discovery and activation (`clido_core::skills`).
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct SkillsSection {
+    /// Skill ids to hide from the agent (even if present on disk).
+    #[serde(default)]
+    pub disabled: Vec<String>,
+    /// If non-empty, only these ids are active (whitelist). Off-disk ids are ignored.
+    #[serde(default)]
+    pub enabled: Vec<String>,
+    /// Extra directories to scan (absolute or relative to workspace root). `~/` expanded.
+    #[serde(default)]
+    pub extra_paths: Vec<String>,
+    /// When true, skip all skill injection.
+    #[serde(default)]
+    pub no_skills: bool,
+    /// When true (default), the system prompt encourages suggesting matching skills.
+    #[serde(default)]
+    pub auto_suggest: Option<bool>,
+    /// Reserved for remote registries / marketplace (not fetched in this version).
+    #[serde(default)]
+    pub registry_urls: Vec<String>,
+}
+
+fn merge_string_vecs_union(a: Vec<String>, b: Vec<String>) -> Vec<String> {
+    let mut v: Vec<String> = a.into_iter().chain(b).collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+fn merge_skills_section(base: &SkillsSection, later: &SkillsSection) -> SkillsSection {
+    SkillsSection {
+        disabled: merge_string_vecs_union(base.disabled.clone(), later.disabled.clone()),
+        enabled: if !later.enabled.is_empty() {
+            later.enabled.clone()
+        } else {
+            base.enabled.clone()
+        },
+        extra_paths: merge_string_vecs_union(base.extra_paths.clone(), later.extra_paths.clone()),
+        no_skills: base.no_skills || later.no_skills,
+        auto_suggest: later.auto_suggest.or(base.auto_suggest),
+        registry_urls: merge_string_vecs_union(
+            base.registry_urls.clone(),
+            later.registry_urls.clone(),
+        ),
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ConfigFile {
@@ -194,6 +243,8 @@ pub struct ConfigFile {
     pub index: IndexSection,
     #[serde(default)]
     pub roles: RolesSection,
+    #[serde(default)]
+    pub skills: SkillsSection,
 }
 
 fn default_default_profile() -> String {
@@ -211,6 +262,7 @@ pub struct LoadedConfig {
     pub workflows: WorkflowsSection,
     pub hooks: HooksConfig,
     pub index: IndexSection,
+    pub skills: SkillsSection,
 }
 
 impl LoadedConfig {
@@ -380,6 +432,7 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
         },
         include_ignored: later.index.include_ignored || base.index.include_ignored,
     };
+    let skills = merge_skills_section(&base.skills, &later.skills);
     ConfigFile {
         default_profile,
         profile,
@@ -390,6 +443,7 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
         hooks,
         index,
         roles: later.roles,
+        skills,
     }
 }
 
@@ -405,6 +459,7 @@ pub fn load_config(cwd: &Path) -> Result<LoadedConfig> {
         hooks: HooksConfig::default(),
         index: IndexSection::default(),
         roles: RolesSection::default(),
+        skills: SkillsSection::default(),
     };
 
     if let Some(path) = global_config_path() {
@@ -433,6 +488,7 @@ pub fn load_config(cwd: &Path) -> Result<LoadedConfig> {
         workflows: merged.workflows,
         hooks: merged.hooks,
         index: merged.index,
+        skills: merged.skills,
     })
 }
 
@@ -548,6 +604,62 @@ pub fn upsert_profile_in_config(
             .map_err(|e| ClidoError::Config(format!("Cannot create config dir: {}", e)))?;
     }
     atomic_write(config_path, &out)?;
+    Ok(())
+}
+
+/// Update `<workspace>/.clido/config.toml` so `[skills].disabled` includes or excludes `skill_id`.
+/// Creates the file and parent dirs if needed. Other keys are preserved.
+pub fn set_skill_disabled_in_project(
+    workspace_root: &Path,
+    skill_id: &str,
+    disabled: bool,
+) -> Result<()> {
+    let path = workspace_root.join(".clido").join("config.toml");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            ClidoError::Config(format!("Cannot create {}: {}", parent.display(), e))
+        })?;
+    }
+    let src = if path.exists() {
+        std::fs::read_to_string(&path)
+            .map_err(|e| ClidoError::Config(format!("Cannot read {}: {}", path.display(), e)))?
+    } else {
+        String::new()
+    };
+    let mut root: toml::Value = if src.trim().is_empty() {
+        toml::Value::Table(toml::map::Map::new())
+    } else {
+        toml::from_str(&src)
+            .map_err(|e| ClidoError::Config(format!("Invalid config {}: {}", path.display(), e)))?
+    };
+    let table = root.as_table_mut().ok_or_else(|| {
+        ClidoError::Config(format!("Config root must be a table: {}", path.display()))
+    })?;
+    let skills_val = table
+        .entry("skills")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let skills_table = skills_val
+        .as_table_mut()
+        .ok_or_else(|| ClidoError::Config("[skills] must be a table".to_string()))?;
+    let disabled_val = skills_table
+        .entry("disabled")
+        .or_insert_with(|| toml::Value::Array(Vec::new()));
+    let arr = disabled_val
+        .as_array_mut()
+        .ok_or_else(|| ClidoError::Config("[skills].disabled must be an array".to_string()))?;
+    if disabled {
+        if !arr.iter().any(|v| v.as_str() == Some(skill_id)) {
+            arr.push(toml::Value::String(skill_id.to_string()));
+        }
+        if let Some(toml::Value::Array(en)) = skills_table.get_mut("enabled") {
+            en.retain(|v| v.as_str() != Some(skill_id));
+        }
+    } else {
+        arr.retain(|v| v.as_str() != Some(skill_id));
+    }
+    let out = toml::to_string_pretty(&root)
+        .map_err(|e| ClidoError::Config(format!("Serialize error: {}", e)))?;
+    atomic_write(&path, &out)?;
     Ok(())
 }
 
@@ -700,6 +812,7 @@ mod tests {
             workflows: WorkflowsSection::default(),
             hooks: crate::config::HooksConfig::default(),
             index: IndexSection::default(),
+            skills: SkillsSection::default(),
         };
         let result = loaded.get_profile("nonexistent");
         assert!(result.is_err());
@@ -1487,6 +1600,7 @@ max-turns = 100
             workflows: WorkflowsSection::default(),
             hooks: HooksConfig::default(),
             index: IndexSection::default(),
+            skills: SkillsSection::default(),
         };
         // Override only max_turns via CLI
         let cfg = agent_config_from_loaded(
@@ -1544,6 +1658,7 @@ max-turns = 100
             workflows: WorkflowsSection::default(),
             hooks: HooksConfig::default(),
             index: IndexSection::default(),
+            skills: SkillsSection::default(),
         };
         let cfg = agent_config_from_loaded(
             &loaded, "default", None, None, None, None, None, false, None,
@@ -1586,6 +1701,7 @@ max-turns = 100
             workflows: WorkflowsSection::default(),
             hooks: HooksConfig::default(),
             index: IndexSection::default(),
+            skills: SkillsSection::default(),
         };
         let cfg =
             agent_config_from_loaded(&loaded, "default", None, None, None, None, None, true, None)
@@ -1620,6 +1736,7 @@ max-turns = 100
             workflows: WorkflowsSection::default(),
             hooks: HooksConfig::default(),
             index: IndexSection::default(),
+            skills: SkillsSection::default(),
         };
         let cfg = agent_config_from_loaded(
             &loaded, "default", None, None, None, None, None, false, None,
@@ -1694,5 +1811,22 @@ max-turns = 100
         assert!(!cf.profile.contains_key("alpha"));
         assert!(cf.profile.contains_key("beta"));
         assert_eq!(cf.default_profile, "beta");
+    }
+
+    #[test]
+    fn set_skill_disabled_roundtrip_in_project_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        set_skill_disabled_in_project(root, "foo", true).unwrap();
+        set_skill_disabled_in_project(root, "bar", true).unwrap();
+        let s = std::fs::read_to_string(root.join(".clido/config.toml")).unwrap();
+        let cf: ConfigFile = toml::from_str(&s).unwrap();
+        assert!(cf.skills.disabled.contains(&"foo".to_string()));
+        assert!(cf.skills.disabled.contains(&"bar".to_string()));
+        set_skill_disabled_in_project(root, "foo", false).unwrap();
+        let s2 = std::fs::read_to_string(root.join(".clido/config.toml")).unwrap();
+        let cf2: ConfigFile = toml::from_str(&s2).unwrap();
+        assert!(!cf2.skills.disabled.contains(&"foo".to_string()));
+        assert!(cf2.skills.disabled.contains(&"bar".to_string()));
     }
 }

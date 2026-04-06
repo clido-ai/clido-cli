@@ -12,6 +12,7 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 | `/sessions` | Open the session picker | `/sessions` | Use arrow keys to select, Enter to resume |
 | `/session` | Show the current session ID | `/session` | |
 | `/help` | Display all key bindings and slash commands | `/help` | Output appears in the chat pane |
+| `/keys` | Open the keybindings overlay | `/keys` | Same shortcuts as **Ctrl+K** |
 | `/quit` | Exit clido | `/quit` | Equivalent to pressing `Ctrl+C` when idle |
 | `/init` | Re-run setup wizard | `/init` | Reconfigure provider, model, API key, and roles |
 | `/search <query>` | Search conversation history | `/search auth bug` | Highlights matching messages |
@@ -32,8 +33,8 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 |---------|-------------|---------|-------|
 | `/model [name]` | Show or switch the active model | `/model claude-opus-4-6` | Switches immediately; reverts after session ends |
 | `/models` | Open the interactive model picker overlay | `/models` | Live type-to-filter; shows pricing, context window, and role assignments |
-| `/fast` | Switch to the fast (cheap) model | `/fast` | Uses `[roles] fast` from config, falls back to `claude-haiku-4-5-20251001` |
-| `/smart` | Switch to the smart (powerful) model | `/smart` | Uses `[roles] reasoning` from config, falls back to `claude-opus-4-6` |
+| `/fast` | Switch to the fast (cheap) model | `/fast` | Uses `[roles] fast` from config when set; otherwise a built-in Haiku-class default |
+| `/smart` | Switch to the smart (powerful) model | `/smart` | Uses `[roles] reasoning` from config when set; otherwise a built-in Opus-class default |
 | `/fav` | Toggle current model in/out of favorites | `/fav` | Favorites shown with ★ in the model picker and `/model` output |
 | `/reviewer [on\|off]` | Toggle reviewer sub-agent | `/reviewer on` | When on, a second model reviews each assistant response before it is shown |
 
@@ -45,7 +46,16 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 | `/tokens` | Print input and output token usage | `/tokens` | |
 | `/compact` | Compact the context window immediately | `/compact` | Summarises history via LLM; shows before/after message count |
 | `/memory <query>` | Search long-term memory | `/memory error handling` | The agent also uses memory automatically |
-| `/todo` | Show the agent's current task list | `/todo` | Displays pending tasks from the current session |
+| `/todo` | Show the agent's current task list | `/todo` | From the **TodoWrite** tool; mirrors the plan/todo strip when visible |
+
+### Skills
+
+| Command | Description | Example | Notes |
+|---------|-------------|---------|-------|
+| `/skills` or `/skills list` | List skills found on disk and whether each is **active** | `/skills` | Active = not disabled by config and passes whitelist rules; see [Skills](/docs/guide/skills) |
+| `/skills paths` | Show skill search directories | `/skills paths` | Includes `[skills] extra-paths` and `CLIDO_SKILL_PATHS` |
+| `/skills disable <id>` | Add a skill id to project `[skills].disabled` | `/skills disable risky` | Writes `.clido/config.toml` under the workspace root |
+| `/skills enable <id>` | Remove a skill id from the disabled list | `/skills enable risky` | Restart the session to refresh the system prompt |
 
 ### Git
 
@@ -63,10 +73,16 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 
 | Command | Description | Example | Notes |
 |---------|-------------|---------|-------|
-| `/plan` | Show the current task plan | `/plan` | Active when `--plan` or `--planner` flag is set |
-| `/plan edit` | Re-open the plan editor overlay | `/plan edit` | Edit tasks, complexity, notes before executing |
-| `/plan save` | Save the current plan to `.clido/plans/` | `/plan save` | Saved plans can be resumed with `clido plan run` |
-| `/plan list` | List all saved plans | `/plan list` | Shows id, task count, done count, and goal |
+| `/plan` | Show the current plan (snapshot or simple list) | `/plan` | If no plan yet, prints usage for `/plan <task>` |
+| `/plan <task>` | Ask the agent for a **structured plan** (Goal → Risks) and **TodoWrite**; agent stops for your confirmation | `/plan migrate auth` | Does not run implementation until you confirm |
+| `/plan on` | Always show the **plan/todo** strip when the terminal is large enough | `/plan on` | User preference; see [TUI](/docs/guide/tui) |
+| `/plan off` | Hide the plan/todo strip | `/plan off` | |
+| `/plan auto` | Show the strip only on **large** terminals when there is something to show (default) | `/plan auto` | Avoids clutter on small windows |
+| `/plan edit` | Open the plan text editor | `/plan edit` | Requires an existing plan |
+| `/plan save` | Save the current plan to `.clido/plans/` | `/plan save` | Use with `clido plan run` etc. |
+| `/plan list` | List saved plans on disk | `/plan list` | |
+
+With **`--planner`** or **`--plan`**, clido can also drive the **graph planner** UI; `/plan` still shows the current structured plan when one exists.
 
 ### Workflow
 
@@ -90,16 +106,16 @@ Slash commands are typed in the TUI input field and executed immediately when yo
 | `/profile new` | Create a new profile | `/profile new` | Launches the guided setup wizard |
 | `/profile edit [name]` | Edit a profile | `/profile edit cheap` | Edit provider, model, and API key for the named profile |
 | `/profile delete <name>` | Delete a profile | `/profile delete old-profile` | Cannot delete the currently active profile |
-| `/settings` | Open settings editor | `/settings` | Edit roles and default model; changes saved to `config.toml` |
 | `/workdir [path]` | Show or set working directory | `/workdir ~/projects/myapp` | Without argument shows current cwd |
-| `/check` | Run diagnostics on the current project | `/check` | Invokes the DiagnosticsTool |
+| `/check` | Run diagnostics on the current project | `/check` | Sends a diagnostics request to the agent |
 | `/index` | Show repo index stats | `/index` | Build with `clido index build` |
-| `/rules` | Show active CLIDO.md rules files | `/rules` | Overlay listing all discovered rules |
+| `/rules` | Show active project rules files | `/rules` | Lists discovered CLIDO / rules content |
 | `/image <path>` | Attach an image to the next message | `/image screenshot.png` | Supports PNG, JPEG, GIF, WebP |
 | `/stop` | Interrupt current run | `/stop` | Cancels the in-progress agent turn without exiting |
 | `/copy` | Copy last assistant message to clipboard | `/copy` | Uses OSC 52 escape sequence; requires terminal support |
-| `/notify [on\|off]` | Toggle desktop notifications | `/notify on` | Shows system notifications when agent completes a turn |
-| `/index` | Show codebase index stats | `/index` | Build the index with `clido index build` |
+| `/notify [on\|off]` | Toggle desktop notifications | `/notify on` | When enabled, notifies when a turn completes |
+| `/allow-path <path>` | Allow one-off access outside the workspace | `/allow-path /tmp/log.txt` | Session-scoped |
+| `/allowed-paths` | List paths allowed for this session | `/allowed-paths` | |
 
 ## Using slash commands
 

@@ -26,6 +26,7 @@ mod repl;
 mod run;
 mod sessions;
 mod setup;
+mod skills_cmd;
 mod spawn_tools;
 mod stats;
 pub(crate) mod text_input;
@@ -291,6 +292,12 @@ async fn dispatch(cli: cli::Cli) -> Result<(), anyhow::Error> {
         }
         Some(cli::Subcommand::Profile { cmd }) => {
             return profiles::run_profile(cmd).await;
+        }
+        Some(cli::Subcommand::Skills { cmd }) => {
+            let workspace_root = cli.workdir.clone().unwrap_or_else(|| {
+                env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
+            return skills_cmd::run_skills(cmd.clone(), &workspace_root);
         }
         Some(cli::Subcommand::ListSessions) => {
             eprintln!(

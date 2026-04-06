@@ -6,6 +6,9 @@
 //!
 //! Migration is incremental — overlays move here one at a time while legacy
 //! `Option<State>` fields continue to work via the existing cascade.
+//!
+//! Action enums and stack helpers are not all wired yet; suppress `dead_code` until migration finishes.
+#![allow(dead_code)]
 
 use crossterm::event::KeyEvent;
 

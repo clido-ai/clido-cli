@@ -1,5 +1,5 @@
-use crossterm::event::{KeyCode, KeyModifiers};
 use clido_planner::Complexity;
+use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::list_picker::ListPicker;
 use crate::overlay::{AppAction, ErrorOverlay, OverlayKeyResult, OverlayKind};
@@ -572,27 +572,45 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                     let value = st.input.trim().to_string();
                     match step {
                         ProfileCreateStep::Name => {
-                            // Optional: if user typed a name, validate uniqueness.
-                            // If blank, auto-generate later from provider.
-                            if !value.is_empty() {
-                                let dup = clido_core::load_config(&app.workspace_root)
-                                    .ok()
-                                    .map(|c| c.profiles.contains_key(&value))
-                                    .unwrap_or(false);
-                                if dup {
-                                    st.status =
-                                        Some(format!("  ✗ Profile '{}' already exists", value));
-                                    return;
+                            use super::state::ProfileCreateNameChoice;
+                            match st.profile_create_name_choice {
+                                ProfileCreateNameChoice::AutoGenerate => {
+                                    st.name.clear();
+                                    st.input.clear();
+                                    st.input_cursor = 0;
+                                    st.provider_picker = ProviderPickerState::new();
+                                    st.provider_picker.clamp();
+                                    st.mode = ProfileOverlayMode::Creating {
+                                        step: ProfileCreateStep::Provider,
+                                    };
                                 }
-                                st.name = value;
+                                ProfileCreateNameChoice::TypeCustomName => {
+                                    if value.is_empty() {
+                                        st.status = Some(
+                                            "  ✗ Enter a name, or press Up for auto-generated name"
+                                                .into(),
+                                        );
+                                        return;
+                                    }
+                                    let dup = clido_core::load_config(&app.workspace_root)
+                                        .ok()
+                                        .map(|c| c.profiles.contains_key(&value))
+                                        .unwrap_or(false);
+                                    if dup {
+                                        st.status =
+                                            Some(format!("  ✗ Profile '{}' already exists", value));
+                                        return;
+                                    }
+                                    st.name = value;
+                                    st.input.clear();
+                                    st.input_cursor = 0;
+                                    st.provider_picker = ProviderPickerState::new();
+                                    st.provider_picker.clamp();
+                                    st.mode = ProfileOverlayMode::Creating {
+                                        step: ProfileCreateStep::Provider,
+                                    };
+                                }
                             }
-                            st.input.clear();
-                            st.input_cursor = 0;
-                            st.provider_picker = ProviderPickerState::new();
-                            st.provider_picker.clamp();
-                            st.mode = ProfileOverlayMode::Creating {
-                                step: ProfileCreateStep::Provider,
-                            };
                         }
                         ProfileCreateStep::Provider => {
                             if let Some(id) = st.provider_picker.selected_id() {
@@ -658,7 +676,16 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                     st.api_key.clear();
                                     ProfileCreateStep::Model
                                 };
-                                st.mode = ProfileOverlayMode::Creating { step: next_step };
+                                if next_step == ProfileCreateStep::ApiKey
+                                    && !st.saved_keys.is_empty()
+                                {
+                                    st.mode = ProfileOverlayMode::PickingSavedKey {
+                                        selected: 0,
+                                        show_type_new_row: true,
+                                    };
+                                } else {
+                                    st.mode = ProfileOverlayMode::Creating { step: next_step };
+                                }
                             } else {
                                 st.status = Some("  ✗ Select a provider from the list".into());
                             }
@@ -720,6 +747,29 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                 }
                 Backspace => {
                     match step {
+                        ProfileCreateStep::Name => {
+                            if st.profile_create_name_choice
+                                == super::state::ProfileCreateNameChoice::TypeCustomName
+                                && !st.input.is_empty()
+                            {
+                                if event.modifiers.contains(Km::CONTROL) {
+                                    while st.input_cursor > 0 {
+                                        let b = char_byte_pos_tui(&st.input, st.input_cursor - 1);
+                                        let ch = st.input[..b].chars().last();
+                                        if ch.map(|c| c == ' ').unwrap_or(false)
+                                            && st.input_cursor > 1
+                                        {
+                                            break;
+                                        }
+                                        st.input_cursor -= 1;
+                                        let pos = char_byte_pos_tui(&st.input, st.input_cursor);
+                                        st.input.remove(pos);
+                                    }
+                                } else {
+                                    delete_char_before_cursor_pe(st);
+                                }
+                            }
+                        }
                         ProfileCreateStep::Provider => {
                             st.provider_picker.filter.pop();
                             st.provider_picker.clamp();
@@ -788,6 +838,10 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                     }
                 },
                 Up => match step {
+                    ProfileCreateStep::Name => {
+                        st.profile_create_name_choice =
+                            super::state::ProfileCreateNameChoice::AutoGenerate;
+                    }
                     ProfileCreateStep::Provider => {
                         if st.provider_picker.selected > 0 {
                             st.provider_picker.selected -= 1;
@@ -807,10 +861,15 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                         }
                     }
                     _ => {
+                        // Text steps (e.g. API key): jump to start of line.
                         st.input_cursor = 0;
                     }
                 },
                 Down => match step {
+                    ProfileCreateStep::Name => {
+                        st.profile_create_name_choice =
+                            super::state::ProfileCreateNameChoice::TypeCustomName;
+                    }
                     ProfileCreateStep::Provider => {
                         let vis = crossterm::terminal::size()
                             .map(|(_, h)| (h as usize).saturating_sub(12).max(3))
@@ -840,10 +899,20 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                         }
                     }
                     _ => {
+                        // Text steps: jump to end of line.
                         st.input_cursor = st.input.chars().count();
                     }
                 },
                 Char(c) => match step {
+                    ProfileCreateStep::Name => {
+                        use super::state::ProfileCreateNameChoice;
+                        if st.profile_create_name_choice == ProfileCreateNameChoice::AutoGenerate {
+                            st.profile_create_name_choice = ProfileCreateNameChoice::TypeCustomName;
+                        }
+                        let b = char_byte_pos_tui(&st.input, st.input_cursor);
+                        st.input.insert(b, c);
+                        st.input_cursor += 1;
+                    }
                     ProfileCreateStep::Provider => {
                         st.provider_picker.filter.push(c);
                         st.provider_picker.clamp();
@@ -855,7 +924,10 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                         }
                     }
                     ProfileCreateStep::ApiKey if c == 'k' && !st.saved_keys.is_empty() => {
-                        st.mode = ProfileOverlayMode::PickingSavedKey { selected: 0 };
+                        st.mode = ProfileOverlayMode::PickingSavedKey {
+                            selected: 0,
+                            show_type_new_row: true,
+                        };
                         st.status = None;
                     }
                     _ => {
@@ -1021,16 +1093,39 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
         },
 
         // ── PickingSavedKey: choose a saved API key ─────────────────────────
-        ProfileOverlayMode::PickingSavedKey { selected } => {
+        ProfileOverlayMode::PickingSavedKey {
+            selected,
+            show_type_new_row,
+        } => {
+            let n_keys = st.saved_keys.len();
+            let last_idx = if *show_type_new_row {
+                n_keys
+            } else {
+                n_keys.saturating_sub(1)
+            };
             match event.code {
                 Esc => {
-                    st.mode =
-                        ProfileOverlayMode::Creating { step: ProfileCreateStep::ApiKey };
+                    st.mode = ProfileOverlayMode::Creating {
+                        step: ProfileCreateStep::ApiKey,
+                    };
                     st.status = None;
                 }
                 Enter => {
-                    // Select the currently highlighted saved key
                     let idx = *selected;
+                    if *show_type_new_row && n_keys > 0 && idx == n_keys {
+                        st.mode = ProfileOverlayMode::Creating {
+                            step: ProfileCreateStep::ApiKey,
+                        };
+                        st.status = None;
+                        return;
+                    }
+                    if *show_type_new_row && n_keys == 0 && idx == 0 {
+                        st.mode = ProfileOverlayMode::Creating {
+                            step: ProfileCreateStep::ApiKey,
+                        };
+                        st.status = None;
+                        return;
+                    }
                     if idx < st.saved_keys.len() {
                         let offer = &st.saved_keys[idx];
                         let all_profiles = clido_core::load_config(&app.workspace_root)
@@ -1040,15 +1135,15 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                             let real_key =
                                 crate::setup::read_credential(&st.config_path, &offer.provider_id)
                                     .or_else(|| {
-                                        src_entry.api_key_env.as_ref().and_then(|e| {
-                                            std::env::var(e).ok()
-                                        })
+                                        src_entry
+                                            .api_key_env
+                                            .as_ref()
+                                            .and_then(|e| std::env::var(e).ok())
                                     })
                                     .or_else(|| src_entry.api_key.clone())
                                     .unwrap_or_default();
                             if !real_key.is_empty() {
                                 st.api_key = real_key;
-                                // Trigger a live model fetch for this provider + key
                                 spawn_model_fetch(
                                     st.provider.clone(),
                                     st.api_key.clone(),
@@ -1065,25 +1160,27 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                 };
                                 st.status = None;
                             } else {
-                                st.status =
-                                    Some("  ✗ Could not retrieve saved key".into());
+                                st.status = Some("  ✗ Could not retrieve saved key".into());
                             }
                         } else {
-                            st.status =
-                                Some("  ✗ Source profile not found".into());
+                            st.status = Some("  ✗ Source profile not found".into());
                         }
                     }
                 }
                 Up => {
                     if *selected > 0 {
-                        if let ProfileOverlayMode::PickingSavedKey { selected: s } = &mut st.mode {
+                        if let ProfileOverlayMode::PickingSavedKey { selected: s, .. } =
+                            &mut st.mode
+                        {
                             *s -= 1;
                         }
                     }
                 }
                 Down => {
-                    if *selected + 1 < st.saved_keys.len() {
-                        if let ProfileOverlayMode::PickingSavedKey { selected: s } = &mut st.mode {
+                    if *selected < last_idx {
+                        if let ProfileOverlayMode::PickingSavedKey { selected: s, .. } =
+                            &mut st.mode
+                        {
                             *s += 1;
                         }
                     }
@@ -1425,21 +1522,33 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     }
                 }
                 let _ = app.channels.path_permission_tx.send(path.clone());
-                app.push(ChatLine::Info(format!("  ✓ Allowed access to: {}", path.display())));
+                app.push(ChatLine::Info(format!(
+                    "  ✓ Allowed access to: {}",
+                    path.display()
+                )));
                 app.pending_path_permission = None;
                 return;
             }
             Char('n') | Char('N') | Esc => {
                 // Deny - send empty path to signal denial
-                let _ = app.channels.path_permission_tx.send(std::path::PathBuf::new());
-                app.push(ChatLine::Info(format!("  ✗ Denied access to: {}", path.display())));
+                let _ = app
+                    .channels
+                    .path_permission_tx
+                    .send(std::path::PathBuf::new());
+                app.push(ChatLine::Info(format!(
+                    "  ✗ Denied access to: {}",
+                    path.display()
+                )));
                 app.pending_path_permission = None;
                 return;
             }
             Char('a') | Char('A') => {
                 // Always allow - add to allowed paths for this session
                 app.allowed_external_paths.push(path.clone());
-                let _ = app.channels.allowed_paths_tx.send(app.allowed_external_paths.clone());
+                let _ = app
+                    .channels
+                    .allowed_paths_tx
+                    .send(app.allowed_external_paths.clone());
                 let _ = app.channels.path_permission_tx.send(path.clone());
                 app.push(ChatLine::Info(format!(
                     "  ✓ Added to allowed paths: {} (and granted access)",
@@ -1665,7 +1774,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 let all_profiles = clido_core::load_config(&app.workspace_root)
                     .map(|c| c.profiles)
                     .unwrap_or_default();
-                app.profile_overlay = Some(ProfileOverlayState::for_create(config_path, &all_profiles));
+                app.profile_overlay =
+                    Some(ProfileOverlayState::for_create(config_path, &all_profiles));
             }
             KeyCode::Char('e') => {
                 if let Some(picker) = app.profile_picker.take() {
@@ -1888,6 +1998,13 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.selected_cmd = None;
                 return;
             }
+            (Km::NONE, Char(d)) if d.is_ascii_digit() => {
+                let n = d.to_digit(10).unwrap_or(0) as usize;
+                if n > 0 && n <= completions.len().min(9) {
+                    app.selected_cmd = Some(n - 1);
+                    return;
+                }
+            }
             _ => {}
         }
     } else {
@@ -1990,7 +2107,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.rate_limit_next_ping = None;
                 app.rate_limit_ping_count = 0;
                 app.push(ChatLine::Info(
-                    "  ✗ Background rate-limit checks cancelled — retry manually when ready.".into(),
+                    "  ✗ Background rate-limit checks cancelled — retry manually when ready."
+                        .into(),
                 ));
             } else if app.editing_queued_item.is_some() {
                 // Discard the queue item being edited (don't put it back)

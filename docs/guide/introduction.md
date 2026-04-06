@@ -30,6 +30,7 @@ The agent loops autonomously — it calls tools, observes results, and continues
 - **MCP servers** — connect external tools over the Model Context Protocol
 - **Multiple providers** — Anthropic, OpenAI-compatible endpoints, OpenRouter, and local Ollama models
 - **Audit log** — every tool call is logged with inputs, outputs, and timing for review
+- **Skills** — drop markdown instructions in `.clido/skills/`; enable/disable via config or `/skills`; injected for the agent when relevant
 
 ## Why clido
 
@@ -38,7 +39,7 @@ The agent loops autonomously — it calls tools, observes results, and continues
 - **Persistent sessions** — pick up where you left off, with full history and context
 - **YAML workflows** — automate multi-step agent tasks declaratively
 - **MCP support** — extend the agent with external tools via the Model Context Protocol
-- **Built for CI/CD** — embed in pipelines and scripts with `--non-interactive` mode
+- **Built for CI/CD** — use `--print` for non-interactive runs and JSON with `--output-format json`
 
 ## A first look
 
@@ -82,3 +83,4 @@ $ clido
 - [Quick Start](/docs/guide/quick-start) — run your first prompt in five minutes
 - [TUI Guide](/docs/guide/tui) — learn the interactive interface
 - [Configuration](/docs/guide/configuration) — set your provider and model
+- [Skills](/docs/guide/skills) — reusable instructions in `.clido/skills/`

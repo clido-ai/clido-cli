@@ -153,9 +153,7 @@ fn draw_profile_name(f: &mut Frame, area: Rect, s: &SetupState) {
             Span::styled(PROFILE_NAME_PREFIX, Style::default().fg(Color::DarkGray)),
             Span::styled(
                 s.text_input.text.clone(),
-                Style::default()
-                    .fg(TUI_TEXT)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
             ),
         ])),
         input_area,
@@ -178,9 +176,7 @@ fn draw_provider(f: &mut Frame, area: Rect, s: &SetupState) {
                 ),
                 Span::styled(
                     format!("{:<16}", def.name),
-                    Style::default()
-                        .fg(TUI_TEXT)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("  {}", def.description),
@@ -472,9 +468,7 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
                             ),
                             Span::styled(
                                 "Custom\u{2026}",
-                                Style::default()
-                                    .fg(TUI_TEXT)
-                                    .add_modifier(Modifier::BOLD),
+                                Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
                             ),
                         ])
                     } else {
@@ -495,9 +489,7 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
                             ),
                             Span::styled(
                                 entry.id.clone(),
-                                Style::default()
-                                    .fg(TUI_TEXT)
-                                    .add_modifier(Modifier::BOLD),
+                                Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
                             ),
                         ])
                     } else {
@@ -654,9 +646,7 @@ fn draw_fast_intro(f: &mut Frame, area: Rect, s: &SetupState) {
                 ),
                 Span::styled(
                     format!("{:<24}", name),
-                    Style::default()
-                        .fg(TUI_TEXT)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(format!("  {}", desc), Style::default().fg(Color::DarkGray)),
             ])
@@ -726,9 +716,7 @@ fn draw_subagent_provider(f: &mut Frame, area: Rect, s: &SetupState) {
                 ),
                 Span::styled(
                     format!("{:<16}", def.name),
-                    Style::default()
-                        .fg(TUI_TEXT)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("  {}", def.description),
@@ -890,9 +878,7 @@ fn draw_fast_model(f: &mut Frame, area: Rect, s: &SetupState) {
                             ),
                             Span::styled(
                                 "Custom\u{2026}",
-                                Style::default()
-                                    .fg(TUI_TEXT)
-                                    .add_modifier(Modifier::BOLD),
+                                Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
                             ),
                         ])
                     } else {
@@ -913,9 +899,7 @@ fn draw_fast_model(f: &mut Frame, area: Rect, s: &SetupState) {
                             ),
                             Span::styled(
                                 e.id.clone(),
-                                Style::default()
-                                    .fg(TUI_TEXT)
-                                    .add_modifier(Modifier::BOLD),
+                                Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
                             ),
                         ])
                     } else {

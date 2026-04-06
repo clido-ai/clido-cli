@@ -122,6 +122,16 @@ pub(super) const TUI_CODE_FG: Color = Color::Rgb(212, 220, 235);
 
 /// Elevated / inset surface (tool error strip, code-adjacent panels) — same family as code bg.
 pub(super) const TUI_SURFACE_INSET: Color = TUI_CODE_BG;
+
+// ── Layout & copy rhythm (single gutter system for the whole TUI) ─────────────
+/// Primary left margin for chat rows, info lines, and chrome that aligns with transcript text.
+pub(super) const TUI_GUTTER: &str = "  ";
+/// Secondary indent (subsections, queue headers, welcome panel labels).
+pub(super) const TUI_GUTTER_SUB: &str = "    ";
+/// Tertiary indent (numbered lists, tool detail wrap, nested queue items).
+pub(super) const TUI_GUTTER_DEEP: &str = "      ";
+/// Clause separator in titles and hints (`  ·  `) — use everywhere instead of ad-hoc spacing.
+pub(super) const TUI_SEP: &str = "  ·  ";
 pub(super) const TUI_CODE_BORDER: Color = Color::Rgb(58, 66, 88);
 pub(super) const TUI_CODE_LANG: Color = Color::Rgb(190, 165, 235);
 /// Inline `code` in markdown — cool tint, never “warning yellow”.
@@ -916,7 +926,10 @@ mod tests {
 
     #[test]
     fn profile_overlay_for_create_starts_in_create_mode() {
-        let ov = ProfileOverlayState::for_create(std::path::PathBuf::from("/tmp/test.toml"), &Default::default());
+        let ov = ProfileOverlayState::for_create(
+            std::path::PathBuf::from("/tmp/test.toml"),
+            &Default::default(),
+        );
         assert!(ov.is_new);
         assert_eq!(
             ov.mode,
@@ -1444,6 +1457,11 @@ mod tests {
         assert!(
             text.contains("abc123"),
             "session picker should display session id, got:\n{}",
+            text
+        );
+        assert!(
+            text.contains("started (local · rel)") || text.contains("2025-01-01"),
+            "session picker should show explicit date column, got:\n{}",
             text
         );
     }

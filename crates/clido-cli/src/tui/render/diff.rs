@@ -61,10 +61,7 @@ pub(crate) fn render_diff(text: &str, width: usize) -> Vec<Line<'static>> {
         raw_line_count
     };
     let body: String = if truncated {
-        text.lines()
-            .take(keep_lines)
-            .collect::<Vec<_>>()
-            .join("\n")
+        text.lines().take(keep_lines).collect::<Vec<_>>().join("\n")
     } else {
         text.to_string()
     };

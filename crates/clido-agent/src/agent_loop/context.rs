@@ -329,15 +329,7 @@ pub(crate) async fn compact_for_model_request(
                 "context assembly exceeded budget={budget}; retrying with tighter budget and full compaction"
             );
             let tight = budget.saturating_sub(8192).max(16_000);
-            compact_with_summary(
-                messages,
-                system_prompt_tokens,
-                tight,
-                0.0,
-                provider,
-                config,
-            )
-            .await
+            compact_with_summary(messages, system_prompt_tokens, tight, 0.0, provider, config).await
         }
         Err(e) => Err(e),
     }

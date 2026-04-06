@@ -20,32 +20,29 @@ clido --resume abc123     # resume a specific session by ID prefix
 ## Layout
 
 ```
-╭─ clido ──────────────────────────────── claude-3-5-sonnet ──────────────────╮
-│                                                                               │
-│  [assistant]                                                                  │
-│  I've read src/main.rs. The issue is on line 42 — the match arm is           │
-│  missing a wildcard case. I'll fix it now.                                    │
-│                                                                               │
-│  [tool: Edit]  src/main.rs                                                    │
-│  + 42:    _ => Err(ParseError::Unknown),                                      │
-│                                                                               │
-│  [tool: Bash]  cargo check                                                    │
-│  ✓ Finished in 1.2s                                                           │
-│                                                                               │
-│  Done. The wildcard arm has been added and the project compiles cleanly.      │
-│                                                                               │
-├───────────────────────────────────────────────────────────────────────────────┤
-│ session:a1b2c3  $0.0034  1,240 tok  4 turns           [running] Edit         │
-├───────────────────────────────────────────────────────────────────────────────┤
-│ > _                                                                           │
-╰───────────────────────────────────────────────────────────────────────────────╯
+╭─ header: brand · model · profile · session … ───────────────────────────────╮
+│  [chat]  conversation, tools, markdown, code blocks                           │
+│  …                                                                            │
+├─ plan/todo (optional) ───────────────────────────────────────────────────────┤
+│  Plan · auto    ○ step one    › active step    ✓ done                        │
+├─ status strip ────────────────────────────────────────────────────────────────┤
+│  activity log / tool line · spinner                                            │
+├─ queue (optional) ─────────────────────────────────────────────────────────────┤
+│  current step / queued messages                                                │
+├─ hint ─────────────────────────────────────────────────────────────────────────┤
+│  key hints                                                                     │
+╰─ multiline input ─────────────────────────────────────────────────────────────╯
 ```
 
 | Area | Description |
 |------|-------------|
-| **Chat pane** (top) | Scrollable conversation history. Assistant messages, tool calls, and tool results appear here in order. |
-| **Status strip** (middle) | Session ID prefix, accumulated cost, token count, turn count, and current tool activity. |
-| **Input field** (bottom) | Single-line text input. Press Enter to send. Pasted text is inserted and waits for manual Enter. |
+| **Header** | Model, profile, workspace path, session id/title, token/cost hints. |
+| **Chat pane** | Scrollable conversation: user, assistant, tools, errors. |
+| **Plan / todo strip** | Optional panel between chat and status: **TodoWrite** steps (or plan snapshot), with ○ / › / ✓ markers. Controlled with `/plan on`, `/plan off`, `/plan auto` (default: **auto** hides on small terminals). |
+| **Status strip** | Short activity log and current tool; complements the header. |
+| **Input** | Multiline draft (grows up to a few lines); **Enter** sends, **Shift+Enter** newline. |
+
+See [Slash commands](/docs/reference/slash-commands) for the full command list (Git, plan, skills, workflows, etc.).
 
 ## Key bindings
 
@@ -94,23 +91,19 @@ clido --resume abc123     # resume a specific session by ID prefix
 
 ## Slash commands
 
-Type a slash command in the input field and press Enter:
+Type `/` in the input field for autocomplete, or see the full tables in **[Slash commands](/docs/reference/slash-commands)** (session, model, Git, **plan**, **skills**, workflows, profiles, memory, etc.).
 
-| Command | Description | Example |
-|---------|-------------|---------|
-| `/help` | Show all slash commands | `/help` |
-| `/sessions` | Open the session picker | `/sessions` |
-| `/clear` | Clear the chat display (session is preserved) | `/clear` |
-| `/plan` | Show the current planner task graph (if `--planner` is active) | `/plan` |
-| `/memory` | Search long-term memory | `/memory refactor patterns` |
-| `/cost` | Print accumulated cost and token usage | `/cost` |
-| `/model` | Show or switch active model | `/model gpt-4.1` |
-| `/workdir` | Show or set workdir used by tools | `/workdir ~/src/project` |
-| `/stop` | Interrupt current run without sending | `/stop` |
-| `/copy` | Copy last assistant message (OSC 52) | `/copy` |
-| `/enhance <prompt>` | Enhance prompt, review before sending | `/enhance fix the auth bug` |
-| `/notify [on\|off]` | Toggle desktop notifications | `/notify on` |
-| `/quit` | Quit clido | `/quit` |
+Common shortcuts:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Key bindings + slash commands in chat |
+| `/sessions` | Session picker |
+| `/skills list` | Skills on disk and whether each is active |
+| `/plan` / `/plan <task>` | Show plan or ask the agent to plan first |
+| `/todo` | Current TodoWrite list |
+| `/stop` | Cancel the current agent turn |
+| `/quit` | Exit clido |
 
 ## Permission prompts
 
@@ -153,17 +146,9 @@ Press Enter to resume the selected session. The chat history is loaded and you c
 
 ## Status strip
 
-The status strip at the bottom of the chat pane shows:
+The strip **below the chat** (and below the optional plan/todo panel) shows recent activity and the current tool. Detailed **session id, cost, tokens, and model** appear in the **header**, not only here.
 
-| Field | Example | Description |
-|-------|---------|-------------|
-| Session ID | `session:a1b2c3` | First 6 characters of the session ID |
-| Cost | `$0.0034` | Accumulated cost for this session |
-| Tokens | `1,240 tok` | Total tokens used (input + output) |
-| Turns | `4 turns` | Number of agent turns completed |
-| Activity | `[running] Edit` | Current tool name while agent is active |
-
-When the agent is idle the activity field is blank.
+When the agent is idle, the spinner clears; queued messages may still show above the input.
 
 ## Scroll behaviour
 

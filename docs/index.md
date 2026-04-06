@@ -19,7 +19,7 @@ hero:
 features:
   - icon: 🖥️
     title: Interactive TUI
-    details: A full terminal UI built with Ratatui. Real-time tool progress, session picker, slash commands, permission prompts, and a cost/token status strip.
+    details: Ratatui chat UI with tool progress, session picker, slash commands, optional plan/todo strip, permission prompts, and header cost/token context.
 
   - icon: 🧠
     title: Session Memory
@@ -37,7 +37,11 @@ features:
     title: MCP Servers
     details: Connect any Model Context Protocol tool server over stdio. External tools appear natively to the agent alongside built-in Bash, Read, Write, Grep, and Glob.
 
+  - icon: 🧩
+    title: Skills
+    details: Folder-based reusable playbooks with optional YAML front matter. You enable, disable, or whitelist them in config; the agent sees them in a dedicated skills block.
+
   - icon: 📦
     title: Open Source
-    details: Written in Rust. A clean multi-crate workspace designed to be extended. Add new tools, providers, or context strategies without touching the core loop.
+    details: Written in Rust. A clean multi-crate workspace designed to be extended. Add new tools, providers, skills, or context strategies without touching the core loop.
 ---

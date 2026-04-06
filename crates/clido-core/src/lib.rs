@@ -5,6 +5,7 @@ pub mod config_loader;
 pub mod error;
 pub mod model_prefs;
 pub mod pricing;
+pub mod skills;
 pub mod types;
 
 pub use config::{
@@ -13,8 +14,8 @@ pub use config::{
 };
 pub use config_loader::{
     agent_config_from_loaded, config_file_exists, delete_profile_from_config, global_config_dir,
-    global_config_path, load_config, switch_active_profile, upsert_profile_in_config, LoadedConfig,
-    ProfileEntry,
+    global_config_path, load_config, set_skill_disabled_in_project, switch_active_profile,
+    upsert_profile_in_config, LoadedConfig, ProfileEntry, SkillsSection,
 };
 pub use error::{ClidoError, Result};
 pub use model_prefs::ModelPrefs;

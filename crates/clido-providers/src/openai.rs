@@ -632,7 +632,7 @@ fn parse_openai_response(json: &serde_json::Value) -> Result<ModelResponse> {
             .unwrap_or("unknown provider error");
         let error_type = error["type"].as_str().unwrap_or("");
         let code = error["code"].as_str().unwrap_or("");
-        
+
         let full_msg = if !code.is_empty() {
             format!("{} ({}): {}", error_type, code, msg)
         } else if !error_type.is_empty() {
@@ -642,12 +642,12 @@ fn parse_openai_response(json: &serde_json::Value) -> Result<ModelResponse> {
         };
         return Err(ClidoError::Provider(full_msg));
     }
-    
+
     let id = json["id"].as_str().unwrap_or("").to_string();
     let model = json["model"].as_str().unwrap_or("").to_string();
-    let choices = json["choices"]
-        .as_array()
-        .ok_or_else(|| ClidoError::Provider("missing choices (provider may have returned an error)".into()))?;
+    let choices = json["choices"].as_array().ok_or_else(|| {
+        ClidoError::Provider("missing choices (provider may have returned an error)".into())
+    })?;
     let choice = choices
         .first()
         .ok_or_else(|| ClidoError::Provider("empty choices".into()))?;

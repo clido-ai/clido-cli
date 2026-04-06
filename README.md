@@ -13,7 +13,7 @@
 - **Safe by default** — Destructive or state-changing actions require your approval.
 - **Session-aware** — Resume after interrupt; cost and usage visible when you care.
 
-Planned capabilities include: core agent loop with tools, sessions, context and permissions (V1); JSON output and operator tooling (V1.5); multi-provider, sandboxing, packaging (V2); memory, MCP, semantic search, declarative workflows (V3); optional task-graph planner (V4).
+Shipped today: multi-provider agent with tools, TUI, sessions, memory, MCP, semantic search, YAML workflows, checkpoints, audit log, **skills** (folder-based reusable instructions), and plan/todo UX in the TUI. See `docs/guide/` for detail.
 
 ## Installation
 
@@ -45,15 +45,15 @@ Config is stored in `~/.config/clido/config.toml` (global) or `.clido/config.tom
 ```toml
 default_profile = "default"
 
-[profiles.default]
+[profile.default]
 provider = "anthropic"
 model = "claude-sonnet-4-5"
 
-[profiles.fast]
+[profile.fast]
 provider = "anthropic"
 model = "claude-haiku-4-5"
 
-[profiles.local]
+[profile.local]
 provider = "local"
 model = "llama3"
 base_url = "http://localhost:11434"
@@ -66,7 +66,7 @@ Switch profiles with `--profile fast` or `CLIDO_PROFILE=fast`.
 Each profile defines a provider, model, and optional credentials. The setup wizard and `clido profile create` store API keys in a separate `credentials` file alongside `config.toml` (with chmod 600 permissions), keeping secrets out of the main config.
 
 ```toml
-[profiles.myprofile]
+[profile.myprofile]
 provider = "anthropic"        # required — see Supported Providers below
 model = "claude-sonnet-4-5"   # required — model identifier
 api_key_env = "MY_KEY"        # optional — name of env var holding the key
@@ -74,7 +74,7 @@ base_url = "https://..."      # optional — override API endpoint
 # api_key = "sk-..."          # legacy fallback — prefer env var or credentials file
 
 # Optional fast/cheap provider for utility tasks (titles, summaries, etc.)
-[profiles.myprofile.fast]
+[profile.myprofile.fast]
 provider = "openai"
 model = "gpt-4o-mini"
 ```
@@ -130,6 +130,11 @@ In the TUI, press **Ctrl+P** to open the profile picker or use `/profile` slash 
 | `CLIDO_SYSTEM_PROMPT` | System prompt override |
 | `CLIDO_DATA_DIR` | Override data directory (sessions, index, audit) |
 | `CLIDO_SESSION_DIR` | Override session storage directory |
+| `CLIDO_SKILL_PATHS` | Extra directories to scan for skills (`:` or `;` separated) |
+
+### Skills (reusable instructions)
+
+Add `.md` or `.txt` files under **`.clido/skills/`** (project) or **`~/.clido/skills/`** (user). Optional YAML front matter sets `id`, `name`, `purpose`, etc. Control loading with **`[skills]`** in `config.toml` (`disabled`, `enabled` whitelist, `extra-paths`, `no-skills`, `auto-suggest`). CLI: `clido skills list|paths|enable|disable`. TUI: `/skills …`. Full guide: `docs/guide/skills.md`.
 
 ## Supported Providers
 

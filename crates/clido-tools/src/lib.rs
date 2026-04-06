@@ -64,7 +64,13 @@ pub fn default_registry_with_allowed_paths(
     workspace_root: PathBuf,
     allowed_external: Vec<PathBuf>,
 ) -> ToolRegistry {
-    default_registry_with_options_and_allowed_paths(workspace_root, Vec::new(), false, allowed_external).0
+    default_registry_with_options_and_allowed_paths(
+        workspace_root,
+        Vec::new(),
+        false,
+        allowed_external,
+    )
+    .0
 }
 
 /// Build registry with blocked paths excluded from all file tools and Bash.
@@ -90,7 +96,10 @@ pub fn default_registry_with_options_and_allowed_paths(
     blocked: Vec<PathBuf>,
     sandbox: bool,
     allowed_external: Vec<PathBuf>,
-) -> (ToolRegistry, std::sync::Arc<std::sync::Mutex<Vec<TodoItem>>>) {
+) -> (
+    ToolRegistry,
+    std::sync::Arc<std::sync::Mutex<Vec<TodoItem>>>,
+) {
     let guard = PathGuard::new(workspace_root.clone())
         .with_blocked(blocked.clone())
         .with_allowed_external(allowed_external);

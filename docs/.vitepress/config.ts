@@ -41,6 +41,7 @@ export default defineConfig({
           text: 'Features',
           items: [
             { text: 'Providers & Models', link: '/guide/providers' },
+            { text: 'Skills', link: '/guide/skills' },
             { text: 'Memory', link: '/guide/memory' },
             { text: 'Repository Index', link: '/guide/index-search' },
             { text: 'Workflows', link: '/guide/workflows' },

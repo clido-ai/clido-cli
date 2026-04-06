@@ -25,7 +25,7 @@ type TodoStore = std::sync::Arc<std::sync::Mutex<Vec<TodoItem>>>;
 /// Falls back to safe defaults when model is not recognized.
 fn detect_context_window(model: &str) -> u32 {
     let model_lower = model.to_lowercase();
-    
+
     // kimi (Moonshot AI) models
     if model_lower.contains("kimi") {
         if model_lower.contains("k2") || model_lower.contains("-k2-") {
@@ -37,12 +37,12 @@ fn detect_context_window(model: &str) -> u32 {
         // Default for other kimi models (k1, etc.)
         return 128_000;
     }
-    
+
     // Cerebras models
     if model_lower.contains("cerebras") {
         return 128_000; // Cerebras models typically have 128k
     }
-    
+
     // DeepSeek models
     if model_lower.contains("deepseek") {
         if model_lower.contains("coder") || model_lower.contains("chat") {
@@ -50,7 +50,7 @@ fn detect_context_window(model: &str) -> u32 {
         }
         return 64_000; // Older DeepSeek models have 64k
     }
-    
+
     // Mistral models
     if model_lower.contains("mistral") {
         if model_lower.contains("large") || model_lower.contains("medium") {
@@ -58,7 +58,7 @@ fn detect_context_window(model: &str) -> u32 {
         }
         return 32_000; // Mistral small/tiny have 32k
     }
-    
+
     // Llama models
     if model_lower.contains("llama") {
         if model_lower.contains("3") || model_lower.contains("-3-") {
@@ -66,17 +66,17 @@ fn detect_context_window(model: &str) -> u32 {
         }
         return 8_192; // Llama 2 has 4k/8k
     }
-    
+
     // Gemma models
     if model_lower.contains("gemma") {
         return 8_192; // Gemma typically has 8k
     }
-    
+
     // Phi models
     if model_lower.contains("phi") {
         return 128_000; // Phi-3/4 have 128k
     }
-    
+
     // Qwen models
     if model_lower.contains("qwen") {
         if model_lower.contains("2.5") || model_lower.contains("-2.5-") {
@@ -87,7 +87,7 @@ fn detect_context_window(model: &str) -> u32 {
         }
         return 128_000; // Default for newer Qwen
     }
-    
+
     // Claude models (should be in pricing table, but just in case)
     if model_lower.contains("claude") {
         if model_lower.contains("3") {
@@ -98,7 +98,7 @@ fn detect_context_window(model: &str) -> u32 {
         }
         return 100_000; // Claude 2 has 100k
     }
-    
+
     // GPT-4 models (should be in pricing table, but just in case)
     if model_lower.contains("gpt-4") || model_lower.contains("gpt4") {
         if model_lower.contains("32k") {
@@ -109,7 +109,7 @@ fn detect_context_window(model: &str) -> u32 {
         }
         return 128_000; // GPT-4 Turbo and later have 128k
     }
-    
+
     // GPT-3.5 models
     if model_lower.contains("gpt-3.5") || model_lower.contains("gpt3.5") {
         if model_lower.contains("16k") {
@@ -117,22 +117,24 @@ fn detect_context_window(model: &str) -> u32 {
         }
         return 4_096; // Standard GPT-3.5 has 4k
     }
-    
+
     // Gemini models (should be in pricing table, but just in case)
     if model_lower.contains("gemini") {
-        if model_lower.contains("1.5") || model_lower.contains("-1.5-") {
-            if model_lower.contains("flash") || model_lower.contains("pro") {
-                return 1_000_000; // Gemini 1.5 has 1M context!
-            }
+        if (model_lower.contains("1.5") || model_lower.contains("-1.5-"))
+            && (model_lower.contains("flash") || model_lower.contains("pro"))
+        {
+            return 1_000_000; // Gemini 1.5 has 1M context!
         }
         return 32_768; // Older Gemini has 32k
     }
-    
+
     // Groq hosted models often have limited context
-    if model_lower.contains("groq") || model_lower.starts_with("llama-3") && model_lower.contains("groq") {
+    if model_lower.contains("groq")
+        || model_lower.starts_with("llama-3") && model_lower.contains("groq")
+    {
         return 8_192; // Groq often limits to 8k
     }
-    
+
     // Safe default for unknown models - 128k is a common modern standard
     // This is safer than 200k which causes issues with many providers
     128_000
@@ -332,6 +334,7 @@ impl AgentSetup {
 /// Core file tools (with filters + optional external paths), MCP, spawn worker/reviewer tools,
 /// and the base [`AgentConfig`] / fast-provider pair (before routing rules and token limits).
 /// `main_provider` must be the **unwrapped** provider from `make_provider` (before `RetryProvider::wrap`).
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(crate) fn build_full_tool_registry(
     cli: &Cli,
     workspace_root: &Path,
@@ -379,85 +382,20 @@ pub(crate) fn build_full_tool_registry(
     }
 
     {
-        let mut skill_texts = Vec::new();
-        let skills_dir = workspace_root.join(".clido").join("skills");
-        if skills_dir.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&skills_dir) {
-                let mut paths: Vec<_> = entries
-                    .filter_map(|e| e.ok())
-                    .filter(|e| {
-                        e.path()
-                            .extension()
-                            .map(|ext| ext == "md" || ext == "txt")
-                            .unwrap_or(false)
-                    })
-                    .map(|e| e.path())
-                    .collect();
-                paths.sort();
-                for path in paths {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        let trimmed = content.trim();
-                        if !trimmed.is_empty() {
-                            let name = path
-                                .file_stem()
-                                .map(|s| s.to_string_lossy().to_string())
-                                .unwrap_or_default();
-                            skill_texts.push(format!("### {}\n{}", name, trimmed));
-                        }
-                    }
-                }
+        match clido_core::skills::load_skills_prompt_for_workspace(workspace_root, &loaded.skills) {
+            Ok(Some(block)) => {
+                system_prompt = format!("{system_prompt}\n\n{block}");
             }
-        }
-        let global_skills_dir = std::env::var("HOME")
-            .map(|h| std::path::PathBuf::from(h).join(".clido").join("skills"))
-            .ok();
-        if let Some(ref global_skills) = global_skills_dir {
-            if global_skills.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(global_skills) {
-                    let mut paths: Vec<_> = entries
-                        .filter_map(|e| e.ok())
-                        .filter(|e| {
-                            e.path()
-                                .extension()
-                                .map(|ext| ext == "md" || ext == "txt")
-                                .unwrap_or(false)
-                        })
-                        .map(|e| e.path())
-                        .collect();
-                    paths.sort();
-                    for path in paths {
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            let trimmed = content.trim();
-                            if !trimmed.is_empty() {
-                                let name = path
-                                    .file_stem()
-                                    .map(|s| s.to_string_lossy().to_string())
-                                    .unwrap_or_default();
-                                if !skill_texts
-                                    .iter()
-                                    .any(|s| s.starts_with(&format!("### {}\n", name)))
-                                {
-                                    skill_texts.push(format!("### {}\n{}", name, trimmed));
-                                }
-                            }
-                        }
-                    }
-                }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(target: "clido::skills", "failed to load skills: {e}");
             }
-        }
-        if !skill_texts.is_empty() {
-            system_prompt = format!(
-                "{}\n\n<skills>\n{}\n</skills>",
-                system_prompt,
-                skill_texts.join("\n\n")
-            );
         }
     }
 
     let provider_name = profile.provider.as_str();
     let model_name = cli.model.as_deref().unwrap_or(&profile.model);
-    let family =
-        clido_agent::provider_prompts::ProviderFamily::detect(provider_name, model_name);
+    let family = clido_agent::provider_prompts::ProviderFamily::detect(provider_name, model_name);
     let suffix = clido_agent::provider_prompts::provider_specific_instructions(family);
     if !suffix.is_empty() {
         system_prompt = format!("{}\n{}", system_prompt, suffix);
@@ -537,7 +475,8 @@ pub(crate) fn regenerate_tool_registry(
     todo_store: TodoStore,
     allowed_external_paths: &[std::path::PathBuf],
 ) -> Result<ToolRegistry, anyhow::Error> {
-    let loaded = load_config(workspace_root).map_err(|e| CliError::Usage(format!("load config: {e}")))?;
+    let loaded =
+        load_config(workspace_root).map_err(|e| CliError::Usage(format!("load config: {e}")))?;
     let profile_name = cli
         .profile
         .as_deref()
@@ -545,7 +484,8 @@ pub(crate) fn regenerate_tool_registry(
     let profile = loaded
         .get_profile(profile_name)
         .map_err(|e| CliError::Usage(e.to_string()))?;
-    LoadedConfig::validate_provider(&profile.provider).map_err(|e| CliError::Usage(e.to_string()))?;
+    LoadedConfig::validate_provider(&profile.provider)
+        .map_err(|e| CliError::Usage(e.to_string()))?;
     let provider = make_provider(
         profile_name,
         profile,

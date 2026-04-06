@@ -206,6 +206,8 @@ pub(super) struct App {
     pub(super) last_executed_step_num: Option<usize>,
     /// Shared todo list written by the agent via the TodoWrite tool.
     pub(super) todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
+    /// Whether to show the plan/todo strip (`/plan on|off|auto`).
+    pub(super) plan_panel_visibility: PlanPanelVisibility,
     /// Track whether we have already shown the empty-input hint this session.
     pub(super) empty_input_hint_shown: bool,
     /// Pending `/enhance` request — set by cmd_enhance, consumed by event_loop.
@@ -349,6 +351,7 @@ impl App {
             last_executed_step_num: None,
             plan_dry_run,
             todo_store,
+            plan_panel_visibility: PlanPanelVisibility::default(),
             empty_input_hint_shown: false,
             pending_enhance: None,
             enhancing: false,
@@ -495,21 +498,11 @@ impl App {
                 per_turn_model
             )));
             self.push(ChatLine::User(actual_prompt.clone()));
-            if self.text_input.history.last().map(|s| s.as_str()) != Some(text.as_str()) {
-                self.text_input.history.push(text);
-                if self.text_input.history.len() > 1000 {
-                    self.text_input.history.remove(0);
-                }
-            }
+            self.text_input.push_history(&text);
             self.channels.prompt_tx.send(actual_prompt)
         } else {
             self.push(ChatLine::User(text.clone()));
-            if self.text_input.history.last().map(|s| s.as_str()) != Some(text.as_str()) {
-                self.text_input.history.push(text.clone());
-                if self.text_input.history.len() > 1000 {
-                    self.text_input.history.remove(0);
-                }
-            }
+            self.text_input.push_history(&text);
             self.channels.prompt_tx.send(text)
         };
 
@@ -884,7 +877,11 @@ impl App {
             let start_col = display_col_to_char_idx(line, sc);
             let end_col = display_col_to_char_idx(
                 line,
-                if row == er { ec + 1 } else { line_display_width(line) },
+                if row == er {
+                    ec + 1
+                } else {
+                    line_display_width(line)
+                },
             );
 
             let chars: Vec<char> = line.chars().collect();

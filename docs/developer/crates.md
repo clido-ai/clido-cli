@@ -161,7 +161,7 @@ Token counting and context assembly (system prompt + memory + history) before ea
 | `assemble()` | Build final message list for provider call |
 | `estimate_tokens_str()` | Approximate token count for a string |
 | `DEFAULT_MAX_CONTEXT_TOKENS` | Default context window (200,000) |
-| `DEFAULT_COMPACTION_THRESHOLD` | Default compaction trigger (0.75) |
+| `DEFAULT_COMPACTION_THRESHOLD` | Default compaction trigger (**0.58**) |
 
 Also contains a `ReadCache` for deduplicating file reads within a session.
 

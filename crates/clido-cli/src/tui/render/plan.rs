@@ -7,10 +7,241 @@ use ratatui::{
 };
 
 use clido_planner::{Complexity, Plan, TaskStatus};
+use clido_tools::TodoStatus;
 
+use crate::tui::state::PlanPanelVisibility;
 use crate::tui::*;
 
 use super::widgets::truncate_chars;
+
+// ── Plan / todo strip (main layout, above status) ─────────────────────────────
+
+/// One row in the plan/todo panel (todos, planner snapshot, or status hint).
+#[derive(Debug, Clone)]
+pub(crate) struct PlanPanelStep {
+    pub status: PlanPanelStepStatus,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanPanelStepStatus {
+    Pending,
+    Active,
+    Completed,
+    Blocked,
+}
+
+/// Collect steps to show: live `TodoWrite` list wins, then planner snapshot, then fallbacks.
+pub(crate) fn gather_plan_panel_steps(app: &App) -> Vec<PlanPanelStep> {
+    if let Ok(todos) = app.todo_store.lock() {
+        if !todos.is_empty() {
+            return todos
+                .iter()
+                .map(|t| PlanPanelStep {
+                    status: match t.status {
+                        TodoStatus::Pending => PlanPanelStepStatus::Pending,
+                        TodoStatus::InProgress => PlanPanelStepStatus::Active,
+                        TodoStatus::Done => PlanPanelStepStatus::Completed,
+                        TodoStatus::Blocked => PlanPanelStepStatus::Blocked,
+                    },
+                    text: t.content.clone(),
+                })
+                .collect();
+        }
+    }
+
+    if let Some(ref plan) = app.plan.last_plan_snapshot {
+        if !plan.tasks.is_empty() {
+            return plan
+                .tasks
+                .iter()
+                .map(|t| PlanPanelStep {
+                    status: match t.status {
+                        TaskStatus::Pending => PlanPanelStepStatus::Pending,
+                        TaskStatus::Running => PlanPanelStepStatus::Active,
+                        TaskStatus::Done => PlanPanelStepStatus::Completed,
+                        TaskStatus::Failed => PlanPanelStepStatus::Blocked,
+                        TaskStatus::Skipped => PlanPanelStepStatus::Completed,
+                    },
+                    text: t.description.clone(),
+                })
+                .collect();
+        }
+    }
+
+    if let Some(ref tasks) = app.plan.last_plan {
+        if !tasks.is_empty() {
+            return tasks
+                .iter()
+                .map(|s| PlanPanelStep {
+                    status: PlanPanelStepStatus::Pending,
+                    text: s.clone(),
+                })
+                .collect();
+        }
+    }
+
+    if app.plan.awaiting_plan_response {
+        return vec![PlanPanelStep {
+            status: PlanPanelStepStatus::Active,
+            text: "Waiting for structured plan…".to_string(),
+        }];
+    }
+
+    if app.busy {
+        if let Some(ref s) = app.current_step {
+            return vec![PlanPanelStep {
+                status: PlanPanelStepStatus::Active,
+                text: s.clone(),
+            }];
+        }
+    }
+
+    Vec::new()
+}
+
+fn plan_panel_content_row_count(step_count: usize) -> u16 {
+    const MAX_STEP_LINES: usize = 5;
+    if step_count == 0 {
+        return 0;
+    }
+    if step_count <= MAX_STEP_LINES {
+        step_count as u16
+    } else {
+        // Reserve one row for "+N more".
+        MAX_STEP_LINES as u16
+    }
+}
+
+/// Vertical space for the plan/todo strip (0 = hidden).
+pub(crate) fn plan_panel_height_for_layout(
+    vis: PlanPanelVisibility,
+    term_w: u16,
+    term_h: u16,
+    steps: &[PlanPanelStep],
+) -> u16 {
+    if matches!(vis, PlanPanelVisibility::Off) {
+        return 0;
+    }
+
+    /// Need enough width for gutter + marker + reasonable text.
+    const MIN_W: u16 = 52;
+    /// Auto: only on larger terminals so chat + input stay usable.
+    const MIN_TERM_H_AUTO: u16 = 28;
+    /// On: still hide when the terminal is unusably short.
+    const MIN_TERM_H_ON: u16 = 22;
+    const HEADER_ROWS: u16 = 1;
+
+    if term_w < MIN_W {
+        return 0;
+    }
+
+    let empty = steps.is_empty();
+    let body_rows = plan_panel_content_row_count(steps.len());
+
+    match vis {
+        PlanPanelVisibility::Off => 0,
+        PlanPanelVisibility::Auto => {
+            if term_h < MIN_TERM_H_AUTO || empty {
+                return 0;
+            }
+            HEADER_ROWS + body_rows
+        }
+        PlanPanelVisibility::On => {
+            if term_h < MIN_TERM_H_ON {
+                return 0;
+            }
+            if empty {
+                HEADER_ROWS + 1
+            } else {
+                HEADER_ROWS + body_rows
+            }
+        }
+    }
+}
+
+/// Build wrapped lines for the plan/todo strip (`plan_h` rows from [`plan_panel_height_for_layout`]).
+pub(crate) fn build_plan_todo_strip_lines(
+    app: &App,
+    steps: &[PlanPanelStep],
+    width: u16,
+) -> Vec<Line<'static>> {
+    let w = width as usize;
+    let dim = Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM);
+    let header_note = match app.plan_panel_visibility {
+        PlanPanelVisibility::Auto => "auto",
+        PlanPanelVisibility::On => "on",
+        PlanPanelVisibility::Off => "off",
+    };
+    let mut out: Vec<Line<'static>> = vec![Line::from(vec![
+        Span::styled(
+            format!("{TUI_GUTTER}Plan"),
+            dim.add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!("  ·  {header_note}"), dim),
+    ])];
+
+    if steps.is_empty() {
+        out.push(Line::from(vec![Span::styled(
+            format!("{TUI_GUTTER}No active steps — use /plan <task> or let the agent set todos."),
+            dim,
+        )]));
+        return out;
+    }
+
+    const MAX_STEP_LINES: usize = 5;
+    let show_more = steps.len() > MAX_STEP_LINES;
+    let take = if show_more {
+        MAX_STEP_LINES - 1
+    } else {
+        steps.len().min(MAX_STEP_LINES)
+    };
+
+    let prefix_cols = 4usize;
+    let text_budget = w.saturating_sub(prefix_cols).max(12);
+
+    for step in steps.iter().take(take) {
+        let (icon, icon_style, text_style) = match step.status {
+            PlanPanelStepStatus::Pending => (
+                "○",
+                Style::default().fg(TUI_MUTED),
+                Style::default().fg(TUI_ROW_DIM),
+            ),
+            PlanPanelStepStatus::Active => (
+                "›",
+                Style::default()
+                    .fg(TUI_SOFT_ACCENT)
+                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(TUI_TEXT),
+            ),
+            PlanPanelStepStatus::Completed => (
+                "✓",
+                Style::default().fg(TUI_STATE_OK),
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+            ),
+            PlanPanelStepStatus::Blocked => (
+                "!",
+                Style::default().fg(TUI_STATE_WARN),
+                Style::default().fg(TUI_STATE_WARN),
+            ),
+        };
+        let truncated = truncate_chars(&step.text, text_budget);
+        out.push(Line::from(vec![
+            Span::styled(format!("{TUI_GUTTER}{icon} "), icon_style),
+            Span::styled(truncated, text_style),
+        ]));
+    }
+
+    if show_more {
+        let n = steps.len().saturating_sub(take);
+        out.push(Line::from(vec![Span::styled(
+            format!("{TUI_GUTTER}…  +{n} more"),
+            dim,
+        )]));
+    }
+
+    out
+}
 
 pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
     let editor = match &app.plan.editor {
@@ -76,23 +307,17 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         task_lines.push(Line::raw(""));
 
         let desc_style = if form.focused_field == TaskEditField::Description {
-            Style::default()
-                .fg(TUI_TEXT)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(TUI_MUTED)
         };
         let notes_style = if form.focused_field == TaskEditField::Notes {
-            Style::default()
-                .fg(TUI_TEXT)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(TUI_MUTED)
         };
         let comp_style = if form.focused_field == TaskEditField::Complexity {
-            Style::default()
-                .fg(TUI_TEXT)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(TUI_MUTED)
         };
@@ -124,7 +349,9 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
             Complexity::High => (
                 Style::default().fg(TUI_MUTED),
                 Style::default().fg(TUI_MUTED),
-                Style::default().fg(TUI_STATE_ERR).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(TUI_STATE_ERR)
+                    .add_modifier(Modifier::BOLD),
             ),
         };
         task_lines.push(Line::from(vec![
@@ -136,9 +363,7 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         task_lines.push(Line::raw(""));
         task_lines.push(Line::from(vec![Span::styled(
             "  Tab=next field  Enter=save  Esc=cancel",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]));
     } else {
         // Task list with selection highlight
@@ -169,13 +394,13 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
             };
 
             let complexity_badge = match task.complexity {
-                Complexity::Low => {
-                    Span::styled(" [low] ", Style::default().fg(TUI_MUTED).bg(bg))
-                }
+                Complexity::Low => Span::styled(" [low] ", Style::default().fg(TUI_MUTED).bg(bg)),
                 Complexity::Medium => {
                     Span::styled(" [med] ", Style::default().fg(TUI_STATE_WARN).bg(bg))
                 }
-                Complexity::High => Span::styled(" [high]", Style::default().fg(TUI_STATE_ERR).bg(bg)),
+                Complexity::High => {
+                    Span::styled(" [high]", Style::default().fg(TUI_STATE_ERR).bg(bg))
+                }
             };
 
             let skip_str = if task.skip { "⊘ " } else { "  " };
@@ -207,9 +432,7 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         task_lines.push(Line::raw(""));
         task_lines.push(Line::from(vec![Span::styled(
             progress,
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]));
     }
 
@@ -235,9 +458,7 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
             hint,
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )])),
         hint_area,
     );
@@ -312,37 +533,27 @@ pub(crate) fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) 
         Span::styled("  ↑↓←→", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " navigate  ",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ),
         Span::styled("Enter", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " new line  ",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ),
         Span::styled("Ctrl+S", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " save  ",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ),
         Span::styled("Esc", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " discard  ",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ),
         Span::styled("Ctrl+C", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " discard",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ),
     ]));
     frame.render_widget(hint, hint_area);
@@ -616,31 +827,81 @@ pub(crate) fn render_workflow_editor(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled("  ↑↓←→", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " navigate  ",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ),
         Span::styled("Enter", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " new line  ",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ),
         Span::styled("Ctrl+S", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " validate & save  ",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ),
         Span::styled("Esc", Style::default().fg(TUI_MUTED)),
         Span::styled(
             " discard",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ),
     ]));
     frame.render_widget(hint, hint_area);
+}
+
+#[cfg(test)]
+mod plan_panel_tests {
+    use super::*;
+
+    fn sample_steps(n: usize) -> Vec<PlanPanelStep> {
+        (0..n)
+            .map(|i| PlanPanelStep {
+                status: PlanPanelStepStatus::Pending,
+                text: format!("step {i}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn panel_off_always_zero_height() {
+        let steps = sample_steps(3);
+        assert_eq!(
+            plan_panel_height_for_layout(PlanPanelVisibility::Off, 80, 40, &steps),
+            0
+        );
+    }
+
+    #[test]
+    fn auto_requires_tall_terminal_and_content() {
+        let steps = sample_steps(1);
+        assert_eq!(
+            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 27, &steps),
+            0
+        );
+        assert!(plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 28, &steps) > 0);
+        assert_eq!(
+            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 40, &[]),
+            0
+        );
+    }
+
+    #[test]
+    fn on_shows_placeholder_when_empty() {
+        assert_eq!(
+            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 22, &[]),
+            2
+        );
+        assert_eq!(
+            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 21, &[]),
+            0
+        );
+    }
+
+    #[test]
+    fn narrow_terminal_hides_panel() {
+        let steps = sample_steps(2);
+        assert_eq!(
+            plan_panel_height_for_layout(PlanPanelVisibility::On, 50, 30, &steps),
+            0
+        );
+    }
 }

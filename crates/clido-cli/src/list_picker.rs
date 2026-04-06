@@ -38,6 +38,7 @@ pub struct ListPicker<T> {
     pub filterable: bool,
 }
 
+#[allow(dead_code)]
 impl<T: PickerItem> ListPicker<T> {
     /// Create a new picker with the given items and visible row count.
     pub fn new(items: Vec<T>, visible_rows: usize) -> Self {

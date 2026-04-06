@@ -68,10 +68,7 @@ fn multiline_input_paragraph(
             break;
         };
         let slice: String = if line_idx == cursor_line_idx {
-            line.chars()
-                .skip(h_skip)
-                .take(max_line_chars)
-                .collect()
+            line.chars().skip(h_skip).take(max_line_chars).collect()
         } else {
             line.chars().take(max_line_chars).collect()
         };
@@ -132,9 +129,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     if !app.provider.is_empty() || !app.model.is_empty() {
         let model_str = if app.per_turn_prev_model.is_some() {
-            format!("{}  {}⁺", app.provider, app.model)
+            format!("{}{}{}⁺", app.provider, TUI_SEP, app.model)
         } else {
-            format!("{}  {}", app.provider, app.model)
+            format!("{}{}{}", app.provider, TUI_SEP, app.model)
         };
         hline1.push(Span::styled("  │ ", Style::default().fg(TUI_DIVIDER)));
         hline1.push(Span::styled(model_str, dim));
@@ -146,18 +143,18 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             .fg(TUI_SOFT_ACCENT)
             .add_modifier(Modifier::BOLD),
     ));
-    // Session info compact: id + title in one span
+    // Session: explicit labels so the header is self-explanatory.
     if let Some(ref session_id) = app.current_session_id {
         let short_id = session_id[..session_id.len().min(8)].to_string();
         hline1.push(Span::styled(
-            format!("  #{}", short_id),
+            format!("{TUI_SEP}session #{short_id}"),
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ));
     }
     if let Some(ref title) = app.session_title {
         let title_str = title.clone();
         hline1.push(Span::styled(
-            format!("  ·  {}", title_str),
+            format!("{TUI_SEP}title: {title_str}"),
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ));
     }
@@ -169,7 +166,10 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             ("○", TUI_MUTED)
         };
         hline1.push(Span::styled("  │ ", Style::default().fg(TUI_DIVIDER)));
-        hline1.push(Span::styled(format!("r {}", dot), Style::default().fg(color).add_modifier(Modifier::DIM)));
+        hline1.push(Span::styled(
+            format!("reviewer {dot}"),
+            Style::default().fg(color).add_modifier(Modifier::DIM),
+        ));
     }
 
     // Line 2: dir · cost/tokens
@@ -182,7 +182,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             } else {
                 raw
             };
-            format!("  {}", short)
+            format!("{TUI_GUTTER}{short}")
         },
         dim,
     )];
@@ -203,7 +203,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let pct = (app.stats.session_input_tokens as f64 / app.context_max_tokens as f64
                 * 100.0)
                 .min(100.0);
-            format!("  {:.0}% window", pct)
+            format!("{TUI_SEP}{:.0}% context", pct)
         } else {
             String::new()
         };
@@ -213,12 +213,12 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         if is_subscription {
             // Subscription providers: show tokens + turns, no dollar cost
             let turn_str = if app.stats.session_turn_count > 0 {
-                format!("  {} turns", app.stats.session_turn_count)
+                format!("{TUI_SEP}{} turns", app.stats.session_turn_count)
             } else {
                 String::new()
             };
             hline2.push(Span::styled(
-                format!("   session: {}{}{}", tok_str, turn_str, ctx_str),
+                format!("{TUI_SEP}session: {}{}{}", tok_str, turn_str, ctx_str),
                 dim,
             ));
         } else {
@@ -229,13 +229,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 format!("${:.4}", app.stats.session_total_cost_usd)
             };
             hline2.push(Span::styled(
-                format!("   session: {}  {}{}", cost_str, tok_str, ctx_str),
+                format!("{TUI_SEP}session: {}  {}{}", cost_str, tok_str, ctx_str),
                 dim,
             ));
         }
     } else if let Some(budget) = app.max_budget_usd {
         if !clido_providers::is_subscription_provider(&app.provider) {
-            hline2.push(Span::styled(format!("   budget: ${:.2}", budget), dim));
+            hline2.push(Span::styled(format!("{TUI_SEP}budget ${:.2}", budget), dim));
         }
     }
 
@@ -251,17 +251,24 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         2
     };
 
-    // Layout: header | chat | status (2) | queue (1) | hint (1) | input (dynamic)
+    // Layout: header | chat | plan/todo (0–N) | status (2) | queue (1) | hint (1) | input
     // Input grows with content: 1 line of text = 3 rows (2 borders + 1), capped at 12.
     // When very narrow (< 40), collapse optional rows to avoid layout panics.
     let input_line_count = app.text_input.text.matches('\n').count() + 1;
     // Up to 6 content rows (+ borders) so longer drafts stay visible on tall terminals.
     let input_h = (input_line_count as u16 + 2).clamp(3, 8);
     let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
+    let plan_steps = gather_plan_panel_steps(app);
+    let plan_h = plan_panel_height_for_layout(
+        app.plan_panel_visibility,
+        area.width,
+        area.height,
+        &plan_steps,
+    );
     // Queue area: height = header + items, but reserve enough chat space (min 10 lines).
     // Dynamic — fills available vertical space on tall terminals.
     let min_chat_h = 10u16;
-    let reserved_h = header_h + status_h + hint_h + input_h + 2; // chat borders
+    let reserved_h = header_h + plan_h + status_h + hint_h + input_h + 2; // chat borders
     let available_for_queue = area.height.saturating_sub(min_chat_h + reserved_h);
     let queue_h = if app.current_step.is_some() && !app.queued.is_empty() {
         let total = 1 + 1 + app.queued.len();
@@ -274,10 +281,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     } else {
         0 // Nothing to show
     };
-    let [header_area, chat_area, status_area, queue_area, hint_area, input_area] =
+    let [header_area, chat_area, plan_area, status_area, queue_area, hint_area, input_area] =
         Layout::vertical([
             Constraint::Length(header_h),
             Constraint::Min(0),
+            Constraint::Length(plan_h),
             Constraint::Length(status_h),
             Constraint::Length(queue_h),
             Constraint::Length(hint_h),
@@ -325,10 +333,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         }
         let prev_max = app.chat_render_prev_max_scroll;
         app.chat_render_prev_max_scroll = max_scroll;
-        if app.following
-            && prev_max > 0
-            && max_scroll > prev_max.saturating_add(10)
-        {
+        if app.following && prev_max > 0 && max_scroll > prev_max.saturating_add(10) {
             app.suppress_next_chat_scroll_up = true;
         }
         let scroll = if app.following {
@@ -341,6 +346,12 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             para.scroll((scroll.min(u16::MAX as u32) as u16, 0)),
             chat_area,
         );
+    }
+
+    // ── Plan / todo strip (above status; visibility: /plan on|off|auto) ──
+    if plan_h > 0 {
+        let plines = build_plan_todo_strip_lines(app, &plan_steps, plan_area.width);
+        frame.render_widget(Paragraph::new(plines), plan_area);
     }
 
     // ── Status strip ──
@@ -363,7 +374,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         if has_thinking {
             queue_lines.push(Line::from(vec![
                 Span::styled(
-                    "  ▶ ",
+                    format!("{TUI_GUTTER}▶ "),
                     Style::default()
                         .fg(TUI_SOFT_ACCENT)
                         .add_modifier(Modifier::DIM),
@@ -380,13 +391,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 // Agent is active — compact divider before queued items
                 queue_lines.push(Line::raw(""));
                 queue_lines.push(Line::from(Span::styled(
-                    "    queued:",
+                    format!("{TUI_GUTTER_SUB}Queued — runs after current step"),
                     Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                 )));
             } else {
                 // Agent is idle — header with count
                 queue_lines.push(Line::from(Span::styled(
-                    format!("    {} queued", app.queued.len()),
+                    format!("{TUI_GUTTER_SUB}{} queued — sent next", app.queued.len()),
                     Style::default()
                         .fg(TUI_STATE_WARN)
                         .add_modifier(Modifier::DIM),
@@ -400,14 +411,17 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
             for (idx, item) in app.queued.iter().enumerate().take(effective_max) {
                 let first_line = item.lines().next().unwrap_or(item.as_str());
-                let prefix = format!("      {:>2}. ", idx + 1);
+                let prefix = format!("{TUI_GUTTER_DEEP}{:>2}. ", idx + 1);
                 let prefix_len = prefix.chars().count();
                 let max_width = queue_area.width as usize;
                 let available = max_width.saturating_sub(prefix_len);
                 let truncated = if first_line.chars().count() > available {
                     format!(
                         "{}…",
-                        first_line.chars().take(available.saturating_sub(1)).collect::<String>()
+                        first_line
+                            .chars()
+                            .take(available.saturating_sub(1))
+                            .collect::<String>()
                     )
                 } else {
                     first_line.to_string()
@@ -422,7 +436,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let more_count = app.queued.len().saturating_sub(effective_max);
             if more_count > 0 {
                 queue_lines.push(Line::from(Span::styled(
-                    format!("    ... and {} more", more_count),
+                    format!("{TUI_GUTTER_SUB}… and {more_count} more"),
                     Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                 )));
             }
@@ -443,11 +457,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     let (input_para_lines, cursor_row, cursor_col) = if is_multiline {
         multiline_input_paragraph(&app.text_input, max_visible_content_rows, input_visible_w)
     } else {
-        if app.text_input.cursor < app.text_input.scroll {
-            app.text_input.scroll = app.text_input.cursor;
-        } else if app.text_input.cursor >= app.text_input.scroll + input_visible_w {
-            app.text_input.scroll = app.text_input.cursor - input_visible_w + 1;
-        }
+        app.text_input.update_scroll(input_visible_w);
         let visible: String = app
             .text_input
             .text
@@ -470,12 +480,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let chrome_note = Style::default().fg(TUI_ROW_DIM).add_modifier(Modifier::DIM);
         let title_line = if app.pending_perm.is_some() {
             Line::from(vec![
-                Span::styled("⏸ ", Style::default().fg(TUI_STATE_WARN)),
-                Span::styled("Permission needed", Style::default().fg(TUI_STATE_WARN)),
-                Span::styled(
-                    "  ·  approve in the dialog above",
-                    chrome_note,
-                ),
+                Span::styled("▸ ", Style::default().fg(TUI_STATE_WARN)),
+                Span::styled("Permission required", Style::default().fg(TUI_STATE_WARN)),
+                Span::styled(format!("{TUI_SEP}use the dialog above"), chrome_note),
             ])
         } else if app.enhancing {
             Line::from(vec![
@@ -484,50 +491,41 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     Style::default().fg(TUI_SOFT_ACCENT),
                 ),
                 Span::styled("Enhancing prompt", Style::default().fg(TUI_SOFT_ACCENT)),
-                Span::styled("  ·  wait…", chrome_note),
+                Span::styled(format!("{TUI_SEP}please wait"), chrome_note),
             ])
         } else if !app.queued.is_empty() {
             Line::from(vec![
-                Span::styled(
-                    format!("{} ", spinner),
-                    Style::default().fg(TUI_STATE_BUSY),
-                ),
+                Span::styled(format!("{} ", spinner), Style::default().fg(TUI_STATE_BUSY)),
                 Span::styled("Agent running", Style::default().fg(TUI_BRAND_TEXT)),
                 Span::styled(
-                    "  ·  Ctrl+Enter interrupt  ·  queue with Enter",
+                    format!("{TUI_SEP}Ctrl+Enter interrupt{TUI_SEP}Enter queues input"),
                     chrome_note,
                 ),
             ])
-        } else if app.text_input.text.is_empty() {
+        } else if app.text_input.is_empty() {
             let elapsed_s = app.turn_start.map(|t| t.elapsed().as_secs()).unwrap_or(0);
             let elapsed_hint = if elapsed_s >= 1 {
-                format!(" {}s", elapsed_s)
+                format!(" {elapsed_s}s")
             } else {
                 String::new()
             };
             Line::from(vec![
+                Span::styled(format!("{} ", spinner), Style::default().fg(TUI_STATE_BUSY)),
                 Span::styled(
-                    format!("{} ", spinner),
-                    Style::default().fg(TUI_STATE_BUSY),
-                ),
-                Span::styled(
-                    format!("Thinking{}", elapsed_hint),
+                    format!("Thinking{elapsed_hint}"),
                     Style::default().fg(TUI_BRAND_TEXT),
                 ),
                 Span::styled(
-                    "  ·  type to queue a follow-up  ·  Ctrl+Enter interrupt",
+                    format!("{TUI_SEP}type to queue a follow-up{TUI_SEP}Ctrl+Enter interrupt"),
                     chrome_note,
                 ),
             ])
         } else {
             Line::from(vec![
-                Span::styled(
-                    format!("{} ", spinner),
-                    Style::default().fg(TUI_STATE_BUSY),
-                ),
+                Span::styled(format!("{} ", spinner), Style::default().fg(TUI_STATE_BUSY)),
                 Span::styled("Thinking", Style::default().fg(TUI_BRAND_TEXT)),
                 Span::styled(
-                    "  ·  Enter queues draft  ·  Ctrl+Enter interrupt",
+                    format!("{TUI_SEP}Enter queues draft{TUI_SEP}Ctrl+Enter interrupt"),
                     chrome_note,
                 ),
             ])
@@ -573,10 +571,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let title_line = Line::from(vec![
             Span::styled("⏳ ", Style::default().fg(TUI_STATE_WARN)),
             Span::styled(
-                format!("Rate limit  ·  resume in {countdown}"),
+                format!("Rate limited{TUI_SEP}resume in {countdown}"),
                 Style::default().fg(TUI_STATE_WARN),
             ),
-            Span::styled("  ·  Esc cancel  ·  /profile switch", rl_dim),
+            Span::styled(
+                format!("{TUI_SEP}Esc cancel{TUI_SEP}/profile to switch"),
+                rl_dim,
+            ),
         ]);
         let block = Block::default()
             .title(title_line)
@@ -588,16 +589,14 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         frame.set_cursor_position((input_area.x + 2 + cursor_col, input_area.y + 1 + cursor_row));
     } else {
         let idle_title = Line::from(vec![
-            Span::styled("Message", Style::default().fg(TUI_SOFT_ACCENT)),
+            Span::styled("Input", Style::default().fg(TUI_SOFT_ACCENT)),
             Span::styled(
                 if is_multiline {
-                    "  ·  Shift+Enter newline  ·  Enter send  ·  Esc clear"
+                    format!("{TUI_SEP}Shift+Enter newline{TUI_SEP}Enter send{TUI_SEP}Esc clear")
                 } else {
-                    "  ·  Enter send  ·  Shift+Enter newline  ·  Esc clear"
+                    format!("{TUI_SEP}Enter send{TUI_SEP}Shift+Enter newline{TUI_SEP}Esc clear")
                 },
-                Style::default()
-                    .fg(TUI_ROW_DIM)
-                    .add_modifier(Modifier::DIM),
+                Style::default().fg(TUI_ROW_DIM).add_modifier(Modifier::DIM),
             ),
         ]);
         let block = Block::default()
@@ -630,7 +629,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let mut hint_spans: Vec<Span<'static>> = Vec::new();
         if let Some(label) = mode_label {
             hint_spans.push(Span::styled(
-                format!("  focus: {}  ·  ", label),
+                format!("{TUI_GUTTER}Mode:{TUI_SEP}{label}{TUI_SEP}"),
                 Style::default()
                     .fg(TUI_SOFT_ACCENT)
                     .add_modifier(Modifier::DIM),
@@ -639,25 +638,25 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let hk = Style::default().fg(TUI_BRAND_TEXT);
         hint_spans.extend([
             Span::styled("Enter", hk),
-            Span::styled(" send · ", hint_dim),
+            Span::styled(format!(" send{TUI_SEP}"), hint_dim),
             Span::styled("Shift+Enter", hk),
-            Span::styled(" newline · ", hint_dim),
+            Span::styled(format!(" newline{TUI_SEP}"), hint_dim),
             Span::styled("Ctrl+V", hk),
-            Span::styled(" paste · ", hint_dim),
+            Span::styled(format!(" paste{TUI_SEP}"), hint_dim),
             Span::styled("Esc", hk),
-            Span::styled(" clear input · ", hint_dim),
+            Span::styled(format!(" clear{TUI_SEP}"), hint_dim),
             Span::styled("↑↓", hk),
-            Span::styled(" history · ", hint_dim),
+            Span::styled(format!(" history{TUI_SEP}"), hint_dim),
             Span::styled("PgUp/Dn", hk),
-            Span::styled(" scroll · ", hint_dim),
+            Span::styled(format!(" scroll{TUI_SEP}"), hint_dim),
             Span::styled("/help", hk),
-            Span::styled(" · ", hint_dim),
+            Span::styled(TUI_SEP, hint_dim),
             Span::styled("/settings", hk),
-            Span::styled(" prefs · ", hint_dim),
+            Span::styled(format!(" prefs{TUI_SEP}"), hint_dim),
             Span::styled("Ctrl+/", hk),
-            Span::styled(" stop · ", hint_dim),
+            Span::styled(format!(" stop{TUI_SEP}"), hint_dim),
             Span::styled("Ctrl+C", hk),
-            Span::styled(" quit · ", hint_dim),
+            Span::styled(format!(" quit{TUI_SEP}"), hint_dim),
             Span::styled("Ctrl+L", hk),
             Span::styled(" redraw", hint_dim),
         ]);
@@ -665,7 +664,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         if app.layout.max_scroll > 0 && !app.following {
             let pct = (app.scroll * 100 / app.layout.max_scroll).min(100);
             hint_spans.push(Span::styled(
-                format!("  ↑ {}%", pct),
+                format!("{TUI_GUTTER}↑ {pct}%"),
                 Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
             ));
         }
@@ -677,10 +676,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     // ── "↓ new messages" scroll indicator ──
     if !app.following && app.layout.max_scroll > app.scroll {
         let unread_hint = Span::styled(
-            "  ↓ new  PgDn ",
-            Style::default()
-                .fg(TUI_MARK)
-                .add_modifier(Modifier::BOLD),
+            format!("{TUI_GUTTER}↓ new{TUI_SEP}PgDn"),
+            Style::default().fg(TUI_MARK).add_modifier(Modifier::BOLD),
         );
         let hint_line = Line::from(vec![unread_hint]);
         let hint_para = Paragraph::new(hint_line);
@@ -733,7 +730,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         // Use nearly the full terminal width; cap at 120 for ultra-wide displays.
         let popup_w = area.width.saturating_sub(4).min(120);
         // 2 chars for marker (▶ / space), 18 for command = 20 total left column.
-        let cmd_col_w = 20usize;
+        let cmd_col_w = 22usize;
         let popup_rect = popup_above_input(input_area, popup_h, popup_w);
         let desc_w = (popup_rect.width as usize).saturating_sub(cmd_col_w + 3);
 
@@ -741,10 +738,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             .iter()
             .map(|row| match row {
                 CompletionRow::Header(section) => Line::from(Span::styled(
-                    format!("  ── {} ", section),
-                    Style::default()
-                        .fg(TUI_MUTED)
-                        .add_modifier(Modifier::DIM),
+                    format!("{TUI_GUTTER}── {section} ──"),
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                 )),
                 CompletionRow::Cmd {
                     flat_idx,
@@ -753,13 +748,25 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 } => {
                     let selected = app.selected_cmd == Some(*flat_idx);
                     let marker = if selected { "▶" } else { " " };
+                    let key_col = if *flat_idx < 9 {
+                        format!("{} ", flat_idx + 1)
+                    } else {
+                        "  ".to_string()
+                    };
                     let desc_str = if desc.len() > desc_w {
                         format!("{}…", &desc[..desc_w.saturating_sub(1)])
                     } else {
                         desc.to_string()
                     };
                     modal_row_two_col(
-                        format!("{} {:<width$}", marker, cmd, width = cmd_col_w - 2),
+                        format!(
+                            "{}{:<key_w$}{:<width$}",
+                            marker,
+                            key_col,
+                            cmd,
+                            key_w = 3,
+                            width = cmd_col_w.saturating_sub(4)
+                        ),
                         format!(" {}", desc_str),
                         TUI_SOFT_ACCENT,
                         TUI_ROW_DIM,
@@ -786,8 +793,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             .iter()
             .filter(|r| matches!(r, CompletionRow::Cmd { .. }))
             .count();
-        let title = format!(" {} commands ", n_cmds);
-        let hint = " ↑↓ navigate · Tab/Enter select · Esc close ";
+        let title = format!(" / {n_cmds} commands ");
+        let hint = " ↑↓ navigate · 1-9 jump to match · Tab / Enter select · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block_with_hint(&title, hint, TUI_SOFT_ACCENT)),
@@ -801,15 +808,19 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let filtered: Vec<(usize, &clido_storage::SessionSummary)> =
             picker.picker.filtered_items().collect();
         let n_rows = filtered.len().min(VISIBLE) as u16;
-        // border(2) + header(1) + blank(1) + filter(1) + rows = n_rows + 5
-        let popup_h = (n_rows + 5).min(input_area.y.saturating_sub(2));
+        // border(2) + header(2) + blank(1) + filter(1) + rows = n_rows + 6
+        let popup_h = (n_rows + 6).min(input_area.y.saturating_sub(2));
         let popup_h = popup_h.min(area.height.saturating_sub(4));
-        let popup_h = (n_rows + 5).min(popup_h.max(6));
+        let popup_h = (n_rows + 6).min(popup_h.max(7));
         let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
 
         let inner_w = popup_rect.width.saturating_sub(4) as usize;
-        // fixed cols: marker(2) id(8) sep(2) msg(3) sep(2) cost(6) sep(2) date(11) sep(2) = 38
-        let preview_w = inner_w.saturating_sub(38).max(8);
+        // marker(2) + id(8) + gaps + turns(4) + cost(8) + when(26) + gap + name/preview (rest)
+        const TURNS_W: usize = 4;
+        const COST_W: usize = 8;
+        const WHEN_W: usize = 26;
+        let fixed = 2 + 8 + 2 + TURNS_W + 2 + COST_W + 2 + WHEN_W + 1;
+        let name_w = inner_w.saturating_sub(fixed).max(8);
 
         let mut content: Vec<Line<'static>> = Vec::new();
         // Filter line
@@ -818,18 +829,15 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         }
         content.push(Line::from(vec![Span::styled(
             format!(
-                "  {:<8}  {:<5}  {:<6}  {:<11}  {}",
-                "id", "turns", "cost", "when", "preview"
+                "  {:<8}  {:>4}  {:>8}  {:<26}  {}",
+                "id", "turns", "cost", "started (local · rel)", "name / preview"
             ),
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]));
         content.push(Line::from(vec![Span::styled(
-            "  ────────  ─────  ──────  ───────────  ────────────────────".to_string(),
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            "  ────────  ────  ────────  ──────────────────────────  ────────────────────"
+                .to_string(),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]));
 
         let end = (picker.picker.scroll_offset + VISIBLE).min(filtered.len());
@@ -843,17 +851,44 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             } else {
                 Color::Reset
             };
-            let fg = if selected { TUI_TEXT } else { TUI_ROW_DIM };
-            let id_short = &s.session_id[..s.session_id.len().min(8)];
-            let date_str = relative_time(&s.start_time);
-            let preview_str: String = s.preview.chars().take(preview_w).collect();
+            let base_style = Style::default().bg(bg);
+            let row_style = if selected {
+                base_style.fg(TUI_TEXT).add_modifier(Modifier::BOLD)
+            } else {
+                base_style.fg(TUI_TEXT).add_modifier(Modifier::DIM)
+            };
+            let id_raw: String = s.session_id.chars().take(8).collect();
+            let is_active = app.current_session_id.as_deref() == Some(s.session_id.as_str());
+            let id_cell = if is_active {
+                format!("{:<7}●", id_raw.chars().take(7).collect::<String>())
+            } else {
+                format!("{id_raw:<8}")
+            };
+            let wall = session_wall_clock(&s.start_time);
+            let rel = relative_time(&s.start_time);
+            let mut when_str = format!("{wall} · {rel}");
+            if when_str.chars().count() > WHEN_W {
+                when_str = wall.chars().take(WHEN_W).collect::<String>();
+            }
+            let name_part = match s.title.as_deref() {
+                Some(t) if !t.is_empty() => {
+                    format!("{t} — {}", s.preview)
+                }
+                _ => s.preview.clone(),
+            };
+            let name_trunc: String = name_part.chars().take(name_w).collect();
             let marker = if selected { "▶ " } else { "  " };
             content.push(Line::from(vec![Span::styled(
                 format!(
-                    "{}{:<8}  {:>5}  ${:<5.2}  {:<11}  {}",
-                    marker, id_short, s.num_turns, s.total_cost_usd, date_str, preview_str
+                    "{}{id_cell}  {:>3}t  ${:>6.2}  {:<w$}  {}",
+                    marker,
+                    s.num_turns,
+                    s.total_cost_usd,
+                    when_str,
+                    name_trunc,
+                    w = WHEN_W,
                 ),
-                Style::default().fg(fg).bg(bg),
+                row_style,
             )]));
         }
 
@@ -868,7 +903,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
         let total = filtered.len();
         let picker_title = format!(" Sessions — {} total ", total);
-        let hint = " ↑↓ navigate · Enter resume · d delete · type to filter · Esc close ";
+        let hint = " ↑↓ navigate · Enter resume · d delete · type to filter (id, title, preview) · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block_with_hint(
@@ -898,9 +933,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     "    {:<32}  {:<12}  {:>8}  {:>8}  {:>6}  {}",
                     "model", "provider", "$/1M in", "$/1M out", "ctx", "role"
                 ),
-                Style::default()
-                    .fg(TUI_MUTED)
-                    .add_modifier(Modifier::DIM),
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
             )]),
             Line::raw(""),
         ];
@@ -913,9 +946,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             };
             content.push(Line::from(vec![Span::styled(
                 msg.to_string(),
-                Style::default()
-                    .fg(TUI_MUTED)
-                    .add_modifier(Modifier::DIM),
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
             )]));
         } else {
             // Count favorites and recent models for section headers.
@@ -969,9 +1000,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     header_shown_all = true;
                     content.push(Line::from(vec![Span::styled(
                         "  All".to_string(),
-                        Style::default()
-                            .fg(TUI_MUTED)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(TUI_MUTED).add_modifier(Modifier::BOLD),
                     )]));
                 }
 
@@ -1040,9 +1069,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         }
         content.push(Line::from(Span::styled(
             format!("  {:<20}  {}", "profile", "provider / model"),
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )));
         content.push(Line::raw(""));
 
@@ -1094,7 +1121,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let hint = " ↑↓ navigate · Enter switch · n new · e edit · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content).block(modal_block_with_hint(&title, hint, modal_border_default())),
+            Paragraph::new(content).block(modal_block_with_hint(
+                &title,
+                hint,
+                modal_border_default(),
+            )),
             popup_rect,
         );
     }
@@ -1126,9 +1157,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 Line::raw(""),
                 Line::from(vec![Span::styled(
                     "  Enter send · Esc back · paste supported",
-                    Style::default()
-                        .fg(TUI_MUTED)
-                        .add_modifier(Modifier::DIM),
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                 )]),
             ];
             frame.render_widget(Clear, popup_rect);
@@ -1183,33 +1212,24 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     ),
                     Span::styled(
                         format!("{:<28}", label),
-                        Style::default()
-                            .fg(TUI_TEXT)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(format!("  {}", hint), Style::default().fg(TUI_MUTED)),
                 ]));
             } else {
                 content.push(Line::from(vec![
                     Span::raw("   "),
-                    Span::styled(
-                        format!("{:<28}", label),
-                        Style::default().fg(TUI_MUTED),
-                    ),
+                    Span::styled(format!("{:<28}", label), Style::default().fg(TUI_MUTED)),
                     Span::styled(
                         format!("  {}", hint),
-                        Style::default()
-                            .fg(TUI_MUTED)
-                            .add_modifier(Modifier::DIM),
+                        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                     ),
                 ]));
             }
         }
         content.push(Line::from(vec![Span::styled(
             "  ↑↓ pick · 1–5 jump · Enter confirm · Esc deny",
-            Style::default()
-                .fg(TUI_MUTED)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]));
 
         frame.render_widget(Clear, popup_rect);
@@ -1265,9 +1285,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 content.push(Line::raw(""));
                 content.push(Line::from(vec![Span::styled(
                     "  [ OK ] · Enter · Esc · Space",
-                    Style::default()
-                        .fg(TUI_MARK)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(TUI_MARK).add_modifier(Modifier::BOLD),
                 )]));
                 let hint_title = if e.max_scroll > 0 {
                     format!(" {} — ↑↓ scroll · Enter/Esc close ", e.title)
@@ -1315,9 +1333,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 content.push(Line::raw(""));
                 content.push(Line::from(vec![Span::styled(
                     "  [ Close ] · Enter · Esc".to_string(),
-                    Style::default()
-                        .fg(TUI_MARK)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(TUI_MARK).add_modifier(Modifier::BOLD),
                 )]));
                 let popup_h = ((content.len() as u16) + 2).min(area.height.saturating_sub(4));
                 let inner_h = popup_h.saturating_sub(2) as usize;
@@ -1353,9 +1369,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 for (i, choice) in c.choices.iter().enumerate() {
                     let marker = if i == c.selected { "▸ " } else { "  " };
                     let style = if i == c.selected {
-                        Style::default()
-                            .fg(TUI_MARK)
-                            .add_modifier(Modifier::BOLD)
+                        Style::default().fg(TUI_MARK).add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(TUI_TEXT)
                     };
@@ -1373,8 +1387,10 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
                 frame.render_widget(Clear, popup_rect);
                 frame.render_widget(
-                    Paragraph::new(content)
-                        .block(modal_block(&format!(" {} ", c.title), modal_border_default())),
+                    Paragraph::new(content).block(modal_block(
+                        &format!(" {} ", c.title),
+                        modal_border_default(),
+                    )),
                     popup_rect,
                 );
             }
@@ -1454,9 +1470,7 @@ fn apply_selection_highlight(
 
     let (start_row, start_col, end_row, end_col) = selection.bounds();
 
-    let sel_style = Style::default()
-        .bg(TUI_SELECTION_BG)
-        .fg(TUI_TEXT);
+    let sel_style = Style::default().bg(TUI_SELECTION_BG).fg(TUI_TEXT);
 
     for line_idx in first_visible..last_visible {
         if line_idx >= result.len() {
@@ -1684,10 +1698,8 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
         match msg {
             ChatLine::User(text) => {
                 out.push(Line::from(Span::styled(
-                    "  You",
-                    Style::default()
-                        .fg(TUI_ACCENT)
-                        .add_modifier(Modifier::BOLD),
+                    format!("{TUI_GUTTER}You"),
+                    Style::default().fg(TUI_ACCENT).add_modifier(Modifier::BOLD),
                 )));
                 out.extend(render_markdown(text, width));
                 out.push(Line::raw(""));
@@ -1696,20 +1708,18 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 let model_bit = if app.model.is_empty() {
                     String::new()
                 } else {
-                    format!("  ·  {}", app.model)
+                    format!("{TUI_SEP}{}", app.model)
                 };
                 out.push(Line::from(vec![
                     Span::styled(
-                        "  Assistant",
+                        format!("{TUI_GUTTER}Assistant"),
                         Style::default()
                             .fg(TUI_SOFT_ACCENT)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         model_bit,
-                        Style::default()
-                            .fg(TUI_MUTED)
-                            .add_modifier(Modifier::DIM),
+                        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                     ),
                 ]));
                 out.extend(render_markdown(text, width));
@@ -1724,7 +1734,7 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                         continue;
                     }
                     out.push(Line::from(vec![
-                        Span::styled("      ‥  ", think),
+                        Span::styled(format!("{TUI_GUTTER_DEEP}‥  "), think),
                         Span::styled(part.to_string(), think),
                     ]));
                 }
@@ -1754,15 +1764,10 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 } else {
                     out.push(Line::from(vec![
                         Span::styled(
-                            "  › ",
-                            Style::default()
-                                .fg(TUI_DIVIDER)
-                                .add_modifier(Modifier::DIM),
+                            format!("{TUI_GUTTER}› "),
+                            Style::default().fg(TUI_DIVIDER).add_modifier(Modifier::DIM),
                         ),
-                        Span::styled(
-                            text.clone(),
-                            Style::default().fg(TUI_ROW_DIM),
-                        ),
+                        Span::styled(text.clone(), Style::default().fg(TUI_ROW_DIM)),
                     ]));
                 }
             }
@@ -1771,7 +1776,7 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 let rule = "─".repeat((width / 3).clamp(4, 24));
                 out.push(Line::from(vec![
                     Span::styled(
-                        format!("  {rule}  "),
+                        format!("{TUI_GUTTER}{rule} "),
                         Style::default().fg(TUI_DIVIDER).add_modifier(Modifier::DIM),
                     ),
                     Span::styled(
@@ -1823,8 +1828,8 @@ pub(super) fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
 /// horizontal rules, task-list checkboxes, and hard/soft breaks.
 pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
     use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Tag};
-    // Available content width: subtract 4 chars for left margin / padding.
-    let content_w = width.saturating_sub(4).max(20);
+    // Content width: match transcript gutter (2) + body inset (2).
+    let content_w = width.saturating_sub(super::TUI_GUTTER.len() * 2).max(20);
 
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let parser = Parser::new_ext(text, opts);
@@ -1928,7 +1933,7 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                         _ => String::new(),
                     };
                     let fence_tail = |used: usize| {
-                        let n = content_w.saturating_sub(used).min(40).max(8);
+                        let n = content_w.saturating_sub(used).clamp(8, 40);
                         "─".repeat(n)
                     };
                     if lang.is_empty() {
@@ -1946,11 +1951,7 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                         )]));
                     }
                     // Code content uses code block background
-                    style_stack.push(
-                        Style::default()
-                            .fg(TUI_CODE_FG)
-                            .bg(TUI_CODE_BG),
-                    );
+                    style_stack.push(Style::default().fg(TUI_CODE_FG).bg(TUI_CODE_BG));
                 }
                 Tag::List(_) => {
                     list_depth += 1;
@@ -2074,9 +2075,7 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                     if bq_depth > 0 && cur_spans.is_empty() {
                         cur_spans.push(Span::styled(
                             "│ ".repeat(bq_depth as usize),
-                            Style::default()
-                                .fg(TUI_DIVIDER)
-                                .add_modifier(Modifier::DIM),
+                            Style::default().fg(TUI_DIVIDER).add_modifier(Modifier::DIM),
                         ));
                     }
                     let style = style_stack.last().copied().unwrap_or_default();
@@ -2111,9 +2110,7 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                 let w = content_w.saturating_sub(4).clamp(16, 64);
                 out.push(Line::from(vec![Span::styled(
                     format!("  {}", "─".repeat(w)),
-                    Style::default()
-                        .fg(TUI_DIVIDER)
-                        .add_modifier(Modifier::DIM),
+                    Style::default().fg(TUI_DIVIDER).add_modifier(Modifier::DIM),
                 )]));
                 out.push(Line::raw(""));
             }

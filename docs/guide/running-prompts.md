@@ -128,7 +128,7 @@ clido --max-budget-usd 0.50 "generate comprehensive tests for all public APIs"
 When a limit is reached, clido exits with code 3 (soft limit) and prints whatever the agent has produced so far.
 
 Default values (from config):
-- `--max-turns`: 50
+- `--max-turns`: from config (default **200** in a fresh install)
 - `--max-budget-usd`: 5.0
 
 ## Permission modes
@@ -200,7 +200,7 @@ fi
 | `--input-format` | `text` (default) or `stream-json` |
 | `--quiet` / `-q` | Suppress tool output and cost footer |
 | `--print` / `-p` | Non-interactive; no REPL |
-| `--max-turns N` | Maximum agent turns (default: 50) |
+| `--max-turns N` | Maximum agent turns (config default: **200**) |
 | `--max-budget-usd N` | Maximum cost in USD |
 | `--permission-mode` | `default`, `accept-all`, or `plan` |
 | `--model` | Model override |

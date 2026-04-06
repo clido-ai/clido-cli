@@ -29,9 +29,7 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
-use context::{
-    compact_for_model_request, CONTEXT_OUTPUT_RESERVE, PROACTIVE_SUMMARIZE_THRESHOLD,
-};
+use context::{compact_for_model_request, CONTEXT_OUTPUT_RESERVE, PROACTIVE_SUMMARIZE_THRESHOLD};
 pub use history::session_lines_to_messages;
 use security::{detect_injection, enhanced_edit_error};
 /// How many consecutive identical tool failures trigger doom-loop detection.
@@ -184,12 +182,7 @@ pub trait EventEmitter: Send + Sync {
     /// Default impl is a no-op so existing code compiles without changes.
     async fn on_assistant_text(&self, _text: &str) {}
     /// Ask the UI to approve access outside the workspace (TUI shows y/n/a prompt).
-    async fn on_path_permission_request(
-        &self,
-        _path: &std::path::Path,
-        _tool_name: &str,
-    ) {
-    }
+    async fn on_path_permission_request(&self, _path: &std::path::Path, _tool_name: &str) {}
     /// Called when cumulative cost crosses a budget threshold (50%, 80%, 90%).
     /// `pct` is the percentage (50, 80, or 90), `spent_usd` and `limit_usd` are raw values.
     /// Default impl is a no-op.
@@ -558,53 +551,59 @@ impl AgentLoop {
     /// Determine if a tool error is retryable and what strategy to use.
     fn classify_retry_strategy(&self, tool_name: &str, error: &str) -> Option<RetryStrategy> {
         let err_lower = error.to_lowercase();
-        
+
         // Network/timeout errors - always retryable
-        if err_lower.contains("timeout") 
+        if err_lower.contains("timeout")
             || err_lower.contains("timed out")
             || err_lower.contains("connection")
             || err_lower.contains("network")
             || err_lower.contains("temporarily unavailable")
             || err_lower.contains("rate limit")
-            || err_lower.contains("too many requests") {
+            || err_lower.contains("too many requests")
+        {
             return Some(RetryStrategy::WaitAndRetry { delay_ms: 1000 });
         }
-        
+
         // File not found - might be race condition or typo
         if err_lower.contains("no such file")
             || err_lower.contains("file not found")
             || err_lower.contains("cannot find")
-            || err_lower.contains("does not exist") {
+            || err_lower.contains("does not exist")
+        {
             // Only retry Read, Glob, Grep operations - not Write/Edit
-            if matches!(tool_name, "Read" | "Glob" | "Grep" | "Ls" | "SemanticSearch") {
+            if matches!(
+                tool_name,
+                "Read" | "Glob" | "Grep" | "Ls" | "SemanticSearch"
+            ) {
                 return Some(RetryStrategy::RetryOnce);
             }
         }
-        
+
         // Permission denied - might be transient
         if err_lower.contains("permission denied")
             || err_lower.contains("access denied")
-            || err_lower.contains("unauthorized") {
+            || err_lower.contains("unauthorized")
+        {
             return Some(RetryStrategy::RetryOnce);
         }
-        
+
         // Bash transient errors
-        if tool_name == "Bash" {
-            if err_lower.contains("resource temporarily unavailable")
+        if tool_name == "Bash"
+            && (err_lower.contains("resource temporarily unavailable")
                 || err_lower.contains("try again")
-                || err_lower.contains("device or resource busy") {
-                return Some(RetryStrategy::WaitAndRetry { delay_ms: 500 });
-            }
+                || err_lower.contains("device or resource busy"))
+        {
+            return Some(RetryStrategy::WaitAndRetry { delay_ms: 500 });
         }
-        
+
         // Web fetch/search specific errors
-        if matches!(tool_name, "WebFetch" | "WebSearch") {
-            if err_lower.contains("dns") 
+        if matches!(tool_name, "WebFetch" | "WebSearch")
+            && (err_lower.contains("dns")
                 || err_lower.contains("resolve")
                 || err_lower.contains("certificate")
-                || err_lower.contains("ssl") {
-                return Some(RetryStrategy::RetryOnce);
-            }
+                || err_lower.contains("ssl"))
+        {
+            return Some(RetryStrategy::RetryOnce);
         }
 
         // Generic I/O and connection flakiness
@@ -617,7 +616,7 @@ impl AgentLoop {
         {
             return Some(RetryStrategy::WaitAndRetry { delay_ms: 400 });
         }
-        
+
         None // Not retryable
     }
 
@@ -629,41 +628,47 @@ impl AgentLoop {
     ) -> ToolOutput {
         let max_retries = self.max_tool_retries;
         let mut last_output: Option<ToolOutput> = None;
-        
+
         for attempt in 0..=max_retries {
             let output = self.execute_tool_maybe_gated(name, input).await;
-            
+
             if !output.is_error {
                 // Success - clear retry tracking for this tool
-                let key = format!("{}:{}", name, serde_json::to_string(input).unwrap_or_default());
+                let key = format!(
+                    "{}:{}",
+                    name,
+                    serde_json::to_string(input).unwrap_or_default()
+                );
                 self.retry_attempts.remove(&key);
                 return output;
             }
-            
+
             // Check for "path outside working directory" error - request interactive permission
-            if output.content.contains("path outside working directory") 
-                || output.content.contains("Access denied: path outside") {
+            if output.content.contains("path outside working directory")
+                || output.content.contains("Access denied: path outside")
+            {
                 if let Some(ref mut rx) = self.path_permission_rx {
                     // Extract the path from the error or input
                     let requested_path = Self::extract_path_from_input(input).unwrap_or_default();
-                    
+
                     // Emit request to TUI (modal y/n/a), not only as "thinking" text.
                     if let Some(ref e) = self.emit {
                         e.on_path_permission_request(&requested_path, name).await;
                     }
-                    
+
                     // Wait for user response (with timeout)
-                    match tokio::time::timeout(
-                        std::time::Duration::from_secs(60),
-                        rx.recv()
-                    ).await {
+                    match tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv()).await
+                    {
                         Ok(Some(granted_path)) if !granted_path.as_os_str().is_empty() => {
                             // User granted permission - the TUI will have updated allowed paths
                             // and rebuilt the tools. We need to retry with the new registry.
                             if let Some(ref e) = self.emit {
-                                let _ = e.on_assistant_text(
-                                    &format!("[Permission granted for: {}]", granted_path.display())
-                                ).await;
+                                let _ = e
+                                    .on_assistant_text(&format!(
+                                        "[Permission granted for: {}]",
+                                        granted_path.display()
+                                    ))
+                                    .await;
                             }
                             // Return a special output indicating we need to retry with new tools
                             // The caller (execute_tool_batch_with_retry) will handle the actual retry
@@ -714,7 +719,7 @@ impl AgentLoop {
                     }
                 }
             }
-            
+
             // Check if we've exhausted retries (last iteration)
             if attempt == max_retries {
                 // Max retries exceeded - return last error with context
@@ -728,20 +733,29 @@ impl AgentLoop {
                 }
                 return output;
             }
-            
+
             // Check if this error is retryable
             match self.classify_retry_strategy(name, &output.content) {
                 Some(strategy) => {
-                    let key = format!("{}:{}", name, serde_json::to_string(input).unwrap_or_default());
+                    let key = format!(
+                        "{}:{}",
+                        name,
+                        serde_json::to_string(input).unwrap_or_default()
+                    );
                     self.retry_attempts.insert(key.clone(), attempt);
-                    
+
                     // Log retry attempt (attempt+1 since we're about to retry)
                     if let Some(ref e) = self.emit {
-                        let _ = e.on_assistant_text(
-                            &format!("[Tool '{}' failed, retrying ({}/{})...]", name, attempt + 1, max_retries)
-                        ).await;
+                        let _ = e
+                            .on_assistant_text(&format!(
+                                "[Tool '{}' failed, retrying ({}/{})...]",
+                                name,
+                                attempt + 1,
+                                max_retries
+                            ))
+                            .await;
                     }
-                    
+
                     // Apply retry strategy
                     match strategy {
                         RetryStrategy::WaitAndRetry { delay_ms } => {
@@ -751,7 +765,7 @@ impl AgentLoop {
                             // No delay for simple retry
                         }
                     }
-                    
+
                     last_output = Some(output);
                     // Continue to next retry attempt
                 }
@@ -761,7 +775,7 @@ impl AgentLoop {
                 }
             }
         }
-        
+
         unreachable!()
     }
 
@@ -773,7 +787,7 @@ impl AgentLoop {
     ) -> Vec<ToolOutput> {
         // First pass: execute all tools using the optimized batch method
         let mut results = self.execute_tool_batch(tool_uses).await;
-        
+
         // Second pass: retry any failures
         for (i, result) in results.iter_mut().enumerate() {
             if result.is_error {
@@ -781,7 +795,7 @@ impl AgentLoop {
                 *result = self.execute_tool_with_retry(name, input).await;
             }
         }
-        
+
         results
     }
 
@@ -973,9 +987,7 @@ impl AgentLoop {
                     .config
                     .max_context_tokens
                     .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
-                let effective_max = max_tok
-                    .saturating_sub(CONTEXT_OUTPUT_RESERVE)
-                    .max(32_000);
+                let effective_max = max_tok.saturating_sub(CONTEXT_OUTPUT_RESERVE).max(32_000);
                 let current = sys_tok + estimate_tokens_messages(&self.history);
                 let proactive_limit =
                     ((effective_max as f64) * PROACTIVE_SUMMARIZE_THRESHOLD) as u32;
@@ -1551,9 +1563,7 @@ impl AgentLoop {
                     .config
                     .max_context_tokens
                     .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
-                let effective_max = max_tok
-                    .saturating_sub(CONTEXT_OUTPUT_RESERVE)
-                    .max(32_000);
+                let effective_max = max_tok.saturating_sub(CONTEXT_OUTPUT_RESERVE).max(32_000);
                 let current = sys_tok + estimate_tokens_messages(&self.history);
                 let proactive_limit =
                     ((effective_max as f64) * PROACTIVE_SUMMARIZE_THRESHOLD) as u32;
@@ -3155,9 +3165,10 @@ mod tests {
             }],
         }];
         // Use a very high threshold so no compaction happens
-        let result = context::compact_with_summary(&messages, 0, 200_000, 0.9, &provider, &mock_config())
-            .await
-            .unwrap();
+        let result =
+            context::compact_with_summary(&messages, 0, 200_000, 0.9, &provider, &mock_config())
+                .await
+                .unwrap();
         assert_eq!(result.len(), messages.len());
     }
 

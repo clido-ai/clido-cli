@@ -93,11 +93,7 @@ impl EventEmitter for TuiEmitter {
         });
     }
 
-    async fn on_path_permission_request(
-        &self,
-        path: &std::path::Path,
-        tool_name: &str,
-    ) {
+    async fn on_path_permission_request(&self, path: &std::path::Path, tool_name: &str) {
         let _ = self.tx.send(AgentEvent::PathPermissionRequest {
             path: path.to_path_buf(),
             tool_name: tool_name.to_string(),

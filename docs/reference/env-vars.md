@@ -24,6 +24,13 @@ api_key_env = "MY_CUSTOM_KEY"
 |----------|---------|-------------|
 | `CLIDO_CONFIG` | Platform config dir + `/config.toml` | Override the config file path. Can be absolute or relative. |
 | `CLIDO_DATA_DIR` | Platform data dir | Override the data directory (sessions, memory DB, audit logs). |
+| `CLIDO_SESSION_DIR` | under data dir | Override **only** the session storage directory. |
+
+## Skills
+
+| Variable | Description |
+|----------|-------------|
+| `CLIDO_SKILL_PATHS` | Additional directories to scan for skill files. Use `:` separators on macOS/Linux and `;` on Windows. See [Skills](/docs/guide/skills). |
 
 ## Runtime overrides
 

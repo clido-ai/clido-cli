@@ -95,9 +95,10 @@ impl Tool for TodoWriteTool {
 
     fn description(&self) -> &str {
         "Write a structured todo list for the current session. Replaces the entire list. \
-         Use to track multi-step tasks so the user can see progress. \
-         Items should have a unique id, content description, status (pending/in_progress/done/blocked), \
-         and priority (high/medium/low)."
+         After you publish the **Steps** section of your plan, call TodoWrite with **one item per step**, \
+         same order and wording. Exactly one item should be `in_progress` at a time while you work; \
+         mark steps `done` as you finish. The TUI shows this list as the live plan/todo panel. \
+         Each item: unique id, content, status (pending/in_progress/done/blocked), priority (high/medium/low)."
     }
 
     fn schema(&self) -> serde_json::Value {

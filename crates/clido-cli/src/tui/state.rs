@@ -24,18 +24,27 @@ pub(crate) fn build_saved_keys_from_profiles(
         // Read from credentials file, env var, then inline (same order as setup/mod.rs)
         let key = crate::setup::read_credential(config_path, &entry.provider)
             .or_else(|| {
-                entry.api_key_env.as_ref().and_then(|e| std::env::var(e).ok())
+                entry
+                    .api_key_env
+                    .as_ref()
+                    .and_then(|e| std::env::var(e).ok())
             })
             .or_else(|| entry.api_key.clone());
-        let Some(k) = key else { continue; };
+        let Some(k) = key else {
+            continue;
+        };
         if k.is_empty() || !seen.insert(k.clone()) {
             continue;
         }
         // Anonymize: show first 4 and last 4 characters.
         let display = if k.len() <= 12 {
-            format!("{}•••{}", &k[..2.min(k.len())], &k[k.len()-2.min(k.len())..])
+            format!(
+                "{}•••{}",
+                &k[..2.min(k.len())],
+                &k[k.len() - 2.min(k.len())..]
+            )
         } else {
-            format!("{}•••{}", &k[..4], &k[k.len()-4..])
+            format!("{}•••{}", &k[..4], &k[k.len() - 4..])
         };
         out.push(ProfileSavedKey {
             source_profile: name.clone(),
@@ -148,6 +157,20 @@ pub(crate) struct SessionStats {
     pub(crate) session_total_cost_usd: f64,
     /// Number of completed agent turns in this TUI session.
     pub(crate) session_turn_count: u32,
+}
+
+// ── Plan / todo panel (TUI) ───────────────────────────────────────────────────
+
+/// User preference for the plan & todo strip above the status line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PlanPanelVisibility {
+    /// Show the panel only when the terminal is large enough and there is content.
+    #[default]
+    Auto,
+    /// Always show when the terminal meets a minimum size (may show an empty hint).
+    On,
+    /// Never show the panel.
+    Off,
 }
 
 // ── Plan state ────────────────────────────────────────────────────────────────
@@ -275,10 +298,10 @@ impl TaskEditState {
 
 impl PickerItem for clido_storage::SessionSummary {
     fn filter_text(&self) -> String {
-        self.title
-            .as_deref()
-            .unwrap_or(&self.session_id)
-            .to_string()
+        match self.title.as_deref() {
+            Some(t) if !t.is_empty() => format!("{} {}", self.session_id, t),
+            _ => self.session_id.clone(),
+        }
     }
     fn filter_text_secondary(&self) -> Option<String> {
         Some(self.preview.clone())
@@ -504,7 +527,11 @@ pub(crate) enum ProfileOverlayMode {
     /// User is creating a new profile, step-by-step.
     Creating { step: ProfileCreateStep },
     /// Saved API key picker during profile creation.
-    PickingSavedKey { selected: usize },
+    PickingSavedKey {
+        selected: usize,
+        /// Extra row after saved keys: enter a new API key manually.
+        show_type_new_row: bool,
+    },
 }
 
 /// Steps for the in-TUI new profile wizard.
@@ -514,6 +541,16 @@ pub(crate) enum ProfileCreateStep {
     Provider,
     ApiKey,
     Model,
+}
+
+/// New-profile name step: pick auto-generated vs custom before typing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ProfileCreateNameChoice {
+    /// Continue without a name; it will be derived from the provider.
+    #[default]
+    AutoGenerate,
+    /// User types a profile name in the text field.
+    TypeCustomName,
 }
 
 /// A saved API key offered for reuse in the profile overlay.
@@ -558,6 +595,8 @@ pub(crate) struct ProfileOverlayState {
     pub(crate) profile_model_picker: Option<ModelPickerState>,
     /// Saved keys available for reuse when creating this profile (built from credentials file + env vars of other profiles).
     pub(crate) saved_keys: Vec<ProfileSavedKey>,
+    /// During `/profile new` wizard — name step highlights auto vs custom (arrow keys).
+    pub(crate) profile_create_name_choice: ProfileCreateNameChoice,
 }
 
 /// Display labels and keys for the editable profile fields (in order).
@@ -634,6 +673,7 @@ impl ProfileOverlayState {
             provider_picker: ProviderPickerState::new(),
             profile_model_picker: None,
             saved_keys,
+            profile_create_name_choice: ProfileCreateNameChoice::default(),
         }
     }
 
@@ -650,7 +690,10 @@ impl ProfileOverlayState {
             .and_then(|(_, env_var)| std::env::var(env_var).ok())
             .unwrap_or_default();
 
-        let provider = detected.as_ref().map(|(id, _)| id.to_string()).unwrap_or_default();
+        let provider = detected
+            .as_ref()
+            .map(|(id, _)| id.to_string())
+            .unwrap_or_default();
 
         let saved_keys = build_saved_keys_from_profiles(all_profiles, &config_path, None);
 
@@ -682,6 +725,7 @@ impl ProfileOverlayState {
             provider_picker: ProviderPickerState::new(),
             profile_model_picker: None,
             saved_keys,
+            profile_create_name_choice: ProfileCreateNameChoice::default(),
         }
     }
 

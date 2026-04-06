@@ -30,8 +30,8 @@ When stdin is not a TTY and no prompt is given, stdin is read as the prompt.
 | `--provider` | string | profile default | Provider override |
 | `--profile` | string | `default_profile` from config | Profile name |
 | `--workdir`, `-C` | path | current directory | Working directory |
-| `--max-turns` | integer | 50 | Maximum agent turns |
-| `--max-budget-usd` | float | 5.0 | Maximum cost in USD |
+| `--max-turns` | integer | from config (default **200**) | Maximum agent turns |
+| `--max-budget-usd` | float | from config (optional) | Maximum cost in USD |
 | `--permission-mode` | enum | `default` | `default`, `accept-all`, or `plan` |
 | `--output-format` | enum | `text` | `text`, `json`, `stream-json` |
 | `--input-format` | enum | `text` | `text`, `stream-json` |
@@ -277,7 +277,7 @@ clido index build --ext rs,py,ts
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--dir <path>` | current directory | Directory to index |
-| `--ext <exts>` | `rs,py,js,ts,go` | Comma-separated file extensions |
+| `--ext <exts>` | see `clido index build --help` | Comma-separated file extensions (includes sol/move and common langs by default) |
 
 ---
 
@@ -406,6 +406,28 @@ clido update-pricing
 ```
 
 Prints the current pricing file path and its age. Downloads and replaces it if newer data is available.
+
+---
+
+## `clido skills`
+
+List or toggle **skills** (reusable instructions loaded from `.clido/skills/` and related paths). See [Skills](/docs/guide/skills).
+
+```bash
+clido skills list
+clido skills paths
+clido skills disable my-skill
+clido skills enable my-skill
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` | Print each skill id, short summary, and whether it is active for this workspace |
+| `paths` | Print resolved search directories (and configured `registry-urls`, reserved) |
+| `disable <id>` | Append id to `[skills].disabled` in **project** `.clido/config.toml` |
+| `enable <id>` | Remove id from the disabled list |
+
+Restart the agent session after changes so the system prompt reloads.
 
 ---
 

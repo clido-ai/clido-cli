@@ -108,8 +108,8 @@ provider = "openai"
 model    = "gpt-4o-mini"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# [roles]
-# Map role names to model IDs for use by /fast and /smart in the TUI.
+# [roles]  (legacy — parsed for backwards compatibility; prefer [profile.*.fast])
+# Optional hints for /fast and /smart in the TUI when present.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [roles]
@@ -122,12 +122,12 @@ reasoning = "claude-opus-4-6"
 
 [agent]
 # Maximum number of agent turns per session.
-# Type: integer  Default: 50
-max-turns = 50
+# Type: integer  Default: 200
+max-turns = 200
 
-# Maximum spend per session in USD. Null = no budget limit.
-# Type: float or null  Default: 5.0
-max-budget-usd = 5.0
+# Maximum spend per session in USD. Omit or null = no budget limit.
+# Type: float or null  Default: null
+# max-budget-usd = 5.0
 
 # Maximum number of concurrent read-only tool calls.
 # Type: integer  Default: 4
@@ -139,8 +139,8 @@ max-concurrent-tools = 4
 
 [context]
 # Compact conversation history when token usage exceeds this fraction of the
-# context window. Range: 0.0–1.0  Default: 0.75
-compaction-threshold = 0.75
+# context window. Range: 0.0–1.0  Default: ~0.58
+compaction-threshold = 0.58
 
 # Override the maximum context window size.
 # Default: model-specific value from pricing table (e.g. 200000 for Claude 3.5 Sonnet).
@@ -187,7 +187,29 @@ pre_tool_use  = ""
 # Run after each tool call. Exit code is ignored.
 # Type: string (shell command)  Default: ""
 post_tool_use = ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [index]  — SemanticSearch / clido index
+# ─────────────────────────────────────────────────────────────────────────────
+
+[index]
+# exclude-patterns = ["*.lock", "vendor/**"]
+# include-ignored = false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [skills]  — reusable agent instructions (.clido/skills/, ~/.clido/skills/)
+# ─────────────────────────────────────────────────────────────────────────────
+
+[skills]
+# disabled = ["id-to-hide"]
+# enabled = ["id1", "id2"]   # if non-empty, only these ids are injected
+# extra-paths = ["~/shared-skills"]
+# no-skills = false
+# auto-suggest = true
+# registry-urls = []         # reserved for future remote registries
 ```
+
+See **[Skills guide](/docs/guide/skills)** for file format and commands.
 
 ## Key reference
 
@@ -223,15 +245,22 @@ Optional fast/cheap provider for utility tasks (title generation, summaries, com
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `max-turns` | integer | `50` | Maximum turns per session |
-| `max-budget-usd` | float | `5.0` | Maximum cost per session |
-| `max-concurrent-tools` | integer | `4` | Max parallel tool calls |
+| `max-turns` | integer | `200` | Maximum turns per session |
+| `max-budget-usd` | float \| omitted | none | Optional spend cap per session (USD) |
+| `max-concurrent-tools` | integer | `4` | Max parallel read-only tool calls |
+| `quiet` | boolean | `false` | Less verbose agent output |
+| `no-rules` | boolean | `false` | Skip hierarchical rules / CLIDO injection |
+| `rules-file` | string | none | Use a single rules file instead of discovery |
+| `notify` | boolean | `false` | Desktop notify on turn complete (where supported) |
+| `auto-checkpoint` | boolean | `true` | Checkpoint before file-mutating turns |
+| `max-checkpoints-per-session` | integer | `50` | Retention cap for checkpoints |
+| `max-output-tokens` | integer | none | Cap model output tokens per response |
 
 ### `[context]`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `compaction-threshold` | float | `0.75` | Context compaction trigger fraction |
+| `compaction-threshold` | float | `0.58` | Context compaction trigger fraction |
 | `max-context-tokens` | integer | model default | Context window override |
 
 ### `[tools]`
@@ -254,26 +283,33 @@ Optional fast/cheap provider for utility tasks (title generation, summaries, com
 | `pre_tool_use` | string | `""` | Shell command before each tool call |
 | `post_tool_use` | string | `""` | Shell command after each tool call |
 
-### `[roles]`
-
-Maps role names to model IDs. Used by `/fast` and `/smart` TUI commands.
+### `[index]`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `fast` | string | `claude-haiku-4-5-20251001` | Model for `/fast` |
-| `reasoning` | string | `claude-opus-4-6` | Model for `/smart` |
+| `exclude-patterns` | list | `[]` | Globs excluded from `clido index build` |
+| `include-ignored` | boolean | `false` | Index ignored files (use with care) |
 
-```toml
-[roles]
-fast      = "claude-haiku-4-5-20251001"
-reasoning = "claude-opus-4-6"
-```
+### `[skills]`
 
-User-level model favorites/recency are stored in `~/.config/clido/model_prefs.json` and managed through the TUI (`/fav`, `/models`).
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `disabled` | list of strings | `[]` | Skill ids never injected |
+| `enabled` | list of strings | `[]` | If non-empty, **only** these ids are injected |
+| `extra-paths` | list of strings | `[]` | Extra directories to scan (`~/` expanded) |
+| `no-skills` | boolean | `false` | Disable all skill injection |
+| `auto-suggest` | boolean | `true` (if unset) | Stronger prompt text encouraging skill suggestions |
+| `registry-urls` | list of strings | `[]` | Reserved for remote skill indexes (not used yet) |
+
+### `[roles]` (legacy)
+
+Parsed for backwards compatibility. **`[profile.<name>.fast]`** is the supported way to supply a utility model. The TUI `/fast` and `/smart` commands use built-in defaults when `[roles]` is absent.
+
+User-level model favorites and recency live in `~/.config/clido/model_prefs.json` (`/fav`, `/models`).
 
 ## `permission_mode` values
 
-The permission mode can be set via `--permission-mode` flag or environment variable. Config-level default is not currently supported but planned.
+Set via **`--permission-mode`** or **`CLIDO_PERMISSION_MODE`**. There is **no** `[agent] permission-mode` key today.
 
 | Value | Description |
 |-------|-------------|

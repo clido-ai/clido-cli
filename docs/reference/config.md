@@ -263,8 +263,9 @@ Optional fast/cheap provider for utility tasks (title generation, summaries, com
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `max-turns` | integer | `200` | Maximum turns per session |
-| `max-budget-usd` | float \| omitted | none | Optional spend cap per session (USD) |
-| `max-concurrent-tools` | integer | `4` | Max parallel read-only tool calls |
+| `max-budget-usd` | float \| omitted | none | Session spend cap in USD (accumulates across outer turns until history replace) |
+| `max-budget-usd-per-turn` | float \| omitted | none | Optional cap on model spend within one user turn (`completion_loop_run`) |
+| `max-concurrent-tools` | integer | `4` | Reserved (agent runs tools sequentially per turn; value ignored) |
 | `quiet` | boolean | `false` | Less verbose agent output |
 | `no-rules` | boolean | `false` | Skip hierarchical rules / CLIDO injection |
 | `rules-file` | string | none | Use a single rules file instead of discovery |
@@ -280,6 +281,7 @@ Optional fast/cheap provider for utility tasks (title generation, summaries, com
 | `doom-same-args-window` | integer | `8` | Window size for repeated identical tool+args |
 | `doom-same-args-min` | integer | `4` | Minimum repeats in window to trigger doom |
 | `max-tool-retries` | integer | `3` | Retries per tool call for transient failures (`tool-retries` alias) |
+| `max-tool-retry-budget-per-turn` | integer | `64` | Max retry scheduling events summed across all tools in one user turn |
 | `retry-backoff-max-ms` | integer | `10000` | Upper bound on backoff between retries (ms) |
 | `retry-jitter-numerator` | integer | `25` | Jitter fraction: delay × numerator / 100 |
 | `provider-min-request-interval-ms` | integer | `0` | Minimum gap between LLM `complete` calls (`0` = off) |

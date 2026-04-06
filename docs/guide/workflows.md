@@ -204,13 +204,9 @@ Expressions are rendered before the step runs. Referencing an incomplete step is
 
 ## Parallel execution
 
-Steps with no shared dependencies run in parallel. In the example above, `security` and `style` both depend only on `diff`, so they run concurrently.
+Steps with no shared dependencies run in parallel when marked with `parallel: true` in the workflow YAML. In the example above, `security` and `style` both depend only on `diff`, so they can run concurrently.
 
-Parallelism is bounded by `--max-parallel-tools` (default: 4). You can increase this for workflows with many independent steps:
-
-```bash
-clido workflow run big-workflow.yaml --max-parallel-tools 8
-```
+That parallelism is implemented in the **workflow executor** (separate agent runs per step), not the in-session `--max-parallel-tools` flag (which is reserved and does not batch tools inside a single model turn).
 
 ## Workflow storage
 

@@ -13,7 +13,7 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &str;
     /// JSON Schema for the input object — compiled by the agent before every call.
     fn schema(&self) -> serde_json::Value;
-    /// Return `true` for read-only tools (parallel batching, no permission prompt).
+    /// Return `true` for read-only tools (skips write permission prompts; used for plan-mode filtering).
     fn is_read_only(&self) -> bool {
         false
     }

@@ -43,7 +43,7 @@ When stdin is not a TTY and no prompt is given, stdin is read as the prompt.
 | `--mcp-config` | path | — | Path to MCP server config file |
 | `--sandbox` | flag | false | Enable Bash sandboxing |
 | `--planner` | flag | false | Enable task decomposition planner |
-| `--max-parallel-tools` | integer | 4 | Max concurrent read-only tool calls |
+| `--max-parallel-tools` | integer | 4 | Reserved (ignored for in-turn tool batching) |
 | `--system-prompt` | string | — | System prompt override |
 | `--system-prompt-file` | path | — | Read system prompt from file |
 | `--append-system-prompt` | string | — | Append to default system prompt |

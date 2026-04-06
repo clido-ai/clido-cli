@@ -178,9 +178,9 @@ pub struct AgentConfig {
     /// Suppress spinner, tool lifecycle output, and cost footer.
     #[serde(default)]
     pub quiet: bool,
-    /// Max parallel tool calls for read-only tools (bounded concurrency). Default 4.
+    /// Reserved for future use. The agent loop runs tools **sequentially** per model turn so
+    /// permissions, hooks, and validation stay consistent.
     /// Config key is `max_concurrent_tools` (per spec); CLI flag/env use `max_parallel_tools`.
-    /// Both names are accepted for compatibility.
     #[serde(default = "default_max_parallel_tools", alias = "max_concurrent_tools")]
     pub max_parallel_tools: u32,
     /// Skip all CLIDO.md / rules file injection.

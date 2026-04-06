@@ -26,7 +26,7 @@ Flags can also be set via environment variables — see the `Env` column.
 | `--planner` / `--plan` | — | flag | false | — | Enable interactive plan mode: decompose task into editable DAG before executing |
 | `--plan-dry-run` | — | flag | false | — | With `--plan`: show editor but never execute |
 | `--plan-no-edit` | — | flag | false | — | With `--plan`: skip editor, execute immediately (CI-friendly) |
-| `--max-parallel-tools` | — | integer | `4` | `CLIDO_MAX_PARALLEL_TOOLS` | Max concurrent read-only tool calls |
+| `--max-parallel-tools` | — | integer | `4` | `CLIDO_MAX_PARALLEL_TOOLS` | Reserved (ignored by main agent loop) |
 | `--system-prompt` | — | string | — | `CLIDO_SYSTEM_PROMPT` | Replace the default system prompt |
 | `--system-prompt-file` | — | path | — | — | Read system prompt from a file |
 | `--append-system-prompt` | — | string | — | — | Append text to the default system prompt |
@@ -134,7 +134,7 @@ clido --plan --plan-no-edit "fix clippy"      # skip editor
 
 ### `--max-parallel-tools`
 
-Maximum number of read-only tool calls that can run concurrently. Increasing this can speed up tasks that do a lot of file reading.
+Accepted for compatibility and stored in config; the main agent loop **does not** parallelize tool calls inside a model turn (tools run sequentially for consistent permissions and hooks).
 
 ### `--system-prompt`
 

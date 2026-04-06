@@ -418,21 +418,20 @@ impl App {
 
     pub(super) fn push(&mut self, line: ChatLine) {
         const MAX_THINKING_COALESCE: usize = 24_000;
-        match (&line, self.messages.last_mut()) {
-            (ChatLine::Thinking(new_t), Some(ChatLine::Thinking(prev))) => {
-                if !new_t.is_empty() {
-                    if !prev.is_empty() {
-                        prev.push('\n');
-                    }
-                    prev.push_str(new_t);
-                    if prev.len() > MAX_THINKING_COALESCE {
-                        prev.truncate(MAX_THINKING_COALESCE);
-                        prev.push_str("\n… [truncated]");
-                    }
+        if let (ChatLine::Thinking(new_t), Some(ChatLine::Thinking(prev))) =
+            (&line, self.messages.last_mut())
+        {
+            if !new_t.is_empty() {
+                if !prev.is_empty() {
+                    prev.push('\n');
                 }
-                return;
+                prev.push_str(new_t);
+                if prev.len() > MAX_THINKING_COALESCE {
+                    prev.truncate(MAX_THINKING_COALESCE);
+                    prev.push_str("\n… [truncated]");
+                }
             }
-            _ => {}
+            return;
         }
         self.messages.push(line);
         // scroll position is computed at render time when following=true

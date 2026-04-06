@@ -1933,7 +1933,7 @@ pub(super) fn cmd_configure(app: &mut App, cmd: &str) {
             [agent]\n\
             max-turns            = 200     # maximum tool-use turns per run\n\
             max-budget-usd       = 5.0     # cost cap per run (omit for unlimited)\n\
-            max-concurrent-tools = 4       # parallel tool calls\n\
+            max-concurrent-tools = 4       # reserved (sequential in-turn tools)\n\
             max-output-tokens    = 8192    # max tokens per LLM response\n\
             quiet                = false   # suppress spinner / cost footer\n\
             notify               = false   # desktop notification on completion\n\

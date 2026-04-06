@@ -1679,6 +1679,7 @@ pub(super) fn sync_tui_profile_from_disk(app: &mut App, profile_name: &str) {
     app.current_profile = profile_name.to_string();
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn start_agent_runtime(
     cli: Cli,
     workspace_root: std::path::PathBuf,
@@ -2076,6 +2077,8 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
                 app.channels.path_permission_tx = runtime.path_permission_tx.clone();
                 app.channels.profile_switch_tx = runtime.profile_switch_tx.clone();
                 app.push(ChatLine::Thinking("↻ recovering runtime…".to_string()));
+                app.ui_emit_unhealthy
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
                 app.busy = false;
                 app.agent_run_state = AppRunState::Idle;
                 app.status_log.clear();

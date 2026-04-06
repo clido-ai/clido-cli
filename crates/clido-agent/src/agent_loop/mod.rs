@@ -29,13 +29,11 @@ use clido_memory::MemoryStore;
 use clido_providers::ModelProvider;
 use clido_storage::{AuditEntry, AuditLog, SessionLine, SessionWriter};
 use clido_tools::{ToolOutput, ToolRegistry, ACCESS_DENIED_OUTSIDE_WORKSPACE};
-use futures::future::join_all;
 use similar::TextDiff;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
 use context::{compact_for_model_request, CONTEXT_OUTPUT_RESERVE, PROACTIVE_SUMMARIZE_THRESHOLD};
@@ -899,26 +897,6 @@ impl AgentLoop {
         unreachable!()
     }
 
-    /// Execute a batch of tools with automatic retry for failed calls.
-    /// First runs all tools in parallel (if read-only), then retries any failures.
-    async fn execute_tool_batch_with_retry(
-        &mut self,
-        tool_uses: &[(String, String, serde_json::Value)],
-    ) -> Vec<ToolOutput> {
-        // First pass: execute all tools using the optimized batch method
-        let mut results = self.execute_tool_batch(tool_uses).await;
-
-        // Second pass: retry any failures
-        for (i, result) in results.iter_mut().enumerate() {
-            if result.is_error {
-                let (_, name, input) = &tool_uses[i];
-                *result = self.execute_tool_with_retry(name, input).await;
-            }
-        }
-
-        results
-    }
-
     /// Immediately compact the conversation history, regardless of the compaction threshold.
     /// Returns `(before, after)` message counts. Useful for the `/compact` TUI command.
     pub async fn compact_history_now(&mut self) -> Result<(usize, usize)> {
@@ -1582,134 +1560,64 @@ impl AgentLoop {
                         )?;
                     }
 
-                    let all_read_only = tool_uses.iter().all(|(_, name, _)| {
-                        self.tools
-                            .get(name)
-                            .map(|t| t.is_read_only())
-                            .unwrap_or(false)
-                    });
-
-                    let outputs: Vec<(ToolOutput, u64)> = if all_read_only && tool_uses.len() > 1 {
+                    // One code path: gated execution, hooks, emit, audit, and retries apply uniformly
+                    // (no parallel read-only shortcut — avoids drift vs permission/injection behavior).
+                    let mut outputs = Vec::with_capacity(tool_uses.len());
+                    for (id, name, input) in &tool_uses {
                         if let Some(ref e) = self.emit {
-                            for (id, name, input) in &tool_uses {
-                                e.on_tool_start(id, name, input).await;
-                            }
+                            e.on_tool_start(id, name, input).await;
                         }
-                        for (_, name, input) in &tool_uses {
-                            if let Some(ref hooks) = self.hooks {
-                                if let Some(cmd) = &hooks.pre_tool_use {
-                                    run_hook(
-                                        cmd,
-                                        &[
-                                            ("CLIDO_TOOL_NAME", name.as_str()),
-                                            (
-                                                "CLIDO_TOOL_INPUT",
-                                                &serde_json::to_string(input).unwrap_or_default(),
-                                            ),
-                                        ],
-                                    );
-                                }
+                        if let Some(ref hooks) = self.hooks {
+                            if let Some(cmd) = &hooks.pre_tool_use {
+                                run_hook(
+                                    cmd,
+                                    &[
+                                        ("CLIDO_TOOL_NAME", name.as_str()),
+                                        (
+                                            "CLIDO_TOOL_INPUT",
+                                            &serde_json::to_string(input).unwrap_or_default(),
+                                        ),
+                                    ],
+                                );
                             }
                         }
                         let t0 = std::time::Instant::now();
-                        let results = self.execute_tool_batch_with_retry(&tool_uses).await;
-                        let batch_ms = t0.elapsed().as_millis() as u64;
+                        let output = self.execute_tool_with_retry(name, input).await;
+                        let duration_ms = t0.elapsed().as_millis() as u64;
                         if let Some(ref e) = self.emit {
-                            for ((id, name, _), output) in tool_uses.iter().zip(results.iter()) {
-                                e.on_tool_done(id, name, output.is_error, output.diff.clone())
-                                    .await;
+                            e.on_tool_done(id, name, output.is_error, output.diff.clone())
+                                .await;
+                        }
+                        self.write_audit(name, input, &output, duration_ms);
+                        if let Some(ref hooks) = self.hooks {
+                            if let Some(cmd) = &hooks.post_tool_use {
+                                run_hook(
+                                    cmd,
+                                    &[
+                                        ("CLIDO_TOOL_NAME", name.as_str()),
+                                        (
+                                            "CLIDO_TOOL_INPUT",
+                                            &serde_json::to_string(input).unwrap_or_default(),
+                                        ),
+                                        (
+                                            "CLIDO_TOOL_OUTPUT",
+                                            &output
+                                                .content
+                                                .chars()
+                                                .take(500)
+                                                .collect::<String>(),
+                                        ),
+                                        (
+                                            "CLIDO_TOOL_IS_ERROR",
+                                            if output.is_error { "true" } else { "false" },
+                                        ),
+                                        ("CLIDO_TOOL_DURATION_MS", &duration_ms.to_string()),
+                                    ],
+                                );
                             }
                         }
-                        for ((_, name, input), output) in tool_uses.iter().zip(results.iter()) {
-                            self.write_audit(name, input, output, batch_ms);
-                            if let Some(ref hooks) = self.hooks {
-                                if let Some(cmd) = &hooks.post_tool_use {
-                                    run_hook(
-                                        cmd,
-                                        &[
-                                            ("CLIDO_TOOL_NAME", name.as_str()),
-                                            (
-                                                "CLIDO_TOOL_INPUT",
-                                                &serde_json::to_string(input).unwrap_or_default(),
-                                            ),
-                                            (
-                                                "CLIDO_TOOL_OUTPUT",
-                                                &output
-                                                    .content
-                                                    .chars()
-                                                    .take(500)
-                                                    .collect::<String>(),
-                                            ),
-                                            (
-                                                "CLIDO_TOOL_IS_ERROR",
-                                                if output.is_error { "true" } else { "false" },
-                                            ),
-                                            ("CLIDO_TOOL_DURATION_MS", &batch_ms.to_string()),
-                                        ],
-                                    );
-                                }
-                            }
-                        }
-                        results.into_iter().map(|o| (o, batch_ms)).collect()
-                    } else {
-                        let mut outputs = Vec::new();
-                        for (id, name, input) in &tool_uses {
-                            if let Some(ref e) = self.emit {
-                                e.on_tool_start(id, name, input).await;
-                            }
-                            if let Some(ref hooks) = self.hooks {
-                                if let Some(cmd) = &hooks.pre_tool_use {
-                                    run_hook(
-                                        cmd,
-                                        &[
-                                            ("CLIDO_TOOL_NAME", name.as_str()),
-                                            (
-                                                "CLIDO_TOOL_INPUT",
-                                                &serde_json::to_string(input).unwrap_or_default(),
-                                            ),
-                                        ],
-                                    );
-                                }
-                            }
-                            let t0 = std::time::Instant::now();
-                            let output = self.execute_tool_with_retry(name, input).await;
-                            let duration_ms = t0.elapsed().as_millis() as u64;
-                            if let Some(ref e) = self.emit {
-                                e.on_tool_done(id, name, output.is_error, output.diff.clone())
-                                    .await;
-                            }
-                            self.write_audit(name, input, &output, duration_ms);
-                            if let Some(ref hooks) = self.hooks {
-                                if let Some(cmd) = &hooks.post_tool_use {
-                                    run_hook(
-                                        cmd,
-                                        &[
-                                            ("CLIDO_TOOL_NAME", name.as_str()),
-                                            (
-                                                "CLIDO_TOOL_INPUT",
-                                                &serde_json::to_string(input).unwrap_or_default(),
-                                            ),
-                                            (
-                                                "CLIDO_TOOL_OUTPUT",
-                                                &output
-                                                    .content
-                                                    .chars()
-                                                    .take(500)
-                                                    .collect::<String>(),
-                                            ),
-                                            (
-                                                "CLIDO_TOOL_IS_ERROR",
-                                                if output.is_error { "true" } else { "false" },
-                                            ),
-                                            ("CLIDO_TOOL_DURATION_MS", &duration_ms.to_string()),
-                                        ],
-                                    );
-                                }
-                            }
-                            outputs.push((output, duration_ms));
-                        }
-                        outputs
-                    };
+                        outputs.push((output, duration_ms));
+                    }
 
                     self.stall.observe_batch(&tool_uses, &outputs);
                     if self.stall.score() >= self.config.stall_threshold {
@@ -2140,90 +2048,6 @@ impl AgentLoop {
                 duration_ms,
             };
             let _ = audit.lock().unwrap().append(&entry);
-        }
-    }
-
-    /// Execute a batch of tool calls, using parallel execution if all are read-only.
-    /// Returns results in the same order as the input tool_uses slice.
-    async fn execute_tool_batch(
-        &self,
-        tool_uses: &[(String, String, serde_json::Value)],
-    ) -> Vec<ToolOutput> {
-        let all_read_only = tool_uses.iter().all(|(_, name, _)| {
-            self.tools
-                .get(name)
-                .map(|t| t.is_read_only())
-                .unwrap_or(false)
-        });
-
-        if all_read_only && tool_uses.len() > 1 {
-            // Parallel execution with bounded concurrency
-            let max_parallel = self.config.max_parallel_tools.max(1) as usize;
-            let semaphore = Arc::new(Semaphore::new(max_parallel));
-            let tools = &self.tools;
-            let cache = Arc::clone(&self.schema_cache);
-            let metrics = Arc::clone(&self.metrics);
-            let tool_to = self.tool_timeout();
-            let max_out = self.config.max_tool_output_bytes;
-            let futures: Vec<_> = tool_uses
-                .iter()
-                .map(|(_, name, input)| {
-                    let sem = semaphore.clone();
-                    let cache = Arc::clone(&cache);
-                    let metrics = Arc::clone(&metrics);
-                    let name = name.clone();
-                    let input = input.clone();
-                    async move {
-                        let _permit = match sem.acquire().await {
-                            Ok(p) => p,
-                            Err(_) => {
-                                return ToolOutput::err("internal: semaphore closed".to_string())
-                            }
-                        };
-                        match tools.get(&name) {
-                            Some(tool) => {
-                                let schema = tool.schema();
-                                if let Err(o) = validation::validate_tool_json_or_tool_error(
-                                    &cache,
-                                    &metrics,
-                                    &name,
-                                    &schema,
-                                    &input,
-                                ) {
-                                    return o;
-                                }
-                                match tokio::time::timeout(tool_to, tool.execute(input)).await {
-                                    Ok(output) => output,
-                                    Err(_) => ToolOutput::err_kind(
-                                        format!(
-                                            "Tool '{name}' timed out after {} seconds",
-                                            tool_to.as_secs()
-                                        ),
-                                        ToolFailureKind::Timeout,
-                                    ),
-                                }
-                            }
-                            None => ToolOutput::err_kind(
-                                format!("Tool not found: {name}"),
-                                ToolFailureKind::NotFound,
-                            ),
-                        }
-                    }
-                })
-                .collect();
-            join_all(futures)
-                .await
-                .into_iter()
-                .map(|o| Self::maybe_truncate_tool_output(o, max_out))
-                .collect()
-        } else {
-            // Sequential execution (state-changing or single tool)
-            let mut results = Vec::with_capacity(tool_uses.len());
-            for (_, name, input) in tool_uses {
-                let output = self.execute_tool(name, input).await;
-                results.push(output);
-            }
-            results
         }
     }
 }

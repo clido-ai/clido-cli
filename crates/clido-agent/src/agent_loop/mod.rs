@@ -989,7 +989,9 @@ impl AgentLoop {
             .transpose()
             .map_err(ClidoError::from)?;
 
-        let result = self.run_continue_loop(&mut session, pricing, cancel).await;
+        let result = self
+            .completion_loop_run(&mut session, pricing, cancel, "continue turn")
+            .await;
         match &result {
             Ok(_) => self.prune_memory_if_needed(),
             Err(e) => {
@@ -1002,401 +1004,6 @@ impl AgentLoop {
             }
         }
         result
-    }
-
-    async fn run_continue_loop(
-        &mut self,
-        session: &mut Option<&mut SessionWriter>,
-        pricing: Option<&PricingTable>,
-        cancel: Option<Arc<AtomicBool>>,
-    ) -> Result<String> {
-        let effective_mode = self
-            .permission_mode_override
-            .unwrap_or(self.config.permission_mode);
-        let in_plan_mode = effective_mode == PermissionMode::PlanOnly;
-        let schemas = self.tools.schemas_for_context(in_plan_mode);
-        self.doom_monitor.clear();
-        self.budget_warned_pcts.clear();
-        let mut turns = 0;
-        self.cumulative_cost_usd = 0.0;
-        self.cumulative_input_tokens = 0;
-        self.cumulative_output_tokens = 0;
-        self.cumulative_cache_read_tokens = 0;
-        self.cumulative_cache_creation_tokens = 0;
-        const DEFAULT_INPUT_USD_PER_1M: f64 = 3.0;
-        const DEFAULT_OUTPUT_USD_PER_1M: f64 = 15.0;
-
-        loop {
-            if cancel
-                .as_ref()
-                .map(|c| c.load(Ordering::Relaxed))
-                .unwrap_or(false)
-            {
-                return Err(ClidoError::Interrupted);
-            }
-            if turns >= self.config.max_turns {
-                return Err(ClidoError::MaxTurnsExceeded);
-            }
-            turns += 1;
-            self.last_turn_count = turns;
-
-            // Proactive summarization: at 50% capacity, start replacing oldest tool pairs
-            // with 1-sentence summaries to delay full compaction.
-            {
-                let sys_tok = self
-                    .config
-                    .system_prompt
-                    .as_ref()
-                    .map(|s| estimate_tokens_str(s))
-                    .unwrap_or(0);
-                let max_tok = self
-                    .config
-                    .max_context_tokens
-                    .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
-                let effective_max = max_tok.saturating_sub(CONTEXT_OUTPUT_RESERVE).max(32_000);
-                let current = sys_tok + estimate_tokens_messages(&self.history);
-                let proactive_limit =
-                    ((effective_max as f64) * PROACTIVE_SUMMARIZE_THRESHOLD) as u32;
-                if current > proactive_limit {
-                    let (util_prov, util_cfg) = self.utility_provider();
-                    let count = context::proactive_summarize_pairs(
-                        &mut self.history,
-                        util_prov.as_ref(),
-                        &util_cfg,
-                        8, // preserve last 8 messages
-                    )
-                    .await;
-                    if count > 0 {
-                        debug!("Proactively summarized {} tool pairs", count);
-                    }
-                }
-            }
-
-            let system_tokens = self
-                .config
-                .system_prompt
-                .as_ref()
-                .map(|s| estimate_tokens_str(s))
-                .unwrap_or(0);
-            let max_ctx = self
-                .config
-                .max_context_tokens
-                .unwrap_or(DEFAULT_MAX_CONTEXT_TOKENS);
-            let threshold = self
-                .config
-                .compaction_threshold
-                .unwrap_or(DEFAULT_COMPACTION_THRESHOLD);
-            let (util_prov, summarize_config) = self.utility_provider();
-            let to_send = compact_for_model_request(
-                &self.history,
-                system_tokens,
-                max_ctx,
-                threshold,
-                util_prov.as_ref(),
-                &summarize_config,
-            )
-            .await?;
-
-            let response = self
-                .provider
-                .complete(&to_send, &schemas, &self.config)
-                .await?;
-
-            // Cancel check after the blocking LLM call (10-60s).
-            if cancel
-                .as_ref()
-                .map(|c| c.load(Ordering::Relaxed))
-                .unwrap_or(false)
-            {
-                return Err(ClidoError::Interrupted);
-            }
-
-            let turn_cost = pricing
-                .map(|t| compute_cost_usd(&response.usage, &self.config.model, t))
-                .unwrap_or_else(|| {
-                    (response.usage.input_tokens as f64 * DEFAULT_INPUT_USD_PER_1M
-                        + response.usage.output_tokens as f64 * DEFAULT_OUTPUT_USD_PER_1M)
-                        / 1_000_000.0
-                });
-            self.cumulative_cost_usd += turn_cost;
-            self.cumulative_input_tokens += response.usage.input_tokens;
-            self.cumulative_output_tokens += response.usage.output_tokens;
-            self.cumulative_cache_read_tokens +=
-                response.usage.cache_read_input_tokens.unwrap_or(0);
-            self.cumulative_cache_creation_tokens +=
-                response.usage.cache_creation_input_tokens.unwrap_or(0);
-
-            self.check_budget_exceeded()?;
-            if let (Some(limit), Some(ref e)) = (self.config.max_budget_usd, &self.emit) {
-                let pct_used = (self.cumulative_cost_usd / limit * 100.0).floor() as u8;
-                for &threshold_pct in BUDGET_WARNING_PCTS {
-                    if pct_used >= threshold_pct
-                        && !self.budget_warned_pcts.contains(&threshold_pct)
-                    {
-                        self.budget_warned_pcts.push(threshold_pct);
-                        e.on_budget_warning(threshold_pct, self.cumulative_cost_usd, limit)
-                            .await;
-                    }
-                }
-            }
-
-            debug!(
-                "continue turn {} stop_reason={:?} usage={}/{}",
-                turns,
-                response.stop_reason,
-                response.usage.input_tokens,
-                response.usage.output_tokens
-            );
-
-            self.history.push(Message {
-                role: Role::Assistant,
-                content: response.content.clone(),
-            });
-
-            if let Some(w) = session.as_mut() {
-                let content: Vec<serde_json::Value> = response
-                    .content
-                    .iter()
-                    .filter_map(|b| serde_json::to_value(b).ok())
-                    .collect();
-                w.log_write_line(&SessionLine::AssistantMessage { content });
-            }
-
-            match response.stop_reason {
-                StopReason::EndTurn => {
-                    let text: String = response
-                        .content
-                        .iter()
-                        .filter_map(|b| {
-                            if let ContentBlock::Text { text } = b {
-                                Some(text.as_str())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("");
-                    return Ok(text.trim().to_string());
-                }
-                StopReason::ToolUse => {
-                    let tool_uses: Vec<(String, String, serde_json::Value)> = response
-                        .content
-                        .iter()
-                        .filter_map(|b| {
-                            if let ContentBlock::ToolUse { id, name, input } = b {
-                                Some((id.clone(), name.clone(), input.clone()))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    if let Some(w) = session.as_mut() {
-                        for (id, name, input) in &tool_uses {
-                            w.log_write_line(&SessionLine::ToolCall {
-                                tool_use_id: id.clone(),
-                                tool_name: name.clone(),
-                                input: input.clone(),
-                            });
-                        }
-                    }
-
-                    let all_read_only = tool_uses.iter().all(|(_, name, _)| {
-                        self.tools
-                            .get(name)
-                            .map(|t| t.is_read_only())
-                            .unwrap_or(false)
-                    });
-
-                    let outputs: Vec<(ToolOutput, u64)> = if all_read_only && tool_uses.len() > 1 {
-                        if let Some(ref e) = self.emit {
-                            for (id, name, input) in &tool_uses {
-                                e.on_tool_start(id, name, input).await;
-                            }
-                        }
-                        for (_, name, input) in &tool_uses {
-                            if let Some(ref hooks) = self.hooks {
-                                if let Some(cmd) = &hooks.pre_tool_use {
-                                    run_hook(
-                                        cmd,
-                                        &[
-                                            ("CLIDO_TOOL_NAME", name.as_str()),
-                                            (
-                                                "CLIDO_TOOL_INPUT",
-                                                &serde_json::to_string(input).unwrap_or_default(),
-                                            ),
-                                        ],
-                                    );
-                                }
-                            }
-                        }
-                        let t0 = std::time::Instant::now();
-                        let results = self.execute_tool_batch_with_retry(&tool_uses).await;
-                        let batch_ms = t0.elapsed().as_millis() as u64;
-                        if let Some(ref e) = self.emit {
-                            for ((id, name, _), output) in tool_uses.iter().zip(results.iter()) {
-                                e.on_tool_done(id, name, output.is_error, output.diff.clone())
-                                    .await;
-                            }
-                        }
-                        for ((_, name, input), output) in tool_uses.iter().zip(results.iter()) {
-                            self.write_audit(name, input, output, batch_ms);
-                            if let Some(ref hooks) = self.hooks {
-                                if let Some(cmd) = &hooks.post_tool_use {
-                                    run_hook(
-                                        cmd,
-                                        &[
-                                            ("CLIDO_TOOL_NAME", name.as_str()),
-                                            (
-                                                "CLIDO_TOOL_INPUT",
-                                                &serde_json::to_string(input).unwrap_or_default(),
-                                            ),
-                                            (
-                                                "CLIDO_TOOL_OUTPUT",
-                                                &output
-                                                    .content
-                                                    .chars()
-                                                    .take(500)
-                                                    .collect::<String>(),
-                                            ),
-                                            (
-                                                "CLIDO_TOOL_IS_ERROR",
-                                                if output.is_error { "true" } else { "false" },
-                                            ),
-                                            ("CLIDO_TOOL_DURATION_MS", &batch_ms.to_string()),
-                                        ],
-                                    );
-                                }
-                            }
-                        }
-                        results.into_iter().map(|o| (o, batch_ms)).collect()
-                    } else {
-                        let mut outputs = Vec::new();
-                        for (id, name, input) in &tool_uses {
-                            if let Some(ref e) = self.emit {
-                                e.on_tool_start(id, name, input).await;
-                            }
-                            if let Some(ref hooks) = self.hooks {
-                                if let Some(cmd) = &hooks.pre_tool_use {
-                                    run_hook(
-                                        cmd,
-                                        &[
-                                            ("CLIDO_TOOL_NAME", name.as_str()),
-                                            (
-                                                "CLIDO_TOOL_INPUT",
-                                                &serde_json::to_string(input).unwrap_or_default(),
-                                            ),
-                                        ],
-                                    );
-                                }
-                            }
-                            let t0 = std::time::Instant::now();
-                            let output = self.execute_tool_with_retry(name, input).await;
-                            let duration_ms = t0.elapsed().as_millis() as u64;
-                            if let Some(ref e) = self.emit {
-                                e.on_tool_done(id, name, output.is_error, output.diff.clone())
-                                    .await;
-                            }
-                            self.write_audit(name, input, &output, duration_ms);
-                            if let Some(ref hooks) = self.hooks {
-                                if let Some(cmd) = &hooks.post_tool_use {
-                                    run_hook(
-                                        cmd,
-                                        &[
-                                            ("CLIDO_TOOL_NAME", name.as_str()),
-                                            (
-                                                "CLIDO_TOOL_INPUT",
-                                                &serde_json::to_string(input).unwrap_or_default(),
-                                            ),
-                                            (
-                                                "CLIDO_TOOL_OUTPUT",
-                                                &output
-                                                    .content
-                                                    .chars()
-                                                    .take(500)
-                                                    .collect::<String>(),
-                                            ),
-                                            (
-                                                "CLIDO_TOOL_IS_ERROR",
-                                                if output.is_error { "true" } else { "false" },
-                                            ),
-                                            ("CLIDO_TOOL_DURATION_MS", &duration_ms.to_string()),
-                                        ],
-                                    );
-                                }
-                            }
-                            outputs.push((output, duration_ms));
-                        }
-                        outputs
-                    };
-
-                    let mut tool_results = Vec::new();
-                    let mut had_errors = false;
-                    for ((id, name, input), (output, duration_ms)) in
-                        tool_uses.iter().zip(outputs.iter())
-                    {
-                        if let Some(w) = session.as_mut() {
-                            w.log_write_line(&SessionLine::ToolResult {
-                                tool_use_id: id.clone(),
-                                content: output.content.clone(),
-                                is_error: output.is_error,
-                                duration_ms: Some(*duration_ms),
-                                path: output.path.clone(),
-                                content_hash: output.content_hash.clone(),
-                                mtime_nanos: output.mtime_nanos,
-                            });
-                        }
-                        if output.is_error {
-                            had_errors = true;
-                        }
-                        tool_results.push(ContentBlock::ToolResult {
-                            tool_use_id: id.clone(),
-                            content: if output.is_error {
-                                enhanced_edit_error(name, &output.content, input)
-                            } else {
-                                output.content.clone()
-                            },
-                            is_error: output.is_error,
-                        });
-                    }
-                    prepend_tool_recovery_nudge(&tool_uses, &outputs, &mut tool_results);
-                    // Track consecutive tool errors for escalating hints.
-                    if had_errors {
-                        self.consecutive_tool_errors += 1;
-                        if self.consecutive_tool_errors >= 3 {
-                            tool_results.push(ContentBlock::Text {
-                                text: format!(
-                                    "[Warning] You've had {} consecutive turns with tool errors. \
-                                     Step back and reconsider your approach before trying again.",
-                                    self.consecutive_tool_errors
-                                ),
-                            });
-                        }
-                    } else {
-                        self.consecutive_tool_errors = 0;
-                    }
-                    self.history.push(Message {
-                        role: Role::User,
-                        content: tool_results,
-                    });
-                }
-                StopReason::MaxTokens | StopReason::StopSequence => {
-                    let text: String = response
-                        .content
-                        .iter()
-                        .filter_map(|b| {
-                            if let ContentBlock::Text { text } = b {
-                                Some(text.as_str())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("");
-                    return Ok(text.trim().to_string());
-                }
-            }
-        }
     }
 
     /// Push a new user message and run until EndTurn (for REPL next turn).
@@ -1646,11 +1253,13 @@ impl AgentLoop {
         result
     }
 
-    async fn run_completion_loop(
+    /// Model completion loop shared by `run` / `run_next_*` (`"turn"` log prefix) and [`run_continue`](Self::run_continue) (`"continue turn"`).
+    async fn completion_loop_run(
         &mut self,
         session: &mut Option<&mut SessionWriter>,
         pricing: Option<&PricingTable>,
         cancel: Option<Arc<AtomicBool>>,
+        turn_log_prefix: &'static str,
     ) -> Result<String> {
         let effective_mode = self
             .permission_mode_override
@@ -1788,7 +1397,8 @@ impl AgentLoop {
             }
 
             debug!(
-                "turn {} stop_reason={:?} usage={}/{}",
+                "{} {} stop_reason={:?} usage={}/{}",
+                turn_log_prefix,
                 turns,
                 response.stop_reason,
                 response.usage.input_tokens,
@@ -2104,6 +1714,16 @@ impl AgentLoop {
                 }
             }
         }
+    }
+
+    async fn run_completion_loop(
+        &mut self,
+        session: &mut Option<&mut SessionWriter>,
+        pricing: Option<&PricingTable>,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<String> {
+        self.completion_loop_run(session, pricing, cancel, "turn")
+            .await
     }
 
     async fn execute_tool_maybe_gated(

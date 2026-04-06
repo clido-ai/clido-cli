@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use clido_index::RepoIndex;
 use clido_memory::MemoryStore;
 
@@ -1350,12 +1352,85 @@ pub(super) fn cmd_index(app: &mut App) {
 
 pub(super) fn cmd_rules(app: &mut App) {
     app.push(ChatLine::Info("".into()));
-    app.push(ChatLine::Info(
-        "  Prompt rules have been replaced by /enhance. Use /enhance <prompt> to get".into(),
+    app.push(ChatLine::Section(
+        "Project rules (CLIDO.md, .clido/rules.md)".into(),
     ));
-    app.push(ChatLine::Info(
-        "  an AI-structured version of your prompt before sending.".into(),
-    ));
+
+    let (no_rules, rules_override) = match clido_core::load_config(&app.workspace_root) {
+        Ok(loaded) => {
+            let no = loaded.agent.no_rules;
+            let ro = loaded.agent.rules_file.as_ref().map(|s| {
+                let p = Path::new(s.as_str());
+                if p.is_absolute() {
+                    p.to_path_buf()
+                } else {
+                    app.workspace_root.join(p)
+                }
+            });
+            (no, ro)
+        }
+        Err(_) => (false, None),
+    };
+
+    if no_rules {
+        app.push(ChatLine::Info(
+            "  no-rules is on in config — project rules files are not loaded into the agent."
+                .into(),
+        ));
+        app.push(ChatLine::Info(
+            "  (Unrelated: /enhance <text> can still rewrite a prompt before you send it.)".into(),
+        ));
+        app.push(ChatLine::Info("".into()));
+        return;
+    }
+
+    let files = clido_context::discover_rules(
+        app.workspace_root.as_path(),
+        false,
+        rules_override.as_deref(),
+    );
+
+    if files.is_empty() {
+        app.push(ChatLine::Info(
+            "  No rules files found. The agent looks for, in order:".into(),
+        ));
+        app.push(ChatLine::Info(
+            "    ~/.config/clido/rules.md  (global)".into(),
+        ));
+        app.push(ChatLine::Info(
+            "    … then walking up from the workspace: .clido/rules.md, CLIDO.md".into(),
+        ));
+        app.push(ChatLine::Info(
+            "  Tip: /enhance <prompt> is separate — it structures your message, not project rules."
+                .into(),
+        ));
+    } else {
+        const PREVIEW_CHARS: usize = 1_200;
+        const PREVIEW_LINES: usize = 18;
+        for f in &files {
+            let total = f.content.chars().count();
+            app.push(ChatLine::Info(format!(
+                "  {}  ({} chars)",
+                f.path.display(),
+                total
+            )));
+            let snippet: String = f.content.chars().take(PREVIEW_CHARS).collect();
+            let lines: Vec<&str> = snippet.lines().take(PREVIEW_LINES).collect();
+            for line in lines {
+                app.push(ChatLine::Info(format!("  │ {}", line)));
+            }
+            if total > snippet.chars().count() || f.content.lines().count() > PREVIEW_LINES {
+                app.push(ChatLine::Info(
+                    "  │ … truncated in chat — open the file for the full rules".into(),
+                ));
+            }
+            app.push(ChatLine::Info("".into()));
+        }
+        app.push(ChatLine::Info(
+            "  Order: global first, then parents → workspace (later files override in the prompt)."
+                .into(),
+        ));
+    }
     app.push(ChatLine::Info("".into()));
 }
 

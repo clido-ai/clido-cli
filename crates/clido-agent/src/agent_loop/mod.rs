@@ -11,6 +11,8 @@ mod security;
 mod stall;
 mod throttle;
 mod validation;
+mod stream_aggregate;
+mod completion;
 
 use async_trait::async_trait;
 use clido_context::{
@@ -37,7 +39,8 @@ use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
 use context::{compact_for_model_request, CONTEXT_OUTPUT_RESERVE, PROACTIVE_SUMMARIZE_THRESHOLD};
-pub use history::session_lines_to_messages;
+pub use history::{session_lines_to_messages, try_session_lines_to_messages};
+pub use history::content_blocks_to_json_values;
 use security::{detect_injection, enhanced_edit_error};
 
 use doom::DoomTracker;
@@ -255,6 +258,8 @@ pub struct AgentLoop {
     checkpoint_created: bool,
     /// Receiver for path permission grants from the TUI (for interactive external path access).
     path_permission_rx: Option<tokio::sync::mpsc::UnboundedReceiver<std::path::PathBuf>>,
+    /// Identifies one outer user invocation (`run` / `run_next` / `continue`) for tracing.
+    turn_correlation_id: uuid::Uuid,
 }
 
 impl AgentLoop {
@@ -298,6 +303,7 @@ impl AgentLoop {
             fast_agent_config: None,
             consecutive_tool_errors: 0,
             checkpoint_created: false,
+            turn_correlation_id: uuid::Uuid::new_v4(),
         }
     }
 
@@ -361,6 +367,7 @@ impl AgentLoop {
             fast_agent_config: None,
             consecutive_tool_errors: 0,
             checkpoint_created: false,
+            turn_correlation_id: uuid::Uuid::new_v4(),
         }
     }
 
@@ -453,16 +460,43 @@ impl AgentLoop {
         session_checkpoint: Option<u64>,
         history_before: usize,
         err: &ClidoError,
-    ) {
+    ) -> Result<()> {
         if !err.should_truncate_history_after_failed_run(self.history.len(), history_before) {
-            return;
+            return Ok(());
         }
         self.history.truncate(history_before);
         if let (Some(w), Some(off)) = (session.as_mut(), session_checkpoint) {
-            if let Err(e) = w.truncate_to(off) {
-                eprintln!("[clido] session file truncate after rolled-back turn: {e}");
-            }
+            w.truncate_to(off).map_err(|e| ClidoError::SessionPersistence {
+                message: format!("session rollback truncate failed: {e}"),
+            })?;
         }
+        Ok(())
+    }
+
+    fn persist_session_line(
+        session: &mut Option<&mut SessionWriter>,
+        line: &SessionLine,
+    ) -> Result<()> {
+        if let Some(w) = session.as_mut() {
+            w.write_line(line).map_err(|e| ClidoError::SessionPersistence {
+                message: e.to_string(),
+            })?;
+        }
+        Ok(())
+    }
+
+    fn persist_user_message(
+        session: &mut Option<&mut SessionWriter>,
+        user_msg: &Message,
+    ) -> Result<()> {
+        let content = history::content_blocks_to_json_values(&user_msg.content)?;
+        Self::persist_session_line(
+            session,
+            &SessionLine::UserMessage {
+                role: "user".to_string(),
+                content,
+            },
+        )
     }
 
     /// Whether the **next** prompt from the UI should use `run` (first-turn semantics: git inject,
@@ -953,6 +987,7 @@ impl AgentLoop {
         pricing: Option<&PricingTable>,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
+        self.turn_correlation_id = uuid::Uuid::new_v4();
         let history_before = self.history.len();
         let session_checkpoint = session
             .as_mut()
@@ -971,7 +1006,7 @@ impl AgentLoop {
                     session_checkpoint,
                     history_before,
                     e,
-                );
+                )?;
             }
         }
         result
@@ -985,6 +1020,7 @@ impl AgentLoop {
         pricing: Option<&PricingTable>,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
+        self.turn_correlation_id = uuid::Uuid::new_v4();
         let history_before = self.history.len();
         let user_msg = Message {
             role: Role::User,
@@ -1000,16 +1036,9 @@ impl AgentLoop {
             .transpose()
             .map_err(ClidoError::from)?;
 
-        if let Some(ref mut w) = session {
-            let content: Vec<serde_json::Value> = user_msg
-                .content
-                .iter()
-                .filter_map(|b| serde_json::to_value(b).ok())
-                .collect();
-            w.log_write_line(&SessionLine::UserMessage {
-                role: "user".to_string(),
-                content,
-            });
+        if let Err(e) = Self::persist_user_message(&mut session, &user_msg) {
+            self.history.pop();
+            return Err(e);
         }
 
         let result = self
@@ -1023,7 +1052,7 @@ impl AgentLoop {
                     session_checkpoint,
                     history_before,
                     e,
-                );
+                )?;
             }
         }
         result
@@ -1039,6 +1068,7 @@ impl AgentLoop {
         pricing: Option<&PricingTable>,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
+        self.turn_correlation_id = uuid::Uuid::new_v4();
         // Inject relevant memories into system prompt before running.
         if let Some(injected) = self.inject_memories(user_input) {
             self.config.system_prompt = Some(injected);
@@ -1077,16 +1107,9 @@ impl AgentLoop {
             .transpose()
             .map_err(ClidoError::from)?;
 
-        if let Some(ref mut w) = session {
-            let content: Vec<serde_json::Value> = user_msg
-                .content
-                .iter()
-                .filter_map(|b| serde_json::to_value(b).ok())
-                .collect();
-            w.log_write_line(&SessionLine::UserMessage {
-                role: "user".to_string(),
-                content,
-            });
+        if let Err(e) = Self::persist_user_message(&mut session, &user_msg) {
+            self.history.pop();
+            return Err(e);
         }
 
         let result = self
@@ -1100,7 +1123,7 @@ impl AgentLoop {
                     session_checkpoint,
                     history_before,
                     e,
-                );
+                )?;
             }
         }
         result
@@ -1115,6 +1138,7 @@ impl AgentLoop {
         pricing: Option<&PricingTable>,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
+        self.turn_correlation_id = uuid::Uuid::new_v4();
         if let Some(injected) = self.inject_memories(user_input) {
             self.config.system_prompt = Some(injected);
         }
@@ -1140,16 +1164,9 @@ impl AgentLoop {
             .transpose()
             .map_err(ClidoError::from)?;
 
-        if let Some(ref mut w) = session {
-            let content_json: Vec<serde_json::Value> = user_msg
-                .content
-                .iter()
-                .filter_map(|b| serde_json::to_value(b).ok())
-                .collect();
-            w.log_write_line(&SessionLine::UserMessage {
-                role: "user".to_string(),
-                content: content_json,
-            });
+        if let Err(e) = Self::persist_user_message(&mut session, &user_msg) {
+            self.history.pop();
+            return Err(e);
         }
 
         let result = self
@@ -1163,7 +1180,7 @@ impl AgentLoop {
                     session_checkpoint,
                     history_before,
                     e,
-                );
+                )?;
             }
         }
         result
@@ -1178,6 +1195,7 @@ impl AgentLoop {
         pricing: Option<&PricingTable>,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
+        self.turn_correlation_id = uuid::Uuid::new_v4();
         let history_before = self.history.len();
         let mut content = extra_blocks;
         content.push(ContentBlock::Text {
@@ -1195,16 +1213,9 @@ impl AgentLoop {
             .transpose()
             .map_err(ClidoError::from)?;
 
-        if let Some(ref mut w) = session {
-            let content_json: Vec<serde_json::Value> = user_msg
-                .content
-                .iter()
-                .filter_map(|b| serde_json::to_value(b).ok())
-                .collect();
-            w.log_write_line(&SessionLine::UserMessage {
-                role: "user".to_string(),
-                content: content_json,
-            });
+        if let Err(e) = Self::persist_user_message(&mut session, &user_msg) {
+            self.history.pop();
+            return Err(e);
         }
 
         let result = self
@@ -1218,7 +1229,7 @@ impl AgentLoop {
                     session_checkpoint,
                     history_before,
                     e,
-                );
+                )?;
             }
         }
         result
@@ -1332,18 +1343,15 @@ impl AgentLoop {
             )
             .await?;
 
-            throttle::throttle_before_complete(
+            let response = completion::invoke_model_completion(
+                Arc::clone(&self.provider),
+                &to_send,
+                &schemas,
+                &self.config,
+                self.emit.clone(),
                 &mut self.last_complete_end,
-                self.config.provider_min_request_interval_ms,
             )
-            .await;
-
-            let response = self
-                .provider
-                .complete(&to_send, &schemas, &self.config)
-                .await?;
-
-            throttle::mark_complete_finished(&mut self.last_complete_end);
+            .await?;
 
             // ── Cancel check after the blocking LLM call ──────────────────
             // provider.complete() can take 10-60s. The user may have pressed
@@ -1421,19 +1429,31 @@ impl AgentLoop {
 
             self.metrics.model_turn_completed(turns);
 
+            let pre_assistant_file_offset = session
+                .as_mut()
+                .map(|w| w.end_offset())
+                .transpose()
+                .map_err(ClidoError::from)?;
+
             // Append assistant message (ToolUse batches validated before commit).
             self.history.push(Message {
                 role: Role::Assistant,
                 content: response.content.clone(),
             });
 
-            if let Some(w) = session.as_mut() {
-                let content: Vec<serde_json::Value> = response
-                    .content
-                    .iter()
-                    .filter_map(|b| serde_json::to_value(b).ok())
-                    .collect();
-                w.log_write_line(&SessionLine::AssistantMessage { content });
+            let assistant_line_content =
+                history::content_blocks_to_json_values(&response.content)?;
+            if let Err(e) = Self::persist_session_line(
+                session,
+                &SessionLine::AssistantMessage {
+                    content: assistant_line_content,
+                },
+            ) {
+                self.history.pop();
+                if let (Some(w), Some(off)) = (session.as_mut(), pre_assistant_file_offset) {
+                    let _ = w.truncate_to(off);
+                }
+                return Err(e);
             }
 
             match stop {
@@ -1475,14 +1495,15 @@ impl AgentLoop {
                     let tool_uses: Vec<(String, String, serde_json::Value)> =
                         tool_uses_parsed.expect("tool uses validated before assistant commit");
 
-                    if let Some(w) = session.as_mut() {
-                        for (id, name, input) in &tool_uses {
-                            w.log_write_line(&SessionLine::ToolCall {
+                    for (id, name, input) in &tool_uses {
+                        Self::persist_session_line(
+                            session,
+                            &SessionLine::ToolCall {
                                 tool_use_id: id.clone(),
                                 tool_name: name.clone(),
                                 input: input.clone(),
-                            });
-                        }
+                            },
+                        )?;
                     }
 
                     let all_read_only = tool_uses.iter().all(|(_, name, _)| {
@@ -1628,8 +1649,13 @@ impl AgentLoop {
                     for ((id, name, input), (output, duration_ms)) in
                         tool_uses.iter().zip(outputs.iter())
                     {
-                        if let Some(w) = session.as_mut() {
-                            w.log_write_line(&SessionLine::ToolResult {
+                        let output = Self::maybe_truncate_tool_output(
+                            output.clone(),
+                            self.config.max_tool_output_bytes,
+                        );
+                        Self::persist_session_line(
+                            session,
+                            &SessionLine::ToolResult {
                                 tool_use_id: id.clone(),
                                 content: output.content.clone(),
                                 is_error: output.is_error,
@@ -1637,8 +1663,8 @@ impl AgentLoop {
                                 path: output.path.clone(),
                                 content_hash: output.content_hash.clone(),
                                 mtime_nanos: output.mtime_nanos,
-                            });
-                        }
+                            },
+                        )?;
                         if output.is_error {
                             had_errors = true;
                         }
@@ -1966,9 +1992,21 @@ impl AgentLoop {
         self.execute_tool(name, input).await
     }
 
-    /// Global tool execution timeout to prevent indefinite hangs.
-    /// Individual tools (like Bash) may have shorter timeouts.
-    const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
+    fn tool_timeout(&self) -> Duration {
+        Duration::from_secs(self.config.tool_timeout_secs.max(1))
+    }
+
+    fn maybe_truncate_tool_output(mut out: ToolOutput, max_bytes: usize) -> ToolOutput {
+        if max_bytes == 0 || out.content.len() <= max_bytes {
+            return out;
+        }
+        let keep = max_bytes.saturating_sub(200).max(1024);
+        let prefix: String = out.content.chars().take(keep).collect();
+        out.content = format!(
+            "{prefix}...\n\n[clido: tool output truncated at {max_bytes} bytes; set [agent] max-tool-output-bytes to raise this cap]"
+        );
+        out
+    }
 
     async fn execute_tool(&self, name: &str, input: &serde_json::Value) -> ToolOutput {
         let Some(tool) = self.tools.get(name) else {
@@ -1984,17 +2022,19 @@ impl AgentLoop {
                 return ToolOutput::err_kind(msg, ToolFailureKind::ValidationInput);
             }
         }
-        match tokio::time::timeout(Self::TOOL_TIMEOUT, tool.execute(input.clone())).await {
+        let to = self.tool_timeout();
+        let out = match tokio::time::timeout(to, tool.execute(input.clone())).await {
             Ok(output) => output,
             Err(_) => ToolOutput::err_kind(
                 format!(
                     "Tool '{}' timed out after {} seconds - operation took too long",
                     name,
-                    Self::TOOL_TIMEOUT.as_secs()
+                    to.as_secs()
                 ),
                 ToolFailureKind::Timeout,
             ),
-        }
+        };
+        Self::maybe_truncate_tool_output(out, self.config.max_tool_output_bytes)
     }
 
     /// Write an audit entry for a completed tool call.
@@ -2044,6 +2084,8 @@ impl AgentLoop {
             let tools = &self.tools;
             let cache = Arc::clone(&self.schema_cache);
             let metrics = Arc::clone(&self.metrics);
+            let tool_to = self.tool_timeout();
+            let max_out = self.config.max_tool_output_bytes;
             let futures: Vec<_> = tool_uses
                 .iter()
                 .map(|(_, name, input)| {
@@ -2071,15 +2113,13 @@ impl AgentLoop {
                                         );
                                     }
                                 }
-                                match tokio::time::timeout(
-                                    Duration::from_secs(60),
-                                    tool.execute(input),
-                                )
-                                .await
-                                {
+                                match tokio::time::timeout(tool_to, tool.execute(input)).await {
                                     Ok(output) => output,
                                     Err(_) => ToolOutput::err_kind(
-                                        format!("Tool '{name}' timed out after 60 seconds"),
+                                        format!(
+                                            "Tool '{name}' timed out after {} seconds",
+                                            tool_to.as_secs()
+                                        ),
                                         ToolFailureKind::Timeout,
                                     ),
                                 }
@@ -2092,7 +2132,11 @@ impl AgentLoop {
                     }
                 })
                 .collect();
-            join_all(futures).await
+            join_all(futures)
+                .await
+                .into_iter()
+                .map(|o| Self::maybe_truncate_tool_output(o, max_out))
+                .collect()
         } else {
             // Sequential execution (state-changing or single tool)
             let mut results = Vec::with_capacity(tool_uses.len());

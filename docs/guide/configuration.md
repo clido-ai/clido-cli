@@ -55,6 +55,9 @@ base_url  = "http://localhost:11434"
 max-turns       = 200      # Maximum agent turns per session (default in clido-core: 200).
 max-budget-usd  = 5.0      # Maximum spend per session in USD (optional; omit for no cap).
 max-concurrent-tools = 4   # Max parallel read-only tool calls. Default: 4.
+# stream-model-completion = false   # Stream + aggregate when the provider supports it.
+# tool-timeout-secs = 60            # Wall-clock cap per tool invocation (agent loop).
+# max-tool-output-bytes = 512000    # Truncate tool output beyond this size (0 = off).
 
 # ── Production agent loop (optional overrides; defaults are safe) ─────────────
 # Wall-clock cap for one user message / completion loop (0 = unlimited). Default: 900 s.

@@ -211,6 +211,7 @@ async fn dispatch(cli: cli::Cli) -> Result<(), anyhow::Error> {
             cli::SessionsCmd::List => return sessions::run_sessions_list().await,
             cli::SessionsCmd::Show { id } => return sessions::run_sessions_show(id).await,
             cli::SessionsCmd::Fork { id } => return sessions::run_sessions_fork(id).await,
+            cli::SessionsCmd::Verify { id } => return sessions::run_sessions_verify(id).await,
         },
         Some(cli::Subcommand::Init) => return setup::run_init().await,
         Some(cli::Subcommand::Doctor) => return doctor::run_doctor().await,

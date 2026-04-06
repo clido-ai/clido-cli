@@ -215,6 +215,15 @@ pub struct AgentConfig {
     /// Minimum spacing between provider `complete` calls (ms). 0 = disabled.
     #[serde(default)]
     pub provider_min_request_interval_ms: u32,
+    /// When true, use `complete_stream` and aggregate to a full [`ModelResponse`] (provider support required).
+    #[serde(default)]
+    pub stream_model_completion: bool,
+    /// Per-tool execute timeout (seconds). Applies to the agent loop wrapper around `Tool::execute`.
+    #[serde(default = "default_tool_timeout_secs")]
+    pub tool_timeout_secs: u64,
+    /// Truncate tool output text beyond this many bytes (0 = unlimited).
+    #[serde(default = "default_max_tool_output_bytes")]
+    pub max_tool_output_bytes: usize,
 }
 
 fn default_max_parallel_tools() -> u32 {
@@ -257,6 +266,14 @@ fn default_retry_jitter_numerator() -> u8 {
     25
 }
 
+fn default_tool_timeout_secs() -> u64 {
+    60
+}
+
+fn default_max_tool_output_bytes() -> usize {
+    512_000
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -285,6 +302,9 @@ impl Default for AgentConfig {
             retry_backoff_max_ms: default_retry_backoff_max_ms(),
             retry_jitter_numerator: default_retry_jitter_numerator(),
             provider_min_request_interval_ms: 0,
+            stream_model_completion: false,
+            tool_timeout_secs: default_tool_timeout_secs(),
+            max_tool_output_bytes: default_max_tool_output_bytes(),
         }
     }
 }

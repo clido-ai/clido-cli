@@ -77,6 +77,16 @@ Print the full contents of a session in human-readable form:
 clido sessions show a1b2c3
 ```
 
+## Verifying a session (strict load)
+
+Check that a session file can be loaded the same way as **resume** (strict JSON / history decode):
+
+```bash
+clido sessions verify a1b2c3
+```
+
+If this fails, `clido --resume <id>` and TUI resume for that session will also fail until the file is repaired.
+
 ## Forking a session
 
 Create a copy of a session with a new ID. The fork starts from the full history of the original, allowing you to explore an alternative conversation path:

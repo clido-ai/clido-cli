@@ -23,6 +23,7 @@ use ratatui::{
 };
 
 use crate::overlay::OverlayKind;
+use crate::tui::app_state::AppRunState;
 
 use super::*;
 
@@ -580,9 +581,14 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 Span::styled(format!("{TUI_SEP}please wait"), chrome_note),
             ])
         } else if !app.queued.is_empty() {
+            let phase = match app.agent_run_state {
+                AppRunState::RunningTools => "Running tools",
+                AppRunState::Generating => "Generating",
+                AppRunState::Idle => "Agent running",
+            };
             Line::from(vec![
                 Span::styled(format!("{} ", spinner), Style::default().fg(TUI_STATE_BUSY)),
-                Span::styled("Agent running", Style::default().fg(TUI_BRAND_TEXT)),
+                Span::styled(phase, Style::default().fg(TUI_BRAND_TEXT)),
                 Span::styled(
                     format!("{TUI_SEP}Ctrl+Enter interrupt{TUI_SEP}Enter queues input"),
                     chrome_note,
@@ -595,21 +601,28 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             } else {
                 String::new()
             };
+            let phase = match app.agent_run_state {
+                AppRunState::RunningTools => format!("Running tools{elapsed_hint}"),
+                AppRunState::Generating => format!("Generating{elapsed_hint}"),
+                AppRunState::Idle => format!("Thinking{elapsed_hint}"),
+            };
             Line::from(vec![
                 Span::styled(format!("{} ", spinner), Style::default().fg(TUI_STATE_BUSY)),
-                Span::styled(
-                    format!("Thinking{elapsed_hint}"),
-                    Style::default().fg(TUI_BRAND_TEXT),
-                ),
+                Span::styled(phase, Style::default().fg(TUI_BRAND_TEXT)),
                 Span::styled(
                     format!("{TUI_SEP}type to queue a follow-up{TUI_SEP}Ctrl+Enter interrupt"),
                     chrome_note,
                 ),
             ])
         } else {
+            let phase = match app.agent_run_state {
+                AppRunState::RunningTools => "Running tools",
+                AppRunState::Generating => "Generating",
+                AppRunState::Idle => "Thinking",
+            };
             Line::from(vec![
                 Span::styled(format!("{} ", spinner), Style::default().fg(TUI_STATE_BUSY)),
-                Span::styled("Thinking", Style::default().fg(TUI_BRAND_TEXT)),
+                Span::styled(phase, Style::default().fg(TUI_BRAND_TEXT)),
                 Span::styled(
                     format!("{TUI_SEP}Enter queues draft{TUI_SEP}Ctrl+Enter interrupt"),
                     chrome_note,

@@ -9,6 +9,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::tui::app_state::AppRunState;
 use crate::tui::state::PlanPanelVisibility;
 use crate::tui::*;
 
@@ -76,9 +77,14 @@ pub(crate) fn build_status_rail_lines(app: &App, inner_w: u16, spinner: &str) ->
             Span::styled("Enhancing prompt", dim),
         ])
     } else if app.busy {
+        let phase = match app.agent_run_state {
+            AppRunState::RunningTools => "Running tools",
+            AppRunState::Generating => "Generating",
+            AppRunState::Idle => "Agent running",
+        };
         Line::from(vec![
             Span::styled(format!(" {} ", spinner), Style::default().fg(TUI_STATE_BUSY)),
-            Span::styled("Agent running", dim),
+            Span::styled(phase, dim),
         ])
     } else {
         Line::from(vec![

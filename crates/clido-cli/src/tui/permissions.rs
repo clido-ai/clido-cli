@@ -60,6 +60,9 @@ pub(super) struct TuiEmitter {
 impl EventEmitter for TuiEmitter {
     async fn on_tool_start(&self, tool_use_id: &str, name: &str, input: &serde_json::Value) {
         let detail = format_tool_input(name, input);
+        let _ = self.tx.send(AgentEvent::RunState(
+            super::app_state::AppRunState::RunningTools,
+        ));
         let _ = self.tx.send(AgentEvent::ToolStart {
             tool_use_id: tool_use_id.to_string(),
             name: name.to_string(),
@@ -78,6 +81,9 @@ impl EventEmitter for TuiEmitter {
             is_error,
             diff,
         });
+        let _ = self.tx.send(AgentEvent::RunState(
+            super::app_state::AppRunState::Generating,
+        ));
     }
     async fn on_assistant_text(&self, text: &str) {
         if !text.trim().is_empty() {

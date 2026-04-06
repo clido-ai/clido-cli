@@ -163,7 +163,7 @@ fn format_tool_detail(name: &str, input: &str) -> String {
     }
 }
 
-use clido_agent::AgentLoop;
+use clido_agent::{AgentLoop, TracingAgentMetrics};
 use clido_core::ClidoError;
 use clido_storage::SessionWriter;
 
@@ -340,6 +340,13 @@ pub(super) fn read_clipboard() -> Result<String, String> {
     }
 }
 
+fn with_optional_trace_metrics(mut loop_: clido_agent::AgentLoop) -> clido_agent::AgentLoop {
+    if std::env::var("CLIDO_TRACE_METRICS").ok().as_deref() == Some("1") {
+        loop_ = loop_.with_metrics(Arc::new(TracingAgentMetrics));
+    }
+    loop_
+}
+
 // ── Agent background task ─────────────────────────────────────────────────────
 
 pub(super) enum AgentAction {
@@ -486,12 +493,14 @@ pub(super) async fn agent_task(
         let ws = gwr.lock().ok()?;
         GitContext::discover(ws.as_path()).map(|ctx| ctx.to_prompt_section())
     });
-    let mut agent = AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
-        .with_path_permission_receiver(path_permission_rx)
-        .with_fast_provider(setup.fast_provider, setup.fast_config)
-        .with_emitter(emitter)
-        .with_planner(planner_mode)
-        .with_git_context_fn(git_context_fn);
+    let mut agent = with_optional_trace_metrics(
+        AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
+            .with_path_permission_receiver(path_permission_rx)
+            .with_fast_provider(setup.fast_provider, setup.fast_config)
+            .with_emitter(emitter)
+            .with_planner(planner_mode)
+            .with_git_context_fn(git_context_fn),
+    );
 
     let mut first_turn = true;
     let mut title_generated = cli.resume.is_some(); // skip title gen for resumed sessions
@@ -512,7 +521,20 @@ pub(super) async fn agent_task(
                 }
             }
             Ok(lines) => {
-                let new_history = clido_agent::session_lines_to_messages(&lines);
+                let new_history = match clido_agent::try_session_lines_to_messages(&lines) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        if event_tx
+                            .send(AgentEvent::Err(format!(
+                                "Session file is invalid or incompatible (strict load failed): {e}"
+                            )))
+                            .is_err()
+                        {
+                            return;
+                        }
+                        return;
+                    }
+                };
                 agent.replace_history(new_history);
                 match SessionWriter::append(&workspace_root, &resume_session_id) {
                     Ok(new_writer) => {
@@ -1004,6 +1026,8 @@ pub(super) async fn agent_task(
                     }
                 });
 
+                let _ = event_tx.send(AgentEvent::RunState(AppRunState::Generating));
+
                 let result = if extra_blocks.is_empty() {
                     if first_turn {
                         agent
@@ -1160,6 +1184,7 @@ pub(super) async fn agent_task(
                                 }
                             });
                             // Call run_next_turn directly with a continue message.
+                            let _ = event_tx.send(AgentEvent::RunState(AppRunState::Generating));
                             let continue_result = agent
                                 .run_next_turn(
                                     "Please continue where you left off.",
@@ -1276,6 +1301,8 @@ pub(super) async fn agent_task(
                     }
                 });
 
+                let _ = event_tx.send(AgentEvent::RunState(AppRunState::Generating));
+
                 let result = agent
                     .run_continue(
                         Some(&mut writer),
@@ -1338,6 +1365,7 @@ pub(super) async fn agent_task(
                                     }
                                 }
                             });
+                            let _ = event_tx.send(AgentEvent::RunState(AppRunState::Generating));
                             let continue_result = agent
                                 .run_next_turn(
                                     "Please continue where you left off.",
@@ -1445,7 +1473,16 @@ pub(super) async fn agent_task(
                         }
                     }
                     Ok(lines) => {
-                        let new_history = clido_agent::session_lines_to_messages(&lines);
+                        let new_history = match clido_agent::try_session_lines_to_messages(&lines)
+                        {
+                            Ok(h) => h,
+                            Err(e) => {
+                                let _ = event_tx.send(AgentEvent::Err(format!(
+                                    "Session file is invalid or incompatible (strict load failed): {e}"
+                                )));
+                                return;
+                            }
+                        };
                         agent.replace_history(new_history);
                         // Switch the writer to append to the resumed session.
                         match SessionWriter::append(&workspace_root, &resume_session_id) {
@@ -2055,6 +2092,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
                 app.channels.profile_switch_tx = runtime.profile_switch_tx.clone();
                 app.push(ChatLine::Thinking("↻ recovering runtime…".to_string()));
                 app.busy = false;
+                app.agent_run_state = AppRunState::Idle;
                 app.status_log.clear();
                 app.cancel.store(false, Ordering::Relaxed);
                 app.drain_input_queue();
@@ -2731,6 +2769,7 @@ pub(super) async fn event_loop(
                             }
                         }
                         app.busy = false;
+                        app.agent_run_state = AppRunState::Idle;
                     }
                     Some(AgentEvent::TokenUsage { input_tokens, output_tokens, cost_usd, context_max_tokens }) => {
                         last_agent_activity = std::time::Instant::now();
@@ -2891,6 +2930,9 @@ pub(super) async fn event_loop(
                     }
                     Some(AgentEvent::UpdateStatus(status)) => {
                         app.push(ChatLine::Info(format!("  {}", status)));
+                    }
+                    Some(AgentEvent::RunState(state)) => {
+                        app.agent_run_state = state;
                     }
                     Some(AgentEvent::Info { message }) => {
                         app.push(ChatLine::Info(format!("  {}", message)));

@@ -71,6 +71,14 @@ pub enum ClidoError {
     #[error("interrupted by user")]
     Interrupted,
 
+    /// Session file write or rollback failed (disk full, permissions, etc.).
+    #[error("session persistence: {message}")]
+    SessionPersistence { message: String },
+
+    /// Session JSONL could not be decoded into messages (corrupt or incompatible).
+    #[error("session load invalid: {message}")]
+    SessionLoadInvalid { message: String },
+
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -108,7 +116,10 @@ impl ClidoError {
         history_before_turn: usize,
     ) -> bool {
         match self {
-            ClidoError::RateLimited { .. } | ClidoError::ContextLimit { .. } => false,
+            ClidoError::RateLimited { .. }
+            | ClidoError::ContextLimit { .. }
+            | ClidoError::SessionPersistence { .. }
+            | ClidoError::SessionLoadInvalid { .. } => false,
             ClidoError::MaxTurnsExceeded
             | ClidoError::BudgetExceeded
             | ClidoError::MaxWallTimeExceeded

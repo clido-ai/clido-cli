@@ -92,6 +92,17 @@ fn line_display_width(line: &str) -> usize {
         .sum()
 }
 
+/// High-level agent activity (complements `busy` for IDE-like status awareness).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum AppRunState {
+    #[default]
+    Idle,
+    /// Waiting on the model (batch or stream aggregate).
+    Generating,
+    /// Executing one or more tools.
+    RunningTools,
+}
+
 pub(super) struct App {
     pub(super) messages: Vec<ChatLine>,
     /// Live activity log shown in the status strip (last 2 entries).
@@ -115,6 +126,7 @@ pub(super) struct App {
     pub(super) status_panel_scroll: u16,
     /// Cached `git` snapshot for the status rail (refreshed on workdir change and at startup).
     pub(super) tui_git_snapshot: Option<GitContext>,
+    pub(super) agent_run_state: AppRunState,
     pub(super) busy: bool,
     pub(super) spinner_tick: usize,
     pub(super) pending_perm: Option<PendingPerm>,
@@ -316,6 +328,7 @@ impl App {
             layout: super::state::LayoutInfo::default(),
             status_panel_scroll: 0,
             tui_git_snapshot: GitContext::discover(&workspace_root),
+            agent_run_state: AppRunState::default(),
 
             busy: false,
             spinner_tick: 0,
@@ -491,6 +504,7 @@ impl App {
         self.text_input.text.clear();
         self.text_input.cursor = 0;
         self.busy = true;
+        self.agent_run_state = AppRunState::Generating;
         self.following = true;
         self.turn_start = Some(std::time::Instant::now());
         self.text_input.history_idx = None;
@@ -508,6 +522,7 @@ impl App {
         self.text_input.text.clear();
         self.text_input.cursor = 0;
         self.busy = true;
+        self.agent_run_state = AppRunState::Generating;
         self.following = true;
         self.turn_start = Some(std::time::Instant::now());
         self.text_input.history_idx = None;
@@ -565,6 +580,7 @@ impl App {
             self.text_input.cursor = 0;
         }
         self.busy = true;
+        self.agent_run_state = AppRunState::Generating;
         self.following = true;
         self.turn_start = Some(std::time::Instant::now());
         self.text_input.history_idx = None;
@@ -738,6 +754,7 @@ impl App {
     /// Called when agent finishes a turn. Drains queue if any.
     pub(super) fn on_agent_done(&mut self) {
         self.busy = false;
+        self.agent_run_state = AppRunState::Idle;
         self.status_log.clear();
         self.current_step = None;
         self.cancel

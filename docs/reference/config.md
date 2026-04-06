@@ -133,6 +133,18 @@ max-turns = 200
 # Type: integer  Default: 4
 max-concurrent-tools = 4
 
+# Use provider streaming completion and aggregate to a full response (provider must support it).
+# Type: boolean  Default: false
+# stream-model-completion = false
+
+# Per-tool execute timeout in seconds (agent loop wrapper around Tool::execute).
+# Type: integer  Default: 60
+# tool-timeout-secs = 60
+
+# Truncate tool output text beyond this many bytes (0 = unlimited).
+# Type: integer  Default: 512000
+# max-tool-output-bytes = 512000
+
 # Structured harness: JSON tasks under .clido/harness/, TodoWrite disabled, reviewer-only pass.
 # Type: boolean  Default: false
 # harness = true
@@ -260,6 +272,18 @@ Optional fast/cheap provider for utility tasks (title generation, summaries, com
 | `max-checkpoints-per-session` | integer | `50` | Retention cap for checkpoints |
 | `max-output-tokens` | integer | none | Cap model output tokens per response |
 | `harness` | boolean | `false` | Harness mode: `.clido/harness/` tasks, split `HarnessControl` tools, no `TodoWrite` |
+| `max-wall-time-per-turn-sec` | integer | `900` | Wall seconds per user turn (`0` = unlimited) |
+| `max-tool-calls-per-turn` | integer | `200` | Cap on individual tool invocations per user turn |
+| `stall-threshold` | integer | `6` | Stall tracker score at which the turn fails |
+| `doom-consecutive-same-error` | integer | `3` | Consecutive identical tool errors → doom loop |
+| `doom-same-args-window` | integer | `8` | Window size for repeated identical tool+args |
+| `doom-same-args-min` | integer | `4` | Minimum repeats in window to trigger doom |
+| `max-tool-retries` | integer | `3` | Retries per tool call for transient failures (`tool-retries` alias) |
+| `retry-backoff-max-ms` | integer | `10000` | Upper bound on backoff between retries (ms) |
+| `retry-jitter-numerator` | integer | `25` | Jitter fraction: delay × numerator / 100 |
+| `provider-min-request-interval-ms` | integer | `0` | Minimum gap between LLM `complete` calls (`0` = off) |
+
+Commented examples and tuning notes: [Configuration guide](../guide/configuration.md).
 
 ### `[context]`
 

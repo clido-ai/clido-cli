@@ -1,5 +1,6 @@
 //! Session list and show commands.
 
+use clido_agent::try_session_lines_to_messages;
 use clido_storage::{list_sessions, SessionReader, SessionWriter};
 use std::env;
 use std::io::{self, IsTerminal};
@@ -36,6 +37,20 @@ pub async fn run_sessions_show(id: &str) -> anyhow::Result<()> {
     for line in lines {
         println!("{}", serde_json::to_string(&line)?);
     }
+    Ok(())
+}
+
+pub async fn run_sessions_verify(id: &str) -> anyhow::Result<()> {
+    let cwd = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let lines = SessionReader::load(&cwd, id)?;
+    let msgs = try_session_lines_to_messages(&lines).map_err(|e| {
+        anyhow::anyhow!("session {id}: strict load failed — {e}")
+    })?;
+    println!(
+        "OK: session {} strict-loads as {} message(s).",
+        id,
+        msgs.len()
+    );
     Ok(())
 }
 

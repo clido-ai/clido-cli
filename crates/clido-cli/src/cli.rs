@@ -156,7 +156,7 @@ pub struct Cli {
 
 #[derive(clap::Subcommand, Debug, Clone)]
 pub enum Subcommand {
-    /// Manage sessions (list, show, fork, resume).
+    /// Manage sessions (list, show, fork, verify).
     Sessions {
         #[command(subcommand)]
         cmd: SessionsCmd,
@@ -419,6 +419,10 @@ pub enum SessionsCmd {
     },
     /// Fork a session: copy it to a new session ID.
     Fork {
+        id: String,
+    },
+    /// Strict-load check: verify session JSONL decodes to agent history (same as resume).
+    Verify {
         id: String,
     },
 }

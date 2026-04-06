@@ -98,6 +98,8 @@ pub(crate) enum AgentEvent {
     Info {
         message: String,
     },
+    /// Agent loop phase for status rail / input dock (model vs tools).
+    RunState(crate::tui::app_state::AppRunState),
     /// Request permission to access a path outside the workspace.
     /// The TUI should prompt the user and respond via the permission channel.
     #[allow(dead_code)]

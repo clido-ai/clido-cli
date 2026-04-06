@@ -100,6 +100,12 @@ pub struct AgentSection {
     pub retry_jitter_numerator: Option<u8>,
     #[serde(default)]
     pub provider_min_request_interval_ms: Option<u32>,
+    #[serde(default)]
+    pub stream_model_completion: bool,
+    #[serde(default)]
+    pub tool_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub max_tool_output_bytes: Option<usize>,
 }
 
 impl Default for AgentSection {
@@ -126,6 +132,9 @@ impl Default for AgentSection {
             retry_backoff_max_ms: None,
             retry_jitter_numerator: None,
             provider_min_request_interval_ms: None,
+            stream_model_completion: false,
+            tool_timeout_secs: None,
+            max_tool_output_bytes: None,
         }
     }
 }
@@ -470,6 +479,15 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
             .agent
             .provider_min_request_interval_ms
             .or(base.agent.provider_min_request_interval_ms),
+        stream_model_completion: later.agent.stream_model_completion || base.agent.stream_model_completion,
+        tool_timeout_secs: later
+            .agent
+            .tool_timeout_secs
+            .or(base.agent.tool_timeout_secs),
+        max_tool_output_bytes: later
+            .agent
+            .max_tool_output_bytes
+            .or(base.agent.max_tool_output_bytes),
     };
     let tools = ToolsSection {
         allowed: if later.tools.allowed.is_empty() {
@@ -818,6 +836,15 @@ pub fn agent_config_from_loaded(
             .agent
             .provider_min_request_interval_ms
             .unwrap_or(def.provider_min_request_interval_ms),
+        stream_model_completion: loaded.agent.stream_model_completion,
+        tool_timeout_secs: loaded
+            .agent
+            .tool_timeout_secs
+            .unwrap_or(def.tool_timeout_secs),
+        max_tool_output_bytes: loaded
+            .agent
+            .max_tool_output_bytes
+            .unwrap_or(def.max_tool_output_bytes),
     })
 }
 

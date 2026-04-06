@@ -543,6 +543,7 @@ pub(super) fn handle_plan_editor_key(app: &mut App, event: crossterm::event::Key
             app.plan.task_editing = None;
             app.push(ChatLine::Info("  ✗ Plan aborted".into()));
             app.busy = false;
+            app.agent_run_state = super::app_state::AppRunState::Idle;
         }
         _ => {}
     }

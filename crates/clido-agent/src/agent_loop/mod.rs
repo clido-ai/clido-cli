@@ -990,9 +990,41 @@ impl AgentLoop {
     }
 
     /// Continue from existing history (resume). Does not push a new user message; runs the loop until EndTurn or max_turns.
+    ///
+    /// On failure types that call for a rewind (see [`ClidoError::should_truncate_history_after_failed_run`]),
+    /// drops any assistant/tool lines appended during this invocation and truncates the session file
+    /// to the byte offset captured before the loop (same alignment as `run` / `run_next_turn`).
     pub async fn run_continue(
         &mut self,
         mut session: Option<&mut SessionWriter>,
+        pricing: Option<&PricingTable>,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<String> {
+        let history_before = self.history.len();
+        let session_checkpoint = session
+            .as_mut()
+            .map(|w| w.end_offset())
+            .transpose()
+            .map_err(ClidoError::from)?;
+
+        let result = self.run_continue_loop(&mut session, pricing, cancel).await;
+        match &result {
+            Ok(_) => self.prune_memory_if_needed(),
+            Err(e) => {
+                self.apply_failed_turn_rollback(
+                    &mut session,
+                    session_checkpoint,
+                    history_before,
+                    e,
+                );
+            }
+        }
+        result
+    }
+
+    async fn run_continue_loop(
+        &mut self,
+        session: &mut Option<&mut SessionWriter>,
         pricing: Option<&PricingTable>,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String> {
@@ -1113,7 +1145,7 @@ impl AgentLoop {
                 content: response.content.clone(),
             });
 
-            if let Some(ref mut w) = session {
+            if let Some(w) = session.as_mut() {
                 let content: Vec<serde_json::Value> = response
                     .content
                     .iter()
@@ -1151,7 +1183,7 @@ impl AgentLoop {
                         })
                         .collect();
 
-                    if let Some(ref mut w) = session {
+                    if let Some(w) = session.as_mut() {
                         for (id, name, input) in &tool_uses {
                             w.log_write_line(&SessionLine::ToolCall {
                                 tool_use_id: id.clone(),
@@ -1295,7 +1327,7 @@ impl AgentLoop {
                     for ((id, name, input), (output, duration_ms)) in
                         tool_uses.iter().zip(outputs.iter())
                     {
-                        if let Some(ref mut w) = session {
+                        if let Some(w) = session.as_mut() {
                             w.log_write_line(&SessionLine::ToolResult {
                                 tool_use_id: id.clone(),
                                 content: output.content.clone(),

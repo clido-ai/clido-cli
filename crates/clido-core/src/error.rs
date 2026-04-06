@@ -70,7 +70,7 @@ pub type Result<T> = std::result::Result<T, ClidoError>;
 
 impl ClidoError {
     /// Whether to rewind in-memory conversation history to `history_before_turn` after a failed
-    /// agent `run` / `run_next_turn`.
+    /// agent `run` / `run_next_turn` / `run_continue`.
     ///
     /// **Why:** On generic failures we drop the whole turn so the next message does not create
     /// invalid same-role sequences. **Recoverable** errors are different:

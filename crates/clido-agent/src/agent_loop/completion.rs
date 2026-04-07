@@ -85,9 +85,8 @@ mod tests {
             _messages: &[Message],
             _tools: &[ToolSchema],
             _config: &AgentConfig,
-        ) -> clido_core::Result<
-            Pin<Box<dyn Stream<Item = clido_core::Result<StreamEvent>> + Send>>,
-        > {
+        ) -> clido_core::Result<Pin<Box<dyn Stream<Item = clido_core::Result<StreamEvent>> + Send>>>
+        {
             unimplemented!()
         }
 
@@ -114,9 +113,8 @@ mod tests {
             _messages: &[Message],
             _tools: &[ToolSchema],
             _config: &AgentConfig,
-        ) -> clido_core::Result<
-            Pin<Box<dyn Stream<Item = clido_core::Result<StreamEvent>> + Send>>,
-        > {
+        ) -> clido_core::Result<Pin<Box<dyn Stream<Item = clido_core::Result<StreamEvent>> + Send>>>
+        {
             let events = vec![
                 Ok(StreamEvent::TextDelta("hello ".into())),
                 Ok(StreamEvent::TextDelta("stream".into())),
@@ -156,9 +154,8 @@ mod tests {
             _messages: &[Message],
             _tools: &[ToolSchema],
             _config: &AgentConfig,
-        ) -> clido_core::Result<
-            Pin<Box<dyn Stream<Item = clido_core::Result<StreamEvent>> + Send>>,
-        > {
+        ) -> clido_core::Result<Pin<Box<dyn Stream<Item = clido_core::Result<StreamEvent>> + Send>>>
+        {
             unimplemented!()
         }
 

@@ -293,14 +293,7 @@ mod tests {
     impl EventEmitter for CountTextEmitter {
         async fn on_tool_start(&self, _: &str, _: &str, _: &serde_json::Value) {}
 
-        async fn on_tool_done(
-            &self,
-            _: &str,
-            _: &str,
-            _: bool,
-            _: Option<String>,
-        ) {
-        }
+        async fn on_tool_done(&self, _: &str, _: &str, _: bool, _: Option<String>) {}
 
         async fn on_assistant_text(&self, _text: &str) {
             self.0.fetch_add(1, Ordering::Relaxed);

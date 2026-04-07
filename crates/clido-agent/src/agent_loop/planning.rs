@@ -123,7 +123,8 @@ mod tests {
             _messages: &[Message],
             _tools: &[ToolSchema],
             _config: &AgentConfig,
-        ) -> Result<Pin<Box<dyn Stream<Item = Result<clido_providers::StreamEvent>> + Send>>> {
+        ) -> Result<Pin<Box<dyn Stream<Item = Result<clido_providers::StreamEvent>> + Send>>>
+        {
             unimplemented!()
         }
 

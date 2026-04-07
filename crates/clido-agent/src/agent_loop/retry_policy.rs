@@ -119,24 +119,14 @@ mod tests {
 
     #[test]
     fn classify_typed_transport_and_rate_limit() {
-        let r = classify_retry(
-            Some(ToolFailureKind::Transport),
-            "Read",
-            "anything",
-        )
-        .unwrap();
+        let r = classify_retry(Some(ToolFailureKind::Transport), "Read", "anything").unwrap();
         assert_eq!(r.source, RetryDecisionSource::TypedKind);
         assert!(matches!(
             r.strategy,
             RetryStrategy::WaitAndRetry { delay_ms: 1000 }
         ));
 
-        let r2 = classify_retry(
-            Some(ToolFailureKind::RateLimited),
-            "Read",
-            "",
-        )
-        .unwrap();
+        let r2 = classify_retry(Some(ToolFailureKind::RateLimited), "Read", "").unwrap();
         assert!(matches!(
             r2.strategy,
             RetryStrategy::WaitAndRetry { delay_ms: 1000 }
@@ -188,12 +178,7 @@ mod tests {
             RetryStrategy::WaitAndRetry { delay_ms: 500 }
         ));
 
-        let r4 = classify_retry(
-            None,
-            "WebFetch",
-            "failed to resolve DNS name",
-        )
-        .unwrap();
+        let r4 = classify_retry(None, "WebFetch", "failed to resolve DNS name").unwrap();
         assert!(matches!(r4.strategy, RetryStrategy::RetryOnce));
 
         assert!(classify_retry(None, "Read", "nothing recognizable here").is_none());

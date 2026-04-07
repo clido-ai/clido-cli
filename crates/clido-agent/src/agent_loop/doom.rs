@@ -91,3 +91,38 @@ fn normalize_error(s: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn clear_resets_failure_window() {
+        let mut t = DoomTracker::new(10);
+        let v = json!({});
+        assert!(t.record_failure("Read", "e1", &v, 3, 99).is_none());
+        assert!(t.record_failure("Read", "e1", &v, 3, 99).is_none());
+        t.clear();
+        assert!(t.record_failure("Read", "e1", &v, 3, 99).is_none());
+    }
+
+    #[test]
+    fn consecutive_identical_errors_trigger() {
+        let mut t = DoomTracker::new(10);
+        let v = json!({"a": 1});
+        assert!(t.record_failure("Read", "same err", &v, 3, 99).is_none());
+        assert!(t.record_failure("Read", "same err", &v, 3, 99).is_none());
+        let r = t.record_failure("Read", "same err", &v, 3, 99);
+        assert!(r.is_some());
+    }
+
+    #[test]
+    fn same_args_count_triggers_before_window_full() {
+        let mut t = DoomTracker::new(20);
+        let v = json!({"x": "y"});
+        assert!(t.record_failure("Edit", "oops", &v, 0, 2).is_none());
+        let r = t.record_failure("Edit", "different msg", &v, 0, 2);
+        assert!(r.is_some());
+    }
+}

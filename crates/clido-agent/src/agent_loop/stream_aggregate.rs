@@ -155,12 +155,16 @@ fn flush_text(content: &mut Vec<ContentBlock>, buf: &mut String) {
 #[cfg(test)]
 mod tests {
     use std::pin::Pin;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
 
-    use clido_core::ClidoError;
+    use async_trait::async_trait;
+    use clido_core::{ClidoError, ContentBlock, StopReason, Usage};
     use clido_providers::StreamEvent;
     use futures::stream;
     use futures::Stream;
 
+    use super::super::EventEmitter;
     use super::collect_stream_to_model_response;
 
     fn box_stream<I>(s: I) -> Pin<Box<dyn Stream<Item = clido_core::Result<StreamEvent>> + Send>>
@@ -281,5 +285,90 @@ mod tests {
         let st = box_stream(stream::iter(events));
         let r = collect_stream_to_model_response(st, "m".to_string(), None, None).await;
         assert!(r.is_err(), "expected error, got {r:?}");
+    }
+
+    struct CountTextEmitter(Arc<AtomicU32>);
+
+    #[async_trait]
+    impl EventEmitter for CountTextEmitter {
+        async fn on_tool_start(&self, _: &str, _: &str, _: &serde_json::Value) {}
+
+        async fn on_tool_done(
+            &self,
+            _: &str,
+            _: &str,
+            _: bool,
+            _: Option<String>,
+        ) {
+        }
+
+        async fn on_assistant_text(&self, _text: &str) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_happy_path_merges_text_and_usage() {
+        let events = vec![
+            Ok(StreamEvent::TextDelta("a ".into())),
+            Ok(StreamEvent::TextDelta("b".into())),
+            Ok(StreamEvent::MessageDelta {
+                stop_reason: StopReason::EndTurn,
+                usage: Usage {
+                    input_tokens: 10,
+                    output_tokens: 20,
+                    cache_creation_input_tokens: Some(5),
+                    cache_read_input_tokens: Some(6),
+                },
+            }),
+        ];
+        let st = box_stream(stream::iter(events));
+        let r = collect_stream_to_model_response(st, "mid".into(), None, None)
+            .await
+            .unwrap();
+        assert_eq!(r.model, "mid");
+        match r.content.as_slice() {
+            [ContentBlock::Text { text }] => assert_eq!(text, "a b"),
+            _ => panic!("unexpected content: {:?}", r.content),
+        }
+        assert_eq!(r.usage.input_tokens, 10);
+        assert_eq!(r.usage.output_tokens, 20);
+        assert_eq!(r.usage.cache_creation_input_tokens, Some(5));
+        assert_eq!(r.usage.cache_read_input_tokens, Some(6));
+    }
+
+    #[tokio::test]
+    async fn stream_rejects_empty_tool_id_on_start() {
+        let events = vec![
+            Ok(StreamEvent::ToolUseStart {
+                id: String::new(),
+                name: "Read".into(),
+            }),
+            Ok(StreamEvent::MessageDelta {
+                stop_reason: StopReason::ToolUse,
+                usage: Default::default(),
+            }),
+        ];
+        let st = box_stream(stream::iter(events));
+        let r = collect_stream_to_model_response(st, "m".into(), None, None).await;
+        assert!(r.is_err());
+    }
+
+    #[tokio::test]
+    async fn stream_emits_text_deltas_to_emitter() {
+        let ctr = Arc::new(AtomicU32::new(0));
+        let emit: Arc<dyn EventEmitter> = Arc::new(CountTextEmitter(ctr.clone()));
+        let events = vec![
+            Ok(StreamEvent::TextDelta("x".into())),
+            Ok(StreamEvent::MessageDelta {
+                stop_reason: StopReason::EndTurn,
+                usage: Default::default(),
+            }),
+        ];
+        let st = box_stream(stream::iter(events));
+        let _ = collect_stream_to_model_response(st, "e".into(), Some(emit), None)
+            .await
+            .unwrap();
+        assert_eq!(ctr.load(Ordering::Relaxed), 1);
     }
 }

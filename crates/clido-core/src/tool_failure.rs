@@ -33,3 +33,33 @@ impl ToolFailureKind {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ToolFailureKind;
+
+    #[test]
+    fn retryable_heuristic_matches_transport_like() {
+        for k in [
+            ToolFailureKind::Transport,
+            ToolFailureKind::RateLimited,
+            ToolFailureKind::Timeout,
+            ToolFailureKind::Io,
+        ] {
+            assert!(k.is_retryable_heuristic(), "{k:?}");
+        }
+    }
+
+    #[test]
+    fn retryable_heuristic_false_for_validation_and_logical() {
+        for k in [
+            ToolFailureKind::ValidationInput,
+            ToolFailureKind::PermissionDenied,
+            ToolFailureKind::Logical,
+            ToolFailureKind::NotFound,
+            ToolFailureKind::Unknown,
+        ] {
+            assert!(!k.is_retryable_heuristic(), "{k:?}");
+        }
+    }
+}

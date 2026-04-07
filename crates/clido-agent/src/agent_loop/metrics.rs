@@ -71,3 +71,33 @@ impl AgentMetrics for TracingAgentMetrics {
         tracing::debug!(target: "clido::metrics", event = "doom_detected", tool);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clido_core::ToolFailureKind;
+
+    #[test]
+    fn noop_agent_metrics_no_panic() {
+        let m = NoopAgentMetrics;
+        m.model_turn_completed(0);
+        m.tool_call_finished("Read", false, None);
+        m.tool_retry_scheduled("Read", 1);
+        m.tool_retry_legacy_heuristic("Read");
+        m.validation_rejected("Write");
+        m.stall_detected();
+        m.doom_detected("Bash");
+    }
+
+    #[test]
+    fn tracing_agent_metrics_emits_debug_events() {
+        let m = TracingAgentMetrics;
+        m.model_turn_completed(2);
+        m.tool_call_finished("Grep", true, Some(ToolFailureKind::Timeout));
+        m.tool_retry_scheduled("Read", 3);
+        m.tool_retry_legacy_heuristic("WebFetch");
+        m.validation_rejected("Edit");
+        m.stall_detected();
+        m.doom_detected("MultiEdit");
+    }
+}

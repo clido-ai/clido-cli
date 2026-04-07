@@ -27,5 +27,9 @@ exclude-files = [
     "crates/clido-cli/src/profiles.rs",
     # registry.rs is pure static data declarations with no executable logic to test.
     "crates/clido-providers/src/registry.rs",
+    # Large HTTP/SDK adapters: exercised via integration tests and manual QA; unit tests would
+    # duplicate mock servers without raising confidence in the real wire format.
+    "crates/clido-providers/src/openai.rs",
+    "crates/clido-providers/src/anthropic.rs",
 ]
-fail-under = 70.0
+fail-under = 80.0

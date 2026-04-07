@@ -111,3 +111,99 @@ pub(crate) fn backoff_delay_ms(base: u64, attempt: u32, cap: u64, jitter_numerat
     let slot = (attempt as u64 % 8).saturating_add(1);
     (b + (jitter * slot) / 8).min(cap)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clido_core::ToolFailureKind;
+
+    #[test]
+    fn classify_typed_transport_and_rate_limit() {
+        let r = classify_retry(
+            Some(ToolFailureKind::Transport),
+            "Read",
+            "anything",
+        )
+        .unwrap();
+        assert_eq!(r.source, RetryDecisionSource::TypedKind);
+        assert!(matches!(
+            r.strategy,
+            RetryStrategy::WaitAndRetry { delay_ms: 1000 }
+        ));
+
+        let r2 = classify_retry(
+            Some(ToolFailureKind::RateLimited),
+            "Read",
+            "",
+        )
+        .unwrap();
+        assert!(matches!(
+            r2.strategy,
+            RetryStrategy::WaitAndRetry { delay_ms: 1000 }
+        ));
+    }
+
+    #[test]
+    fn classify_typed_timeout_io_and_non_retryable() {
+        let t = classify_retry(Some(ToolFailureKind::Timeout), "X", "").unwrap();
+        assert!(matches!(
+            t.strategy,
+            RetryStrategy::WaitAndRetry { delay_ms: 800 }
+        ));
+        let io = classify_retry(Some(ToolFailureKind::Io), "X", "").unwrap();
+        assert!(matches!(
+            io.strategy,
+            RetryStrategy::WaitAndRetry { delay_ms: 400 }
+        ));
+        assert!(classify_retry(
+            Some(ToolFailureKind::ValidationInput),
+            "Read",
+            "timeout in message"
+        )
+        .is_none());
+        assert!(classify_retry(Some(ToolFailureKind::Logical), "Read", "network down").is_none());
+    }
+
+    #[test]
+    fn classify_unknown_falls_back_to_legacy_substrings() {
+        let r = classify_retry(
+            Some(ToolFailureKind::Unknown),
+            "Read",
+            "connection reset by peer",
+        )
+        .unwrap();
+        assert_eq!(r.source, RetryDecisionSource::LegacyHeuristic);
+        assert!(matches!(
+            r.strategy,
+            RetryStrategy::WaitAndRetry { delay_ms: 1000 }
+        ));
+
+        let r2 = classify_retry(None, "Read", "Permission Denied on file").unwrap();
+        assert_eq!(r2.source, RetryDecisionSource::LegacyHeuristic);
+        assert!(matches!(r2.strategy, RetryStrategy::RetryOnce));
+
+        let r3 = classify_retry(None, "Bash", "device or resource busy").unwrap();
+        assert!(matches!(
+            r3.strategy,
+            RetryStrategy::WaitAndRetry { delay_ms: 500 }
+        ));
+
+        let r4 = classify_retry(
+            None,
+            "WebFetch",
+            "failed to resolve DNS name",
+        )
+        .unwrap();
+        assert!(matches!(r4.strategy, RetryStrategy::RetryOnce));
+
+        assert!(classify_retry(None, "Read", "nothing recognizable here").is_none());
+    }
+
+    #[test]
+    fn backoff_delay_respects_cap_and_jitter() {
+        let d = backoff_delay_ms(100, 0, 500, 10);
+        assert!(d >= 1 && d <= 500);
+        let d2 = backoff_delay_ms(10_000, 7, 50, 50);
+        assert_eq!(d2, 50);
+    }
+}

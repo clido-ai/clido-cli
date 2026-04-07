@@ -69,3 +69,122 @@ pub(crate) async fn architect_plan(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use clido_core::{
+        AgentConfig, ContentBlock, Message, ModelResponse, PermissionMode, Result, StopReason,
+        ToolSchema, Usage,
+    };
+    use clido_providers::{ModelEntry, ModelProvider};
+    use futures::Stream;
+    use std::pin::Pin;
+
+    fn test_cfg() -> AgentConfig {
+        AgentConfig {
+            model: "test-model".into(),
+            permission_mode: PermissionMode::AcceptAll,
+            ..Default::default()
+        }
+    }
+
+    struct FixedResponseProvider {
+        text: String,
+        err: bool,
+    }
+
+    #[async_trait]
+    impl ModelProvider for FixedResponseProvider {
+        async fn complete(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _config: &AgentConfig,
+        ) -> Result<ModelResponse> {
+            if self.err {
+                Err(anyhow::anyhow!("simulated planner failure").into())
+            } else {
+                Ok(ModelResponse {
+                    id: "1".into(),
+                    model: "m".into(),
+                    content: vec![ContentBlock::Text {
+                        text: self.text.clone(),
+                    }],
+                    stop_reason: StopReason::EndTurn,
+                    usage: Usage::default(),
+                })
+            }
+        }
+
+        async fn complete_stream(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _config: &AgentConfig,
+        ) -> Result<Pin<Box<dyn Stream<Item = Result<clido_providers::StreamEvent>> + Send>>> {
+            unimplemented!()
+        }
+
+        async fn list_models(&self) -> Vec<ModelEntry> {
+            vec![]
+        }
+    }
+
+    #[tokio::test]
+    async fn architect_skips_short_prompts() {
+        let p = FixedResponseProvider {
+            text: "plan".into(),
+            err: false,
+        };
+        assert!(architect_plan("short", &test_cfg(), &p).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn architect_skips_simple_question_prefixes() {
+        let p = FixedResponseProvider {
+            text: "x".into(),
+            err: false,
+        };
+        let cfg = test_cfg();
+        for prefix in ["what ", "how ", "why ", "explain ", "show "] {
+            let body = format!("{prefix}{}", "y".repeat(60));
+            assert!(
+                architect_plan(&body, &cfg, &p).await.is_none(),
+                "prefix {prefix:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn architect_returns_plan_when_model_replies() {
+        let p = FixedResponseProvider {
+            text: "STEP 1 — do the thing".into(),
+            err: false,
+        };
+        let body = "x".repeat(60);
+        let out = architect_plan(&body, &test_cfg(), &p).await;
+        assert_eq!(out.as_deref(), Some("STEP 1 — do the thing"));
+    }
+
+    #[tokio::test]
+    async fn architect_none_when_plan_text_empty() {
+        let p = FixedResponseProvider {
+            text: "".into(),
+            err: false,
+        };
+        let body = "x".repeat(60);
+        assert!(architect_plan(&body, &test_cfg(), &p).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn architect_none_on_provider_error() {
+        let p = FixedResponseProvider {
+            text: "ignored".into(),
+            err: true,
+        };
+        let body = "x".repeat(60);
+        assert!(architect_plan(&body, &test_cfg(), &p).await.is_none());
+    }
+}

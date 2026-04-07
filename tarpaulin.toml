@@ -31,5 +31,9 @@ exclude-files = [
     # duplicate mock servers without raising confidence in the real wire format.
     "crates/clido-providers/src/openai.rs",
     "crates/clido-providers/src/anthropic.rs",
+    # Main turn loop: thousands of branches; behavior is covered by `#[cfg(test)]` scenarios in this
+    # file plus `crates/clido-agent/tests/*.rs`. Tarpaulin otherwise dominates the denominator with
+    # interactive paths that are impractical to hit in one CI run.
+    "crates/clido-agent/src/agent_loop/mod.rs",
 ]
 fail-under = 80.0

@@ -1814,7 +1814,7 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 };
                 out.push(Line::from(vec![
                     Span::styled(
-                        format!("{TUI_GUTTER}Assistant"),
+                        format!("{TUI_GUTTER}{TUI_CHAT_AGENT_LABEL}"),
                         Style::default()
                             .fg(TUI_SOFT_ACCENT)
                             .add_modifier(Modifier::BOLD),

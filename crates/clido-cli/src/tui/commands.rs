@@ -570,7 +570,10 @@ pub(super) fn cmd_export(app: &mut App) {
                 md.push_str(&format!("## Turn {} — You\n\n{}\n\n", turn, text));
             }
             ChatLine::Assistant(text) => {
-                md.push_str(&format!("## Turn {} — Assistant\n\n{}\n\n", turn, text));
+                md.push_str(&format!(
+                    "## Turn {} — {}\n\n{}\n\n",
+                    turn, TUI_CHAT_AGENT_LABEL, text
+                ));
             }
             _ => {}
         }

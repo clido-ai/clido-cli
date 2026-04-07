@@ -149,6 +149,10 @@ pub(super) const TUI_SURFACE_ENHANCE_BG: Color = Color::Rgb(26, 36, 48);
 
 // ── Layout & copy rhythm (single gutter system for the whole TUI) ─────────────
 /// Primary left margin for chat rows, info lines, and chrome that aligns with transcript text.
+/// Gutter label for agent replies in the transcript (product name). Kept separate from
+/// [`ChatLine::Assistant`] / API `Role::Assistant`, which describe message kind, not branding.
+pub(super) const TUI_CHAT_AGENT_LABEL: &str = "clido";
+
 pub(super) const TUI_GUTTER: &str = "  ";
 /// Secondary indent (subsections, queue headers, welcome panel labels).
 pub(super) const TUI_GUTTER_SUB: &str = "    ";

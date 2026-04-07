@@ -1420,11 +1420,11 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         app.quit = true;
         return;
     }
-    if matches!((event.modifiers, event.code), (Km::CONTROL, Char('d'))) {
-        if app.session_picker.is_none() {
-            app.quit = true;
-            return;
-        }
+    if matches!((event.modifiers, event.code), (Km::CONTROL, Char('d')))
+        && app.session_picker.is_none()
+    {
+        app.quit = true;
+        return;
     }
 
     // Ctrl+/ interrupts the current run without sending follow-up input.

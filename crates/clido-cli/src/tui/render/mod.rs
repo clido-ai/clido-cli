@@ -279,7 +279,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         if let Some(ref prompt) = app.active_prompt {
             let first_line = prompt.lines().next().unwrap_or("");
             let available_w = area.width.saturating_sub(4) as usize;
-            if first_line.chars().count() > available_w { 2 } else { 1 }
+            if first_line.chars().count() > available_w {
+                2
+            } else {
+                1
+            }
         } else {
             0
         }
@@ -394,14 +398,25 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let available_w = banner_area.width.saturating_sub(4) as usize;
             let first_line = prompt.lines().next().unwrap_or("").trim();
             let truncated = if first_line.chars().count() > available_w {
-                let s: String = first_line.chars().take(available_w.saturating_sub(1)).collect();
+                let s: String = first_line
+                    .chars()
+                    .take(available_w.saturating_sub(1))
+                    .collect();
                 format!("{}…", s)
             } else {
                 first_line.to_string()
             };
             let banner_line = Line::from(vec![
-                Span::styled("▶ ", Style::default().fg(TUI_STATE_BUSY).add_modifier(Modifier::DIM)),
-                Span::styled(truncated, Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)),
+                Span::styled(
+                    "▶ ",
+                    Style::default()
+                        .fg(TUI_STATE_BUSY)
+                        .add_modifier(Modifier::DIM),
+                ),
+                Span::styled(
+                    truncated,
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                ),
             ]);
             frame.render_widget(Paragraph::new(banner_line), banner_area);
         }
@@ -1846,10 +1861,7 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 )));
                 // Add gutter indentation to each line of content
                 for line in render_markdown(text, width) {
-                    let indented = Line::from(vec![
-                        Span::raw(TUI_GUTTER),
-                        Span::raw("  "),
-                    ]);
+                    let indented = Line::from(vec![Span::raw(TUI_GUTTER), Span::raw("  ")]);
                     let mut new_line = indented;
                     new_line.spans.extend(line.spans);
                     out.push(new_line);
@@ -1876,10 +1888,7 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 ]));
                 // Add gutter indentation to each line of content
                 for line in render_markdown(text, width) {
-                    let indented = Line::from(vec![
-                        Span::raw(TUI_GUTTER),
-                        Span::raw("  "),
-                    ]);
+                    let indented = Line::from(vec![Span::raw(TUI_GUTTER), Span::raw("  ")]);
                     let mut new_line = indented;
                     new_line.spans.extend(line.spans);
                     out.push(new_line);

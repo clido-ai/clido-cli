@@ -1717,7 +1717,8 @@ impl AgentLoop {
                     self.stall.observe_batch(&tool_uses, &outputs);
                     if self.stall.score() >= self.config.stall_threshold {
                         self.metrics.stall_detected();
-                        let tool_names: Vec<&str> = tool_uses.iter().map(|(_, n, _)| n.as_str()).collect();
+                        let tool_names: Vec<&str> =
+                            tool_uses.iter().map(|(_, n, _)| n.as_str()).collect();
                         let tool_list = tool_names.join(", ");
                         return Err(ClidoError::StallDetected {
                             reason: format!(

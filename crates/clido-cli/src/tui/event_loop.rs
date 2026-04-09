@@ -947,7 +947,9 @@ pub(super) async fn agent_task(
                 // Immediately queue a continue action so the agent restarts with the note.
                 // This ensures the note is processed right away, not left waiting.
                 if prompt_tx
-                    .send(AgentUserInput::Prompt("Please continue, taking into account the note I just sent.".to_string()))
+                    .send(AgentUserInput::Prompt(
+                        "Please continue, taking into account the note I just sent.".to_string(),
+                    ))
                     .is_err()
                 {
                     return;

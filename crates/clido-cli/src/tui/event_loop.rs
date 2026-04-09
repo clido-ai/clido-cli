@@ -3168,6 +3168,8 @@ pub(super) async fn event_loop(
                     Some(AgentEvent::ModelsLoaded { mut ids, provider }) => {
                         app.models_loading = false;
                         // If the provider returned 0 models, fall back to the hardcoded list.
+                        let mut fallback_ctx: std::collections::HashMap<&str, u32> =
+                            std::collections::HashMap::new();
                         if ids.is_empty() {
                             if let Some(def) = clido_providers::PROVIDER_REGISTRY
                                 .iter()
@@ -3175,6 +3177,9 @@ pub(super) async fn event_loop(
                             {
                                 if !def.fallback_models.is_empty() {
                                     ids = def.fallback_models.iter().map(|s| s.to_string()).collect();
+                                    for &(id, ctx_k) in def.fallback_model_context_k {
+                                        fallback_ctx.insert(id, ctx_k);
+                                    }
                                 }
                             }
                         }
@@ -3203,7 +3208,7 @@ pub(super) async fn event_loop(
                                         provider: provider.clone(),
                                         input_mtok: 0.0,
                                         output_mtok: 0.0,
-                                        context_k: None,
+                                        context_k: fallback_ctx.get(id.as_str()).copied(),
                                         role: None,
                                         is_favorite: false,
                                     });
@@ -3250,11 +3255,16 @@ pub(super) async fn event_loop(
                     Some(AgentEvent::ModelsFetchFailed { provider, error }) => {
                         app.models_loading = false;
                         // Try to populate the picker with fallback models even on failure.
-                        let fallback: Vec<String> = clido_providers::PROVIDER_REGISTRY
-                            .iter()
-                            .find(|d| d.id == provider.as_str())
-                            .map(|d| d.fallback_models.iter().map(|s| s.to_string()).collect())
-                            .unwrap_or_default();
+                        let (fallback, fallback_ctx): (Vec<String>, std::collections::HashMap<&str, u32>) =
+                            clido_providers::PROVIDER_REGISTRY
+                                .iter()
+                                .find(|d| d.id == provider.as_str())
+                                .map(|d| {
+                                    let ids = d.fallback_models.iter().map(|s| s.to_string()).collect();
+                                    let ctx = d.fallback_model_context_k.iter().copied().collect();
+                                    (ids, ctx)
+                                })
+                                .unwrap_or_default();
                         if !fallback.is_empty() {
                             // Merge into known_models.
                             let existing: std::collections::HashSet<String> =
@@ -3266,7 +3276,7 @@ pub(super) async fn event_loop(
                                         provider: provider.clone(),
                                         input_mtok: 0.0,
                                         output_mtok: 0.0,
-                                        context_k: None,
+                                        context_k: fallback_ctx.get(id.as_str()).copied(),
                                         role: None,
                                         is_favorite: false,
                                     });

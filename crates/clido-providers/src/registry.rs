@@ -33,6 +33,10 @@ pub struct ProviderDef {
     /// Hardcoded fallback model IDs shown in the picker when the live API
     /// fetch returns no models (e.g. plan-specific base URL not yet set).
     pub fallback_models: &'static [&'static str],
+    /// Context window sizes (in thousands of tokens) for a subset of fallback
+    /// models where the value is known. Entries not listed here get `context_k: None`.
+    /// Format: `&[("model-id", context_k_u32)]`.
+    pub fallback_model_context_k: &'static [(&'static str, u32)],
     /// Whether this provider requires a custom base URL that varies per user/plan.
     /// When true, the creation wizard prompts for base_url before the model fetch.
     pub needs_base_url: bool,
@@ -68,6 +72,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_anthropic: false,
         is_subscription: false,
         fallback_models: &[],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -86,6 +91,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
             "claude-sonnet-4-6",
             "claude-haiku-4-5-20251001",
         ],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -100,6 +106,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_anthropic: false,
         is_subscription: false,
         fallback_models: &["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -118,6 +125,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
             "mistral-small-latest",
             "codestral-latest",
         ],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -132,6 +140,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_anthropic: false,
         is_subscription: false,
         fallback_models: &["MiniMax-M1", "MiniMax-Text-01"],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -146,6 +155,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_anthropic: false,
         is_subscription: false,
         fallback_models: &["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -160,6 +170,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_anthropic: false,
         is_subscription: true,
         fallback_models: &["kimi-for-coding"],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -181,6 +192,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
             "qwen2.5-coder-32b-instruct",
             "qwq-32b",
         ],
+        fallback_model_context_k: &[],
         needs_base_url: true,
     },
     ProviderDef {
@@ -206,6 +218,18 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
             "kimi-k2.5",
             "MiniMax-M2.5",
         ],
+        fallback_model_context_k: &[
+            ("qwen3.6-plus", 1000),
+            ("qwen3.5-plus", 128),
+            ("qwen3-max-2026-01-23", 128),
+            ("qwen3-coder-next", 128),
+            ("qwen3-coder-plus", 128),
+            ("glm-5", 128),
+            ("glm-5.1", 128),
+            ("glm-4.7", 128),
+            ("kimi-k2.5", 128),
+            ("MiniMax-M2.5", 1000),
+        ],
         needs_base_url: false,
     },
     ProviderDef {
@@ -220,6 +244,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_anthropic: false,
         is_subscription: false,
         fallback_models: &["deepseek-chat", "deepseek-reasoner"],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -239,6 +264,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
             "gemma2-9b-it",
             "mixtral-8x7b-32768",
         ],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -253,6 +279,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_anthropic: false,
         is_subscription: false,
         fallback_models: &["llama3.1-70b", "llama3.1-8b"],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -271,6 +298,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
             "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
             "deepseek-ai/DeepSeek-R1",
         ],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -288,6 +316,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
             "accounts/fireworks/models/llama-v3p3-70b-instruct",
             "accounts/fireworks/models/deepseek-r1",
         ],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -302,6 +331,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_anthropic: false,
         is_subscription: false,
         fallback_models: &["grok-3-beta", "grok-3-mini-beta", "grok-2-1212"],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -316,6 +346,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_anthropic: false,
         is_subscription: false,
         fallback_models: &["sonar-pro", "sonar", "sonar-reasoning-pro"],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -334,6 +365,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
             "gemini-2.5-flash",
             "gemini-2.0-flash",
         ],
+        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -348,6 +380,7 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_anthropic: false,
         is_subscription: false,
         fallback_models: &[],
+        fallback_model_context_k: &[],
         needs_base_url: true,
     },
 ];

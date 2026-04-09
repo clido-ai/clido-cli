@@ -340,6 +340,9 @@ pub(super) struct App {
     pub(super) last_stall_warning: Option<std::time::Instant>,
     /// Set when the agent fails to deliver an `AgentEvent` to the TUI (channel closed).
     pub(super) ui_emit_unhealthy: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The most recent user prompt — shown as a banner below the header while the
+    /// agent is busy, so the user always knows what task is in flight.
+    pub(super) active_prompt: Option<String>,
 }
 
 impl App {
@@ -464,6 +467,7 @@ impl App {
             last_stall_warning: None,
             selection_mode: false,
             ui_emit_unhealthy,
+            active_prompt: None,
         };
         app.messages.push(ChatLine::WelcomeSplash);
         app
@@ -616,6 +620,12 @@ impl App {
         let text = expand_at_file_refs(&text, std::env::current_dir().ok().as_deref());
         // Remember if text matches current input BEFORE any moves (to decide whether to clear after send)
         let text_matches_input = self.text_input.text.trim() == text.trim();
+        // Capture banner text before text is moved into the send call.
+        let banner_text = if let Some((_, actual)) = parse_per_turn_model(&text) {
+            actual
+        } else {
+            text.clone()
+        };
         // Check for per-turn @model-name prefix.
         let send_result = if let Some((per_turn_model, actual_prompt)) = parse_per_turn_model(&text)
         {
@@ -658,6 +668,7 @@ impl App {
         self.turn_start = Some(std::time::Instant::now());
         self.text_input.history_idx = None;
         self.text_input.history_draft.clear();
+        self.active_prompt = Some(banner_text);
     }
 
     /// Execute a slash command or send chat to the agent (single user line).
@@ -830,6 +841,7 @@ impl App {
         self.agent_run_state = AppRunState::Idle;
         self.status_log.clear();
         self.current_step = None;
+        self.active_prompt = None;
         self.cancel
             .store(false, std::sync::atomic::Ordering::Relaxed);
         self.stats.session_turn_count += 1;

@@ -1930,19 +1930,29 @@ pub(super) fn spawn_model_fetch(
     let provider_for_event = provider.clone();
     tokio::spawn(async move {
         let base_url_ref = base_url.as_deref();
-        let entries =
-            clido_providers::fetch_provider_models(&provider, &api_key, base_url_ref).await;
-        let ids: Vec<String> = entries
-            .into_iter()
-            .filter(|m| m.available)
-            .map(|m| m.id)
-            .collect();
-        let _ = tx
-            .send(AgentEvent::ModelsLoaded {
-                ids,
-                provider: provider_for_event,
-            })
-            .await;
+        match clido_providers::fetch_provider_models(&provider, &api_key, base_url_ref).await {
+            Ok(entries) => {
+                let ids: Vec<String> = entries
+                    .into_iter()
+                    .filter(|m| m.available)
+                    .map(|m| m.id)
+                    .collect();
+                let _ = tx
+                    .send(AgentEvent::ModelsLoaded {
+                        ids,
+                        provider: provider_for_event,
+                    })
+                    .await;
+            }
+            Err(error) => {
+                let _ = tx
+                    .send(AgentEvent::ModelsFetchFailed {
+                        provider: provider_for_event,
+                        error,
+                    })
+                    .await;
+            }
+        }
     });
 }
 
@@ -2761,34 +2771,42 @@ pub(super) async fn event_loop(
                             app.current_step = Some(step);
                             app.last_executed_step_num = Some(num);
                         }
-                        app.push(ChatLine::Assistant(text));
-                        // Fire desktop notification + bell if enabled.
-                        if app.notify_enabled {
-                            let elapsed = app
-                                .turn_start
-                                .map(|s| s.elapsed().as_secs())
-                                .unwrap_or(0);
-                            let session_id = app
-                                .current_session_id
-                                .as_deref()
-                                .unwrap_or("unknown");
-                            crate::notify::notify_done(
-                                session_id,
-                                elapsed,
-                                app.stats.session_total_cost_usd,
-                                &app.provider,
-                            );
+                        // If a workflow is running, route the response to the orchestrator
+                        // instead of calling on_agent_done — it will advance to the next step.
+                        if app.active_workflow.is_some() {
+                            app.push(ChatLine::Assistant(text.clone()));
+                            crate::tui::commands::handle_workflow_step_response(app, text);
+                            // Skip the normal on_agent_done / notification path.
+                        } else {
+                            app.push(ChatLine::Assistant(text));
+                            // Fire desktop notification + bell if enabled.
+                            if app.notify_enabled {
+                                let elapsed = app
+                                    .turn_start
+                                    .map(|s| s.elapsed().as_secs())
+                                    .unwrap_or(0);
+                                let session_id = app
+                                    .current_session_id
+                                    .as_deref()
+                                    .unwrap_or("unknown");
+                                crate::notify::notify_done(
+                                    session_id,
+                                    elapsed,
+                                    app.stats.session_total_cost_usd,
+                                    &app.provider,
+                                );
+                            }
+                            // Revert per-turn model override if active.
+                            if let Some(prev) = app.per_turn_prev_model.take() {
+                                app.model = prev.clone();
+                                let _ = app.channels.model_switch_tx.send(prev.clone());
+                                app.push(ChatLine::Info(format!(
+                                    "  ↻ Model restored to {}",
+                                    prev
+                                )));
+                            }
+                            app.on_agent_done();
                         }
-                        // Revert per-turn model override if active.
-                        if let Some(prev) = app.per_turn_prev_model.take() {
-                            app.model = prev.clone();
-                            let _ = app.channels.model_switch_tx.send(prev.clone());
-                            app.push(ChatLine::Info(format!(
-                                "  ↻ Model restored to {}",
-                                prev
-                            )));
-                        }
-                        app.on_agent_done();
                     }
                     Some(AgentEvent::ModelSwitched { to_model }) => {
                         last_agent_activity = std::time::Instant::now();
@@ -2825,13 +2843,17 @@ pub(super) async fn event_loop(
                     }
                     Some(AgentEvent::Interrupted) => {
                         last_agent_activity = std::time::Instant::now();
-                        app.push(ChatLine::Info("  ↻ Interrupted — processing next item".into()));
                         // Revert per-turn model override on interruption too.
                         if let Some(prev) = app.per_turn_prev_model.take() {
                             app.model = prev.clone();
                             let _ = app.channels.model_switch_tx.send(prev);
                         }
-                        app.on_agent_done();
+                        if app.active_workflow.is_some() {
+                            crate::tui::commands::abort_workflow(app);
+                        } else {
+                            app.push(ChatLine::Info("  ↻ Interrupted — processing next item".into()));
+                            app.on_agent_done();
+                        }
                     }
 
                     Some(AgentEvent::Err(msg)) => {
@@ -2842,10 +2864,127 @@ pub(super) async fn event_loop(
                             app.model = prev.clone();
                             let _ = app.channels.model_switch_tx.send(prev);
                         }
-                        app.overlay_stack.push(OverlayKind::Error(
-                            ErrorOverlay::from_message(msg),
+                        if app.active_workflow.is_some() {
+                            // Route through workflow error handler so on_error policy is applied.
+                            crate::tui::commands::handle_workflow_step_error(app, msg);
+                        } else {
+                            app.overlay_stack.push(OverlayKind::Error(
+                                ErrorOverlay::from_message(msg),
+                            ));
+                            app.on_agent_done();
+                        }
+                    }
+                    Some(AgentEvent::WorkflowStepStarted { step_id, name, step_num, total }) => {
+                        last_agent_activity = std::time::Instant::now();
+                        if let Some(ref mut wf) = app.active_workflow {
+                            if let Some(s) = wf.steps.iter_mut().find(|s| s.step_id == step_id) {
+                                s.status = crate::tui::app_state::WorkflowStepStatus::Active;
+                            }
+                        }
+                        app.push(ChatLine::Info(format!("  [{}/{}] ▷ {}…", step_num, total, name)));
+                    }
+                    Some(AgentEvent::WorkflowStepDone { step_id, name, output_text, cost_usd, duration_ms }) => {
+                        last_agent_activity = std::time::Instant::now();
+                        if let Some(ref mut wf) = app.active_workflow {
+                            if let Some(s) = wf.steps.iter_mut().find(|s| s.step_id == step_id) {
+                                s.status = crate::tui::app_state::WorkflowStepStatus::Done;
+                            }
+                        }
+                        app.push(ChatLine::Info(format!("  ✓ {} ({}ms, ${:.4})", name, duration_ms, cost_usd)));
+                        // Show a preview of the step output in the chat (truncated for readability).
+                        if !output_text.is_empty() {
+                            let preview = if output_text.len() > 3000 {
+                                format!("{}\n\n…[{} chars total — full output saved to disk]", &output_text[..3000], output_text.len())
+                            } else {
+                                output_text
+                            };
+                            app.push(ChatLine::Assistant(preview));
+                        }
+                    }
+                    Some(AgentEvent::WorkflowStepFailed { step_id, name, error, fatal }) => {
+                        last_agent_activity = std::time::Instant::now();
+                        if let Some(ref mut wf) = app.active_workflow {
+                            if let Some(s) = wf.steps.iter_mut().find(|s| s.step_id == step_id) {
+                                s.status = if fatal {
+                                    crate::tui::app_state::WorkflowStepStatus::Failed
+                                } else {
+                                    crate::tui::app_state::WorkflowStepStatus::Skipped
+                                };
+                            }
+                        }
+                        let icon = if fatal { "✗" } else { "⚠" };
+                        app.push(ChatLine::Info(format!("  {} {} — {}", icon, name, error)));
+                    }
+                    Some(AgentEvent::WorkflowComplete { name, step_count, total_cost_usd, total_duration_ms }) => {
+                        // These events are now only emitted by isolated (parallel) sub-agents
+                        // or legacy code paths. The main orchestrator handles completion directly.
+                        last_agent_activity = std::time::Instant::now();
+                        if let Some(ref mut wf) = app.active_workflow {
+                            wf.parallel_abort = None;
+                        }
+                        app.push(ChatLine::Info(format!(
+                            "  ✓ Workflow '{}' complete — {} steps, ${:.4}, {}ms",
+                            name, step_count, total_cost_usd, total_duration_ms
+                        )));
+                        app.push(ChatLine::Info(
+                            "  Outputs saved — type anything to continue.".into()
                         ));
                         app.on_agent_done();
+                        app.active_workflow = None;
+                    }
+                    Some(AgentEvent::WorkflowFailed { name, step_id, error }) => {
+                        last_agent_activity = std::time::Instant::now();
+                        if let Some(ref mut wf) = app.active_workflow {
+                            wf.parallel_abort = None;
+                        }
+                        app.push(ChatLine::Info(format!(
+                            "  ✗ Workflow '{}' failed at '{}': {}",
+                            name, step_id, error
+                        )));
+                        app.push(ChatLine::Info(
+                            "  Step statuses are still visible in the right panel.".into()
+                        ));
+                        app.push(ChatLine::Info(
+                            "  Fix the issue and re-run, or type a message to debug.".into()
+                        ));
+                        app.on_agent_done();
+                        // Keep active_workflow so the right rail still shows steps.
+                    }
+                    Some(AgentEvent::WorkflowParallelBatchDone { outputs }) => {
+                        last_agent_activity = std::time::Instant::now();
+                        // Collect chat lines to push (can't hold wf borrow while calling app.push).
+                        let chat_lines: Vec<ChatLine> = outputs.iter().flat_map(|(step_id, output_text, cost_usd, duration_ms)| {
+                            let mut lines = vec![ChatLine::Info(format!(
+                                "  ✓ [parallel] {} ({}ms, ${:.4})",
+                                step_id, duration_ms, cost_usd
+                            ))];
+                            if !output_text.is_empty() {
+                                let preview = if output_text.len() > 2000 {
+                                    format!("{}…", &output_text[..2000])
+                                } else {
+                                    output_text.clone()
+                                };
+                                lines.push(ChatLine::Assistant(preview));
+                            }
+                            lines
+                        }).collect();
+                        // Update workflow context and step statuses (scoped borrow).
+                        let total_cost: f64 = outputs.iter().map(|(_, _, c, _)| c).sum();
+                        if let Some(ref mut wf) = app.active_workflow {
+                            wf.parallel_abort = None;
+                            for (step_id, output_text, _, _) in &outputs {
+                                wf.context.set_step_output(step_id, "output", output_text.clone());
+                                if let Some(s) = wf.steps.iter_mut().find(|s| &s.step_id == step_id) {
+                                    s.status = crate::tui::app_state::WorkflowStepStatus::Done;
+                                }
+                            }
+                        }
+                        app.stats.session_total_cost_usd += total_cost;
+                        for line in chat_lines {
+                            app.push(line);
+                        }
+                        // Advance to the next batch of sequential/parallel steps.
+                        crate::tui::commands::advance_workflow(app);
                     }
                     Some(AgentEvent::RateLimited { message, retry_after_secs, is_subscription_limit }) => {
                         last_agent_activity = std::time::Instant::now();
@@ -2881,6 +3020,13 @@ pub(super) async fn event_loop(
 
                         // Auto-resume: if we know the reset time, schedule automatic
                         // continuation. The user can press Escape to cancel.
+                        // For active workflows, auto-resume naturally continues the current step,
+                        // which will then call handle_workflow_step_response on completion.
+                        if app.active_workflow.is_some() {
+                            app.push(ChatLine::Info(
+                                "    ⚠ Workflow is paused — will resume automatically with the step.".into()
+                            ));
+                        }
                         if let Some(secs) = retry_after_secs {
                             let resume_at = std::time::Instant::now()
                                 + std::time::Duration::from_secs(secs + 5); // +5s buffer
@@ -3014,8 +3160,19 @@ pub(super) async fn event_loop(
                             percent, cost, limit
                         )));
                     }
-                    Some(AgentEvent::ModelsLoaded { ids, provider }) => {
+                    Some(AgentEvent::ModelsLoaded { mut ids, provider }) => {
                         app.models_loading = false;
+                        // If the provider returned 0 models, fall back to the hardcoded list.
+                        if ids.is_empty() {
+                            if let Some(def) = clido_providers::PROVIDER_REGISTRY
+                                .iter()
+                                .find(|d| d.id == provider.as_str())
+                            {
+                                if !def.fallback_models.is_empty() {
+                                    ids = def.fallback_models.iter().map(|s| s.to_string()).collect();
+                                }
+                            }
+                        }
                         // 15-minute rate-limit pings use model-list fetch; when it succeeds, resume the agent.
                         if app.rate_limit_pinging && !app.rate_limit_cancelled && !ids.is_empty() {
                             app.rate_limit_pinging = false;
@@ -3053,14 +3210,92 @@ pub(super) async fn event_loop(
                                     app.known_models.iter().map(|m| m.id.clone()).collect();
                                 picker.refresh_models(all);
                             }
-                            // Also refresh the profile overlay model picker if active.
+                            // Also refresh the profile overlay model picker if active,
+                            // filtering by the overlay's selected provider.
                             if let Some(overlay) = &mut app.profile_overlay {
                                 if let Some(picker) = &mut overlay.profile_model_picker {
-                                    let all: Vec<String> =
-                                        app.known_models.iter().map(|m| m.id.clone()).collect();
-                                    picker.refresh_models(all);
+                                    let prov = overlay.provider.clone();
+                                    picker.models = app
+                                        .known_models
+                                        .iter()
+                                        .filter(|m| {
+                                            prov.is_empty()
+                                                || m.provider.eq_ignore_ascii_case(&prov)
+                                        })
+                                        .cloned()
+                                        .collect();
+                                    picker.clamp();
                                 }
                             }
+                            // Set success status after releasing the picker borrow.
+                            if let Some(overlay) = &mut app.profile_overlay {
+                                let n = overlay
+                                    .profile_model_picker
+                                    .as_ref()
+                                    .map(|p| p.models.len())
+                                    .unwrap_or(0);
+                                overlay.status = Some(format!(
+                                    "  ✓ Key valid — {} model{} available",
+                                    n,
+                                    if n == 1 { "" } else { "s" }
+                                ));
+                            }
+                        }
+                    }
+                    Some(AgentEvent::ModelsFetchFailed { provider, error }) => {
+                        app.models_loading = false;
+                        // Try to populate the picker with fallback models even on failure.
+                        let fallback: Vec<String> = clido_providers::PROVIDER_REGISTRY
+                            .iter()
+                            .find(|d| d.id == provider.as_str())
+                            .map(|d| d.fallback_models.iter().map(|s| s.to_string()).collect())
+                            .unwrap_or_default();
+                        if !fallback.is_empty() {
+                            // Merge into known_models.
+                            let existing: std::collections::HashSet<String> =
+                                app.known_models.iter().map(|m| m.id.clone()).collect();
+                            for id in &fallback {
+                                if !existing.contains(id) {
+                                    app.known_models.push(ModelEntry {
+                                        id: id.clone(),
+                                        provider: provider.clone(),
+                                        input_mtok: 0.0,
+                                        output_mtok: 0.0,
+                                        context_k: None,
+                                        role: None,
+                                        is_favorite: false,
+                                    });
+                                }
+                            }
+                            if let Some(overlay) = &mut app.profile_overlay {
+                                if let Some(picker) = &mut overlay.profile_model_picker {
+                                    let prov = overlay.provider.clone();
+                                    picker.models = app
+                                        .known_models
+                                        .iter()
+                                        .filter(|m| {
+                                            prov.is_empty()
+                                                || m.provider.eq_ignore_ascii_case(&prov)
+                                        })
+                                        .cloned()
+                                        .collect();
+                                    picker.clamp();
+                                }
+                            }
+                            if let Some(overlay) = &mut app.profile_overlay {
+                                let n = overlay
+                                    .profile_model_picker
+                                    .as_ref()
+                                    .map(|p| p.models.len())
+                                    .unwrap_or(0);
+                                overlay.status = Some(format!(
+                                    "  ⚠ No models endpoint — showing {} known model{}",
+                                    n,
+                                    if n == 1 { "" } else { "s" }
+                                ));
+                            }
+                        } else if let Some(overlay) = &mut app.profile_overlay {
+                            overlay.status = Some(format!("  ✗ {}", error));
                         }
                     }
                     Some(AgentEvent::TitleGenerated(title)) => {

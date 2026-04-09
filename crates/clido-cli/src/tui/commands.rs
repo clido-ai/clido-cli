@@ -2123,7 +2123,535 @@ pub(super) fn cmd_enhance(app: &mut App, cmd: &str) {
     app.pending_enhance = Some(raw.to_string());
 }
 
-// ── Workflow commands ─────────────────────────────────────────────────────────
+// ── Workflow orchestrator ─────────────────────────────────────────────────────
+//
+// Sequential steps are driven through the MAIN agent session: each step's
+// rendered prompt is sent via `send_silent`, the agent's Response is intercepted
+// in event_loop and `handle_workflow_step_response` is called to store the
+// output and advance to the next step. This gives full tool-call visibility,
+// normal permission prompts, and a resumable session.
+//
+// Parallel steps (parallel: true) cannot share a single agent, so they are
+// run as isolated mini-agents in a background task. Results arrive via
+// `AgentEvent::WorkflowParallelBatchDone` and are injected into context before
+// the next sequential step starts.
+
+/// Run a single isolated agent step (used for parallel batches only).
+async fn run_isolated_step(
+    step_id: String,
+    rendered_prompt: String,
+    profile_name: String,
+    workspace_root: std::path::PathBuf,
+    run_id: String,
+    tools: Option<Vec<String>>,
+    system_prompt: Option<String>,
+    max_turns: Option<u32>,
+    outputs: Vec<clido_workflows::OutputDef>,
+    context_snapshot: clido_workflows::WorkflowContext,
+) -> (String, String, f64, u64) {
+    use clido_core::{agent_config_from_loaded, load_config, load_pricing, PermissionMode};
+    use clido_storage::SessionWriter;
+    use clido_tools::default_registry_with_options;
+    use clido_agent::AgentLoop;
+    use std::io::Write as _;
+
+    let do_run = async {
+        let loaded = load_config(&workspace_root)?;
+        let (pricing_table, _) = load_pricing();
+        let profile = loaded.get_profile(&profile_name)?;
+        clido_core::LoadedConfig::validate_provider(&profile.provider)?;
+        let provider = crate::provider::make_provider(&profile_name, profile, None, None)
+            .map_err(|e| clido_core::ClidoError::Workflow(e))?;
+        let model = loaded.get_profile(&profile_name)?.model.clone();
+        let blocked = clido_core::global_config_path().into_iter().collect::<Vec<_>>();
+        let mut registry = default_registry_with_options(workspace_root.clone(), blocked, false);
+        registry = crate::agent_setup::load_mcp_tools_from_path(None, true, registry);
+        let tools_explicitly_empty = tools.as_ref().map_or(false, |t| t.is_empty());
+        registry = registry.with_filters(tools, None);
+        if registry.schemas().is_empty() && !tools_explicitly_empty {
+            return Err(clido_core::ClidoError::Workflow("No tools available for step".into()));
+        }
+        let sp = system_prompt.unwrap_or_else(|| "You are a helpful coding assistant.".into());
+        let mut config = agent_config_from_loaded(
+            &loaded, &profile_name, max_turns, None, Some(model), Some(sp),
+            Some(PermissionMode::AcceptAll), false, None,
+        )?;
+        if config.max_context_tokens.is_none() {
+            if let Some(entry) = pricing_table.models.get(&config.model) {
+                if let Some(cw) = entry.context_window {
+                    config.max_context_tokens = Some(cw);
+                }
+            }
+        }
+        let session_id = format!("{run_id}_{step_id}");
+        let mut writer = SessionWriter::create(&workspace_root, &session_id)?;
+        let mut loop_ = crate::agent_setup::with_optional_trace_metrics(
+            AgentLoop::new(provider, registry, config, None),
+        );
+        let start = std::time::Instant::now();
+        let text = loop_.run(&rendered_prompt, Some(&mut writer), Some(&pricing_table), None).await?;
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let _ = writer.flush();
+        // Apply save_to for this step.
+        for out in &outputs {
+            if let Some(ref tmpl) = out.save_to {
+                if let Ok(path_str) = clido_workflows::render_save_to(tmpl, &context_snapshot, &step_id) {
+                    let p = std::path::Path::new(&path_str);
+                    if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+                    let _ = std::fs::write(p, &text);
+                }
+            }
+        }
+        Ok::<_, clido_core::ClidoError>((text, loop_.cumulative_cost_usd, duration_ms))
+    };
+
+    match do_run.await {
+        Ok((text, cost, dur)) => (step_id, text, cost, dur),
+        Err(e) => (step_id, format!("[error: {e}]"), 0.0, 0),
+    }
+}
+
+/// Load a workflow, validate it, resolve inputs, check prerequisites, and start
+/// orchestrating it through the main agent session.
+fn start_workflow(
+    app: &mut App,
+    path: std::path::PathBuf,
+    inputs: Vec<(String, String)>,
+    profile_override: Option<String>,
+) {
+    use clido_workflows::{load as load_workflow, validate as validate_workflow, WorkflowContext};
+
+    let def = match load_workflow(&path) {
+        Ok(d) => d,
+        Err(e) => { app.push(ChatLine::Info(format!("  ✗ {e}"))); return; }
+    };
+    if let Err(e) = validate_workflow(&def) {
+        app.push(ChatLine::Info(format!("  ✗ Invalid workflow: {e}"))); return;
+    }
+    if let Err(e) = clido_workflows::check_prerequisites(&def) {
+        app.push(ChatLine::Info(format!("  ✗ Prerequisite check failed: {e}"))); return;
+    }
+
+    let overrides: Vec<(String, serde_json::Value)> = inputs
+        .into_iter()
+        .map(|(k, v)| (k, serde_json::Value::String(v)))
+        .collect();
+    let resolved = match WorkflowContext::resolve_inputs(&def, &overrides) {
+        Ok(r) => r,
+        Err(e) => { app.push(ChatLine::Info(format!("  ✗ Input error: {e}"))); return; }
+    };
+
+    let panel_steps = def.steps.iter().map(|s| crate::tui::app_state::WorkflowStepEntry {
+        step_id: s.id.clone(),
+        name: s.name.clone().unwrap_or_else(|| s.id.clone()),
+        status: crate::tui::app_state::WorkflowStepStatus::Pending,
+    }).collect();
+
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let sequential_count = def.steps.iter().filter(|s| !s.parallel).count();
+    let step_count = def.steps.len();
+
+    app.active_workflow = Some(crate::tui::app_state::ActiveWorkflow {
+        name: def.name.clone(),
+        steps: panel_steps,
+        def,
+        context: WorkflowContext::new(resolved),
+        current_idx: 0,
+        run_id,
+        // Track against session_total_cost_usd so parallel step costs are included.
+        start_cost: app.stats.session_total_cost_usd,
+        start_time: std::time::Instant::now(),
+        step_start_time: None,
+        step_prev_model: None,
+        parallel_abort: None,
+        retry_attempts: 0,
+        profile_override,
+    });
+    app.plan_panel_visibility = super::state::PlanPanelVisibility::On;
+
+    app.push(ChatLine::Info(format!(
+        "  ▶ Workflow '{}' starting ({step_count} steps)…",
+        app.active_workflow.as_ref().unwrap().name,
+    )));
+    // Warn about context growth for long sequential workflows.
+    if sequential_count > 5 {
+        app.push(ChatLine::Info(format!(
+            "  ⚠ {} sequential steps will share session context — step outputs are saved to disk",
+            sequential_count
+        )));
+    }
+
+    advance_workflow(app);
+}
+
+/// Advance the workflow orchestrator to the next step (or finish).
+/// Called after a sequential step completes, after a parallel batch finishes,
+/// and at the very start. Sets `app.busy` appropriately.
+pub(super) fn advance_workflow(app: &mut App) {
+    // Phase 1: snapshot what we need to decide what to do next.
+    let (current_idx, total) = match app.active_workflow.as_ref() {
+        Some(wf) => (wf.current_idx, wf.def.steps.len()),
+        None => return,
+    };
+
+    if current_idx >= total {
+        // All steps done — use session_total_cost_usd for accurate delta including parallel steps.
+        let (name, cost_delta, elapsed_ms) = {
+            let wf = app.active_workflow.as_ref().unwrap();
+            let cost = app.stats.session_total_cost_usd - wf.start_cost;
+            let ms = wf.start_time.elapsed().as_millis() as u64;
+            (wf.name.clone(), cost, ms)
+        };
+        app.push(ChatLine::Info(format!(
+            "  ✓ Workflow '{name}' complete — {total} steps, ${cost_delta:.4}, {elapsed_ms}ms"
+        )));
+        app.push(ChatLine::Info("  Type anything to continue.".into()));
+        app.on_agent_done();
+        app.active_workflow = None;
+        return;
+    }
+
+    // Phase 2: check if next steps are parallel.
+    let parallel_batch: Vec<clido_workflows::StepDef> = {
+        let wf = app.active_workflow.as_ref().unwrap();
+        let step = &wf.def.steps[current_idx];
+        if step.parallel {
+            wf.def.steps[current_idx..].iter().take_while(|s| s.parallel).cloned().collect()
+        } else {
+            vec![]
+        }
+    };
+
+    if !parallel_batch.is_empty() {
+        let batch_len = parallel_batch.len();
+
+        // Mark all parallel steps as Active.
+        {
+            let wf = app.active_workflow.as_mut().unwrap();
+            for step in &parallel_batch {
+                if let Some(e) = wf.steps.iter_mut().find(|e| e.step_id == step.id) {
+                    e.status = crate::tui::app_state::WorkflowStepStatus::Active;
+                }
+            }
+            wf.current_idx += batch_len;
+        }
+
+        // Render prompts and collect everything needed for the task.
+        let (tasks, context_snapshot, workspace_root, run_id, fetch_tx) = {
+            let wf = app.active_workflow.as_ref().unwrap();
+            let fallback_profile = wf.profile_override.clone()
+                .unwrap_or_else(|| app.current_profile.clone());
+            let mut tasks = Vec::new();
+            for step in &parallel_batch {
+                let rendered = clido_workflows::render(&step.prompt, &wf.context)
+                    .unwrap_or_else(|_| step.prompt.clone());
+                let profile = step.profile.clone().unwrap_or_else(|| fallback_profile.clone());
+                tasks.push((
+                    step.id.clone(),
+                    rendered,
+                    profile,
+                    step.tools.clone(),
+                    step.system_prompt.clone(),
+                    step.max_turns,
+                    step.outputs.clone(),
+                ));
+            }
+            (tasks, wf.context.clone(), app.workspace_root.clone(),
+             wf.run_id.clone(), app.channels.fetch_tx.clone())
+        };
+
+        let step_names: Vec<String> = parallel_batch.iter()
+            .map(|s| s.name.clone().unwrap_or_else(|| s.id.clone()))
+            .collect();
+        app.push(ChatLine::Info(format!(
+            "  ⇉ Running {} parallel steps: {}",
+            batch_len, step_names.join(", ")
+        )));
+
+        let handle = tokio::spawn(async move {
+            let futs: Vec<_> = tasks.into_iter().map(|(sid, prompt, prof, tools, sp, mt, outs)| {
+                run_isolated_step(
+                    sid, prompt, prof, workspace_root.clone(),
+                    run_id.clone(), tools, sp, mt, outs, context_snapshot.clone(),
+                )
+            }).collect();
+            let outputs = futures::future::join_all(futs).await;
+            let _ = fetch_tx.send(AgentEvent::WorkflowParallelBatchDone { outputs }).await;
+        });
+
+        app.active_workflow.as_mut().unwrap().parallel_abort = Some(handle.abort_handle());
+        // Keep app.busy = true; the parallel batch will send WorkflowParallelBatchDone when done.
+        return;
+    }
+
+    // Phase 3: sequential step — send its prompt to the main agent.
+    let (step_id, step_name, rendered, effective_profile, tools_hint, step_system_prompt) = {
+        let wf = app.active_workflow.as_ref().unwrap();
+        let step = &wf.def.steps[current_idx];
+        let name = step.name.clone().unwrap_or_else(|| step.id.clone());
+        let rendered = match clido_workflows::render(&step.prompt, &wf.context) {
+            Ok(p) => p,
+            Err(e) => {
+                app.push(ChatLine::Info(format!("  ✗ Failed to render step '{}': {e}", step.id)));
+                app.on_agent_done();
+                app.active_workflow = None;
+                return;
+            }
+        };
+        // Tool restriction hint (best effort — main agent registry can't be changed per-step).
+        let tools_hint = step.tools.as_ref().map(|t| {
+            if t.is_empty() {
+                "IMPORTANT: Do not use any tools for this step. Write your response directly.".to_string()
+            } else {
+                format!("IMPORTANT: For this step, only use these tools if needed: {}.", t.join(", "))
+            }
+        });
+        // Effective profile: step-level > workflow --profile= override > session default.
+        let effective_profile = step.profile.clone()
+            .or_else(|| wf.profile_override.clone());
+        (step.id.clone(), name, rendered, effective_profile, tools_hint, step.system_prompt.clone())
+    };
+
+    // Update step status to Active.
+    {
+        let wf = app.active_workflow.as_mut().unwrap();
+        if let Some(e) = wf.steps.iter_mut().find(|e| e.step_id == step_id) {
+            e.status = crate::tui::app_state::WorkflowStepStatus::Active;
+        }
+        wf.step_start_time = Some(std::time::Instant::now());
+    }
+
+    // Show a step header in chat.
+    app.push(ChatLine::Info(format!(
+        "  [{}/{}] ▶ {step_name}",
+        current_idx + 1, total
+    )));
+
+    // Switch model if effective profile specifies a different model.
+    if let Some(ref profile_name) = effective_profile {
+        let workspace = app.workspace_root.clone();
+        if let Ok(loaded) = clido_core::load_config(&workspace) {
+            if let Ok(profile) = loaded.get_profile(profile_name) {
+                if profile.model != app.model {
+                    let prev = app.model.clone();
+                    app.model = profile.model.clone();
+                    let _ = app.channels.model_switch_tx.send(profile.model.clone());
+                    app.active_workflow.as_mut().unwrap().step_prev_model = Some(prev);
+                    app.push(ChatLine::Info(format!(
+                        "  ↻ Using {} ({}) for this step", profile.model, profile_name
+                    )));
+                }
+            }
+        }
+    }
+
+    // Build final prompt: prepend system_prompt persona + tool hint ahead of the rendered prompt.
+    // This is a best-effort substitution since the main agent's system prompt is session-level.
+    let mut prefix_parts: Vec<String> = Vec::new();
+    if let Some(sp) = step_system_prompt {
+        let sp = sp.trim();
+        if !sp.is_empty() {
+            prefix_parts.push(format!("[Step persona: {sp}]"));
+        }
+    }
+    if let Some(hint) = tools_hint {
+        prefix_parts.push(hint);
+    }
+    let final_prompt = if prefix_parts.is_empty() {
+        rendered
+    } else {
+        format!("{}\n\n{rendered}", prefix_parts.join("\n"))
+    };
+
+    app.send_silent(final_prompt);
+}
+
+/// Called from the `AgentEvent::Response` handler when a workflow is active.
+/// Stores the step output, applies `save_to`, reverts model override, then advances.
+pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
+    use clido_workflows::OnErrorPolicy;
+
+    // Extract everything we need before borrowing mutably.
+    let (step_id, step_num, total, step_name, outputs, on_error, prev_model, dur_ms) = {
+        let Some(ref mut wf) = app.active_workflow else { return; };
+        let step = &wf.def.steps[wf.current_idx];
+        let step_id = step.id.clone();
+        let step_num = wf.current_idx + 1;
+        let total = wf.def.steps.len();
+        let step_name = step.name.clone().unwrap_or_else(|| step.id.clone());
+        let outputs = step.outputs.clone();
+        let on_error = step.on_error;
+
+        // Store output in context (all output aliases + canonical "output").
+        wf.context.set_step_output(&step_id, "output", text.clone());
+        for out in &outputs {
+            if out.name != "output" {
+                wf.context.set_step_output(&step_id, &out.name, text.clone());
+            }
+        }
+
+        // Mark done in display list.
+        if let Some(e) = wf.steps.iter_mut().find(|e| e.step_id == step_id) {
+            e.status = crate::tui::app_state::WorkflowStepStatus::Done;
+        }
+
+        let dur_ms = wf.step_start_time
+            .map(|t| t.elapsed().as_millis() as u64)
+            .unwrap_or(0);
+        wf.step_start_time = None;
+
+        let prev_model = wf.step_prev_model.take();
+        wf.retry_attempts = 0;
+        wf.current_idx += 1;
+        (step_id, step_num, total, step_name, outputs, on_error, prev_model, dur_ms)
+    };
+
+    // Show step timing.
+    app.push(ChatLine::Info(format!(
+        "  ✓ [{step_num}/{total}] {step_name} ({dur_ms}ms)"
+    )));
+
+    // Apply save_to. On fatal write errors, abort if on_error == Fail.
+    let save_errors: Vec<String> = {
+        let wf = app.active_workflow.as_ref().unwrap();
+        let mut errors = Vec::new();
+        for out in &outputs {
+            if let Some(ref tmpl) = out.save_to {
+                match clido_workflows::render_save_to(tmpl, &wf.context, &step_id) {
+                    Ok(path_str) => {
+                        let p = std::path::Path::new(&path_str);
+                        if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+                        if let Err(e) = std::fs::write(p, &text) {
+                            errors.push(format!("save_to write failed for '{step_id}': {e}"));
+                        }
+                    }
+                    Err(e) => errors.push(format!("save_to template error for '{step_id}': {e}")),
+                }
+            }
+        }
+        errors
+    };
+    if !save_errors.is_empty() {
+        for msg in &save_errors {
+            app.push(ChatLine::Info(format!("  ⚠ {msg}")));
+        }
+        if on_error == OnErrorPolicy::Fail {
+            // Disk write failure with fail policy → abort workflow.
+            handle_workflow_step_error(app, save_errors.join("; "));
+            return;
+        }
+    }
+
+    // Restore model.
+    if let Some(prev) = prev_model {
+        app.model = prev.clone();
+        let _ = app.channels.model_switch_tx.send(prev);
+    }
+
+    advance_workflow(app);
+}
+
+/// Called when an agent error or hard failure occurs during a sequential workflow step.
+/// Applies the step's `on_error` policy (Fail / Continue / Retry).
+pub(super) fn handle_workflow_step_error(app: &mut App, error: String) {
+    use clido_workflows::OnErrorPolicy;
+
+    let (step_id, step_name, on_error, retry_limit, current_attempts) = {
+        let Some(ref wf) = app.active_workflow else {
+            app.on_agent_done();
+            return;
+        };
+        let step = &wf.def.steps[wf.current_idx];
+        let retry_limit = step.retry.as_ref().map(|r| r.max_attempts).unwrap_or(3) as usize;
+        (
+            step.id.clone(),
+            step.name.clone().unwrap_or_else(|| step.id.clone()),
+            step.on_error,
+            retry_limit,
+            wf.retry_attempts,
+        )
+    };
+
+    // Revert any per-step model override before deciding what to do.
+    let prev_model = app.active_workflow.as_mut()
+        .and_then(|wf| wf.step_prev_model.take());
+    if let Some(prev) = prev_model {
+        app.model = prev.clone();
+        let _ = app.channels.model_switch_tx.send(prev);
+    }
+
+    match on_error {
+        OnErrorPolicy::Retry if current_attempts < retry_limit => {
+            let attempt = current_attempts + 1;
+            app.active_workflow.as_mut().unwrap().retry_attempts = attempt;
+            app.push(ChatLine::Info(format!(
+                "  ↻ Step '{step_name}' failed (attempt {attempt}/{retry_limit}): {error}"
+            )));
+            app.push(ChatLine::Info(format!(
+                "  ↻ Retrying '{step_name}'…"
+            )));
+            // Re-send the same step prompt (current_idx unchanged).
+            advance_workflow(app);
+        }
+        OnErrorPolicy::Continue => {
+            app.push(ChatLine::Info(format!(
+                "  ⚠ Step '{step_name}' failed (continuing): {error}"
+            )));
+            if let Some(ref mut wf) = app.active_workflow {
+                if let Some(e) = wf.steps.iter_mut().find(|e| e.step_id == step_id) {
+                    e.status = crate::tui::app_state::WorkflowStepStatus::Skipped;
+                }
+                // Store empty output so downstream templates don't break.
+                wf.context.set_step_output(&step_id, "output", String::new());
+                wf.current_idx += 1;
+                wf.retry_attempts = 0;
+                wf.step_start_time = None;
+            }
+            advance_workflow(app);
+        }
+        _ => {
+            // Fail (default) or Retry exhausted.
+            let label = if on_error == OnErrorPolicy::Retry {
+                format!("  ✗ Step '{step_name}' failed after {current_attempts} retries: {error}")
+            } else {
+                format!("  ✗ Step '{step_name}' failed: {error}")
+            };
+            app.push(ChatLine::Info(label));
+            if let Some(ref mut wf) = app.active_workflow {
+                if let Some(e) = wf.steps.iter_mut().find(|e| e.step_id == step_id) {
+                    e.status = crate::tui::app_state::WorkflowStepStatus::Failed;
+                }
+            }
+            app.push(ChatLine::Info(
+                "  Workflow stopped — type a message to debug or /workflow run to restart.".into()
+            ));
+            app.on_agent_done();
+            app.active_workflow = None;
+        }
+    }
+}
+
+/// Abort the active workflow (parallel batch + main agent), called on Ctrl-C.
+pub(super) fn abort_workflow(app: &mut App) {
+    // Extract model to revert and abort any parallel batch.
+    let prev_model = app.active_workflow.as_mut().map(|wf| {
+        if let Some(handle) = wf.parallel_abort.take() {
+            handle.abort();
+        }
+        wf.step_prev_model.take()
+    }).flatten();
+
+    app.active_workflow = None;
+    app.push(ChatLine::Info("  ✗ Workflow cancelled.".into()));
+
+    // Revert model if a step had switched it.
+    if let Some(prev) = prev_model {
+        app.model = prev.clone();
+        let _ = app.channels.model_switch_tx.send(prev);
+    }
+
+    app.on_agent_done();
+}
 
 /// Resolve workflow directories: project-local `.clido/workflows/` and global `~/.config/clido/workflows/`.
 fn workflow_dirs(workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
@@ -2243,46 +2771,108 @@ fn extract_last_yaml_from_chat(messages: &[ChatLine]) -> Option<String> {
 fn workflow_creation_system_prompt() -> String {
     r#"You are helping the user create a clido YAML workflow. Guide them through the process step by step.
 
-## Workflow YAML Schema
+## Full Workflow YAML Schema
 
 ```yaml
-name: workflow-name          # Required: kebab-case identifier
+name: workflow-name          # Required: kebab-case identifier used in /workflow run <name>
 version: "1"                 # Required: always "1"
-description: "What it does"  # Optional but recommended
+description: "What it does"  # Recommended
 
-inputs:                      # Optional: parameters the user provides at runtime
-  - name: param-name
-    required: true           # or false
-    default: "value"         # optional default
+inputs:                      # Optional: parameters the user provides at runtime via key=value args
+  - name: repo_path
+    description: "Human-readable description of this input"
+    required: false          # true = error if not provided and no default
+    default: "{{ cwd }}"    # Defaults support {{ cwd }}, {{ date }}, {{ datetime }} template vars
 
 steps:                       # Required: at least one step
   - id: step-id              # Required: unique kebab-case ID
-    name: "Human name"       # Optional: displayed during execution
-    prompt: "What to do"     # Required: can use ${{ inputs.name }} and {{ steps.prev.output }}
-    tools: [Read, Write, Bash, Glob, Grep, Edit, Git, TestLoop, WebSearch, WebFetch]  # Optional: tool allowlist
-    profile: "fast"          # Optional: use a different profile for this step
-    system_prompt: "..."     # Optional: custom system prompt
-    max_turns: 10            # Optional: limit agent iterations
-    parallel: true           # Optional: run with adjacent parallel:true steps concurrently
-    on_error: fail           # Optional: fail (default), continue, or retry
-    retry:                   # Optional: only with on_error: retry
+    name: "Human name"       # Optional: shown during execution
+    prompt: |                # Required: Tera template — use {{ inputs.name }}, {{ steps.prev_id.output }}
+      Analyse {{ inputs.repo_path }}.
+      Previous findings: {{ steps.explore.output }}
+    tools:                   # Optional allowlist; omit = all tools; [] = no tools (pure reasoning)
+      - Read
+      - Glob
+      - Grep
+      - Bash
+      - Edit
+      - Write
+      - Git
+      - WebSearch
+      - WebFetch
+    profile: "opus"          # Optional: profile name from config (overrides workflow default)
+    system_prompt: "..."     # Optional: replaces the default agent system prompt for this step
+    max_turns: 20            # Optional: cap agent iterations (default: profile setting)
+    parallel: true           # Optional: group consecutive parallel:true steps into a concurrent batch
+    on_error: fail           # Optional: fail (default) | continue | retry
+    retry:                   # Required when on_error: retry
       max_attempts: 3
-      backoff: exponential   # none or exponential
+      backoff: exponential   # none | exponential
+    outputs:                 # Optional: named outputs; "output" is always set automatically
+      - name: output         # "output" = full step text (default); custom names are aliases
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-out/{{ step_id }}.txt"
+        # save_to is a Tera template: {{ inputs.* }}, {{ steps.*.output }}, {{ step_id }}, {{ cwd }}
+
+prerequisites:               # Optional: checked before any steps run
+  env:
+    - SOME_API_KEY           # String = required env var
+    - name: OPT_VAR
+      optional: true         # optional env var (warn but don't fail)
+  commands:
+    - forge                  # String = required PATH command
+    - name: slither
+      optional: true
 ```
 
-## Guidelines
-1. Ask what the workflow should accomplish
-2. Ask about inputs (what varies between runs?)
-3. Design steps — each step is a full agent invocation with its own prompt
-4. For each step, suggest appropriate tools and error handling
-5. Consider which steps can run in parallel
-6. When ready, output the complete YAML in a ```yaml code block
-7. After showing the YAML, tell the user they can:
-   - `/workflow save` to save it
-   - `/workflow edit` to edit it manually
-   - Ask for changes and you'll regenerate it
+## Template variables available in prompts and save_to paths
 
-Keep the conversation natural. Ask one thing at a time. Don't dump all questions at once."#
+- `{{ inputs.<name> }}` — resolved input value
+- `{{ steps.<step_id>.output }}` — full text output of a completed step
+- `{{ steps.<step_id>.<output_name> }}` — named output of a completed step
+- `{{ cwd }}` — current working directory at workflow start
+- `{{ date }}` — today's date (YYYY-MM-DD)
+- `{{ datetime }}` — current date+time (YYYY-MM-DDTHH:MM:SS)
+- `{{ step_id }}` — current step id (only in `save_to` templates)
+
+## Key design rules
+
+1. **Each step is a full agent invocation** — it gets its own LLM call, tool sandbox, and session log.
+2. **Use `save_to` for large outputs** so subsequent steps can read them with the Read tool instead of embedding them in prompts (avoids token bloat).
+3. **`parallel: true`** groups consecutive parallel steps into a concurrent batch; non-parallel steps run sequentially.
+4. **`profile:`** per step lets you run cheap steps on a fast model and expensive steps on a powerful one.
+5. **`tools: []`** (empty list) is valid — it means the step does pure reasoning/writing with no tool access.
+6. **`on_error: continue`** is useful for optional steps (e.g. PoC generation) that shouldn't abort the workflow.
+7. **`default: "{{ cwd }}"`** on inputs enables zero-config auto-discovery — the user can run the workflow from inside the target repository without supplying any arguments.
+8. **Workflow discovery**: save workflows to `.clido/workflows/<name>.yaml` (project-local) or `~/.config/clido/workflows/<name>.yaml` (global). Use `/workflow save` from the TUI after the agent outputs the YAML block.
+
+## Running workflows
+
+From the TUI:
+```
+/workflow run <name>
+/workflow run <name> key=value key2=value2
+/workflow run <name> key=value --profile=opus
+```
+
+From the CLI:
+```
+clido workflow run <name>
+clido workflow run <name> -i key=value -i key2=value2 --profile opus
+```
+
+## Guidelines for guiding the user
+
+1. Ask what the workflow should accomplish.
+2. Ask about inputs — what varies between runs? What has a sensible default?
+3. Design steps — each is a full agent turn with its own prompt, tools, and profile.
+4. Suggest `save_to` for steps with large outputs that feed later steps.
+5. Consider which steps can run in parallel.
+6. Propose per-step profiles if some steps need a more capable model.
+7. When ready, output the complete YAML in a ```yaml code block.
+8. After showing the YAML, remind the user to use `/workflow save` to save it, or `/workflow edit` to tweak it.
+
+Keep the conversation natural. Ask one thing at a time."#
         .to_string()
 }
 
@@ -2474,49 +3064,28 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
             }
         }
         _ if sub.starts_with("run ") => {
-            let name = sub.trim_start_matches("run").trim();
-            if name.is_empty() {
-                app.push(ChatLine::Info("  Usage: /workflow run <name>".into()));
+            let rest = sub.trim_start_matches("run").trim();
+            if rest.is_empty() {
+                app.push(ChatLine::Info(
+                    "  Usage: /workflow run <name> [key=value …] [--profile=<name>]".into(),
+                ));
                 return;
+            }
+            // Parse: first token = workflow name, remaining = key=value pairs or --profile=
+            let mut tokens = rest.split_whitespace();
+            let name = tokens.next().unwrap_or("").trim();
+            let mut inputs: Vec<(String, String)> = Vec::new();
+            let mut profile_override: Option<String> = None;
+            for token in tokens {
+                if let Some(p) = token.strip_prefix("--profile=") {
+                    profile_override = Some(p.to_string());
+                } else if let Some((k, v)) = token.split_once('=') {
+                    inputs.push((k.to_string(), v.to_string()));
+                }
             }
             match find_workflow(&app.workspace_root, name) {
                 Some(path) => {
-                    // Run via the agent — ask it to execute the workflow steps
-                    let yaml = std::fs::read_to_string(&path).unwrap_or_default();
-                    match serde_yaml::from_str::<clido_workflows::WorkflowDef>(&yaml) {
-                        Ok(def) => {
-                            app.push(ChatLine::Info(format!(
-                                "  ▶ Running workflow '{}' ({} steps)…",
-                                def.name,
-                                def.steps.len()
-                            )));
-                            // Build a prompt that tells the agent to execute each step
-                            let mut step_desc = String::new();
-                            for (i, step) in def.steps.iter().enumerate() {
-                                let name = step.name.as_deref().unwrap_or(&step.id);
-                                step_desc.push_str(&format!(
-                                    "\nStep {} ({}): {}",
-                                    i + 1,
-                                    name,
-                                    step.prompt
-                                ));
-                                if let Some(ref tools) = step.tools {
-                                    step_desc.push_str(&format!(" [tools: {}]", tools.join(", ")));
-                                }
-                            }
-                            let msg = format!(
-                                "Execute this workflow step by step. Complete each step before moving to the next.\n\
-                                 Workflow: {}\n\
-                                 Description: {}\n\
-                                 {step_desc}",
-                                def.name, def.description
-                            );
-                            app.send_now(msg);
-                        }
-                        Err(e) => {
-                            app.push(ChatLine::Info(format!("  ✗ Invalid workflow: {e}")));
-                        }
-                    }
+                    start_workflow(app, path, inputs, profile_override);
                 }
                 None => {
                     app.push(ChatLine::Info(format!(

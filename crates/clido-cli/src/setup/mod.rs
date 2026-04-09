@@ -156,7 +156,7 @@ pub fn run_interactive_setup_blocking(
         provider,
         api_key_for_fetch,
         base_url_for_fetch,
-    ));
+    )).unwrap_or_default();
 
     let model = if fetched.is_empty() {
         eprintln!("  (Couldn't fetch model list — enter model ID manually)");

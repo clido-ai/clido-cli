@@ -28,9 +28,10 @@ pub async fn run_workflow(cli: &Cli, cmd: &WorkflowCmd) -> Result<(), anyhow::Er
         WorkflowCmd::Run {
             workflow,
             input,
+            profile,
             dry_run,
             yes: _,
-        } => run_workflow_run(cli, workflow, input, *dry_run).await,
+        } => run_workflow_run(cli, workflow, input, profile.as_deref(), *dry_run).await,
         WorkflowCmd::Validate { path } => run_workflow_validate(path).await,
         WorkflowCmd::Inspect { path } => run_workflow_inspect(path).await,
         WorkflowCmd::List => run_workflow_list().await,
@@ -44,6 +45,8 @@ struct CliWorkflowRunner {
     sandbox: bool,
     mcp_config: Option<std::path::PathBuf>,
     quiet: bool,
+    /// Profile override from `--profile` flag. Applied to steps with no explicit profile.
+    profile_override: Option<String>,
 }
 
 #[async_trait]
@@ -55,6 +58,7 @@ impl WorkflowStepRunner for CliWorkflowRunner {
         let profile_name = request
             .profile
             .as_deref()
+            .or(self.profile_override.as_deref())
             .unwrap_or(loaded.default_profile.as_str());
         let profile = loaded
             .get_profile(profile_name)
@@ -74,8 +78,10 @@ impl WorkflowStepRunner for CliWorkflowRunner {
             self.quiet,
             registry,
         );
+        let tools_explicitly_empty = request.tools.as_ref().map_or(false, |t| t.is_empty());
         registry = registry.with_filters(request.tools, None);
-        if registry.schemas().is_empty() {
+        // Only error if tools became empty unintentionally (not when tools: [] was set explicitly).
+        if registry.schemas().is_empty() && !tools_explicitly_empty {
             return Err(ClidoError::Workflow(
                 "No tools available for step".to_string(),
             ));
@@ -139,6 +145,7 @@ async fn run_workflow_run(
     cli: &Cli,
     workflow: &str,
     input: &[String],
+    profile_override: Option<&str>,
     dry_run: bool,
 ) -> Result<(), anyhow::Error> {
     let workspace_root = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -175,6 +182,7 @@ async fn run_workflow_run(
         sandbox: cli.sandbox,
         mcp_config: cli.mcp_config.clone(),
         quiet: cli.quiet,
+        profile_override: profile_override.map(str::to_string),
     };
     let audit_path = workflow_run_path(&def.name, &run_id).ok();
     let summary = run_workflow_exec(&def, &mut context, &runner, audit_path.as_deref()).await?;

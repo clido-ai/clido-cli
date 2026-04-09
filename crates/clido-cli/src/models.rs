@@ -69,7 +69,11 @@ pub async fn run_list_models(provider_filter: Option<&str>, json: bool) -> anyho
     };
 
     let models =
-        clido_providers::fetch_provider_models(effective_provider, &api_key, base_url).await;
+        clido_providers::fetch_provider_models(effective_provider, &api_key, base_url).await
+        .unwrap_or_else(|e| {
+            eprintln!("Error fetching models: {}", e);
+            vec![]
+        });
 
     if json {
         let arr: serde_json::Value =

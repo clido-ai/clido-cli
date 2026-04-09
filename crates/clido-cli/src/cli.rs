@@ -367,6 +367,9 @@ pub enum WorkflowCmd {
         /// Input overrides: key=value (repeatable).
         #[arg(long, short = 'i')]
         input: Vec<String>,
+        /// Profile to use for steps without an explicit profile (overrides config default).
+        #[arg(long, short = 'p')]
+        profile: Option<String>,
         /// Validate and render prompts only; no API calls.
         #[arg(long)]
         dry_run: bool,

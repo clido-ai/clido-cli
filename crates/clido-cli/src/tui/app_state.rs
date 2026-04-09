@@ -103,6 +103,53 @@ pub(crate) enum AppRunState {
     RunningTools,
 }
 
+/// Per-step display status for the active workflow panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkflowStepStatus {
+    Pending,
+    Active,
+    Done,
+    Failed,
+    /// Step ran but hit on_error:continue — completed with error, workflow proceeds.
+    Skipped,
+}
+
+/// One step entry in the active workflow panel.
+#[derive(Debug, Clone)]
+pub(super) struct WorkflowStepEntry {
+    pub(super) step_id: String,
+    pub(super) name: String,
+    pub(super) status: WorkflowStepStatus,
+}
+
+/// State for a workflow being orchestrated through the main agent session.
+pub(super) struct ActiveWorkflow {
+    // ── Display (right rail) ──────────────────────────────────────────────────
+    pub(super) name: String,
+    pub(super) steps: Vec<WorkflowStepEntry>,
+    // ── Orchestration ─────────────────────────────────────────────────────────
+    pub(super) def: clido_workflows::WorkflowDef,
+    pub(super) context: clido_workflows::WorkflowContext,
+    /// Index of the next step to execute (0-based).
+    pub(super) current_idx: usize,
+    pub(super) run_id: String,
+    /// Cumulative session cost at workflow start — used to compute total workflow cost.
+    /// Uses `session_total_cost_usd` (includes parallel step costs).
+    pub(super) start_cost: f64,
+    pub(super) start_time: std::time::Instant,
+    /// Timestamp when the current sequential step was sent.
+    pub(super) step_start_time: Option<std::time::Instant>,
+    /// Model to restore once the current step's profile override expires.
+    pub(super) step_prev_model: Option<String>,
+    /// Abort handle for an in-progress parallel batch task.
+    pub(super) parallel_abort: Option<tokio::task::AbortHandle>,
+    /// Number of times the current step has been retried (reset to 0 on success/skip/advance).
+    pub(super) retry_attempts: usize,
+    /// Profile override from `/workflow run --profile=<name>` — applied to steps
+    /// that don't have their own `profile:` field.
+    pub(super) profile_override: Option<String>,
+}
+
 pub(super) struct App {
     pub(super) messages: Vec<ChatLine>,
     /// Live activity log shown in the status strip (last 2 entries).
@@ -248,6 +295,8 @@ pub(super) struct App {
     pub(super) workflow_editor: Option<super::state::PlanTextEditor>,
     /// File path of the workflow being edited (None = new/unsaved).
     pub(super) workflow_editor_path: Option<std::path::PathBuf>,
+    /// State for a workflow currently running in the background.
+    pub(super) active_workflow: Option<ActiveWorkflow>,
 
     /// Rate-limit auto-resume: when the agent hits a rate limit with a known
     /// retry_after, we set a timer. When it expires the agent is automatically
@@ -398,6 +447,7 @@ impl App {
             max_budget_usd: budget,
             workflow_editor: None,
             workflow_editor_path: None,
+            active_workflow: None,
             rate_limit_resume_at: None,
             rate_limit_cancelled: false,
             rate_limit_pinging: false,

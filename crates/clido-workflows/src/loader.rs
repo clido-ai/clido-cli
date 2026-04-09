@@ -5,6 +5,46 @@ use std::path::Path;
 use crate::types::{OnErrorPolicy, WorkflowDef};
 use clido_core::{ClidoError, Result};
 
+/// Check whether a command exists somewhere in PATH.
+fn command_exists(cmd: &str) -> bool {
+    if let Ok(path_var) = std::env::var("PATH") {
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        for dir in path_var.split(sep) {
+            let mut candidate = std::path::PathBuf::from(dir);
+            candidate.push(cmd);
+            if candidate.exists() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Enforce prerequisites declared in the workflow: required env vars and commands.
+/// Optional entries are skipped; missing required entries return an error.
+pub fn check_prerequisites(def: &WorkflowDef) -> Result<()> {
+    let Some(ref prereqs) = def.prerequisites else {
+        return Ok(());
+    };
+    for entry in &prereqs.env {
+        if !entry.optional() && std::env::var(entry.name()).is_err() {
+            return Err(ClidoError::Workflow(format!(
+                "Missing required environment variable: {}",
+                entry.name()
+            )));
+        }
+    }
+    for entry in &prereqs.commands {
+        if !entry.optional() && !command_exists(entry.name()) {
+            return Err(ClidoError::Workflow(format!(
+                "Required command not found in PATH: {}",
+                entry.name()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Load workflow from YAML file.
 pub fn load(path: &Path) -> Result<WorkflowDef> {
     let s = std::fs::read_to_string(path)
@@ -530,5 +570,101 @@ steps:
         // Either has "validate" pass or a generic "preflight" pass
         assert!(result.is_ok());
         assert!(!result.checks.is_empty());
+    }
+
+    // ── check_prerequisites ───────────────────────────────────────────────
+
+    #[test]
+    fn check_prerequisites_no_prerequisites_passes() {
+        let def = WorkflowDef {
+            name: "x".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![],
+            output: None,
+            prerequisites: None,
+        };
+        assert!(check_prerequisites(&def).is_ok());
+    }
+
+    #[test]
+    fn check_prerequisites_missing_required_env_fails() {
+        use crate::types::{PrereqEntry, PrerequisitesDef};
+        let def = WorkflowDef {
+            name: "x".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![],
+            output: None,
+            prerequisites: Some(PrerequisitesDef {
+                commands: vec![],
+                env: vec![PrereqEntry::Required("__CLIDO_DEFINITELY_NOT_SET_XYZ__".into())],
+            }),
+        };
+        let err = check_prerequisites(&def).unwrap_err();
+        assert!(err.to_string().contains("Missing required environment variable"));
+    }
+
+    #[test]
+    fn check_prerequisites_optional_env_missing_passes() {
+        use crate::types::{PrereqEntry, PrerequisitesDef};
+        let def = WorkflowDef {
+            name: "x".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![],
+            output: None,
+            prerequisites: Some(PrerequisitesDef {
+                commands: vec![],
+                env: vec![PrereqEntry::Optional {
+                    name: "__CLIDO_DEFINITELY_NOT_SET_XYZ__".into(),
+                    optional: true,
+                }],
+            }),
+        };
+        assert!(check_prerequisites(&def).is_ok());
+    }
+
+    #[test]
+    fn check_prerequisites_missing_required_command_fails() {
+        use crate::types::{PrereqEntry, PrerequisitesDef};
+        let def = WorkflowDef {
+            name: "x".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![],
+            output: None,
+            prerequisites: Some(PrerequisitesDef {
+                commands: vec![PrereqEntry::Required(
+                    "__clido_no_such_cmd_xyz_12345__".into(),
+                )],
+                env: vec![],
+            }),
+        };
+        let err = check_prerequisites(&def).unwrap_err();
+        assert!(err.to_string().contains("Required command not found"));
+    }
+
+    #[test]
+    fn check_prerequisites_present_command_passes() {
+        use crate::types::{PrereqEntry, PrerequisitesDef};
+        // "sh" should exist everywhere
+        let def = WorkflowDef {
+            name: "x".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![],
+            output: None,
+            prerequisites: Some(PrerequisitesDef {
+                commands: vec![PrereqEntry::Required("sh".into())],
+                env: vec![],
+            }),
+        };
+        assert!(check_prerequisites(&def).is_ok());
     }
 }

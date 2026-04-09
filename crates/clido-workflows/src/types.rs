@@ -26,6 +26,8 @@ pub struct WorkflowDef {
 pub struct InputDef {
     pub name: String,
     #[serde(default)]
+    pub description: String,
+    #[serde(default)]
     pub required: bool,
     #[serde(default)]
     pub default: Option<serde_json::Value>,

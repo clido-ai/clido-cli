@@ -821,7 +821,7 @@ impl ModelProvider for OpenAICompatProvider {
         Ok(Box::pin(parse_openai_sse(byte_stream)))
     }
 
-    async fn list_models(&self) -> Vec<crate::provider::ModelEntry> {
+    async fn list_models(&self) -> std::result::Result<Vec<crate::provider::ModelEntry>, String> {
         let base = self.base_url.trim_end_matches('/');
         let url = format!("{}/models", base);
         let mut req = self
@@ -834,19 +834,20 @@ impl ModelProvider for OpenAICompatProvider {
         let resp = match req.send().await {
             Ok(r) => r,
             Err(e) => {
-                warn!("list_models: request failed: {}", e);
-                return vec![];
+                return Err(format!("Network error: {}", e));
             }
         };
-        if !resp.status().is_success() {
-            warn!("list_models: API returned status {}", resp.status());
-            return vec![];
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err("Authentication failed — check your API key".to_string());
+        }
+        if !status.is_success() {
+            return Err(format!("API returned {}", status));
         }
         let json = match resp.json::<serde_json::Value>().await {
             Ok(j) => j,
             Err(e) => {
-                warn!("list_models: failed to parse response: {}", e);
-                return vec![];
+                return Err(format!("Failed to parse response: {}", e));
             }
         };
         let is_openrouter = base.contains("openrouter.ai");
@@ -860,10 +861,6 @@ impl ModelProvider for OpenAICompatProvider {
                 if is_openai && !is_openai_chat_model(&id) {
                     return None;
                 }
-                // For OpenRouter: mark models that have no usable chat endpoints.
-                // The API returns `supported_generation_types` (array) — if it
-                // exists and does not contain "text", the model cannot generate
-                // chat completions. Falls back to checking `per_request_limits`.
                 let available = if is_openrouter {
                     openrouter_model_available(m)
                 } else {
@@ -873,7 +870,7 @@ impl ModelProvider for OpenAICompatProvider {
             })
             .collect();
         models.sort_by(|a, b| a.id.cmp(&b.id));
-        models
+        Ok(models)
     }
 }
 

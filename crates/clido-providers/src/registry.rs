@@ -30,6 +30,12 @@ pub struct ProviderDef {
     /// True for providers billed via a flat subscription rather than per-token.
     /// Budget tracking is not applicable for these providers.
     pub is_subscription: bool,
+    /// Hardcoded fallback model IDs shown in the picker when the live API
+    /// fetch returns no models (e.g. plan-specific base URL not yet set).
+    pub fallback_models: &'static [&'static str],
+    /// Whether this provider requires a custom base URL that varies per user/plan.
+    /// When true, the creation wizard prompts for base_url before the model fetch.
+    pub needs_base_url: bool,
 }
 
 /// Check whether a provider (by id) uses subscription billing.
@@ -61,6 +67,8 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &[],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "anthropic",
@@ -68,11 +76,17 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Claude models — console.anthropic.com",
         base_url: "https://api.anthropic.com",
         api_key_env: "ANTHROPIC_API_KEY",
-        default_model: "claude-sonnet-4-5",
+        default_model: "claude-sonnet-4-6",
         extra_headers: &[],
         is_local: false,
         is_anthropic: true,
         is_subscription: false,
+        fallback_models: &[
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+        ],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "openai",
@@ -85,6 +99,8 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "mistral",
@@ -97,11 +113,13 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &["mistral-large-latest", "mistral-small-latest", "codestral-latest"],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "minimax",
         name: "MiniMax",
-        description: "MiniMax-M2.7 coding model — minimax.io",
+        description: "MiniMax models — minimax.io",
         base_url: "https://api.minimax.io/v1",
         api_key_env: "MINIMAX_API_KEY",
         default_model: "MiniMax-M1",
@@ -109,6 +127,8 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &["MiniMax-M1", "MiniMax-Text-01"],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "kimi",
@@ -121,6 +141,8 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "kimi-code",
@@ -133,6 +155,8 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: true,
+        fallback_models: &["kimi-for-coding"],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "alibabacloud",
@@ -145,6 +169,40 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &[
+            "qwen-max",
+            "qwen-plus",
+            "qwen-turbo",
+            "qwen2.5-72b-instruct",
+            "qwen2.5-coder-32b-instruct",
+            "qwq-32b",
+        ],
+        needs_base_url: true,
+    },
+    ProviderDef {
+        id: "alibabacloud-code",
+        name: "Alibaba Cloud  (coding plan)",
+        description: "Multi-vendor coding models — coding-intl.dashscope.aliyuncs.com",
+        base_url: "https://coding-intl.dashscope.aliyuncs.com/v1",
+        api_key_env: "DASHSCOPE_CODE_API_KEY",
+        default_model: "qwen3.6-plus",
+        extra_headers: &[],
+        is_local: false,
+        is_anthropic: false,
+        is_subscription: true,
+        fallback_models: &[
+            "qwen3.6-plus",
+            "qwen3.5-plus",
+            "qwen3-max-2026-01-23",
+            "qwen3-coder-next",
+            "qwen3-coder-plus",
+            "glm-5",
+            "glm-5.1",
+            "glm-4.7",
+            "kimi-k2.5",
+            "MiniMax-M2.5",
+        ],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "deepseek",
@@ -157,6 +215,8 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &["deepseek-chat", "deepseek-reasoner"],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "groq",
@@ -169,6 +229,13 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &[
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "gemma2-9b-it",
+            "mixtral-8x7b-32768",
+        ],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "cerebras",
@@ -181,6 +248,8 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &["llama3.1-70b", "llama3.1-8b"],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "togetherai",
@@ -193,6 +262,12 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &[
+            "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+            "deepseek-ai/DeepSeek-R1",
+        ],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "fireworks",
@@ -205,6 +280,11 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &[
+            "accounts/fireworks/models/llama-v3p3-70b-instruct",
+            "accounts/fireworks/models/deepseek-r1",
+        ],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "xai",
@@ -217,6 +297,8 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &["grok-3-beta", "grok-3-mini-beta", "grok-2-1212"],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "perplexity",
@@ -229,6 +311,8 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &["sonar-pro", "sonar", "sonar-reasoning-pro"],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "gemini",
@@ -241,6 +325,12 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &[
+            "gemini-2.5-pro-preview-06-05",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+        ],
+        needs_base_url: false,
     },
     ProviderDef {
         id: "local",
@@ -253,6 +343,8 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: true,
         is_anthropic: false,
         is_subscription: false,
+        fallback_models: &[],
+        needs_base_url: true,
     },
 ];
 

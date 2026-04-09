@@ -124,7 +124,7 @@ impl ModelProvider for RetryProvider {
         self.inner.complete_stream(messages, tools, config).await
     }
 
-    async fn list_models(&self) -> Vec<ModelEntry> {
+    async fn list_models(&self) -> std::result::Result<Vec<ModelEntry>, String> {
         self.inner.list_models().await
     }
 }
@@ -186,8 +186,8 @@ mod tests {
             Ok(Box::pin(futures::stream::empty()))
         }
 
-        async fn list_models(&self) -> Vec<ModelEntry> {
-            vec![]
+        async fn list_models(&self) -> std::result::Result<Vec<ModelEntry>, String> {
+            Ok(vec![])
         }
     }
 

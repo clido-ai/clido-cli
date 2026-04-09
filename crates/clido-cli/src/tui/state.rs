@@ -452,8 +452,7 @@ impl ModelPickerState {
 pub(crate) const KNOWN_PROVIDERS: &[(&str, &str, bool)] = &[
     ("anthropic", "Anthropic  (Claude)", true),
     ("openai", "OpenAI  (GPT / o-series)", true),
-    ("google", "Google  (Gemini)", true),
-    ("gemini", "Google Gemini", true),
+    ("gemini", "Google  (Gemini)", true),
     ("xai", "xAI  (Grok)", true),
     ("deepseek", "DeepSeek", true),
     ("groq", "Groq", true),
@@ -464,13 +463,12 @@ pub(crate) const KNOWN_PROVIDERS: &[(&str, &str, bool)] = &[
     ("mistral", "Mistral", true),
     ("kimi", "Moonshot AI  (Kimi)", true),
     ("kimi-code", "Kimi Code  (coding)", true),
-    ("cohere", "Cohere", true),
-    ("together", "Together AI", true),
-    ("ollama", "Ollama  (local)", false),
-    ("lmstudio", "LM Studio  (local)", false),
+    ("alibabacloud", "Alibaba Cloud  (Qwen)", true),
+    ("alibabacloud-code", "Alibaba Cloud  (coding plan)", true),
+    ("minimax", "MiniMax", true),
     ("openrouter", "OpenRouter", true),
-    ("azure", "Azure OpenAI", true),
-    ("custom", "Custom / Other", true),
+    ("ollama", "Ollama  (local)", false),
+    ("local", "Local  (OpenAI-compatible)", false),
 ];
 
 pub(crate) struct ProviderPickerState {
@@ -570,6 +568,8 @@ pub(crate) enum ProfileOverlayMode {
 pub(crate) enum ProfileCreateStep {
     Name,
     Provider,
+    /// Base URL step — only shown for providers where `needs_base_url == true` (e.g. alibabacloud, local).
+    BaseUrl,
     ApiKey,
     Model,
 }

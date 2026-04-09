@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::template::render_default;
 use crate::types::WorkflowDef;
 use clido_core::{ClidoError, Result};
 
@@ -40,7 +41,15 @@ impl WorkflowContext {
                 continue;
             }
             if let Some(ref default) = input.default {
-                map.insert(input.name.clone(), default.clone());
+                // Render string defaults as templates so `{{ cwd }}`, `{{ date }}`,
+                // `{{ datetime }}` work in default values.
+                let resolved = match default {
+                    serde_json::Value::String(s) if s.contains("{{") || s.contains("${{") => {
+                        serde_json::Value::String(render_default(s))
+                    }
+                    other => other.clone(),
+                };
+                map.insert(input.name.clone(), resolved);
             } else if input.required {
                 return Err(ClidoError::Workflow(format!(
                     "Missing required input: {}",
@@ -87,6 +96,7 @@ mod tests {
             description: String::new(),
             inputs: vec![InputDef {
                 name: "required_key".to_string(),
+                description: String::new(),
                 required: true,
                 default: None,
             }],
@@ -109,6 +119,7 @@ mod tests {
             description: String::new(),
             inputs: vec![InputDef {
                 name: "key".to_string(),
+                description: String::new(),
                 required: false,
                 default: Some(serde_json::Value::String("default_val".to_string())),
             }],
@@ -137,6 +148,7 @@ mod tests {
             description: String::new(),
             inputs: vec![InputDef {
                 name: "opt".to_string(),
+                description: String::new(),
                 required: false,
                 default: Some(serde_json::Value::String("default_val".to_string())),
             }],

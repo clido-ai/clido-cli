@@ -5,8 +5,8 @@ use std::path::Path;
 use async_trait::async_trait;
 
 use crate::context::{StepResult, WorkflowContext};
-use crate::loader::validate;
-use crate::template::render;
+use crate::loader::{check_prerequisites, validate};
+use crate::template::{render, render_save_to};
 use crate::types::{OnErrorPolicy, StepDef, WorkflowDef};
 use clido_core::{ClidoError, Result};
 
@@ -54,7 +54,36 @@ pub struct WorkflowSummary {
     pub success: bool,
 }
 
-/// Execute workflow: validate, run steps (linear + parallel batches), apply on_error/retry, write audit.
+/// Write step outputs to disk for any `OutputDef` entries that have `save_to` set.
+/// Called only on success (no-op if output_text is empty due to error).
+fn apply_save_to(step: &StepDef, ctx: &WorkflowContext, output_text: &str) -> Result<()> {
+    for out in &step.outputs {
+        let Some(ref template) = out.save_to else {
+            continue;
+        };
+        let path_str = render_save_to(template, ctx, &step.id)?;
+        let path = std::path::Path::new(&path_str);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                ClidoError::Workflow(format!(
+                    "save_to: failed to create directory '{}': {}",
+                    parent.display(),
+                    e
+                ))
+            })?;
+        }
+        std::fs::write(path, output_text).map_err(|e| {
+            ClidoError::Workflow(format!(
+                "save_to: failed to write '{}': {}",
+                path_str, e
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+/// Execute workflow: validate, enforce prerequisites, run steps (linear + parallel batches),
+/// apply on_error/retry, write audit.
 pub async fn run(
     def: &WorkflowDef,
     context: &mut WorkflowContext,
@@ -62,6 +91,7 @@ pub async fn run(
     audit_path: Option<&Path>,
 ) -> Result<WorkflowSummary> {
     validate(def)?;
+    check_prerequisites(def)?;
 
     let mut total_cost = 0.0_f64;
     let mut total_duration = 0_u64;
@@ -129,6 +159,14 @@ pub async fn run(
                 total_cost += run_res.cost_usd;
                 total_duration += run_res.duration_ms;
                 context.set_step_output(&step.id, "output", step_result.output_text.clone());
+                for out in &step.outputs {
+                    if out.name != "output" {
+                        context.set_step_output(&step.id, &out.name, step_result.output_text.clone());
+                    }
+                }
+                if run_res.error.is_none() {
+                    apply_save_to(step, context, &step_result.output_text)?;
+                }
                 context.step_results.push(step_result);
                 if run_res.error.is_some() {
                     success = false;
@@ -187,6 +225,9 @@ async fn run_one_step(
         if out.name != "output" {
             context.set_step_output(&step.id, &out.name, output_text.clone());
         }
+    }
+    if result.error.is_none() {
+        apply_save_to(step, context, &output_text)?;
     }
     let step_result = StepResult {
         step_id: step.id.clone(),
@@ -872,5 +913,174 @@ mod tests {
         assert_eq!(req.system_prompt_override, Some("You are helpful.".into()));
         assert_eq!(req.max_turns_override, Some(5));
         assert_eq!(req.tools, Some(vec!["Read".into()]));
+    }
+
+    // ── save_to writes output to disk ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn save_to_writes_file_on_success() {
+        use crate::types::OutputDef;
+        let tmp = tempfile::tempdir().unwrap();
+        let save_path = tmp.path().join("output.txt");
+        let save_path_str = save_path.to_str().unwrap().to_string();
+
+        let def = WorkflowDef {
+            name: "save".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![StepDef {
+                id: "s1".into(),
+                name: None,
+                profile: None,
+                tools: None,
+                prompt: "Generate output".into(),
+                outputs: vec![OutputDef {
+                    name: "output".into(),
+                    r#type: "text".into(),
+                    save_to: Some(save_path_str.clone()),
+                }],
+                on_error: OnErrorPolicy::Fail,
+                retry: None,
+                parallel: false,
+                system_prompt: None,
+                max_turns: None,
+            }],
+            output: None,
+            prerequisites: None,
+        };
+        let runner = MockRunner::new();
+        let mut ctx = WorkflowContext::new(HashMap::new());
+        run(&def, &mut ctx, &runner, None).await.unwrap();
+        assert!(save_path.exists(), "save_to file should be written");
+        let content = std::fs::read_to_string(&save_path).unwrap();
+        assert_eq!(content, "output_s1");
+    }
+
+    #[tokio::test]
+    async fn save_to_uses_step_id_in_template() {
+        use crate::types::OutputDef;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_str().unwrap().to_string();
+
+        let def = WorkflowDef {
+            name: "save_template".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![StepDef {
+                id: "intel".into(),
+                name: None,
+                profile: None,
+                tools: None,
+                prompt: "Generate intel".into(),
+                outputs: vec![OutputDef {
+                    name: "output".into(),
+                    r#type: "text".into(),
+                    save_to: Some(format!("{}/{{{{ step_id }}}}.json", dir)),
+                }],
+                on_error: OnErrorPolicy::Fail,
+                retry: None,
+                parallel: false,
+                system_prompt: None,
+                max_turns: None,
+            }],
+            output: None,
+            prerequisites: None,
+        };
+        let runner = MockRunner::new();
+        let mut ctx = WorkflowContext::new(HashMap::new());
+        run(&def, &mut ctx, &runner, None).await.unwrap();
+        assert!(tmp.path().join("intel.json").exists());
+    }
+
+    #[tokio::test]
+    async fn save_to_not_written_on_step_error() {
+        use crate::types::OutputDef;
+        let tmp = tempfile::tempdir().unwrap();
+        let save_path = tmp.path().join("should_not_exist.txt");
+
+        let def = WorkflowDef {
+            name: "save_err".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![StepDef {
+                id: "s1".into(),
+                name: None,
+                profile: None,
+                tools: None,
+                prompt: "Fail".into(),
+                outputs: vec![OutputDef {
+                    name: "output".into(),
+                    r#type: "text".into(),
+                    save_to: Some(save_path.to_str().unwrap().to_string()),
+                }],
+                on_error: OnErrorPolicy::Continue,
+                retry: None,
+                parallel: false,
+                system_prompt: None,
+                max_turns: None,
+            }],
+            output: None,
+            prerequisites: None,
+        };
+        let runner = MockRunner::new().fail_step("s1");
+        let mut ctx = WorkflowContext::new(HashMap::new());
+        run(&def, &mut ctx, &runner, None).await.unwrap();
+        assert!(!save_path.exists(), "save_to should not write on error");
+    }
+
+    // ── parallel steps set named outputs ─────────────────────────────────
+
+    #[tokio::test]
+    async fn parallel_steps_set_named_outputs() {
+        use crate::types::OutputDef;
+        let def = WorkflowDef {
+            name: "par_named".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![
+                StepDef {
+                    id: "p1".into(),
+                    name: None,
+                    profile: None,
+                    tools: None,
+                    prompt: "P1".into(),
+                    outputs: vec![
+                        OutputDef { name: "output".into(), r#type: "text".into(), save_to: None },
+                        OutputDef { name: "findings".into(), r#type: "text".into(), save_to: None },
+                    ],
+                    on_error: OnErrorPolicy::Fail,
+                    retry: None,
+                    parallel: true,
+                    system_prompt: None,
+                    max_turns: None,
+                },
+                StepDef {
+                    id: "p2".into(),
+                    name: None,
+                    profile: None,
+                    tools: None,
+                    prompt: "P2".into(),
+                    outputs: vec![],
+                    on_error: OnErrorPolicy::Fail,
+                    retry: None,
+                    parallel: true,
+                    system_prompt: None,
+                    max_turns: None,
+                },
+            ],
+            output: None,
+            prerequisites: None,
+        };
+        let runner = MockRunner::new();
+        let mut ctx = WorkflowContext::new(HashMap::new());
+        run(&def, &mut ctx, &runner, None).await.unwrap();
+        // Named output "findings" must be set for parallel step p1
+        assert_eq!(ctx.get_step_output("p1", "output"), Some("output_p1"));
+        assert_eq!(ctx.get_step_output("p1", "findings"), Some("output_p1"));
+        assert_eq!(ctx.get_step_output("p2", "output"), Some("output_p2"));
     }
 }

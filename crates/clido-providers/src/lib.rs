@@ -117,15 +117,14 @@ pub async fn fetch_provider_models(
     provider_name: &str,
     api_key: &str,
     base_url: Option<&str>,
-) -> Vec<ModelEntry> {
-    let Ok(provider) = build_provider(
+) -> std::result::Result<Vec<ModelEntry>, String> {
+    let provider = build_provider(
         provider_name,
         api_key.to_string(),
         "placeholder".to_string(),
         base_url,
-    ) else {
-        return vec![];
-    };
+    )
+    .map_err(|e| e.to_string())?;
     provider.list_models().await
 }
 

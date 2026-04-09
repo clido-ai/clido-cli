@@ -638,9 +638,8 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                     }
                                 }
                                 let needs_key = st.provider_picker.selected_requires_key();
-                                let models = app.known_models.clone();
                                 let mut picker = ModelPickerState {
-                                    models,
+                                    models: vec![],
                                     filter: String::new(),
                                     selected: 0,
                                     scroll_offset: 0,
@@ -655,18 +654,27 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                 } else {
                                     None
                                 };
-                                let next_step = if let Some(key) = saved_key {
+                                // Check if this provider requires a custom base URL step.
+                                let provider_needs_base_url = clido_providers::PROVIDER_REGISTRY
+                                    .iter()
+                                    .find(|d| d.id == id)
+                                    .map(|d| d.needs_base_url)
+                                    .unwrap_or(false);
+
+                                let next_step = if provider_needs_base_url {
+                                    // Leave input empty — placeholder shows the default.
+                                    // Empty = use registry default; typed value = custom endpoint.
+                                    st.input.clear();
+                                    st.input_cursor = 0;
+                                    ProfileCreateStep::BaseUrl
+                                } else if let Some(key) = saved_key {
                                     // Pre-fill the key and skip to model selection.
                                     st.api_key = key.clone();
                                     // Trigger model fetch with the saved key.
                                     spawn_model_fetch(
                                         st.provider.clone(),
                                         key,
-                                        if st.base_url.is_empty() {
-                                            None
-                                        } else {
-                                            Some(st.base_url.clone())
-                                        },
+                                        None,
                                         app.channels.fetch_tx.clone(),
                                     );
                                     app.models_loading = true;
@@ -677,6 +685,8 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                     st.api_key.clear();
                                     ProfileCreateStep::Model
                                 };
+                                // Filter saved keys to only those matching the selected provider.
+                                st.saved_keys.retain(|k| k.provider_id == st.provider);
                                 if next_step == ProfileCreateStep::ApiKey
                                     && !st.saved_keys.is_empty()
                                 {
@@ -689,6 +699,60 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                 }
                             } else {
                                 st.status = Some("  ✗ Select a provider from the list".into());
+                            }
+                        }
+                        ProfileCreateStep::BaseUrl => {
+                            // Save the custom base URL (may be empty to use default).
+                            st.base_url = value.trim().to_string();
+                            st.input.clear();
+                            st.input_cursor = 0;
+                            let needs_key = clido_providers::PROVIDER_REGISTRY
+                                .iter()
+                                .find(|d| d.id == st.provider.as_str())
+                                .map(|d| !d.id.eq_ignore_ascii_case("local"))
+                                .unwrap_or(true);
+                            // Check for saved key
+                            let saved_key = if needs_key {
+                                crate::setup::read_credential(&st.config_path, &st.provider.clone())
+                            } else {
+                                None
+                            };
+                            if let Some(key) = saved_key {
+                                st.api_key = key.clone();
+                                let base_url_for_fetch = if st.base_url.is_empty() {
+                                    None
+                                } else {
+                                    Some(st.base_url.clone())
+                                };
+                                spawn_model_fetch(
+                                    st.provider.clone(),
+                                    key,
+                                    base_url_for_fetch,
+                                    app.channels.fetch_tx.clone(),
+                                );
+                                app.models_loading = true;
+                                st.mode = ProfileOverlayMode::Creating {
+                                    step: ProfileCreateStep::Model,
+                                };
+                            } else if needs_key {
+                                // Filter saved keys to only those matching the selected provider.
+                                st.saved_keys.retain(|k| k.provider_id == st.provider);
+                                if !st.saved_keys.is_empty() {
+                                    st.mode = ProfileOverlayMode::PickingSavedKey {
+                                        selected: 0,
+                                        show_type_new_row: true,
+                                    };
+                                } else {
+                                    st.mode = ProfileOverlayMode::Creating {
+                                        step: ProfileCreateStep::ApiKey,
+                                    };
+                                }
+                            } else {
+                                // No key needed (local provider)
+                                st.api_key.clear();
+                                st.mode = ProfileOverlayMode::Creating {
+                                    step: ProfileCreateStep::Model,
+                                };
                             }
                         }
                         ProfileCreateStep::ApiKey => {
@@ -718,9 +782,16 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                             };
                         }
                         ProfileCreateStep::Model => {
+                            // Prefer selected item from picker; fall back to whatever is typed
+                            // in the filter box so users can always type a model ID manually.
                             let model_id = st.profile_model_picker.as_ref().and_then(|p| {
                                 let filtered = p.filtered();
                                 filtered.get(p.selected).map(|m| m.id.clone())
+                            }).or_else(|| {
+                                // Use the filter text as a literal model ID if no picker match.
+                                st.profile_model_picker.as_ref()
+                                    .map(|p| p.filter.trim().to_string())
+                                    .filter(|s| !s.is_empty())
                             });
                             if let Some(id) = model_id {
                                 st.model = id;
@@ -741,7 +812,7 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                                 app.profile_overlay = None;
                                 super::commands::switch_profile_seamless(app, &name);
                             } else {
-                                st.status = Some("  ✗ Select a model from the list".into());
+                                st.status = Some("  ✗ Type a model name and press Enter".into());
                             }
                         }
                     }
@@ -932,9 +1003,27 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                         st.status = None;
                     }
                     _ => {
+                        let prev_len = st.input.len();
                         let b = char_byte_pos_tui(&st.input, st.input_cursor);
                         st.input.insert(b, c);
                         st.input_cursor += 1;
+                        // Trigger live key validation once the input looks like a
+                        // complete API key (crosses 20-char threshold or was just pasted).
+                        // Skip validation on the BaseUrl step.
+                        const MIN_KEY_LEN: usize = 20;
+                        if *step == ProfileCreateStep::ApiKey
+                            && prev_len < MIN_KEY_LEN && st.input.len() >= MIN_KEY_LEN
+                            && !app.models_loading
+                        {
+                            st.status = Some("  Validating…".to_string());
+                            spawn_model_fetch(
+                                st.provider.clone(),
+                                st.input.trim().to_string(),
+                                if st.base_url.is_empty() { None } else { Some(st.base_url.clone()) },
+                                app.channels.fetch_tx.clone(),
+                            );
+                            app.models_loading = true;
+                        }
                     }
                 },
                 _ => {}
@@ -2120,6 +2209,13 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.push(ChatLine::Info(
                     "  ✗ Auto-resume cancelled. Use /profile <name> to switch provider or just type to continue manually.".into(),
                 ));
+                // If a workflow was waiting on rate-limit recovery, it's now stranded.
+                // Apply the step's on_error policy so it doesn't zombify.
+                if app.active_workflow.is_some() {
+                    crate::tui::commands::handle_workflow_step_error(
+                        app, "rate limit auto-resume cancelled by user".into()
+                    );
+                }
             } else if app.rate_limit_pinging && !app.rate_limit_cancelled {
                 app.rate_limit_cancelled = true;
                 app.rate_limit_pinging = false;
@@ -2129,6 +2225,11 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     "  ✗ Background rate-limit checks cancelled — retry manually when ready."
                         .into(),
                 ));
+                if app.active_workflow.is_some() {
+                    crate::tui::commands::handle_workflow_step_error(
+                        app, "rate limit auto-resume cancelled by user".into()
+                    );
+                }
             } else if app.editing_queued_item.is_some() {
                 // Discard the queue item being edited (don't put it back)
                 app.editing_queued_item = None;

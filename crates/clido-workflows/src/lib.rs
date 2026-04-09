@@ -11,10 +11,10 @@ pub use executor::{
     run as run_workflow, StepRunRequest, StepRunResult, WorkflowStepRunner, WorkflowSummary,
 };
 pub use loader::{
-    load, preflight, required_tools_and_profiles, validate, PreflightCheck, PreflightResult,
-    PreflightStatus,
+    check_prerequisites, load, preflight, required_tools_and_profiles, validate, PreflightCheck,
+    PreflightResult, PreflightStatus,
 };
-pub use template::render;
+pub use template::{render, render_default, render_save_to};
 pub use types::{
     BackoffKind, InputDef, OnErrorPolicy, OutputConfig, OutputDef, PrereqEntry, PrerequisitesDef,
     RetryConfig, StepDef, WorkflowDef,

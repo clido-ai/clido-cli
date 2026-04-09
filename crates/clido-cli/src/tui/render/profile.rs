@@ -13,14 +13,31 @@ use super::widgets::{popup_above_input, scroll_indicator_line};
 // ── Profile overlay renderer ──────────────────────────────────────────────────
 
 /// Progress steps for the creation wizard (ordered).
-const CREATE_STEPS: &[&str] = &["Name", "Provider", "API key", "Model"];
+const CREATE_STEPS: &[&str] = &["Name", "Provider", "Base URL", "API key", "Model"];
 
 fn step_index_for(step: &ProfileCreateStep) -> usize {
     match step {
         ProfileCreateStep::Name => 0,
         ProfileCreateStep::Provider => 1,
-        ProfileCreateStep::ApiKey => 2,
-        ProfileCreateStep::Model => 3,
+        ProfileCreateStep::BaseUrl => 2,
+        ProfileCreateStep::ApiKey => 3,
+        ProfileCreateStep::Model => 4,
+    }
+}
+
+/// Whether the given step is one that the current provider actually uses.
+/// For providers that don't need a base URL, the BaseUrl step is skipped entirely
+/// and we show 4 dots instead of 5.
+fn effective_step_count(step: &ProfileCreateStep, st: &ProfileOverlayState) -> usize {
+    let provider_needs_base_url = clido_providers::PROVIDER_REGISTRY
+        .iter()
+        .find(|d| d.id == st.provider)
+        .map(|d| d.needs_base_url)
+        .unwrap_or(false);
+    if provider_needs_base_url || *step == ProfileCreateStep::BaseUrl {
+        CREATE_STEPS.len()
+    } else {
+        CREATE_STEPS.len() - 1
     }
 }
 
@@ -93,6 +110,7 @@ pub(crate) fn render_profile_overlay(
     area: Rect,
     input_area: Rect,
     st: &ProfileOverlayState,
+    models_loading: bool,
 ) {
     let popup_h = area.height.saturating_sub(6).max(12);
     let popup_w = area.width.saturating_sub(8).min(80);
@@ -117,13 +135,13 @@ pub(crate) fn render_profile_overlay(
             render_profile_overview(frame, popup_rect, content_area, hint_area, st)
         }
         ProfileOverlayMode::Creating { step } => {
-            render_profile_create(frame, popup_rect, content_area, hint_area, st, step)
+            render_profile_create(frame, popup_rect, content_area, hint_area, st, step, models_loading)
         }
         ProfileOverlayMode::PickingProvider { .. } => {
             render_profile_provider_picker(frame, popup_rect, content_area, hint_area, st)
         }
         ProfileOverlayMode::PickingModel { .. } => {
-            render_profile_model_picker(frame, popup_rect, content_area, hint_area, st)
+            render_profile_model_picker(frame, popup_rect, content_area, hint_area, st, models_loading)
         }
         ProfileOverlayMode::PickingSavedKey { .. } => {
             render_profile_saved_key_picker(frame, popup_rect, content_area, hint_area, st)
@@ -323,13 +341,14 @@ pub(crate) fn render_profile_create(
     hint_area: Rect,
     st: &ProfileOverlayState,
     step: &ProfileCreateStep,
+    models_loading: bool,
 ) {
     // Title spans the full popup rect for the progress bar
     render_progress_bar(
         frame,
         popup_rect,
         step_index_for(step),
-        CREATE_STEPS.len(),
+        effective_step_count(step, st),
         " New Profile ",
     );
 
@@ -340,7 +359,7 @@ pub(crate) fn render_profile_create(
             return;
         }
         ProfileCreateStep::Model => {
-            render_profile_model_picker(frame, popup_rect, content_area, hint_area, st);
+            render_profile_model_picker(frame, popup_rect, content_area, hint_area, st, models_loading);
             return;
         }
         ProfileCreateStep::Name => {
@@ -467,6 +486,18 @@ pub(crate) fn render_profile_create(
     );
 
     let (step_label, input_placeholder, hint_text) = match step {
+        ProfileCreateStep::BaseUrl => (
+            "Base URL  (leave empty for the standard endpoint)",
+            {
+                // Show the registry default as placeholder hint.
+                clido_providers::PROVIDER_REGISTRY
+                    .iter()
+                    .find(|d| d.id == st.provider.as_str())
+                    .map(|d| d.base_url)
+                    .unwrap_or("https://your-endpoint.com/v1")
+            },
+            "Enter=use default  ·  or type your plan's custom URL first  ·  Esc=cancel",
+        ),
         ProfileCreateStep::ApiKey => (
             "API key",
             if !st.saved_keys.is_empty() {
@@ -539,7 +570,7 @@ pub(crate) fn render_profile_create(
     lines.push(Line::raw(""));
 
     // Already entered summary
-    if matches!(step, ProfileCreateStep::ApiKey) {
+    if matches!(step, ProfileCreateStep::BaseUrl | ProfileCreateStep::ApiKey) {
         lines.push(Line::raw(""));
         lines.push(Line::from(vec![
             Span::styled(
@@ -833,6 +864,7 @@ pub(crate) fn render_profile_model_picker(
     content_area: Rect,
     hint_area: Rect,
     st: &ProfileOverlayState,
+    models_loading: bool,
 ) {
     frame.render_widget(
         Block::default()
@@ -863,6 +895,28 @@ pub(crate) fn render_profile_model_picker(
         )),
         Line::raw(""),
     ];
+
+    if filtered.is_empty() {
+        let msg = if models_loading {
+            "  Fetching models…"
+        } else {
+            "  No models found — type a model name and press Enter, or check your API key"
+        };
+        lines.push(Line::from(Span::styled(
+            msg,
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+        )));
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }),
+            content_area,
+        );
+        frame.render_widget(
+            Paragraph::new("type to filter / enter model name  ·  Esc=cancel")
+                .style(Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)),
+            hint_area,
+        );
+        return;
+    }
 
     let end = (picker.scroll_offset + visible).min(filtered.len());
     for (di, m) in filtered[picker.scroll_offset..end].iter().enumerate() {

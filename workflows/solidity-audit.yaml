@@ -1,0 +1,1992 @@
+name: solidity-audit
+version: "2"
+description: "Bulletproof multi-phase Solidity security audit: preflight → code intelligence → intent reconstruction → 10 parallel imagination angles → systematic vector scan → deep investigation → adversarial challenge → judge → coverage gap analysis → PoC chain → report"
+
+inputs:
+  - name: repo_path
+    description: "Path to the Solidity repository to audit (defaults to current directory)"
+    required: false
+    default: "{{ cwd }}"
+  - name: scope
+    description: "Optional: comma-separated list of files or directories in scope"
+    required: false
+    default: ""
+  - name: context
+    description: "Optional: free-text protocol description (e.g. 'Lending protocol with variable interest rates')"
+    required: false
+    default: ""
+  - name: rpc_url
+    description: "Optional: RPC URL for PoC fork tests (e.g. https://eth-mainnet.alchemyapi.io/v2/...)"
+    required: false
+    default: ""
+
+# All intermediate outputs are saved to <repo_path>/.clido-audit/ so that
+# subsequent steps can read them via tool rather than embedding large blobs in prompts.
+
+steps:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 0 · Preflight
+  # Git analysis, prior audit extraction, build verification.
+  # Establishes critical context before any security analysis begins.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: preflight
+    name: "Stage 0 · Preflight & Context"
+    tools: ["read", "glob", "bash"]
+    max_turns: 20
+    on_error: continue
+    system_prompt: |
+      You are a senior smart contract security researcher performing pre-audit
+      reconnaissance. You gather context about the codebase's history, known issues,
+      and prior review work. You are factual and report exactly what you find.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/preflight.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.context != "" %}Protocol context: {{ inputs.context }}{% endif %}
+
+      Perform pre-audit reconnaissance. Run each section and collect findings.
+
+      SECTION 1 — GIT HISTORY ANALYSIS
+      Run: cd {{ inputs.repo_path }} && git log --oneline -30 2>/dev/null || echo "not_a_git_repo"
+      Run: cd {{ inputs.repo_path }} && git log --oneline --since="90 days ago" --format="%h %s" 2>/dev/null | head -50
+
+      Look for:
+      - Recent commits with keywords: fix, bug, patch, security, revert, hotfix, vulnerability
+        → these are high-priority review targets
+      - Large-scale refactors in the last 90 days → regression risk
+      - Files changed most frequently (git log --follow --name-only)
+
+      SECTION 2 — PRIOR AUDIT EXTRACTION
+      Search for any existing audit reports:
+      - Glob: audits/, audit/, security/, reports/, docs/audits/
+      - Glob: **/*.pdf, **/*audit*.md, **/*security*.md, **/*review*.md
+      - Read any found files and extract: auditor name, date, findings summary,
+        anything described as "acknowledged but not fixed" or "out of scope"
+
+      SECTION 3 — KNOWN ISSUES / TODO EXTRACTION
+      Run: cd {{ inputs.repo_path }} && grep -rn "TODO\|FIXME\|HACK\|XXX\|BUG\|NOTE:.*unsafe\|NOTE:.*risk\|NOTE:.*TODO" --include="*.sol" 2>/dev/null | head -100
+      These are developer-acknowledged issues — they deserve heightened scrutiny.
+
+      SECTION 4 — BUILD & DEPENDENCY CHECK
+      Run: cd {{ inputs.repo_path }} && forge build 2>&1 | tail -20 (if foundry.toml exists)
+      Run: cd {{ inputs.repo_path }} && cat foundry.toml 2>/dev/null || cat hardhat.config.ts 2>/dev/null || cat hardhat.config.js 2>/dev/null
+      Note: compiler version(s), optimizer runs, via-ir setting, any compiler warnings.
+
+      SECTION 5 — DEPENDENCY AUDIT
+      Look for: package.json, lib/ (Foundry), node_modules/
+      Identify: OpenZeppelin version, Solmate version, any fork-modified libraries.
+      Flag: is Solmate's SafeTransferLib used? (It does NOT check contract existence.)
+      Flag: any git submodule pointing to an unofficial fork?
+
+      SECTION 6 — SCOPE DETERMINATION
+      {% if inputs.scope != "" %}
+      User-provided scope: {{ inputs.scope }}
+      {% else %}
+      Count all .sol files. List top-level contracts (non-test, non-mock, non-interface).
+      {% endif %}
+
+      OUTPUT: Valid JSON only.
+
+      {
+        "git_history": {
+          "recent_suspicious_commits": [
+            {"hash": "", "message": "", "risk": "why this is a target"}
+          ],
+          "high_churn_files": [],
+          "days_of_history": 0
+        },
+        "prior_audits": [
+          {
+            "source": "filename or URL",
+            "auditor": "",
+            "date": "",
+            "finding_count": 0,
+            "unresolved_issues": ["issue description"],
+            "out_of_scope_items": []
+          }
+        ],
+        "developer_todos": [
+          {"file": "", "line": 0, "text": "", "risk": "why it matters"}
+        ],
+        "build": {
+          "framework": "foundry|hardhat|none",
+          "compiler_version": "",
+          "optimizer": {"enabled": false, "runs": 0},
+          "via_ir": false,
+          "warnings": [],
+          "build_status": "clean|warnings|errors|unknown"
+        },
+        "dependencies": {
+          "openzeppelin_version": "",
+          "solmate_used": false,
+          "solmate_safetransferlib_used": false,
+          "unofficial_forks": [],
+          "notable_flags": []
+        },
+        "scope": {
+          "in_scope_files": [],
+          "total_sol_files": 0,
+          "excluded_files": []
+        }
+      }
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 1 · Code Intelligence
+  # Read every Solidity file; produce a compact structured JSON map of the
+  # protocol. Saved to disk so imagination agents can read it directly.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: code_intel
+    name: "Stage 1 · Code Intelligence"
+    tools: ["read", "glob", "bash"]
+    max_turns: 40
+    system_prompt: |
+      You are a senior smart contract security researcher. You explore codebases
+      systematically and produce accurate, structured output. You NEVER hallucinate
+      code you have not read. When uncertain, read the file.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/intel.json"
+    prompt: |
+      You are a senior smart contract security researcher. Deeply explore a Solidity
+      repository and produce a structured code intelligence report.
+
+      REPOSITORY: {{ inputs.repo_path }}
+      {% if inputs.scope != "" %}SCOPE (analyze only these paths): {{ inputs.scope }}{% endif %}
+      {% if inputs.context != "" %}PROTOCOL CONTEXT: {{ inputs.context }}{% endif %}
+
+      First, read the preflight report for context: {{ inputs.repo_path }}/.clido-audit/preflight.json
+
+      TASK:
+
+      1. Find all Solidity source files. Skip test files (*.t.sol, *Test*.sol),
+         mocks (*Mock*.sol), and pure interface files (prefixed I or named Interface*).
+         If scope is specified, limit to those paths.
+
+      2. For each contract read the full source and extract:
+         - Name, type (ERC20/ERC721/ERC4626/vault/lending/DEX/bridge/etc.)
+         - State variables: name, type, visibility, purpose
+         - Functions: name, visibility, modifiers, access requirements (permissionless / owner / role:X),
+           what state they read and write, external calls made
+         - Events and custom errors
+         - unchecked blocks (list line ranges)
+         - assembly blocks (yes/no + purpose)
+         - delegatecall usage (yes/no + target)
+         - Any low-level .call/.staticcall/.delegatecall
+         - transient storage (tstore/tload) usage
+
+      3. Identify:
+         - Protocol type: lending | DEX | staking | bridge | vault | governance |
+           yield-aggregator | perpetuals | options | NFT | other
+         - Economic model: how value enters and exits the protocol
+         - Key invariants: what must always be true (e.g. "sum of user balances == totalSupply")
+         - Trust assumptions: which external systems the protocol trusts without verification
+           (oracles, bridges, admin keys, governance multisig)
+         - Upgrade mechanism: proxy type (UUPS/Transparent/Diamond/Beacon), initializer pattern,
+           storage layout, implementation contract address
+         - External token handling: which ERC standards, fee-on-transfer support, rebasing tokens,
+           non-standard return values
+
+      4. Build access control map:
+         - Permissionless functions (callable by any EOA)
+         - Admin/owner functions
+         - Role-gated functions (list role name)
+         - Timelocked functions (list delay)
+
+      5. Flag high-risk patterns (read the actual code to confirm):
+         - Spot price oracle reads (pool.slot0(), reserve-based price, single-block TWAP)
+         - State changes after external calls (potential reentrancy)
+         - unchecked arithmetic on user-controlled values
+         - Share/price calculations susceptible to inflation attacks
+         - Signature verification (EIP-712, EIP-2098, ecrecover, permit)
+         - Storage slot collisions (proxy upgradeability)
+         - Flash loan callbacks (onFlashLoan, executeOperation, uniswapV3FlashCallback, etc.)
+         - Chainlink oracle calls (latestRoundData — check if staleness and circuit breaker are verified)
+         - Cross-chain messaging (LayerZero, Axelar, Wormhole, Hyperlane receives)
+         - ERC2771 trusted forwarder patterns (msg.sender extraction from calldata)
+         - Diamond proxy facets (selector clash risk)
+         - Permit() calls on behalf of users (frontrun risk)
+
+      6. Identify the "crown jewels" — the 3-5 most valuable state transitions or
+         assets that an attacker would want to compromise. These should receive the
+         deepest scrutiny in later stages.
+
+      OUTPUT: Valid JSON only. No text before or after.
+
+      {
+        "protocol_type": "string",
+        "compiler_versions": [],
+        "economic_model": "2-3 sentence description",
+        "crown_jewels": [
+          {"description": "", "contract": "", "function_or_var": "", "why_valuable": ""}
+        ],
+        "contracts": [
+          {
+            "name": "ContractName",
+            "file": "src/path/File.sol",
+            "type": "...",
+            "inherits": [],
+            "upgradeable": false,
+            "proxy_type": null,
+            "state_vars": [
+              {"name": "", "type": "", "visibility": "public|private|internal", "notes": ""}
+            ],
+            "functions": [
+              {
+                "name": "",
+                "visibility": "public|external|internal|private",
+                "access": "permissionless|owner|role:X|internal",
+                "modifiers": [],
+                "reads_state": [],
+                "writes_state": [],
+                "external_calls": [{"target": "", "selector": ""}],
+                "flash_callback": false,
+                "uses_permit": false,
+                "uses_signature": false,
+                "notes": ""
+              }
+            ],
+            "unchecked_blocks": ["L123-L145"],
+            "assembly_blocks": [],
+            "delegatecall": false,
+            "transient_storage": false,
+            "low_level_calls": []
+          }
+        ],
+        "value_flows": [
+          {"from": "", "to": "", "trigger": "functionName()", "token": "ETH|ERC20|shares"}
+        ],
+        "external_dependencies": [
+          {
+            "name": "",
+            "type": "oracle|amm|bridge|token|lending|forwarder",
+            "trust_level": "trusted|semi-trusted|untrusted",
+            "notes": ""
+          }
+        ],
+        "access_control_map": {
+          "permissionless_functions": ["Contract.fn()"],
+          "admin_functions": ["Contract.fn()"],
+          "timelocked_functions": [{"fn": "", "delay_seconds": 0}],
+          "roles": [{"name": "", "controls": []}]
+        },
+        "key_invariants": [
+          {"description": "", "enforced_by": "code|documentation|assumed"}
+        ],
+        "high_risk_patterns": [
+          {"pattern": "", "location": "File.sol:functionName():L123", "notes": ""}
+        ],
+        "math_risks": [
+          {"location": "", "operation": "", "risk": "overflow|underflow|precision|division_before_mul|downcast|dirty_bits"}
+        ],
+        "oracle_calls": [
+          {"location": "", "oracle_type": "chainlink|uniswap_v3_twap|spot|custom", "staleness_check": false, "circuit_breaker_check": false}
+        ],
+        "signature_patterns": [
+          {"location": "", "type": "eip712|permit|ecrecover|eip2098", "nonce_check": false, "domain_separator": ""}
+        ],
+        "cross_chain": [
+          {"location": "", "protocol": "layerzero|axelar|wormhole|hyperlane|other", "direction": "send|receive", "trust_model": ""}
+        ],
+        "upgrade_risks": [],
+        "test_framework": "foundry|hardhat|none"
+      }
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 1b · Intent Reconstruction & Gap Analysis (CRITICAL — Faultline method)
+  # Read ONLY documentation, NatSpec, and comments. NOT code logic.
+  # Extract what the developer CLAIMS the protocol does.
+  # Then compare those claims against what the code actually does (from intel.json).
+  # The delta = potential bugs.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: intent_reconstruction
+    name: "Stage 1b · Intent Reconstruction & Gap Analysis"
+    profile: opus
+    tools: ["read", "glob", "bash"]
+    max_turns: 30
+    system_prompt: |
+      You are performing intent reconstruction: extracting what developers CLAIMED
+      the protocol should do, then comparing against code reality.
+
+      CRITICAL RULE: In the INTENT EXTRACTION phase, you read ONLY documentation,
+      NatSpec comments, README files, and inline comments. You do NOT read
+      implementation code logic. You are extracting developer intent from their words.
+
+      In the GAP ANALYSIS phase, you compare the extracted intent against the
+      code intelligence report (intel.json) which was derived from actual code.
+      Any discrepancy between claimed invariants and code behavior is a red flag.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/intent_gaps.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+
+      Read code intelligence for context: {{ inputs.repo_path }}/.clido-audit/intel.json
+
+      ═══════════════════════════════════════════════════════════════
+      PHASE A — INTENT EXTRACTION (read docs/NatSpec/comments ONLY)
+      ═══════════════════════════════════════════════════════════════
+
+      Read the following documentation sources. DO NOT read implementation logic yet.
+
+      1. README files: README.md, docs/**/*.md, SPECIFICATION.md, ARCHITECTURE.md,
+         WHITEPAPER.md, documentation/**
+
+      2. NatSpec: For each in-scope Solidity file, read ONLY the NatSpec comments
+         (@notice, @dev, @param, @return, contract-level @notice/@dev).
+         Extract every claim: "this function will...", "this invariant holds...",
+         "X is always greater than Y", "admin cannot...", "users are guaranteed..."
+
+      3. Inline comments: Read inline comments (// and /* */) that describe
+         invariants, assumptions, or expected behavior. Skip TODO/FIXME (already
+         collected in preflight).
+
+      For each documented invariant or claim, record:
+      - The exact quoted text
+      - Where it appears (file:line)
+      - What specific behavior it claims
+
+      ═══════════════════════════════════════════════════════════════
+      PHASE B — GAP ANALYSIS (compare intent vs intel.json reality)
+      ═══════════════════════════════════════════════════════════════
+
+      Now compare each documented claim against what intel.json reveals about
+      the actual code structure. Ask for each claim:
+
+      1. UNCHECKED INVARIANT: The docs say "X always holds" — does the code have
+         any mechanism enforcing this? Or is it just assumed?
+         Example: "totalSupply == sum of balances" claimed but no actual check exists.
+
+      2. MISSING GUARD: The docs say "only owner can do X" — does the code have
+         an access modifier on X? If not: access control bug.
+
+      3. BEHAVIORAL MISMATCH: The docs say "deposit returns shares proportional to
+         assets" — does the share calculation in intel.json match this claim?
+
+      4. UNDOCUMENTED TRUST: The code trusts external system Y (from intel.json)
+         but no documentation mentions this trust assumption — undocumented risk.
+
+      5. SILENT FAILURE: The docs say "reverts if X" — but the code may silently
+         continue. Read the specific function to verify (this is the one time you
+         may read implementation code — only for gap verification).
+
+      6. DOCUMENTATION LIE: The docs claim the contract is "immutable" or
+         "trustless" but intel.json shows admin functions, upgrade mechanisms,
+         or oracle dependencies.
+
+      OUTPUT: Valid JSON only.
+
+      {
+        "documented_invariants": [
+          {
+            "id": "INV-01",
+            "claim": "exact quoted text",
+            "source": "file:line",
+            "category": "invariant|access_control|economic|trust|behavioral"
+          }
+        ],
+        "intent_gaps": [
+          {
+            "id": "GAP-01",
+            "invariant_id": "INV-01",
+            "gap_type": "unchecked_invariant|missing_guard|behavioral_mismatch|undocumented_trust|silent_failure|documentation_lie",
+            "description": "precise description of the discrepancy",
+            "claim": "what the docs say",
+            "reality": "what intel.json or code shows",
+            "risk_level": "high|medium|low",
+            "code_ref": "file:line to verify"
+          }
+        ],
+        "undocumented_behaviors": [
+          {
+            "description": "behavior present in code not mentioned in docs",
+            "location": "file:function",
+            "risk": "why this matters"
+          }
+        ]
+      }
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 2 · Imagination (10 parallel attack angles)
+  # Each agent reads intel.json + intent_gaps.json from disk, plus actual code.
+  # All run in parallel. Three new angles added vs v1: cross-chain, signatures,
+  # and upgrades/proxies/assembly.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  - id: imagine_capital
+    name: "Stage 2a · Flash Loan & Capital Attacks"
+    parallel: true
+    tools: ["read", "glob"]
+    max_turns: 20
+    on_error: continue
+    system_prompt: |
+      You are an adversarial exploit developer. You think like an attacker trying
+      to make money. You only report attacks that would actually work and produce
+      meaningful profit. You always read the code before claiming something is vulnerable.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/imagine_capital.json"
+    prompt: |
+      Read the code intelligence report: {{ inputs.repo_path }}/.clido-audit/intel.json
+      Read intent gaps for additional leads: {{ inputs.repo_path }}/.clido-audit/intent_gaps.json
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.context != "" %}Protocol context: {{ inputs.context }}{% endif %}
+
+      ATTACKER MODEL (violating these voids your narratives):
+      - Completely unprivileged external EOA — no admin keys, no oracle rights, no validator control
+      - You CAN take flash loans (Aave V3, Balancer, Uniswap V3), deploy contracts, call any
+        public/external function that does not require a privileged role
+
+      A REAL FINDING requires ALL of:
+      - You steal tokens/ETH, cause permanent insolvency, or mint tokens without authorization
+      - Profit meaningfully exceeds gas cost (not dust-level)
+      - Attack executable in one transaction or a deterministic reproducible sequence
+      - Vulnerable state reachable through NORMAL protocol use (no admin setup required)
+
+      NOT A FINDING: dust rounding (<0.01% pool), "theoretically possible" without mechanism,
+      oracle price control (out of scope), attacks needing admin action as precondition.
+
+      YOUR TASK — generate TRANSIENT CAPITAL attack narratives. Focus on:
+      1. Flash loan price oracle manipulation: borrow → move AMM spot price → trigger protocol
+         action at wrong price → profit before price reverts
+      2. Flash loan collateral inflation: inflate collateral value → over-borrow → repay flash
+         loan → keep profit
+      3. Donation/inflation attack: donate tokens to vault → inflate totalAssets → steal from
+         next depositor via inflated share price
+      4. First-depositor attack: be the first depositor and set an exploitable exchange rate
+         (especially if virtual shares/assets mechanism is absent)
+      5. Share/price manipulation: manipulate totalAssets or totalShares via flash loan
+      6. ERC4626 rounding direction: does rounding consistently favor attacker over depositors?
+         Can this be exploited profitably over many operations?
+      7. JIT liquidity attacks: add liquidity just before a fee-generating event, remove after
+      8. Same-block leverage loops exceeding intended limits
+      9. Reward accumulator timing: stake → collect rewards that accrued before your stake;
+         any timestamp-based accrual that can be gamed in same block
+
+      Also check: any intent gaps from intent_gaps.json related to economic invariants?
+
+      Read the relevant code for each narrative before including it. Verify the entry point
+      is actually callable by an unprivileged actor.
+
+      OUTPUT: Valid JSON array only. Empty array [] if nothing plausible found.
+
+      [
+        {
+          "id": "CAP-01",
+          "title": "concise attack title",
+          "angle": "transient_capital",
+          "entry_point": "ContractName.sol:functionName():L123",
+          "attacker": "unprivileged external EOA",
+          "preconditions": ["concrete state condition"],
+          "preconditions_reachable": "how normal protocol use creates this state",
+          "steps": [
+            "1. Deploy attacker contract",
+            "2. Call flashLoan(token, amount) — this triggers onFlashLoan callback",
+            "3. Inside callback: call protocol.deposit(amount) — inflates sharePrice from X to Y",
+            "4. ...",
+            "N. Profit: ~$X from Y tokens, protocol loses Z"
+          ],
+          "root_cause": "one precise sentence",
+          "estimated_profit": "dust|small(<$1k)|medium($1k-$100k)|large(>$100k)",
+          "confidence": "high|medium|low",
+          "intent_gap_ref": "GAP-XX if triggered by an intent gap"
+        }
+      ]
+
+  - id: imagine_ordering
+    name: "Stage 2b · MEV & Ordering Attacks"
+    parallel: true
+    tools: ["read", "glob"]
+    max_turns: 20
+    on_error: continue
+    system_prompt: |
+      You are an adversarial exploit developer specializing in MEV and transaction
+      ordering. You think like a searcher bot operator. You read code before claiming
+      something is exploitable.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/imagine_ordering.json"
+    prompt: |
+      Read the code intelligence report: {{ inputs.repo_path }}/.clido-audit/intel.json
+      Read intent gaps: {{ inputs.repo_path }}/.clido-audit/intent_gaps.json
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.context != "" %}Protocol context: {{ inputs.context }}{% endif %}
+
+      ATTACKER MODEL:
+      - Unprivileged EOA or MEV bot — NO admin keys, oracle rights, validator control
+      - You CAN observe the mempool, submit transactions before others, deploy contracts
+
+      A REAL FINDING requires:
+      - You reliably extract value from users or the protocol
+      - Profit is non-trivial and repeatable
+      - Attack is deterministic (not reliant on block timing luck)
+
+      NOT A FINDING: permissionless races intended by protocol design (anyone can claim
+      rewards, liquidate positions), MEV that is inherent and acknowledged.
+
+      YOUR TASK — generate MEV/ORDERING attack narratives. Focus on:
+      1. Sandwich attacks on swaps/deposits where victim's price impact is material
+      2. Front-running liquidations where profit margin is significant
+      3. Governance/parameter change front-running (act before effect takes place)
+      4. Oracle update front-running (act on stale price before update lands on-chain)
+      5. Deadline bypass or griefing (make victim txs expire or revert at low cost)
+      6. State-race conditions where first-mover wins meaningful value over others
+      7. Withdrawal queue front-running: see large withdrawal pending, drain liquidity first
+      8. Permit front-running: see permit tx in mempool, front-run to drain allowance
+         before the permit holder can use it
+      9. Price update sandwiching: for any protocol with price updates (e.g. Chainlink
+         push), act between the update tx and the user action that depends on the new price
+
+      Read relevant functions before including a narrative.
+
+      OUTPUT: Valid JSON array only. Empty array [] if nothing plausible found.
+
+      [
+        {
+          "id": "ORD-01",
+          "title": "concise attack title",
+          "angle": "ordering_mev",
+          "entry_point": "ContractName.sol:functionName():L123",
+          "attacker": "MEV bot / unprivileged EOA",
+          "preconditions": [],
+          "preconditions_reachable": "",
+          "steps": [],
+          "root_cause": "one precise sentence",
+          "estimated_profit": "dust|small|medium|large",
+          "confidence": "high|medium|low"
+        }
+      ]
+
+  - id: imagine_access
+    name: "Stage 2c · Access Control Attacks"
+    parallel: true
+    tools: ["read", "glob"]
+    max_turns: 20
+    on_error: continue
+    system_prompt: |
+      You are an adversarial exploit developer specializing in access control flaws.
+      You always read the actual modifier and role-check code. You never claim a
+      function lacks access control without reading it.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/imagine_access.json"
+    prompt: |
+      Read the code intelligence report: {{ inputs.repo_path }}/.clido-audit/intel.json
+      Read intent gaps: {{ inputs.repo_path }}/.clido-audit/intent_gaps.json
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.context != "" %}Protocol context: {{ inputs.context }}{% endif %}
+
+      ATTACKER MODEL:
+      - Completely unprivileged external EOA
+      - If you attack a function that requires a role, the bug MUST be that the CHECK IS MISSING
+        or INCORRECT — you are NOT assuming you already have the role
+
+      A REAL FINDING requires:
+      - Missing or incorrect access control allows unauthorized state change
+      - The unauthorized state change leads to fund theft or protocol damage
+      - The vulnerability is in the code (not "admin could do X")
+
+      NOT A FINDING: functions that ARE correctly restricted, admin key compromise (out of scope),
+      governance decisions, intentionally permissionless functions (reward claiming, liquidation).
+
+      YOUR TASK — generate ACCESS CONTROL attack narratives. Focus on:
+      1. Missing modifier on state-changing function (read the function — verify no onlyOwner/role)
+      2. Incorrect role check (wrong address compared, inverted condition, wrong role name)
+      3. Unguarded initializer (no initializer() modifier or _initialized flag)
+      4. Implementation contract callable directly (proxy not initialized, can call initialize())
+      5. Privilege escalation: can unprivileged user grant themselves a privileged role?
+      6. Two-step ownership transfer with exploitable race (pending owner can be set by anyone?)
+      7. Check any intent gaps flagged as missing_guard — read the function to confirm
+      8. ERC2771 trusted forwarder: if a forwarder is trusted, does msg.sender extraction
+         from calldata[-20:] allow spoofing? Can an attacker craft a malicious call via
+         an untrusted forwarder that is mistakenly treated as trusted?
+      9. Multicall + self-delegatecall: can msg.sender be manipulated through meta-tx patterns?
+      10. Function selector collision in Diamond proxies: do any facet selectors collide,
+          allowing a lower-privilege function to be called when a higher-privilege one is expected?
+
+      Read every modifier and role check for each function you claim is unprotected.
+
+      OUTPUT: Valid JSON array only. Empty array [] if nothing plausible found.
+
+      [
+        {
+          "id": "ACC-01",
+          "title": "concise attack title",
+          "angle": "access_control",
+          "entry_point": "ContractName.sol:functionName():L123",
+          "attacker": "unprivileged external EOA",
+          "preconditions": [],
+          "preconditions_reachable": "",
+          "steps": [],
+          "root_cause": "one precise sentence",
+          "estimated_profit": "dust|small|medium|large",
+          "confidence": "high|medium|low"
+        }
+      ]
+
+  - id: imagine_math
+    name: "Stage 2d · Numeric & Boundary Attacks"
+    parallel: true
+    tools: ["read", "glob"]
+    max_turns: 20
+    on_error: continue
+    system_prompt: |
+      You are an adversarial exploit developer specializing in integer arithmetic,
+      precision loss, and boundary conditions. You read the actual math code.
+      You estimate whether exploiting precision loss is actually profitable.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/imagine_math.json"
+    prompt: |
+      Read the code intelligence report: {{ inputs.repo_path }}/.clido-audit/intel.json
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.context != "" %}Protocol context: {{ inputs.context }}{% endif %}
+
+      ATTACKER MODEL:
+      - Completely unprivileged external EOA
+
+      A REAL FINDING requires:
+      - Arithmetic error produces incorrect state (wrong balances, wrong prices)
+      - The incorrect state can be exploited for fund theft or meaningful loss
+      - Profit exceeds gas cost
+
+      NOT A FINDING: dust rounding (<0.01% per op), rounding favoring the protocol,
+      theoretical overflow requiring impossible token amounts.
+
+      YOUR TASK — generate NUMERIC/BOUNDARY attack narratives. Focus on:
+      1. unchecked blocks: read each one — can any value overflow with realistic inputs?
+         What does the overflowed value do to balances or prices?
+      2. Division-before-multiplication: (a / b) * c — how much precision is lost?
+         Can attacker exploit this repeatably for non-trivial gain?
+      3. Share inflation / first-depositor: is initial exchange rate manipulable?
+         Can 1 wei deposit create a 1:1e18 share ratio that steals future deposits?
+      4. Silent downcast: uint128(x), uint96(y) — do high bits matter with realistic values?
+         "Dirty higher-order bits": does the code pack/unpack values and forget to mask?
+      5. Accumulated rounding drift: over many operations, does rounding consistently
+         extract value that an attacker can harvest?
+      6. Zero edge cases: what happens at deposit(0), borrow(0), 0 liquidity, max uint?
+      7. Precision in reward calculations: is reward-per-share computed with sufficient
+         precision? Can dust accumulate into exploitable amounts via many micro-operations?
+      8. ERC4626 rounding: does convertToShares round down and convertToAssets round up
+         (required by spec)? Violations can enable griefing or theft.
+      9. TWAP accumulator overflow: if the protocol uses a TWAP accumulator (price * time),
+         can the accumulator overflow with realistic prices and time ranges?
+
+      Read the arithmetic code. For each finding, reason about whether the precision
+      loss is large enough to profitably exploit.
+
+      OUTPUT: Valid JSON array only. Empty array [] if nothing plausible found.
+
+      [
+        {
+          "id": "MATH-01",
+          "title": "concise attack title",
+          "angle": "numeric_boundary",
+          "entry_point": "ContractName.sol:functionName():L123",
+          "attacker": "unprivileged external EOA",
+          "preconditions": [],
+          "preconditions_reachable": "",
+          "steps": [],
+          "root_cause": "one precise sentence",
+          "estimated_profit": "dust|small|medium|large",
+          "confidence": "high|medium|low"
+        }
+      ]
+
+  - id: imagine_external
+    name: "Stage 2e · External Systems & Callback Attacks"
+    parallel: true
+    tools: ["read", "glob"]
+    max_turns: 20
+    on_error: continue
+    system_prompt: |
+      You are an adversarial exploit developer specializing in reentrancy, callbacks,
+      and external system interactions. You always verify whether reentrancy guards
+      are ACTUALLY absent before claiming a reentrancy vulnerability.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/imagine_external.json"
+    prompt: |
+      Read the code intelligence report: {{ inputs.repo_path }}/.clido-audit/intel.json
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.context != "" %}Protocol context: {{ inputs.context }}{% endif %}
+
+      ATTACKER MODEL:
+      - Unprivileged EOA or malicious contract you deploy
+      - You CANNOT control oracle prices directly — but you CAN move AMM spot prices
+        in the same transaction (you swap into the pool)
+      - You CAN exploit callbacks: reentrancy, ERC777 hooks, ERC721 safeTransfer
+
+      A REAL FINDING requires:
+      - External interaction creates opportunity to steal funds or corrupt state
+      - Reentrancy guard is verified ABSENT (you read the function and confirmed no nonReentrant)
+      - Meaningful profit
+
+      NOT A FINDING: functions with confirmed nonReentrant or CEI pattern, TWAP oracle reads
+      (cannot be moved in single tx), calls to OpenZeppelin core or Uniswap V3 core.
+
+      YOUR TASK — generate EXTERNAL SYSTEM attack narratives. Focus on:
+      1. Classic reentrancy: state change AFTER external call — read code and confirm
+         nonReentrant is absent; callback can re-enter and double-spend
+      2. Cross-function reentrancy: A has a lock, but during A's external call attacker
+         enters B which reads A's not-yet-updated state
+      3. Read-only reentrancy: view function called during callback returns stale
+         price/balance that another protocol trusts
+      4. Spot price oracle: protocol reads pool.slot0() or reserve ratio without TWAP?
+         Attacker swaps to move price in same tx
+      5. ERC777 tokensReceived / tokensToSend hooks: protocol handles ERC777 but calls
+         transfer before updating internal balances?
+      6. ERC721/ERC1155 safeTransfer callbacks: protocol calls safeTransferFrom before
+         updating state → onERC721Received re-enters
+      7. Fee-on-transfer tokens: protocol accepts arbitrary ERC20 but uses
+         amount directly without balanceBefore/balanceAfter check?
+      8. Solmate SafeTransferLib: if used, note it does NOT check for contract existence —
+         transfers to EOAs succeed even if the token contract is self-destructed or not deployed
+      9. Transient storage reentrancy: if the contract uses TSTORE/TLOAD for reentrancy
+         locks, verify the lock is cleared in ALL exit paths including revert paths
+      10. Chainlink oracle issues:
+          - Is latestRoundData() used without checking updatedAt for staleness (e.g., > 1 hour)?
+          - Is the aggregator circuit breaker (minAnswer/maxAnswer) handled?
+          - Is the L2 Sequencer Uptime Feed checked (for Optimism/Arbitrum deployments)?
+          - Is a negative answer possible (some price feeds can return negative)?
+
+      CRITICAL: For any reentrancy claim, read the function and verify nonReentrant is absent.
+
+      OUTPUT: Valid JSON array only. Empty array [] if nothing plausible found.
+
+      [
+        {
+          "id": "EXT-01",
+          "title": "concise attack title",
+          "angle": "external_systems",
+          "entry_point": "ContractName.sol:functionName():L123",
+          "attacker": "unprivileged EOA / malicious contract",
+          "preconditions": [],
+          "preconditions_reachable": "",
+          "steps": [],
+          "root_cause": "one precise sentence",
+          "estimated_profit": "dust|small|medium|large",
+          "confidence": "high|medium|low"
+        }
+      ]
+
+  - id: imagine_state
+    name: "Stage 2f · State & Logic Attacks"
+    parallel: true
+    tools: ["read", "glob"]
+    max_turns: 20
+    on_error: continue
+    system_prompt: |
+      You are an adversarial exploit developer specializing in state management
+      errors and protocol logic flaws. You think in terms of valid state machines
+      and find transitions that shouldn't be possible.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/imagine_state.json"
+    prompt: |
+      Read the code intelligence report: {{ inputs.repo_path }}/.clido-audit/intel.json
+      Read intent gaps: {{ inputs.repo_path }}/.clido-audit/intent_gaps.json
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.context != "" %}Protocol context: {{ inputs.context }}{% endif %}
+
+      ATTACKER MODEL:
+      - Completely unprivileged external EOA
+      - You exploit logical errors through sequences of NORMAL protocol interactions
+
+      A REAL FINDING requires:
+      - Normal protocol interactions create exploitable state (no admin action needed)
+      - A protocol invariant is violated (not a design choice)
+      - Exploiting the state leads to real fund theft or permanent insolvency
+
+      NOT A FINDING: normal state transitions, admin-controlled parameter changes
+      (unless they reveal a logic flaw), "this could drift" without a concrete exploit.
+
+      YOUR TASK — generate STATE & LOGIC attack narratives. Focus on:
+      1. Invariant violations: enumerate protocol invariants from intel.json and
+         intent_gaps.json — can any sequence of normal calls violate them?
+      2. State machine attacks: can you trigger state transitions out of order?
+         What if you interrupt a multi-step process mid-way?
+      3. Accounting drift: do balance-tracking state variables diverge from actual
+         token balances after certain operation sequences?
+      4. Upgradeable proxy storage collision: do new implementation variables collide
+         with proxy admin slots (EIP-1967 slot, etc.)?
+      5. Initialization window: is there a vulnerable window between deployment and
+         full initialization where an attacker can call initialize()?
+      6. Cross-contract state inconsistency: two contracts maintain related state —
+         can a sequence of calls put them out of sync?
+      7. Stale cached state: does the protocol cache a value (price, balance, rate)
+         that can be exploited when the actual value has diverged?
+      8. Re-initialization: can initialize() be called again after it has already been
+         called? Even if protected, is there a re-initialization path via an upgrade?
+      9. Intent gap logic flaws: for each GAP in intent_gaps.json with risk_level high
+         or medium, generate a narrative attempting to exploit the discrepancy
+
+      OUTPUT: Valid JSON array only. Empty array [] if nothing plausible found.
+
+      [
+        {
+          "id": "STATE-01",
+          "title": "concise attack title",
+          "angle": "state_logic",
+          "entry_point": "ContractName.sol:functionName():L123",
+          "attacker": "unprivileged external EOA",
+          "preconditions": [],
+          "preconditions_reachable": "",
+          "steps": [],
+          "root_cause": "one precise sentence",
+          "estimated_profit": "dust|small|medium|large",
+          "confidence": "high|medium|low",
+          "intent_gap_ref": "GAP-XX if triggered by an intent gap"
+        }
+      ]
+
+  # ─── NEW: Stage 2g · Cross-Chain & Bridge Attacks ───────────────────────
+  - id: imagine_crosschain
+    name: "Stage 2g · Cross-Chain & Bridge Attacks"
+    parallel: true
+    tools: ["read", "glob"]
+    max_turns: 20
+    on_error: continue
+    system_prompt: |
+      You are an adversarial exploit developer specializing in cross-chain messaging
+      vulnerabilities. You understand LayerZero, Axelar, Wormhole, and bridge patterns.
+      You always read the actual message handling code before claiming it is vulnerable.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/imagine_crosschain.json"
+    prompt: |
+      Read the code intelligence report: {{ inputs.repo_path }}/.clido-audit/intel.json
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.context != "" %}Protocol context: {{ inputs.context }}{% endif %}
+
+      Check if this protocol has cross-chain components. If intel.json shows no cross_chain
+      entries and no bridge-related external_dependencies, this is likely not applicable —
+      output an empty array [].
+
+      ATTACKER MODEL:
+      - Unprivileged EOA on the SOURCE or DESTINATION chain
+      - You may also model a malicious DVN (decentralized verifier node) in LayerZero
+      - You can craft arbitrary cross-chain messages if the receiving function lacks
+        proper origin verification
+
+      A REAL FINDING requires:
+      - Insufficient verification of the message source, chain ID, or message content
+      - The insufficiency allows theft, unauthorized state changes, or supply inflation
+        on the destination chain
+
+      YOUR TASK — generate CROSS-CHAIN attack narratives. Focus on:
+      1. Missing origin chain check: does the lzReceive/execute/processMessage function
+         verify that the message came from the correct source chain ID?
+         Read the require/if statements in the receive handler.
+      2. Missing sender check: does it verify the sender address on the source chain
+         is the expected contract, or does it trust any address?
+      3. Message replay: is there a nonce or message ID checked to prevent the same
+         message being processed twice? (LayerZero has built-in ordering but custom
+         bridges may not)
+      4. Out-of-order message delivery: if the bridge allows out-of-order delivery,
+         can an older message be delivered after a newer one to roll back state?
+      5. Supply cap violation: bridge mints tokens on destination chain — is total
+         supply across all chains bounded? Can an attacker print unlimited tokens by
+         sending fake messages?
+      6. LayerZero DVN collusion: if the required DVN threshold is low (e.g., 1-of-1),
+         a compromised DVN can forge message delivery. Note this as medium severity.
+      7. Chain ID spoofing: does the contract check block.chainid on a function that
+         should only be callable on one specific chain?
+      8. Incorrect token amount bridging: does the bridge correctly handle decimal
+         differences between chains (e.g., 6 decimals on ETH, 18 on another chain)?
+
+      For each narrative, read the actual message receive/handle function.
+
+      OUTPUT: Valid JSON array only. Empty array [] if nothing plausible found.
+
+      [
+        {
+          "id": "XCHAIN-01",
+          "title": "concise attack title",
+          "angle": "cross_chain",
+          "entry_point": "ContractName.sol:functionName():L123",
+          "source_chain": "ethereum|arbitrum|any",
+          "destination_chain": "ethereum|arbitrum|any",
+          "attacker": "unprivileged EOA / malicious DVN",
+          "preconditions": [],
+          "preconditions_reachable": "",
+          "steps": [],
+          "root_cause": "one precise sentence",
+          "estimated_profit": "dust|small|medium|large",
+          "confidence": "high|medium|low"
+        }
+      ]
+
+  # ─── NEW: Stage 2h · Signature, Permit & Replay Attacks ─────────────────
+  - id: imagine_signatures
+    name: "Stage 2h · Signature, Permit & Replay Attacks"
+    parallel: true
+    tools: ["read", "glob"]
+    max_turns: 20
+    on_error: continue
+    system_prompt: |
+      You are an adversarial exploit developer specializing in signature schemes,
+      EIP-712, permit(), and replay attacks. You read the actual signature verification
+      code — you never assume it is correct.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/imagine_signatures.json"
+    prompt: |
+      Read the code intelligence report: {{ inputs.repo_path }}/.clido-audit/intel.json
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.context != "" %}Protocol context: {{ inputs.context }}{% endif %}
+
+      Check if intel.json shows any signature_patterns entries. If there are none and
+      no permit/signature-related functions, this may not apply — investigate anyway
+      by searching for ecrecover, permit, EIP712, DOMAIN_SEPARATOR.
+
+      ATTACKER MODEL:
+      - Unprivileged EOA — you possess your own private key but not the victim's
+      - You CAN observe signatures submitted in mempool transactions
+      - You CAN front-run permit() and related meta-transactions
+
+      A REAL FINDING requires:
+      - Signature can be replayed, forged, or front-run in a way that harms users
+      - Meaningful financial impact
+
+      YOUR TASK — generate SIGNATURE/PERMIT/REPLAY attack narratives. Focus on:
+      1. Missing nonce: does the signed message include a nonce? If not, the same
+         signature can be replayed multiple times.
+      2. Missing deadline/expiry: does the signed message include an expiry?
+         If not, old signatures remain valid indefinitely.
+      3. Wrong domain separator: does EIP-712 DOMAIN_SEPARATOR include chainId and
+         the contract's address? If not, signatures can be replayed on other chains
+         or contracts.
+      4. ecrecover returns zero address: if ecrecover fails (e.g., malformed sig),
+         it returns address(0). Does the contract check that the recovered address
+         is not address(0) AND matches the expected signer?
+      5. EIP-2098 compact signature malleability: does the protocol accept both 64-byte
+         compact and 65-byte canonical signatures? Can the signature be modified (s
+         flipped to curve order - s) while remaining valid, and does this bypass checks?
+      6. Permit front-running: if a user submits a permit() tx, an attacker can see it
+         in the mempool and front-run with the same parameters — the permit succeeds but
+         the user's follow-up call (which expected to be the first user) may fail or behave
+         unexpectedly. Does the protocol handle this gracefully?
+      7. Cross-contract signature reuse: is a signature intended for contract A also
+         valid for contract B? (Missing contract address in domain separator)
+      8. Signature for wrong function: can a signature meant for function A be used
+         to call a different function B that accepts the same signature format?
+      9. ERC2771 meta-transaction msg.sender spoofing: if the protocol uses a trusted
+         forwarder, does it extract msg.sender from calldata[-20:]? Can an attacker
+         craft a forwarder call that spoof a victim's address?
+      10. Permit-based griefing: can an attacker permanently grief a user by front-running
+          their permit() with incorrect parameters, causing the user's tx to fail?
+
+      Read the signature verification functions (ecrecover, _verifySignature, etc.) before
+      including any narrative.
+
+      OUTPUT: Valid JSON array only. Empty array [] if nothing plausible found.
+
+      [
+        {
+          "id": "SIG-01",
+          "title": "concise attack title",
+          "angle": "signature_replay",
+          "entry_point": "ContractName.sol:functionName():L123",
+          "attacker": "unprivileged EOA / mempool observer",
+          "preconditions": [],
+          "preconditions_reachable": "",
+          "steps": [],
+          "root_cause": "one precise sentence",
+          "estimated_profit": "dust|small|medium|large",
+          "confidence": "high|medium|low"
+        }
+      ]
+
+  # ─── NEW: Stage 2i · Upgrade, Proxy & Assembly Attacks ──────────────────
+  - id: imagine_upgrades
+    name: "Stage 2i · Upgrade, Proxy & Assembly Attacks"
+    parallel: true
+    tools: ["read", "glob"]
+    max_turns: 20
+    on_error: continue
+    system_prompt: |
+      You are an adversarial exploit developer specializing in proxy patterns,
+      upgradeable contracts, and assembly-level vulnerabilities. You always read
+      the actual proxy and implementation code before making any claim.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/imagine_upgrades.json"
+    prompt: |
+      Read the code intelligence report: {{ inputs.repo_path }}/.clido-audit/intel.json
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.context != "" %}Protocol context: {{ inputs.context }}{% endif %}
+
+      Check intel.json for contracts with upgradeable: true, proxy_type set,
+      assembly_blocks present, or delegatecall usage. If none apply, output [].
+
+      ATTACKER MODEL:
+      - Unprivileged EOA — you cannot compromise admin keys
+      - You CAN call public/external functions on proxy AND implementation contracts directly
+      - You CAN craft arbitrary calldata for assembly-level attacks
+
+      A REAL FINDING requires:
+      - Incorrect proxy implementation leads to fund theft or permanent bricking
+      - The vulnerability is accessible without admin keys
+
+      NOT A FINDING: admin can upgrade to malicious implementation (out of scope —
+      that's admin trust), intended proxy behavior.
+
+      YOUR TASK — generate UPGRADE/PROXY/ASSEMBLY attack narratives. Focus on:
+      1. Uninitialized implementation: can the implementation contract be called directly
+         (not through the proxy)? Can initialize() be called on the implementation to
+         take ownership and then selfdestruct or drain via delegatecall?
+      2. Storage layout collision: do new implementation variables overlap with existing
+         storage slots from the previous version? Read the storage layout carefully.
+         In UUPS: does upgradeToAndCall write to a slot already used by application data?
+      3. Delegatecall to user-controlled target: does any function allow the user to
+         specify the target of a delegatecall? This is an arbitrary code execution path.
+      4. Transparent proxy function clashing: does a public admin function have the same
+         4-byte selector as a user-facing function in the implementation?
+         (TransparentUpgradeableProxy routes by msg.sender, but custom proxies may not)
+      5. UUPS: is the upgradeability mechanism protected in the implementation?
+         If the implementation has an unprotected upgradeTo(), anyone can upgrade to
+         a malicious impl and selfdestruct the proxy.
+      6. Beacon proxy: if multiple proxies share one beacon, a single upgrade affects
+         ALL proxies simultaneously — does the protocol account for this?
+      7. Diamond proxy selector clash: do any facet selectors collide with each other
+         or with the DiamondCut/Loupe interface selectors?
+      8. Assembly dirty bits: does the assembly code properly mask values when packing
+         multiple values into one word? Unmasked values can cause silent data corruption.
+      9. Assembly memory expansion: does any assembly block expand memory unboundedly
+         based on user input, causing out-of-gas in the middle of a state-changing operation?
+      10. Transient storage misuse: if TSTORE/TLOAD is used, is the transient state
+          properly cleared at the end of every execution path? Can it be read across calls?
+
+      Read the proxy and implementation contracts before including any narrative.
+
+      OUTPUT: Valid JSON array only. Empty array [] if nothing plausible found.
+
+      [
+        {
+          "id": "UPG-01",
+          "title": "concise attack title",
+          "angle": "upgrade_proxy_assembly",
+          "entry_point": "ContractName.sol:functionName():L123",
+          "attacker": "unprivileged EOA",
+          "preconditions": [],
+          "preconditions_reachable": "",
+          "steps": [],
+          "root_cause": "one precise sentence",
+          "estimated_profit": "dust|small|medium|large",
+          "confidence": "high|medium|low"
+        }
+      ]
+
+  # ─── NEW: Stage 2j · Systematic Vector Scan ──────────────────────────────
+  - id: vector_scan
+    name: "Stage 2j · Systematic Attack Vector Scan"
+    parallel: true
+    profile: opus
+    tools: ["read", "glob", "bash"]
+    max_turns: 35
+    on_error: continue
+    system_prompt: |
+      You are a systematic security researcher running a comprehensive checklist
+      scan against known Solidity attack patterns. You verify each pattern against
+      the actual code before flagging it. You are methodical and thorough.
+      You do NOT report false positives — if you cannot confirm the code is
+      vulnerable by reading it, you skip that pattern.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/vector_scan.json"
+    prompt: |
+      Read the code intelligence report: {{ inputs.repo_path }}/.clido-audit/intel.json
+      Read preflight for known issues: {{ inputs.repo_path }}/.clido-audit/preflight.json
+      Repository: {{ inputs.repo_path }}
+
+      You are performing a systematic scan against known Solidity attack vectors.
+      For each category below, check whether the pattern applies to this codebase
+      by reading the relevant code. Only flag patterns you can confirm by reading code.
+
+      ═══════════════════════════════════════════════════════════════
+      VECTOR CHECKLIST
+      ═══════════════════════════════════════════════════════════════
+
+      [ERC TOKEN STANDARD VIOLATIONS]
+      V-ERC-01: ERC20 transfer() returns false instead of reverting — does the protocol
+                check return values, or use SafeERC20?
+      V-ERC-02: Fee-on-transfer ERC20 — does the protocol account for tokens where
+                received amount < sent amount? Look for balance delta checks.
+      V-ERC-03: Rebasing/elastic supply tokens — does any vault/pool assume a fixed
+                balance per share, which fails with rebasing tokens?
+      V-ERC-04: ERC20 decimals() — does the protocol assume 18 decimals? Check with
+                tokens like USDC (6) or WBTC (8).
+      V-ERC-05: Non-standard ERC20 (no return on transfer, USDT-style) — does code
+                use raw transfer() without SafeERC20 wrapper?
+      V-ERC-06: ERC4626 rounding direction — does convertToShares round down and
+                convertToAssets round up (required)? Violation enables share inflation.
+
+      [ORACLE VULNERABILITIES]
+      V-ORC-01: Chainlink staleness — is updatedAt checked against a max age threshold?
+      V-ORC-02: Chainlink min/maxAnswer circuit breaker — does the protocol handle
+                the case where the price feed hits its configured min or max answer?
+      V-ORC-03: L2 Sequencer uptime — for Optimism/Arbitrum, is the sequencer uptime
+                feed checked before using Chainlink prices?
+      V-ORC-04: Spot price manipulation — does the protocol read AMM spot prices
+                (slot0, getReserves) in the same transaction where liquidity can be moved?
+      V-ORC-05: Negative Chainlink price — does the code handle the case where a
+                price feed returns a negative int256?
+
+      [REENTRANCY VARIANTS]
+      V-RE-01: Classic reentrancy — state updated after external call, no lock
+      V-RE-02: Cross-function reentrancy — two functions share state, only one is locked
+      V-RE-03: Read-only reentrancy — view function reads inconsistent state during callback
+      V-RE-04: ERC1155 batch callback reentrancy — onERC1155BatchReceived re-enters
+      V-RE-05: Transient storage as reentrancy lock — cleared in all paths including reverts?
+
+      [GOVERNANCE ATTACKS]
+      V-GOV-01: Flash loan governance: can an attacker borrow governance tokens, vote,
+                and repay in one tx? Is voting power snapshot at proposal creation time?
+      V-GOV-02: Proposal sandwich: can an attacker front-run a governance execution
+                to be in a better position when the change takes effect?
+      V-GOV-03: Timelock bypass: is there any path that skips the timelock?
+
+      [NUMERIC EDGE CASES]
+      V-NUM-01: Silent integer overflow in unchecked block — values from user input
+      V-NUM-02: Division before multiplication: (a/b)*c loses precision
+      V-NUM-03: Unsafe downcast: uint128(x) where x can exceed uint128 max
+      V-NUM-04: Dirty higher-order bits in assembly: does assembly pack/unpack values
+                without proper masking (e.g., shr(96, shl(96, addr)) )?
+
+      [PROXY / UPGRADE PATTERNS]
+      V-PRX-01: Uninitialized implementation contract — can initialize() be called directly?
+      V-PRX-02: Storage collision between proxy admin slot and implementation data
+      V-PRX-03: Delegatecall to user-controlled address
+      V-PRX-04: UUPS: is upgradeTo() protected on the implementation contract?
+
+      [SIGNATURE SCHEMES]
+      V-SIG-01: ecrecover returns zero address on invalid signature — is address(0) checked?
+      V-SIG-02: Missing nonce — same signature replayable multiple times
+      V-SIG-03: Missing deadline — expired signatures accepted indefinitely
+      V-SIG-04: Wrong DOMAIN_SEPARATOR — missing chainId or contract address
+      V-SIG-05: Permit frontrun griefing — user's tx fails if permit consumed by attacker
+
+      [LIBRARY / DEPENDENCY RISKS]
+      V-LIB-01: Solmate SafeTransferLib — does NOT check contract existence;
+                transferring to an EOA succeeds even if the ERC20 is not yet deployed
+      V-LIB-02: OpenZeppelin version — check for known CVEs in the version used
+                (preflight should have captured the version)
+      V-LIB-03: Unofficial fork of a library — any git submodule pointing to a non-official fork?
+
+      [CROSS-CHAIN]
+      V-XC-01: Missing source chain verification in message handler
+      V-XC-02: Missing sender address verification in message handler
+      V-XC-03: Message replay possible (no nonce or message ID)
+      V-XC-04: Supply cap not enforced across chains
+
+      [MISCELLANEOUS]
+      V-MISC-01: Block timestamp dependence — is block.timestamp used for randomness
+                 or as a precise timer (±12s is exploitable)?
+      V-MISC-02: tx.origin used for authentication — vulnerable to phishing attacks
+      V-MISC-03: Hardcoded gas limit in external calls — may break with EVM upgrades
+      V-MISC-04: Incorrect event emission — events emitted with wrong values mislead
+                 off-chain indexers that systems depend on
+
+      ═══════════════════════════════════════════════════════════════
+      INSTRUCTIONS
+      ═══════════════════════════════════════════════════════════════
+
+      For each vector ID above:
+      1. Determine if it is APPLICABLE to this codebase (based on intel.json)
+      2. If applicable: read the relevant code section and determine PRESENT/ABSENT/PARTIAL
+      3. If PRESENT (vulnerability exists): create a narrative entry
+      4. If ABSENT (properly guarded): mark as checked/clean
+      5. If NOT APPLICABLE (e.g., no Chainlink): skip
+
+      Focus your reading on the highest-risk entries: V-ERC-02, V-ORC-01, V-ORC-02,
+      V-RE-01, V-RE-03, V-PRX-01, V-SIG-01, V-SIG-02, V-LIB-01, V-GOV-01.
+
+      OUTPUT: Valid JSON only.
+
+      {
+        "scan_summary": {
+          "total_vectors_checked": 0,
+          "applicable": 0,
+          "confirmed_vulnerable": 0,
+          "confirmed_clean": 0,
+          "not_applicable": 0
+        },
+        "findings": [
+          {
+            "id": "VSCAN-01",
+            "vector_id": "V-ERC-02",
+            "title": "Fee-on-transfer token handling in deposit()",
+            "angle": "vector_scan",
+            "status": "vulnerable|clean|partial",
+            "entry_point": "ContractName.sol:functionName():L123",
+            "attacker": "unprivileged EOA using a fee-on-transfer token",
+            "preconditions": [],
+            "preconditions_reachable": "",
+            "steps": [],
+            "root_cause": "one precise sentence",
+            "estimated_profit": "dust|small|medium|large",
+            "confidence": "high|medium|low",
+            "code_ref": "file:line"
+          }
+        ],
+        "clean_checks": [
+          {"vector_id": "V-ORC-01", "note": "updatedAt checked at src/Oracle.sol:L45"}
+        ],
+        "skipped": [
+          {"vector_id": "V-XC-01", "reason": "no cross-chain components found"}
+        ]
+      }
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 3 · Deep Investigation
+  # Read all 10 narrative files + actual code. Validate or kill each narrative.
+  # Uses Opus for best reasoning. Reads code for every claim it makes.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: investigation
+    name: "Stage 3 · Deep Investigation"
+    profile: opus
+    tools: ["read", "glob", "bash"]
+    max_turns: 60
+    system_prompt: |
+      You are a senior Solidity security researcher performing deep technical
+      investigation. You ALWAYS verify claims by reading the actual code.
+      You never assume access control is absent — you read and confirm.
+      You are rigorous and conservative: if you cannot confirm an attack path
+      works by reading the code, you mark it implausible.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/investigation.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+
+      You are investigating attack narratives generated by specialized agents.
+      Read each narrative file, then for each narrative read the actual source code
+      and determine whether the attack is technically sound.
+
+      NARRATIVE FILES TO INVESTIGATE (read each; skip if file does not exist):
+      - {{ inputs.repo_path }}/.clido-audit/narratives/imagine_capital.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/imagine_ordering.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/imagine_access.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/imagine_math.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/imagine_external.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/imagine_state.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/imagine_crosschain.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/imagine_signatures.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/imagine_upgrades.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/vector_scan.json
+
+      Also read intent gaps for additional context:
+      - {{ inputs.repo_path }}/.clido-audit/intent_gaps.json
+
+      PRIORITIZATION: First investigate narratives with confidence: "high", then
+      "medium", then "low". Within each group, prioritize estimated_profit: "large"
+      then "medium". This ensures the most impactful findings get deepest scrutiny.
+
+      INVESTIGATION METHODOLOGY for each narrative:
+
+      1. READ the target code (file:lines cited in the narrative)
+      2. READ all modifiers on the entry point function
+      3. READ all functions called in the attack path (follow the call tree at least 2 levels)
+      4. Verify each precondition is reachable through normal protocol interactions
+      5. Trace each attack step and verify it produces the claimed effect
+      6. Check for guards that prevent the attack (require statements, modifiers, checks)
+      7. Estimate realistic profit magnitude
+      8. Cross-check: does any other narrative from a different angle confirm the same bug?
+         If so, note the correlation — corroborated findings have higher confidence.
+
+      STRICT VALIDATION RULES — ALL must hold for verdict: exploitable:
+
+      ATTACKER: Must be completely unprivileged. No admin keys, oracle control, validator access.
+
+      REACHABILITY: Every precondition must be achievable via normal protocol interactions.
+      If you cannot trace how to reach the required state → implausible.
+
+      DETERMINISM: Attack must be reproducible. No reliance on block timestamps beyond ±12s,
+      no impossible race conditions.
+
+      REAL DAMAGE: Must be one of:
+        - Token or ETH theft from protocol or users
+        - Permanent insolvency of the protocol
+        - Unauthorized minting of protocol tokens
+      NOT acceptable: temporary imbalance that self-corrects, rounding dust, UI issues,
+      admin behavioral risks.
+
+      NOT A DESIGN CHOICE: Check NatSpec, README, and inline comments. If the docs say
+      this behavior is intentional, it is not a bug.
+
+      FINANCIAL MATERIALITY: Profit must be meaningful. Dust-level attacks are at most
+      informational.
+
+      ACCESS CONTROL CHECK: For EVERY function in the attack path — read the function
+      and its modifiers. If any required function needs a role the attacker doesn't have
+      (and the bug is NOT the missing check itself) → implausible.
+
+      OUTPUT: Valid JSON array only. Include ALL investigated narratives.
+
+      [
+        {
+          "narrative_id": "CAP-01",
+          "verdict": "exploitable|implausible|borderline",
+          "verdict_reason": "precise explanation with code file:line references",
+          "title": "descriptive title",
+          "severity_estimate": "high|medium|low|informational",
+          "root_cause": "one precise sentence identifying the buggy code",
+          "entry_point": "ContractName.sol:functionName():L123",
+          "corroborated_by": ["VSCAN-01", "STATE-02"],
+          "attack_path": {
+            "attacker": "description of attacker role",
+            "preconditions": [
+              "concrete state condition + how it is reachable"
+            ],
+            "steps": [
+              "1. Deploy attacker contract AttackerContract",
+              "2. Call protocol.deposit(1e18) to establish initial position",
+              "3. Call AttackerContract.attack() which internally: ...",
+              "N. Profit: attacker balance increases by X tokens (~$Y)"
+            ],
+            "result": "exact impact: attacker gains X ETH, protocol loses Y, users lose Z"
+          },
+          "code_refs": [
+            {"file": "src/Vault.sol", "lines": "123-145", "issue": "state change after external call"}
+          ],
+          "estimated_profit": "dust|small|medium|large",
+          "confidence": "high|medium|low",
+          "kill_reason": null
+        }
+      ]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 4 · Adversarial Challenge
+  # Try hard to kill every finding. Only findings that survive adversarial
+  # scrutiny move to the judge. Uses Opus.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: adversarial
+    name: "Stage 4 · Adversarial Challenge"
+    profile: opus
+    tools: ["read", "glob"]
+    max_turns: 30
+    system_prompt: |
+      You are the defense. Your job is to kill false positives. You challenge
+      every finding aggressively. You read code to verify your challenges —
+      you never assume. You apply the canonical form rule: only reject a finding
+      if the CORE vulnerability does not exist. Do not reject because the attack
+      description has minor inaccuracies if the underlying bug is real.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/adversarial.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+
+      Read the investigation results: {{ inputs.repo_path }}/.clido-audit/investigation.json
+
+      Challenge every finding marked verdict: "exploitable" or "borderline".
+      Your goal: find errors that prove the finding is invalid. Only findings
+      that survive all your challenges move forward.
+
+      CHALLENGE METHODOLOGY for each finding:
+
+      1. CHALLENGE THE ENTRY POINT
+         Read the function and ALL its modifiers.
+         - Can an unprivileged actor ACTUALLY call this? Read every require and modifier.
+         - Is the function internal/private? Is there a caller restriction you missed?
+
+      2. CHALLENGE THE PRECONDITIONS
+         For each precondition:
+         - Trace the state transitions required to reach it
+         - Does any precondition require admin action or an impossible state?
+         - Is any precondition blocked by an invariant enforced elsewhere?
+
+      3. CHALLENGE EACH ATTACK STEP
+         Read the actual function called in each step:
+         - Does calling it produce the claimed effect?
+         - Is there a require/revert/modifier that would block it?
+         - Are there slippage limits or sanity checks that bound the profit?
+
+      4. CHALLENGE THE PROFIT MECHANISM
+         - Is there a circuit breaker, pause mechanism, or fee that limits impact?
+         - Is there a time lock preventing same-block execution?
+         - Does the claimed profit actually materialize after fees?
+
+      5. IS THIS A DESIGN CHOICE?
+         Read NatSpec, any README or documentation for the relevant functions.
+         If the documentation says this is intentional → not a bug.
+
+      6. COUNTERARGUMENT EXCHANGE (for borderline findings)
+         For findings marked "borderline": produce the strongest possible argument
+         FOR the finding's validity, then the strongest argument AGAINST.
+         Then make a final determination based on which is more convincing.
+
+      CANONICAL FORM RULE (critical):
+      Challenge findings in their STRONGEST possible formulation.
+      If the core vulnerability exists but attack steps have minor errors,
+      acknowledge the core and note corrections — do NOT kill the finding
+      just because one step needs refinement.
+      Only mark survived: false when the CORE vulnerability does not hold.
+
+      Use the `read` tool to verify EVERY challenge claim. Do not assume.
+
+      OUTPUT: Valid JSON array only.
+
+      [
+        {
+          "narrative_id": "CAP-01",
+          "survived": true,
+          "confidence": 85,
+          "challenges": [
+            {
+              "challenge_type": "entry_point|precondition|attack_step|profit|design_choice",
+              "claim": "The deposit() function has nonReentrant at line 45",
+              "code_ref": "src/Vault.sol:L45",
+              "decisive": false,
+              "rebuttal": "nonReentrant only guards deposit(); the callback re-enters withdraw() at L112 which is unprotected"
+            }
+          ],
+          "canonical_attack": "Strongest, most precise formulation of the attack after removing errors",
+          "kill_reason": null
+        }
+      ]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 5 · Judge
+  # Final verdict. Reads cited code independently to verify every claim.
+  # Assigns severity. Produces clean finding descriptions.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: judge
+    name: "Stage 5 · Judge"
+    profile: opus
+    tools: ["read", "glob"]
+    max_turns: 30
+    system_prompt: |
+      You are a senior smart contract security judge. You are conservative and
+      precise. You independently verify every code citation before confirming
+      a finding. You never inflate severity. You assign "High" only when direct
+      fund theft or protocol insolvency is proven.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/findings.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+
+      Read the adversarial review results: {{ inputs.repo_path }}/.clido-audit/adversarial.json
+      Also read the investigation for full context: {{ inputs.repo_path }}/.clido-audit/investigation.json
+      Also read intent gaps: {{ inputs.repo_path }}/.clido-audit/intent_gaps.json
+
+      Review only findings where survived: true. For each, read the cited code
+      independently and apply the final validation checklist.
+
+      FINAL VALIDATION CHECKLIST (ALL must pass to confirm):
+
+      [ ] Attacker is completely unprivileged (no admin, oracle, or validator role)
+      [ ] Required state is reachable via NORMAL protocol use (not admin action)
+      [ ] Attack steps are deterministic and reproducible
+      [ ] Real financial damage: theft, permanent insolvency, or unauthorized minting
+      [ ] Protocol invariant violated — NOT a documented design choice
+      [ ] No missed access control — read EVERY function in the attack path
+      [ ] Impact magnitude is meaningful (not dust-level)
+
+      If ANY item fails → confirmed: false with specific explanation.
+
+      SEVERITY RULES (Code4rena calibration):
+      High:
+        - Direct theft of tokens/ETH from users or protocol treasury
+        - Permanent protocol insolvency
+        - Unauthorized minting of protocol tokens
+        - Scale: large (scales with TVL) or > ~$1,000 per exploit
+      Medium:
+        - Theft possible only under specific conditions that significantly limit scale
+        - Permanent availability impact (not just temporary DoS)
+        - Protocol invariant violation with indirect financial consequences
+        - Griefing that causes material harm to users (not just dust)
+      Low:
+        - Dust-level rounding exploitation (exploitable but tiny profit)
+        - Requires very unlikely state that may never occur in practice
+        - Minor invariant violation with no direct loss path
+      Informational:
+        - Code quality, best practice violations, no exploit path
+        - Documentation gaps surfaced by intent reconstruction
+
+      NEVER use "Critical" — High is the maximum severity.
+
+      NOTE: Intent gaps from intent_gaps.json that were confirmed as real issues
+      (not just documentation drift) should be included as findings with appropriate
+      severity. Document-only gaps with no exploit path → Informational.
+
+      INDEPENDENT VERIFICATION:
+      Use the `read` tool to verify at least the primary code reference for each finding.
+      If a finding claims "function X has no access control at line Y" → read line Y and confirm.
+      If you find the claim is wrong → mark confirmed: false.
+
+      OUTPUT: Valid JSON array only.
+
+      [
+        {
+          "id": "F-01",
+          "narrative_id": "CAP-01",
+          "confirmed": true,
+          "severity": "high|medium|low|informational",
+          "title": "Flash Loan Share Price Inflation in Vault.deposit()",
+          "summary": "1-2 sentences: what the bug is and what an attacker can do",
+          "impact": "Precise: 'Attacker can steal up to X% of vault TVL per tx by...'",
+          "root_cause": "One sentence with exact code location",
+          "attack_path": {
+            "attacker": "unprivileged external EOA or contract",
+            "preconditions": [],
+            "steps": [],
+            "result": "attacker gains X, protocol loses Y"
+          },
+          "code_refs": [
+            {
+              "file": "src/Vault.sol",
+              "lines": "123-145",
+              "description": "description of the vulnerable code"
+            }
+          ],
+          "recommendation": "Specific, actionable fix with code guidance",
+          "verification_note": "What you read to independently confirm this finding"
+        }
+      ]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 5b · Coverage Gap Analysis + Targeted Investigation (NEW)
+  # After judge, identify attack surfaces NOT covered by any narrative.
+  # Deliberately investigate the uncovered high-value surfaces.
+  # Also: use confirmed findings to generate new hypotheses (attackers-review).
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: coverage_gap
+    name: "Stage 5b · Coverage Gap Analysis"
+    profile: opus
+    tools: ["read", "glob", "bash"]
+    max_turns: 40
+    on_error: continue
+    system_prompt: |
+      You are performing systematic coverage gap analysis. Your goal is to identify
+      attack surfaces that WERE NOT covered by any of the imagination or vector scan
+      agents. You then deliberately investigate the highest-value uncovered surfaces.
+      You also reason about whether confirmed findings suggest related vulnerabilities
+      that were not yet investigated (attackers-review loop).
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/gap_findings.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+
+      Read code intelligence: {{ inputs.repo_path }}/.clido-audit/intel.json
+      Read confirmed findings: {{ inputs.repo_path }}/.clido-audit/findings.json
+      Read investigation results: {{ inputs.repo_path }}/.clido-audit/investigation.json
+
+      ═══════════════════════════════════════════════════════════════
+      PHASE A — COVERAGE MAPPING
+      ═══════════════════════════════════════════════════════════════
+
+      Build a coverage map:
+      - For each contract.function in intel.json, note whether it appeared as an
+        entry_point in ANY narrative (across all investigation results)
+      - Identify "uncovered" functions: high-value functions that were never investigated
+        as an entry point
+
+      HIGH-VALUE functions to prioritize for coverage:
+      - Any function that transfers tokens or ETH
+      - Any function in the access_control_map.permissionless_functions list
+      - Any function that the intel.json marks as a flash_callback
+      - Any function in the "crown_jewels" list from intel.json
+      - Any function touched by a developer TODO (from preflight)
+
+      ═══════════════════════════════════════════════════════════════
+      PHASE B — DELIBERATE INVESTIGATION OF GAPS
+      ═══════════════════════════════════════════════════════════════
+
+      For each uncovered high-value function:
+      1. Read the function and its complete call tree
+      2. Apply the following gap-specific checklist:
+         - Does it move funds? Is CEI followed? Any reentrancy path?
+         - Is the caller verified? Can any unprivileged actor call it unexpectedly?
+         - Does it modify critical state variables (share price, debt, collateral)?
+         - Any arithmetic on user-controlled inputs without bounds?
+         - Any external call with a user-controlled target?
+      3. If you find a plausible vulnerability, create a finding entry
+
+      ═══════════════════════════════════════════════════════════════
+      PHASE C — ATTACKERS-REVIEW LOOP
+      ═══════════════════════════════════════════════════════════════
+
+      Read confirmed findings (findings.json). For each finding with severity high or medium:
+
+      Ask: "What OTHER vulnerabilities does this finding suggest I haven't investigated?"
+
+      Examples of attacker-review reasoning:
+      - "We found a reentrancy in withdraw(). Are there OTHER state-changing functions
+        that call the same external hook without a reentrancy guard?"
+      - "We found a missing nonce in permit(). Are there other signed message types
+        in this codebase that may also lack nonces?"
+      - "We found a flash loan attack via deposit(). Can the same flash loan pattern
+        be applied to withdraw() or redeem()?"
+      - "We found storage collision in proxy slot X. Are there other slots that may
+        collide after a future upgrade?"
+
+      Investigate each new hypothesis by reading the code.
+
+      OUTPUT: Valid JSON only.
+
+      {
+        "coverage_map": {
+          "total_functions_in_scope": 0,
+          "covered_as_entry_point": 0,
+          "uncovered": [
+            {"contract": "", "function": "", "reason_high_value": ""}
+          ]
+        },
+        "gap_findings": [
+          {
+            "id": "GAP-F-01",
+            "source": "coverage_gap|attackers_review",
+            "parent_finding": "F-01 (for attackers_review) or null",
+            "title": "concise title",
+            "severity": "high|medium|low|informational",
+            "confirmed": true,
+            "entry_point": "Contract.sol:function():L123",
+            "summary": "1-2 sentences",
+            "root_cause": "one precise sentence",
+            "attack_path": {
+              "attacker": "unprivileged EOA",
+              "preconditions": [],
+              "steps": [],
+              "result": ""
+            },
+            "code_refs": [{"file": "", "lines": "", "description": ""}],
+            "recommendation": ""
+          }
+        ],
+        "attackers_review_hypotheses": [
+          {
+            "triggered_by": "F-01",
+            "hypothesis": "description of the new attack direction",
+            "investigated": true,
+            "result": "found|not_found|inconclusive",
+            "finding_id": "GAP-F-01 or null"
+          }
+        ]
+      }
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 6 · Proof of Concept
+  # For each confirmed finding (main + gap), write a Foundry test that proves
+  # exploitability. Runs `forge test`. Reports pass/fail per PoC.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: poc
+    name: "Stage 6 · Proof of Concept"
+    profile: opus
+    tools: ["read", "glob", "bash"]
+    max_turns: 50
+    on_error: continue
+    system_prompt: |
+      You are a Solidity exploit developer writing proof-of-concept test contracts.
+      You write real, runnable Foundry tests. You read the actual source contracts
+      before writing any test. You always include the full import path. You run
+      `forge test` to check compilation and correctness, and iterate to fix errors.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/poc-results.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.rpc_url != "" %}RPC URL for fork tests: {{ inputs.rpc_url }}{% endif %}
+
+      Read confirmed findings: {{ inputs.repo_path }}/.clido-audit/findings.json
+      Read gap findings: {{ inputs.repo_path }}/.clido-audit/gap_findings.json
+
+      Write Foundry proof-of-concept tests for each confirmed finding from BOTH files.
+      For gap_findings.json, only write PoC for entries with confirmed: true.
+      Skip findings with confirmed: false.
+
+      METHODOLOGY:
+
+      1. Read the target contract source file(s) for each finding before writing any test.
+
+      2. Check what test framework the repo uses:
+         - Look for foundry.toml / forge.toml (Foundry)
+         - Look for existing test/ or tests/ files to understand conventions and setUp patterns
+
+      3. For each confirmed finding, write a Foundry test file:
+
+         Location: {{ inputs.repo_path }}/test/audit/Audit_<FindingId>.t.sol
+
+         Test contract structure:
+         ```solidity
+         // SPDX-License-Identifier: MIT
+         pragma solidity ^0.8.x; // match target contract version
+
+         import "forge-std/Test.sol";
+         import "forge-std/console.sol";
+         import {TargetContract} from "../../src/TargetContract.sol";
+         // ... other imports
+
+         contract Audit_<FindingId>_PoC is Test {
+             // Protocol contracts
+             TargetContract target;
+             // Attacker contract (if needed — define inline or as separate contract)
+             AttackerContract attacker;
+
+             // Addresses
+             address alice = makeAddr("alice");  // victim
+             address bob = makeAddr("bob");      // attacker
+
+             function setUp() public {
+                 // Fork mainnet if rpc_url provided, otherwise deploy fresh
+                 {% if inputs.rpc_url != "" %}
+                 vm.createSelectFork("{{ inputs.rpc_url }}");
+                 {% endif %}
+                 // Deploy protocol
+                 target = new TargetContract(/* constructor args */);
+                 // Fund accounts
+                 deal(address(token), alice, 1000e18);
+                 deal(address(token), bob, 1e18);
+             }
+
+             /// @notice Proof of concept for: <finding title>
+             /// @dev Demonstrates: <root cause one-line>
+             function test_exploit_<findingId>() public {
+                 // === SETUP ===
+                 // Establish victim position
+                 vm.startPrank(alice);
+                 token.approve(address(target), 1000e18);
+                 target.deposit(1000e18, alice);
+                 vm.stopPrank();
+
+                 uint256 attackerBalanceBefore = token.balanceOf(bob);
+
+                 // === ATTACK ===
+                 vm.startPrank(bob);
+                 // ... execute the attack steps from the finding
+                 vm.stopPrank();
+
+                 // === ASSERT ===
+                 uint256 attackerBalanceAfter = token.balanceOf(bob);
+                 uint256 profit = attackerBalanceAfter - attackerBalanceBefore;
+
+                 console.log("Attacker profit:", profit);
+                 assertGt(profit, 0, "Attacker should profit");
+             }
+         }
+
+         // Attacker contract (if needed for callbacks / flash loans)
+         contract AttackerContract {
+             TargetContract target;
+             address owner;
+
+             constructor(address _target) {
+                 target = TargetContract(_target);
+                 owner = msg.sender;
+             }
+
+             function attack() external { }
+
+             function onFlashLoan(
+                 address initiator,
+                 address token,
+                 uint256 amount,
+                 uint256 fee,
+                 bytes calldata data
+             ) external returns (bytes32) {
+                 // Attack inside callback
+                 IERC20(token).approve(msg.sender, amount + fee);
+                 return keccak256("ERC3156FlashBorrower.onFlashLoan");
+             }
+         }
+         ```
+
+      4. After writing each test file, run it:
+         ```bash
+         cd {{ inputs.repo_path }} && forge test --match-path "test/audit/Audit_<FindingId>.t.sol" -vvv 2>&1
+         ```
+
+      5. If the test fails to compile or the assertion fails:
+         - Read the error carefully
+         - Fix import paths, constructor arguments, function signatures
+         - Iterate up to 3 times per test
+         - Report final status: pass / compile_error / assertion_failed / skipped
+
+      6. If forge is not installed, write the test files but mark status as "no_forge".
+
+      OUTPUT: Valid JSON array only. One entry per finding.
+
+      [
+        {
+          "finding_id": "F-01",
+          "narrative_id": "CAP-01",
+          "title": "finding title",
+          "poc_file": "test/audit/Audit_F01.t.sol",
+          "poc_written": true,
+          "forge_available": true,
+          "test_result": "pass|fail_compile|fail_assertion|no_forge|skipped",
+          "test_output": "relevant snippet from forge test output",
+          "iterations": 1,
+          "notes": "any relevant notes"
+        }
+      ]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 7 · Report
+  # Format confirmed findings + PoC results into a professional audit report.
+  # Includes coverage map, gap analysis, and rejected findings for completeness.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: report
+    name: "Stage 7 · Audit Report"
+    tools: ["read"]
+    max_turns: 10
+    system_prompt: |
+      You are a technical writer producing professional smart contract security audit
+      reports. You are precise and direct. No filler. No hedging. If findings are
+      serious, say so clearly.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/report.md"
+    prompt: |
+      Read all audit artifacts:
+      - Confirmed findings: {{ inputs.repo_path }}/.clido-audit/findings.json
+      - Gap findings: {{ inputs.repo_path }}/.clido-audit/gap_findings.json
+      - PoC results: {{ inputs.repo_path }}/.clido-audit/poc-results.json
+      - Code intel for protocol context: {{ inputs.repo_path }}/.clido-audit/intel.json
+      - Preflight context: {{ inputs.repo_path }}/.clido-audit/preflight.json
+      - Intent gaps: {{ inputs.repo_path }}/.clido-audit/intent_gaps.json
+      - Investigation results: {{ inputs.repo_path }}/.clido-audit/investigation.json
+      - Coverage gap analysis: {{ inputs.repo_path }}/.clido-audit/gap_findings.json
+
+      Produce a complete Markdown audit report. Structure:
+
+      ---
+
+      # Smart Contract Security Audit
+
+      **Repository**: `{{ inputs.repo_path }}`
+      **Date**: {{ date }}
+      **Methodology**: Preflight → Code intelligence → Intent reconstruction → 10 parallel
+      attack angles → Systematic vector scan → Deep investigation → Adversarial challenge →
+      Independent judge → Coverage gap analysis → Proof-of-concept testing
+
+      ---
+
+      ## Executive Summary
+
+      [2-3 paragraphs. Overview of the protocol, its type, and what was analyzed.
+      Total finding count by severity (include gap findings). Overall security assessment.
+      Be direct — if there are serious issues, say so clearly without corporate hedging.
+      Note any prior audit findings that were unresolved.]
+
+      ## Finding Summary
+
+      | ID | Title | Severity | Source | PoC |
+      |----|-------|----------|--------|-----|
+      | F-01 | Flash Loan Share Price Inflation | High | Imagination | ✓ Pass |
+      | GAP-F-01 | Uncovered reentrancy in redeem() | High | Gap Analysis | ✓ Pass |
+
+      ---
+
+      ## Findings
+
+      For each confirmed finding from BOTH findings.json and gap_findings.json
+      (combined, ordered by severity: High → Medium → Low → Informational):
+
+      ---
+
+      ### [F-XX] Title
+
+      **Severity**: High / Medium / Low / Informational
+      **Source**: Imagination angle / Vector scan / Coverage gap / Attackers review
+      **PoC Status**: Pass / Fail / Not run
+
+      **Root Cause**
+      One sentence with exact code location.
+
+      **Impact**
+      Precise description of what an attacker can do and at what scale.
+
+      **Attack Scenario**
+
+      **Attacker**: description
+
+      **Preconditions**:
+      - condition 1
+
+      **Steps**:
+      1. ...
+      2. ...
+      N. Result: attacker gains X, protocol loses Y
+
+      **Proof of Concept**
+
+      ```
+      [Include the test function signature and key assertion lines if PoC passed.
+       If PoC failed, note the status.]
+      ```
+
+      **Code References**
+      - `src/File.sol:L123-L145` — description of the vulnerable code
+
+      **Recommendation**
+      Specific, actionable fix. Include code if helpful.
+
+      ---
+
+      ## Intent Reconstruction Findings
+
+      [List any significant gaps between developer-stated invariants and code reality,
+      even if they don't rise to a full finding severity. These help developers understand
+      where documentation diverges from implementation.]
+
+      ---
+
+      ## Rejected Findings
+
+      [Brief table of narratives that were investigated and rejected, with one-sentence
+      reason. This demonstrates thoroughness.]
+
+      | Angle | Description | Rejection Reason |
+      |-------|-------------|-----------------|
+
+      ---
+
+      ## Coverage Analysis
+
+      [Summary of attack surfaces investigated. How many functions were covered as
+      entry points vs total in-scope functions. What attack angles were applied.
+      Any areas that could not be fully analyzed.]
+
+      ---
+
+      ## Prior Audit Context
+
+      [If prior audits were found in preflight: list them, their dates, and note
+      whether previously acknowledged-but-unfixed issues were still present.]
+
+      ---
+
+      *All findings independently verified against source code. PoC tests written
+      in Foundry where applicable. Human expert review recommended before production
+      deployment.*
+
+      ---
+
+      Output the complete Markdown report. No text before or after.
+
+output:
+  print_summary: true

@@ -80,8 +80,9 @@ pub trait ModelProvider: Send + Sync {
         config: &AgentConfig,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>>;
 
-    /// List models available from this provider. Returns an empty vec on error or if
-    /// the provider doesn't support model discovery. `available=false` entries are
-    /// shown greyed-out in pickers (no usable chat endpoints).
-    async fn list_models(&self) -> Vec<ModelEntry>;
+    /// List models available from this provider.
+    /// Returns `Err(message)` on authentication failure or network error.
+    /// Returns `Ok(vec![])` if the provider doesn't support model discovery.
+    /// `available=false` entries are shown greyed-out in pickers.
+    async fn list_models(&self) -> std::result::Result<Vec<ModelEntry>, String>;
 }

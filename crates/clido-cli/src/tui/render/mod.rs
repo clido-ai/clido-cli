@@ -1234,7 +1234,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Profile overview/editor overlay ──────────────────────────────────────
     if let Some(ref st) = app.profile_overlay {
-        render_profile_overlay(frame, area, input_area, st);
+        render_profile_overlay(frame, area, input_area, st, app.models_loading);
     }
 
     // ── Permission popup ─────────────────────────────────────────────────────

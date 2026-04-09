@@ -676,7 +676,7 @@ impl ModelProvider for AnthropicProvider {
         Ok(Box::pin(parse_anthropic_sse(byte_stream)))
     }
 
-    async fn list_models(&self) -> Vec<crate::provider::ModelEntry> {
+    async fn list_models(&self) -> std::result::Result<Vec<crate::provider::ModelEntry>, String> {
         let resp = match self
             .client
             .get("https://api.anthropic.com/v1/models")
@@ -686,21 +686,18 @@ impl ModelProvider for AnthropicProvider {
             .await
         {
             Ok(r) => r,
-            Err(e) => {
-                warn!("list_models: request failed: {}", e);
-                return vec![];
-            }
+            Err(e) => return Err(format!("Network error: {}", e)),
         };
-        if !resp.status().is_success() {
-            warn!("list_models: API returned status {}", resp.status());
-            return vec![];
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err("Authentication failed — check your API key".to_string());
+        }
+        if !status.is_success() {
+            return Err(format!("API returned {}", status));
         }
         let json = match resp.json::<serde_json::Value>().await {
             Ok(j) => j,
-            Err(e) => {
-                warn!("list_models: failed to parse response: {}", e);
-                return vec![];
-            }
+            Err(e) => return Err(format!("Failed to parse response: {}", e)),
         };
         let mut models: Vec<crate::provider::ModelEntry> = json["data"]
             .as_array()
@@ -709,7 +706,7 @@ impl ModelProvider for AnthropicProvider {
             .filter_map(|m| m["id"].as_str().map(crate::provider::ModelEntry::available))
             .collect();
         models.sort_by(|a, b| a.id.cmp(&b.id));
-        models
+        Ok(models)
     }
 }
 

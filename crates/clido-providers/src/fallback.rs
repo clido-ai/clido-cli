@@ -106,7 +106,7 @@ impl ModelProvider for FallbackProvider {
         }
     }
 
-    async fn list_models(&self) -> Vec<ModelEntry> {
+    async fn list_models(&self) -> std::result::Result<Vec<ModelEntry>, String> {
         self.primary.list_models().await
     }
 }
@@ -138,8 +138,8 @@ mod tests {
         {
             Err(ClidoError::Provider("primary stream boom".into()))
         }
-        async fn list_models(&self) -> Vec<ModelEntry> {
-            vec![]
+        async fn list_models(&self) -> std::result::Result<Vec<ModelEntry>, String> {
+            Ok(vec![])
         }
     }
 
@@ -181,8 +181,8 @@ mod tests {
         {
             Ok(Box::pin(futures::stream::empty()))
         }
-        async fn list_models(&self) -> Vec<ModelEntry> {
-            vec![ModelEntry::available("test-model")]
+        async fn list_models(&self) -> std::result::Result<Vec<ModelEntry>, String> {
+            Ok(vec![ModelEntry::available("test-model")])
         }
     }
 

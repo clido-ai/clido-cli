@@ -1981,6 +1981,18 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         });
     }
 
+    // Delete empty sessions (sessions with no user messages) to prevent pollution.
+    {
+        let wr = workspace_root.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Ok(count) = clido_storage::delete_empty_sessions(&wr) {
+                if count > 0 {
+                    tracing::info!("Deleted {} empty session(s)", count);
+                }
+            }
+        });
+    }
+
     // Load config, pricing table, and model prefs concurrently to minimise startup latency.
     let wr = workspace_root.clone();
     let (config_res, pricing_res, prefs_res) = tokio::join!(

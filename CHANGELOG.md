@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-beta.10] - 2026-04-07
+
+### Added
+
+- **Model switching persistence**: Changing the model in profile edit or via `/model` now actually updates the provider's internal model. Previously the TUI showed the new model but API calls still used the old model.
+- **Empty session cleanup**: Empty sessions (created but never used) are now automatically deleted on startup to prevent session pollution.
+- **Alibaba Cloud Code provider context values**: Updated context window values for alibabacloud-code provider models (qwen3.6-plus: 1M, qwen3.5-plus: 1M, qwen3-max: 262K, etc.).
+
+### Fixed
+
+- **Todo persistence**: Todos now persist across turns within a task. Previously they were cleared on every user prompt, causing the sidebar to appear empty after the first turn.
+- **`/note` command**: Fixed pattern matching to accept `/note` without requiring a space after it. Fixed `/note` to bypass the input queue when agent is busy, executing immediately as intended.
+- **Keyboard shortcuts**: Fixed `Ctrl+Shift+C` copy mode shortcut that was incorrectly matching `Shift+C` alone due to bitwise OR usage.
+- **TodoWrite display**: Fixed raw JSON display of TodoWrite tool in TUI - now shows human-readable summary.
+
 ## [0.1.0-beta.9] - 2026-04-04
 
 ### Added

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-beta.11] - 2026-04-07
+
+### Added
+
+- **Task panel feedback**: Show "Analyzing and planning..." in task panel when agent is busy without todos.
+
+### Fixed
+
+- **Model switching persistence**: Changing the model in profile edit or via `/model` now actually updates the provider's internal model.
+- **Empty session cleanup**: Empty sessions (created but never used) are now automatically deleted on startup.
+- **Todo persistence**: Todos now persist across turns within a task.
+- **`/note` command**: Fixed to bypass queue and execute immediately when agent is busy. Also immediately restarts agent with note in context.
+- **Keyboard shortcuts**: Fixed `Ctrl+Shift+C` copy mode shortcut.
+- **MultiEdit display**: Fixed raw JSON display of MultiEdit tool in TUI sidebar and input.
+- **Stall detection**: Increased default threshold from 6 to 12.
+- **Session ID consistency**: Fixed mismatch between header and session picker.
+- **Mouse scroll**: Fixed immediate redraw after mouse scrolling.
+- **Content indentation**: Fixed indentation for content under You/Clido labels.
+
 ## [0.1.0-beta.10] - 2026-04-07
 
 ### Added

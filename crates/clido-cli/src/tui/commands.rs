@@ -2724,15 +2724,12 @@ pub(super) fn handle_workflow_step_error(app: &mut App, error: String) {
 /// Abort the active workflow (parallel batch + main agent), called on Ctrl-C.
 pub(super) fn abort_workflow(app: &mut App) {
     // Extract model to revert and abort any parallel batch.
-    let prev_model = app
-        .active_workflow
-        .as_mut()
-        .and_then(|wf| {
-            if let Some(handle) = wf.parallel_abort.take() {
-                handle.abort();
-            }
-            wf.step_prev_model.take()
-        });
+    let prev_model = app.active_workflow.as_mut().and_then(|wf| {
+        if let Some(handle) = wf.parallel_abort.take() {
+            handle.abort();
+        }
+        wf.step_prev_model.take()
+    });
 
     app.active_workflow = None;
     app.push(ChatLine::Info("  ✗ Workflow cancelled.".into()));

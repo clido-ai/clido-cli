@@ -2435,7 +2435,9 @@ mod tests {
         > {
             unimplemented!()
         }
-        async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+        async fn list_models(
+            &self,
+        ) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
             Ok(vec![])
         }
     }
@@ -2496,7 +2498,9 @@ mod tests {
             unimplemented!()
         }
 
-        async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+        async fn list_models(
+            &self,
+        ) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
             Ok(vec![])
         }
     }
@@ -2882,7 +2886,9 @@ mod tests {
         > {
             unimplemented!()
         }
-        async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+        async fn list_models(
+            &self,
+        ) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
             Ok(vec![])
         }
     }
@@ -3292,7 +3298,9 @@ mod tests {
         > {
             unimplemented!()
         }
-        async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+        async fn list_models(
+            &self,
+        ) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
             Ok(vec![])
         }
     }
@@ -3374,7 +3382,9 @@ mod tests {
         > {
             unimplemented!()
         }
-        async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+        async fn list_models(
+            &self,
+        ) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
             Ok(vec![])
         }
     }
@@ -3462,7 +3472,9 @@ mod tests {
             > {
                 unimplemented!()
             }
-            async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+            async fn list_models(
+                &self,
+            ) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
                 Ok(vec![])
             }
         }

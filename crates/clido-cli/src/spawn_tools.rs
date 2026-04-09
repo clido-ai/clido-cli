@@ -496,7 +496,9 @@ mod tests {
             Ok(Box::pin(futures::stream::empty()))
         }
 
-        async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+        async fn list_models(
+            &self,
+        ) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
             Ok(vec![])
         }
     }

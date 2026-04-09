@@ -274,8 +274,26 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     app.layout.status_rail_active = use_rail;
     let mut stacked_plan_h: u16 = 0;
 
+    // Prompt banner: shows the active prompt (max 2 lines) below the header while busy.
+    let banner_h: u16 = if !is_narrow {
+        if let Some(ref prompt) = app.active_prompt {
+            let first_line = prompt.lines().next().unwrap_or("");
+            let available_w = area.width.saturating_sub(4) as usize;
+            if first_line.chars().count() > available_w {
+                2
+            } else {
+                1
+            }
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
     let (
         header_area,
+        banner_area,
         chat_area,
         plan_area,
         status_area,
@@ -284,19 +302,24 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         input_area,
         rail_area_opt,
     ) = if use_rail {
-        let [h_area, below_header] =
-            Layout::vertical([Constraint::Length(header_h), Constraint::Min(0)]).areas(area);
+        let [h_area, banner_a, below_banner] = Layout::vertical([
+            Constraint::Length(header_h),
+            Constraint::Length(banner_h),
+            Constraint::Min(0),
+        ])
+        .areas(area);
         let [mid_area, hint_a, input_a] = Layout::vertical([
             Constraint::Min(0),
             Constraint::Length(hint_h),
             Constraint::Length(input_h),
         ])
-        .areas(below_header);
+        .areas(below_banner);
         let rail_w = status_panel::status_rail_width(mid_area.width);
         let [chat_a, rail_a] =
             Layout::horizontal([Constraint::Min(0), Constraint::Length(rail_w)]).areas(mid_area);
         (
             h_area,
+            banner_a,
             chat_a,
             Rect::default(),
             Rect::default(),
@@ -314,7 +337,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             app.harness_mode,
         );
         let min_chat_h = 10u16;
-        let reserved_h = header_h + stacked_plan_h + status_h + hint_h + input_h + 2;
+        let reserved_h = header_h + banner_h + stacked_plan_h + status_h + hint_h + input_h + 2;
         let available_for_queue = area.height.saturating_sub(min_chat_h + reserved_h);
         let queue_h = if app.current_step.is_some() && !app.queued.is_empty() {
             let total = 1 + 1 + app.queued.len();
@@ -327,18 +350,20 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         } else {
             0
         };
-        let [h_area, ch_area, pl_area, st_area, qu_area, hi_area, inp_area] = Layout::vertical([
-            Constraint::Length(header_h),
-            Constraint::Min(0),
-            Constraint::Length(stacked_plan_h),
-            Constraint::Length(status_h),
-            Constraint::Length(queue_h),
-            Constraint::Length(hint_h),
-            Constraint::Length(input_h),
-        ])
-        .areas(area);
+        let [h_area, banner_a, ch_area, pl_area, st_area, qu_area, hi_area, inp_area] =
+            Layout::vertical([
+                Constraint::Length(header_h),
+                Constraint::Length(banner_h),
+                Constraint::Min(0),
+                Constraint::Length(stacked_plan_h),
+                Constraint::Length(status_h),
+                Constraint::Length(queue_h),
+                Constraint::Length(hint_h),
+                Constraint::Length(input_h),
+            ])
+            .areas(area);
         (
-            h_area, ch_area, pl_area, st_area, qu_area, hi_area, inp_area, None,
+            h_area, banner_a, ch_area, pl_area, st_area, qu_area, hi_area, inp_area, None,
         )
     };
 
@@ -364,6 +389,37 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let h_inner = hb.inner(header_area);
         frame.render_widget(hb, header_area);
         frame.render_widget(header_para, h_inner);
+    }
+
+    // ── Prompt banner ──
+    // Shows the active prompt (max 2 lines) below the header while the agent is busy.
+    if banner_h > 0 {
+        if let Some(ref prompt) = app.active_prompt {
+            let available_w = banner_area.width.saturating_sub(4) as usize;
+            let first_line = prompt.lines().next().unwrap_or("").trim();
+            let truncated = if first_line.chars().count() > available_w {
+                let s: String = first_line
+                    .chars()
+                    .take(available_w.saturating_sub(1))
+                    .collect();
+                format!("{}…", s)
+            } else {
+                first_line.to_string()
+            };
+            let banner_line = Line::from(vec![
+                Span::styled(
+                    "▶ ",
+                    Style::default()
+                        .fg(TUI_STATE_BUSY)
+                        .add_modifier(Modifier::DIM),
+                ),
+                Span::styled(
+                    truncated,
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(banner_line), banner_area);
+        }
     }
 
     // ── Chat ──
@@ -961,7 +1017,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let id_raw: String = s.session_id.chars().take(8).collect();
             let is_active = app.current_session_id.as_deref() == Some(s.session_id.as_str());
             let id_cell = if is_active {
-                format!("{:<7}●", id_raw.chars().take(7).collect::<String>())
+                format!("{:<8}●", id_raw)
             } else {
                 format!("{id_raw:<8}")
             };
@@ -1803,7 +1859,13 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     format!("{TUI_GUTTER}You"),
                     Style::default().fg(TUI_ACCENT).add_modifier(Modifier::BOLD),
                 )));
-                out.extend(render_markdown(text, width));
+                // Add gutter indentation to each line of content
+                for line in render_markdown(text, width) {
+                    let indented = Line::from(vec![Span::raw(TUI_GUTTER), Span::raw("  ")]);
+                    let mut new_line = indented;
+                    new_line.spans.extend(line.spans);
+                    out.push(new_line);
+                }
                 out.push(Line::raw(""));
             }
             ChatLine::Assistant(text) => {
@@ -1824,7 +1886,13 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                         Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                     ),
                 ]));
-                out.extend(render_markdown(text, width));
+                // Add gutter indentation to each line of content
+                for line in render_markdown(text, width) {
+                    let indented = Line::from(vec![Span::raw(TUI_GUTTER), Span::raw("  ")]);
+                    let mut new_line = indented;
+                    new_line.spans.extend(line.spans);
+                    out.push(new_line);
+                }
                 out.push(Line::raw(""));
             }
             ChatLine::Thinking(text) => {

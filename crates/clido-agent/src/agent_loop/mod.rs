@@ -423,7 +423,9 @@ impl AgentLoop {
 
     /// Switch the model used for subsequent turns. Conversation history is preserved.
     pub fn set_model(&mut self, model: String) {
-        self.config.model = model;
+        self.config.model = model.clone();
+        // Also update the provider's model so it actually uses the new model
+        self.provider.set_model(model);
     }
 
     /// Switch to a new profile (provider + config) while preserving conversation history.
@@ -1334,7 +1336,7 @@ impl AgentLoop {
 
         let mut tool_calls_this_turn: u32 = 0;
         let mut turn_spent_usd: f64 = 0.0;
-        let turn_deadline = if self.config.max_wall_time_per_turn_sec > 0 {
+        let mut turn_deadline = if self.config.max_wall_time_per_turn_sec > 0 {
             Some(Instant::now() + Duration::from_secs(self.config.max_wall_time_per_turn_sec))
         } else {
             None
@@ -1715,9 +1717,16 @@ impl AgentLoop {
                     self.stall.observe_batch(&tool_uses, &outputs);
                     if self.stall.score() >= self.config.stall_threshold {
                         self.metrics.stall_detected();
+                        let tool_names: Vec<&str> =
+                            tool_uses.iter().map(|(_, n, _)| n.as_str()).collect();
+                        let tool_list = tool_names.join(", ");
                         return Err(ClidoError::StallDetected {
-                            reason: "tool stall score reached threshold (repeated batches or all-error rounds)"
-                                .into(),
+                            reason: format!(
+                                "tool stall score {} reached threshold {} (repeated batches or all-error rounds). Tools: {}. Try /stop and rephrase your request, or use /note to guide the agent.",
+                                self.stall.score(),
+                                self.config.stall_threshold,
+                                tool_list
+                            ),
                         });
                     }
 
@@ -1811,6 +1820,14 @@ impl AgentLoop {
                         role: Role::User,
                         content: tool_results,
                     });
+                    // Rolling deadline: reset after each tool batch so the agent
+                    // gets a fresh window as long as it keeps making progress.
+                    if self.config.max_wall_time_per_turn_sec > 0 {
+                        turn_deadline = Some(
+                            Instant::now()
+                                + Duration::from_secs(self.config.max_wall_time_per_turn_sec),
+                        );
+                    }
                 }
                 StopReason::MaxTokens | StopReason::StopSequence => {
                     let text: String = response

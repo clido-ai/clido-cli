@@ -7,6 +7,7 @@ use clido_core::{
 use clido_core::{ClidoError, Result};
 use futures::Stream;
 use std::pin::Pin;
+use std::sync::RwLock;
 use std::time::Duration;
 
 use crate::backoff::{
@@ -26,7 +27,7 @@ const MISTRAL_BASE_URL: &str = "https://api.mistral.ai/v1";
 pub struct OpenAICompatProvider {
     client: reqwest::Client,
     api_key: String,
-    model: String,
+    model: RwLock<String>,
     base_url: String,
     extra_headers: Vec<(String, String)>,
 }
@@ -60,7 +61,7 @@ impl OpenAICompatProvider {
         Self {
             client,
             api_key: api_key.into(),
-            model: model.into(),
+            model: RwLock::new(model.into()),
             base_url: base_url.into(),
             extra_headers,
         }
@@ -235,8 +236,9 @@ impl OpenAICompatProvider {
             .collect();
 
         let max_tokens = config.max_output_tokens.unwrap_or(8192);
+        let model = self.model.read().unwrap().clone();
         let mut body = serde_json::json!({
-            "model": self.model,
+            "model": model,
             "max_tokens": max_tokens,
             "messages": openai_messages
         });
@@ -435,7 +437,8 @@ impl OpenAICompatProvider {
                 }
             } else {
                 let preview: String = text.chars().take(300).collect();
-                format!("API error {} (model: {}): {}", status, self.model, preview)
+                let model = self.model.read().unwrap().clone();
+                format!("API error {} (model: {}): {}", status, model, preview)
             };
             return Err(ClidoError::Provider(msg));
         }
@@ -761,8 +764,9 @@ impl ModelProvider for OpenAICompatProvider {
             .collect();
 
         let max_tokens = config.max_output_tokens.unwrap_or(8192);
+        let model = self.model.read().unwrap().clone();
         let mut body = serde_json::json!({
-            "model": self.model,
+            "model": model,
             "max_tokens": max_tokens,
             "messages": openai_messages,
             "stream": true,
@@ -805,15 +809,17 @@ impl ModelProvider for OpenAICompatProvider {
             if status.as_u16() == 429 {
                 let lower = preview.to_lowercase();
                 let is_sub = crate::backoff::is_subscription_limit(retry_after, &lower);
+                let model = self.model.read().unwrap().clone();
                 return Err(ClidoError::RateLimited {
-                    message: format!("429 (model: {}): {}", self.model, preview),
+                    message: format!("429 (model: {}): {}", model, preview),
                     retry_after_secs: retry_after,
                     is_subscription_limit: is_sub,
                 });
             }
+            let model = self.model.read().unwrap().clone();
             return Err(ClidoError::Provider(format!(
                 "API error {} (model: {}): {}",
-                status, self.model, preview
+                status, model, preview
             )));
         }
 
@@ -871,6 +877,12 @@ impl ModelProvider for OpenAICompatProvider {
             .collect();
         models.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(models)
+    }
+
+    fn set_model(&self, model: String) {
+        if let Ok(mut m) = self.model.write() {
+            *m = model;
+        }
     }
 }
 

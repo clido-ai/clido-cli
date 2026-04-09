@@ -85,4 +85,9 @@ pub trait ModelProvider: Send + Sync {
     /// Returns `Ok(vec![])` if the provider doesn't support model discovery.
     /// `available=false` entries are shown greyed-out in pickers.
     async fn list_models(&self) -> std::result::Result<Vec<ModelEntry>, String>;
+
+    /// Update the model used for subsequent API calls.
+    /// This allows live model switching without recreating the provider.
+    /// Default implementation is a no-op for providers that don't support model switching.
+    fn set_model(&self, _model: String) {}
 }

@@ -418,6 +418,35 @@ pub fn find_recent_session(project_path: &Path, max_age: std::time::Duration) ->
     most_recent.map(|(_, id)| id)
 }
 
+/// Delete all sessions that have no user messages (empty sessions).
+/// Returns the number of deleted sessions.
+pub fn delete_empty_sessions(project_path: &Path) -> anyhow::Result<usize> {
+    let dir = paths::session_dir_for_project(project_path)?;
+    if !dir.exists() {
+        return Ok(0);
+    }
+    let mut deleted = 0;
+    for entry in std::fs::read_dir(&dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                if let Ok(lines) = SessionReader::load(project_path, stem) {
+                    let has_user = lines
+                        .iter()
+                        .any(|l| matches!(l, SessionLine::UserMessage { .. }));
+                    if !has_user {
+                        // Delete empty session
+                        let _ = std::fs::remove_file(&path);
+                        deleted += 1;
+                    }
+                }
+            }
+        }
+    }
+    Ok(deleted)
+}
+
 /// List sessions for a project (newest first). Reads session dir and parses first line for meta.
 pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>> {
     let dir = paths::session_dir_for_project(project_path)?;
@@ -435,7 +464,7 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
                 if let Ok(lines) = load_result {
                     let first: Option<&SessionLine> = lines.first();
                     if let Some(SessionLine::Meta {
-                        session_id,
+                        session_id: _,
                         start_time,
                         project_path: proj,
                         ..
@@ -446,8 +475,10 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
                         if num_turns == 0 {
                             continue;
                         }
+                        // Use the filename (stem) as the session ID, not the meta session_id.
+                        // This ensures consistency when resuming sessions.
                         summaries.push(SessionSummary {
-                            session_id: session_id.clone(),
+                            session_id: stem.to_string(),
                             project_path: proj.clone(),
                             start_time: start_time.clone(),
                             num_turns,

@@ -144,6 +144,24 @@ fn format_tool_detail(name: &str, input: &str) -> String {
                     None => format!("unified diff  ·  {lines} lines"),
                 }
             }
+            "MultiEdit" | "multi_edit" => {
+                let edits = json.get("edits").and_then(|v| v.as_array());
+                let n = edits.map(|a| a.len()).unwrap_or(0);
+                if n == 0 {
+                    "multi-edit".to_string()
+                } else {
+                    let first = edits
+                        .and_then(|a| a.first())
+                        .and_then(|o| o.get("file_path"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if n == 1 {
+                        format!("{}  ·  {}", n, first)
+                    } else {
+                        format!("{} edits  ·  {} …", n, first)
+                    }
+                }
+            }
             _ => {
                 // For unknown tools, show first string value or truncate JSON
                 if let Some(obj) = json.as_object() {
@@ -415,6 +433,7 @@ pub(super) async fn agent_task(
     mut workspace_root: std::path::PathBuf,
     preloaded_config: Option<clido_core::LoadedConfig>,
     preloaded_pricing: clido_core::PricingTable,
+    prompt_tx: mpsc::UnboundedSender<AgentUserInput>,
     mut prompt_rx: mpsc::UnboundedReceiver<AgentUserInput>,
     mut resume_rx: mpsc::UnboundedReceiver<String>,
     mut model_switch_rx: mpsc::UnboundedReceiver<String>,
@@ -925,6 +944,16 @@ pub(super) async fn agent_task(
                 // The cancel flag is checked after tool execution; agent will return
                 // Interrupted and the loop will continue, picking up the queued action.
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                // Immediately queue a continue action so the agent restarts with the note.
+                // This ensures the note is processed right away, not left waiting.
+                if prompt_tx
+                    .send(AgentUserInput::Prompt(
+                        "Please continue, taking into account the note I just sent.".to_string(),
+                    ))
+                    .is_err()
+                {
+                    return;
+                }
             }
             AgentAction::SwitchProfile(profile_name) => {
                 let wr = workspace_root.clone();
@@ -1007,10 +1036,13 @@ pub(super) async fn agent_task(
             AgentAction::Run(prompt) => {
                 let run_start = std::time::Instant::now();
                 cancel.store(false, std::sync::atomic::Ordering::Relaxed);
-                // Clear stale todos from the previous turn so the sidebar reflects
-                // only what the agent writes for this new task.
-                if let Ok(mut todos) = todo_store.lock() {
-                    todos.clear();
+                // Clear stale todos from the previous task so the sidebar reflects
+                // only what the agent writes for this new task. Only clear on first turn
+                // to preserve todos across turns within the same task.
+                if first_turn {
+                    if let Ok(mut todos) = todo_store.lock() {
+                        todos.clear();
+                    }
                 }
 
                 if !title_generated && !heuristic_title_sent && !prompt.trim().is_empty() {
@@ -1886,6 +1918,7 @@ pub(super) fn start_agent_runtime(
         workspace_root,
         preloaded_config,
         preloaded_pricing,
+        prompt_tx.clone(),
         prompt_rx,
         resume_rx,
         model_switch_rx,
@@ -1975,6 +2008,18 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         let wr = workspace_root.clone();
         tokio::task::spawn_blocking(move || {
             let _ = clido_storage::prune_old_sessions(&wr, 30);
+        });
+    }
+
+    // Delete empty sessions (sessions with no user messages) to prevent pollution.
+    {
+        let wr = workspace_root.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Ok(count) = clido_storage::delete_empty_sessions(&wr) {
+                if count > 0 {
+                    tracing::info!("Deleted {} empty session(s)", count);
+                }
+            }
         });
     }
 
@@ -2576,6 +2621,7 @@ pub(super) async fn event_loop(
                         let focus = app.focus();
                         match m.kind {
                             MouseEventKind::ScrollDown => {
+                                dirty = true;
                                 match focus {
                                     FocusTarget::Overlay => {
                                         app.overlay_stack.scroll_by(1);
@@ -2603,6 +2649,7 @@ pub(super) async fn event_loop(
                                 }
                             }
                             MouseEventKind::ScrollUp => {
+                                dirty = true;
                                 match focus {
                                     FocusTarget::Overlay => {
                                         app.overlay_stack.scroll_by(-1);
@@ -2767,7 +2814,15 @@ pub(super) async fn event_loop(
                             app.current_step = Some(step);
                             app.last_executed_step_num = Some(num);
                         }
-                        app.push(ChatLine::Thinking(text));
+                        app.push(ChatLine::Thinking(text.clone()));
+                        // Also show in sidebar that agent is thinking/planning
+                        if app.status_log.is_empty() {
+                            app.push_status(
+                                "thinking".to_string(),
+                                "Thinking".to_string(),
+                                trunc_tool_detail(&text, 40),
+                            );
+                        }
                         // Don't call on_agent_done — the agent is still running.
                     }
                     Some(AgentEvent::Response(text)) => {
@@ -3168,6 +3223,8 @@ pub(super) async fn event_loop(
                     Some(AgentEvent::ModelsLoaded { mut ids, provider }) => {
                         app.models_loading = false;
                         // If the provider returned 0 models, fall back to the hardcoded list.
+                        let mut fallback_ctx: std::collections::HashMap<&str, u32> =
+                            std::collections::HashMap::new();
                         if ids.is_empty() {
                             if let Some(def) = clido_providers::PROVIDER_REGISTRY
                                 .iter()
@@ -3175,6 +3232,9 @@ pub(super) async fn event_loop(
                             {
                                 if !def.fallback_models.is_empty() {
                                     ids = def.fallback_models.iter().map(|s| s.to_string()).collect();
+                                    for &(id, ctx_k) in def.fallback_model_context_k {
+                                        fallback_ctx.insert(id, ctx_k);
+                                    }
                                 }
                             }
                         }
@@ -3203,7 +3263,7 @@ pub(super) async fn event_loop(
                                         provider: provider.clone(),
                                         input_mtok: 0.0,
                                         output_mtok: 0.0,
-                                        context_k: None,
+                                        context_k: fallback_ctx.get(id.as_str()).copied(),
                                         role: None,
                                         is_favorite: false,
                                     });
@@ -3250,11 +3310,16 @@ pub(super) async fn event_loop(
                     Some(AgentEvent::ModelsFetchFailed { provider, error }) => {
                         app.models_loading = false;
                         // Try to populate the picker with fallback models even on failure.
-                        let fallback: Vec<String> = clido_providers::PROVIDER_REGISTRY
-                            .iter()
-                            .find(|d| d.id == provider.as_str())
-                            .map(|d| d.fallback_models.iter().map(|s| s.to_string()).collect())
-                            .unwrap_or_default();
+                        let (fallback, fallback_ctx): (Vec<String>, std::collections::HashMap<&str, u32>) =
+                            clido_providers::PROVIDER_REGISTRY
+                                .iter()
+                                .find(|d| d.id == provider.as_str())
+                                .map(|d| {
+                                    let ids = d.fallback_models.iter().map(|s| s.to_string()).collect();
+                                    let ctx = d.fallback_model_context_k.iter().copied().collect();
+                                    (ids, ctx)
+                                })
+                                .unwrap_or_default();
                         if !fallback.is_empty() {
                             // Merge into known_models.
                             let existing: std::collections::HashSet<String> =
@@ -3266,7 +3331,7 @@ pub(super) async fn event_loop(
                                         provider: provider.clone(),
                                         input_mtok: 0.0,
                                         output_mtok: 0.0,
-                                        context_k: None,
+                                        context_k: fallback_ctx.get(id.as_str()).copied(),
                                         role: None,
                                         is_favorite: false,
                                     });

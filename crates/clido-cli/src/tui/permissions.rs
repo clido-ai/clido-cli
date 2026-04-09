@@ -147,6 +147,22 @@ pub(super) fn format_tool_input(name: &str, input: &serde_json::Value) -> String
                 .map(|p| format!("  {}", p))
                 .unwrap_or_default()
         ),
+        "MultiEdit" => {
+            let n = input["edits"].as_array().map(|a| a.len()).unwrap_or(0);
+            let first = input["edits"]
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|o| o.get("file_path"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if n == 0 {
+                "multi-edit".to_string()
+            } else if n == 1 {
+                format!("{}  ·  {}", n, first)
+            } else {
+                format!("{} edits  ·  {} …", n, first)
+            }
+        }
         _ => input.to_string(),
     };
     if s.chars().count() > 72 {

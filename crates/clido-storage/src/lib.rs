@@ -9,9 +9,9 @@ pub use paths::{
     data_dir, sanitize_for_audit, session_dir_for_project, session_file_path, workflow_run_path,
 };
 pub use session::{
-    delete_session, find_recent_session, list_sessions, prune_old_sessions, redact_secrets,
-    stale_paths, SessionLine, SessionReader, SessionSummary, SessionWriter, StaleFileRecord,
-    SCHEMA_VERSION,
+    delete_empty_sessions, delete_session, find_recent_session, list_sessions, prune_old_sessions,
+    redact_secrets, stale_paths, SessionLine, SessionReader, SessionSummary, SessionWriter,
+    StaleFileRecord, SCHEMA_VERSION,
 };
 
 use std::path::Path;

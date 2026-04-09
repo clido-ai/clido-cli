@@ -7,6 +7,7 @@ use clido_core::{
 use clido_core::{ClidoError, Result};
 use futures::Stream;
 use std::pin::Pin;
+use std::sync::RwLock;
 use std::time::Duration;
 
 use crate::backoff::{
@@ -22,7 +23,7 @@ use crate::provider::{ModelProvider, StreamEvent};
 pub struct AnthropicProvider {
     client: reqwest::Client,
     api_key: String,
-    model: String,
+    model: RwLock<String>,
 }
 
 impl AnthropicProvider {
@@ -44,7 +45,7 @@ impl AnthropicProvider {
         Self {
             client,
             api_key: api_key.into(),
-            model: model.into(),
+            model: RwLock::new(model.into()),
         }
     }
 
@@ -94,8 +95,9 @@ impl AnthropicProvider {
         }]);
 
         let max_tokens = config.max_output_tokens.unwrap_or(8192);
+        let model = self.model.read().unwrap().clone();
         let body = serde_json::json!({
-            "model": self.model,
+            "model": model,
             "max_tokens": max_tokens,
             "system": system_blocks,
             "messages": anthropic_messages,
@@ -627,8 +629,9 @@ impl ModelProvider for AnthropicProvider {
         }]);
 
         let max_tokens = config.max_output_tokens.unwrap_or(8192);
+        let model = self.model.read().unwrap().clone();
         let body = serde_json::json!({
-            "model": self.model,
+            "model": model,
             "max_tokens": max_tokens,
             "system": system_blocks,
             "messages": anthropic_messages,
@@ -659,10 +662,11 @@ impl ModelProvider for AnthropicProvider {
                     || lower.contains("subscription")
                     || lower.contains("limit exceeded")
                     || lower.contains("allowance");
+                let model = self.model.read().unwrap().clone();
                 return Err(ClidoError::RateLimited {
                     message: format!(
                         "429 (model: {}): {}",
-                        self.model,
+                        model,
                         text.chars().take(300).collect::<String>()
                     ),
                     retry_after_secs: retry_after,
@@ -707,6 +711,12 @@ impl ModelProvider for AnthropicProvider {
             .collect();
         models.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(models)
+    }
+
+    fn set_model(&self, model: String) {
+        if let Ok(mut m) = self.model.write() {
+            *m = model;
+        }
     }
 }
 

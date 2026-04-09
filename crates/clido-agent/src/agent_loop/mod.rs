@@ -423,7 +423,9 @@ impl AgentLoop {
 
     /// Switch the model used for subsequent turns. Conversation history is preserved.
     pub fn set_model(&mut self, model: String) {
-        self.config.model = model;
+        self.config.model = model.clone();
+        // Also update the provider's model so it actually uses the new model
+        self.provider.set_model(model);
     }
 
     /// Switch to a new profile (provider + config) while preserving conversation history.

@@ -1007,6 +1007,11 @@ pub(super) async fn agent_task(
             AgentAction::Run(prompt) => {
                 let run_start = std::time::Instant::now();
                 cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+                // Clear stale todos from the previous turn so the sidebar reflects
+                // only what the agent writes for this new task.
+                if let Ok(mut todos) = todo_store.lock() {
+                    todos.clear();
+                }
 
                 if !title_generated && !heuristic_title_sent && !prompt.trim().is_empty() {
                     heuristic_title_sent = true;

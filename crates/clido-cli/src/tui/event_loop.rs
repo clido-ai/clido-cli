@@ -433,6 +433,7 @@ pub(super) async fn agent_task(
     mut workspace_root: std::path::PathBuf,
     preloaded_config: Option<clido_core::LoadedConfig>,
     preloaded_pricing: clido_core::PricingTable,
+    prompt_tx: mpsc::UnboundedSender<AgentUserInput>,
     mut prompt_rx: mpsc::UnboundedReceiver<AgentUserInput>,
     mut resume_rx: mpsc::UnboundedReceiver<String>,
     mut model_switch_rx: mpsc::UnboundedReceiver<String>,
@@ -943,6 +944,14 @@ pub(super) async fn agent_task(
                 // The cancel flag is checked after tool execution; agent will return
                 // Interrupted and the loop will continue, picking up the queued action.
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                // Immediately queue a continue action so the agent restarts with the note.
+                // This ensures the note is processed right away, not left waiting.
+                if prompt_tx
+                    .send(AgentUserInput::Prompt("Please continue, taking into account the note I just sent.".to_string()))
+                    .is_err()
+                {
+                    return;
+                }
             }
             AgentAction::SwitchProfile(profile_name) => {
                 let wr = workspace_root.clone();
@@ -1907,6 +1916,7 @@ pub(super) fn start_agent_runtime(
         workspace_root,
         preloaded_config,
         preloaded_pricing,
+        prompt_tx.clone(),
         prompt_rx,
         resume_rx,
         model_switch_rx,
@@ -2609,6 +2619,7 @@ pub(super) async fn event_loop(
                         let focus = app.focus();
                         match m.kind {
                             MouseEventKind::ScrollDown => {
+                                dirty = true;
                                 match focus {
                                     FocusTarget::Overlay => {
                                         app.overlay_stack.scroll_by(1);
@@ -2636,6 +2647,7 @@ pub(super) async fn event_loop(
                                 }
                             }
                             MouseEventKind::ScrollUp => {
+                                dirty = true;
                                 match focus {
                                     FocusTarget::Overlay => {
                                         app.overlay_stack.scroll_by(-1);
@@ -2800,7 +2812,15 @@ pub(super) async fn event_loop(
                             app.current_step = Some(step);
                             app.last_executed_step_num = Some(num);
                         }
-                        app.push(ChatLine::Thinking(text));
+                        app.push(ChatLine::Thinking(text.clone()));
+                        // Also show in sidebar that agent is thinking/planning
+                        if app.status_log.is_empty() {
+                            app.push_status(
+                                "thinking".to_string(),
+                                "Thinking".to_string(),
+                                trunc_tool_detail(&text, 40),
+                            );
+                        }
                         // Don't call on_agent_done — the agent is still running.
                     }
                     Some(AgentEvent::Response(text)) => {

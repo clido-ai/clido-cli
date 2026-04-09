@@ -166,6 +166,11 @@ pub(crate) fn gather_plan_panel_steps(app: &App) -> Vec<PlanPanelStep> {
                 text: s.clone(),
             }];
         }
+        // Fallback: show that agent is working even if no step was extracted
+        return vec![PlanPanelStep {
+            status: PlanPanelStepStatus::Active,
+            text: "Analyzing and planning...".to_string(),
+        }];
     }
 
     Vec::new()

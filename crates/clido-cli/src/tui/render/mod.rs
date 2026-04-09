@@ -1002,7 +1002,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let id_raw: String = s.session_id.chars().take(8).collect();
             let is_active = app.current_session_id.as_deref() == Some(s.session_id.as_str());
             let id_cell = if is_active {
-                format!("{:<7}●", id_raw.chars().take(7).collect::<String>())
+                format!("{:<8}●", id_raw)
             } else {
                 format!("{id_raw:<8}")
             };
@@ -1844,7 +1844,16 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     format!("{TUI_GUTTER}You"),
                     Style::default().fg(TUI_ACCENT).add_modifier(Modifier::BOLD),
                 )));
-                out.extend(render_markdown(text, width));
+                // Add gutter indentation to each line of content
+                for line in render_markdown(text, width) {
+                    let indented = Line::from(vec![
+                        Span::raw(TUI_GUTTER),
+                        Span::raw("  "),
+                    ]);
+                    let mut new_line = indented;
+                    new_line.spans.extend(line.spans);
+                    out.push(new_line);
+                }
                 out.push(Line::raw(""));
             }
             ChatLine::Assistant(text) => {
@@ -1865,7 +1874,16 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                         Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
                     ),
                 ]));
-                out.extend(render_markdown(text, width));
+                // Add gutter indentation to each line of content
+                for line in render_markdown(text, width) {
+                    let indented = Line::from(vec![
+                        Span::raw(TUI_GUTTER),
+                        Span::raw("  "),
+                    ]);
+                    let mut new_line = indented;
+                    new_line.spans.extend(line.spans);
+                    out.push(new_line);
+                }
                 out.push(Line::raw(""));
             }
             ChatLine::Thinking(text) => {

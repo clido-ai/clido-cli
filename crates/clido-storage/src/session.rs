@@ -464,7 +464,7 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
                 if let Ok(lines) = load_result {
                     let first: Option<&SessionLine> = lines.first();
                     if let Some(SessionLine::Meta {
-                        session_id,
+                        session_id: _,
                         start_time,
                         project_path: proj,
                         ..
@@ -475,8 +475,10 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
                         if num_turns == 0 {
                             continue;
                         }
+                        // Use the filename (stem) as the session ID, not the meta session_id.
+                        // This ensures consistency when resuming sessions.
                         summaries.push(SessionSummary {
-                            session_id: session_id.clone(),
+                            session_id: stem.to_string(),
                             project_path: proj.clone(),
                             start_time: start_time.clone(),
                             num_turns,

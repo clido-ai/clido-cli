@@ -749,13 +749,19 @@ impl App {
             }
         }
 
-        // /stop command bypasses queue and executes immediately
+        // /stop and /note commands bypass queue and execute immediately
         if text == "/stop" {
             if self.busy {
                 self.stop_only();
             } else {
                 self.push(ChatLine::Info(copy_info::NO_ACTIVE_STOP.into()));
             }
+            self.text_input.text.clear();
+            self.text_input.cursor = 0;
+            return;
+        }
+        if text.starts_with("/note") {
+            self.dispatch_user_input(text);
             self.text_input.text.clear();
             self.text_input.cursor = 0;
             return;

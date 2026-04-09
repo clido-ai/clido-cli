@@ -2261,7 +2261,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         // Alt+Enter: also interrupt (for terminals where Ctrl+Enter doesn't work)
         (Km::ALT, Enter) => app.force_send(),
         // Ctrl+Shift+C: enter copy mode for selecting chat lines.
-        (Km::CONTROL | Km::SHIFT, Char('c')) => {
+        (Km::CONTROL, Char('c')) if event.modifiers.contains(Km::SHIFT) => {
             app.selection_mode = !app.selection_mode;
             if app.selection_mode {
                 app.selection.clear();

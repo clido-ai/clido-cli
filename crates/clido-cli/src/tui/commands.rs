@@ -3259,7 +3259,7 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
                 app.push(ChatLine::Info("  ✗ No active run to stop".into()));
             }
         }
-        _ if cmd.starts_with("/note ") => cmd_note(app, cmd),
+        _ if cmd.starts_with("/note") => cmd_note(app, cmd),
         _ if cmd == "/copy" || cmd.starts_with("/copy ") => cmd_copy(app, cmd),
         "/quit" => {
             app.quit = true;

@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/note` command**: Fixed pattern matching to accept `/note` without requiring a space after it. Fixed `/note` to bypass the input queue when agent is busy, executing immediately as intended.
 - **Keyboard shortcuts**: Fixed `Ctrl+Shift+C` copy mode shortcut that was incorrectly matching `Shift+C` alone due to bitwise OR usage.
 - **TodoWrite display**: Fixed raw JSON display of TodoWrite tool in TUI - now shows human-readable summary.
+- **MultiEdit display**: Fixed raw JSON display of MultiEdit tool in TUI sidebar and input.
+- **Stall detection**: Increased default threshold from 6 to 12 for better tolerance of legitimate retries.
+- **Session ID consistency**: Fixed mismatch between header and session picker session IDs.
+- **Mouse scroll**: Fixed immediate redraw after mouse scrolling.
+- **Note interruption**: Fixed /note to immediately restart agent with note in context.
+- **Content indentation**: Fixed indentation for content under You/Clido labels.
+- **Task panel feedback**: Show "Analyzing and planning..." in task panel when agent is busy without todos.
 
 ## [0.1.0-beta.9] - 2026-04-04
 

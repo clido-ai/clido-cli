@@ -27,6 +27,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TUI workflow orchestration**: Major overhaul of workflow execution in the TUI — improved state management, event handling, and command dispatch for reliable workflow runs from the interactive interface.
 - **Plan rendering in TUI**: Better handling of plan display with correct column/byte-width tracking.
 
+## [0.1.0-beta.8] - 2026-04-04
+
+### Fixed
+
+- **Linux clipboard read build**: Fixed compilation error on Linux when reading clipboard data.
+
+## [0.1.0-beta.7] - 2026-04-03
+
+### Added
+
+- **Automatic tool retry with self-recovery** (`clido-agent`): When a tool fails, the agent now automatically retries up to 3 times with intelligent recovery strategies. Retryable errors include network/timeout errors, file-not-found, permission denied, and DNS/SSL errors. Non-retryable errors (syntax errors, logical errors, user denials) return immediately. First pass runs tools in parallel; failed calls are retried individually.
+- **Interactive `/allow-path`**: When a tool tries to access a path outside the workspace, the agent interrupts and asks for permission (y/n/a — allow once, deny, or always allow for the session) instead of failing outright.
+- **External path access commands** (`/allow-path <path>`, `/allowed-paths`): Allow agent to read/write files outside the workspace for the current session. Paths are canonicalized to prevent symlink attacks.
+- **Seamless profile switching** (`/profile <name>`): Switching profiles no longer restarts the TUI. The agent switches in-place while keeping chat history and UI state intact.
+- **`/profile delete <name>`**: Delete profiles from the TUI (was previously CLI-only).
+- **Auto-detect context windows**: Models not in `pricing.toml` now get context windows based on their family (kimi: 128k–256k, mistral: 32k–128k, qwen: 32k–128k, etc.) instead of defaulting to 200k. Fixes context-exceeded errors for models with smaller limits.
+
+### Changed
+
+- **Slower, more precise scrolling**: Mouse wheel scrolls 1 line per event (was 3). PageUp/PageDown scroll 3 lines (was 10).
+- **Softer text color**: Replaced pure white (`#FFFFFF`) with warm gray (`#D4D4DC`) across chat rendering, profiles, plan editor, setup wizard, and toasts — ~17% dimmer for reduced eye strain.
+- **Profile credential reuse**: When creating a profile with a provider that already has a saved key, the API key step is skipped. Enhanced profile creation with progress bar and improved key catalog.
+- **Updated model defaults**: Default model in docs/examples updated to `claude-sonnet-4-5` / `claude-haiku-4-5`.
+- **Comprehensive docs audit**: All 17 provider docs updated with current model names, credentials documentation, and internal cross-links.
+
+### Fixed
+
+- **`/note` interrupt**: `/note` now interrupts the running agent and injects the message immediately instead of being queued. Agent cancels current run and restarts with the note in context.
+
+## [0.1.0-beta.6] - 2026-04-03
+
+### Added
+
+- **Side-by-side diff viewer**: Activates at >=120 columns with GitHub-style layout for displaying diffs in the TUI.
+- **Unified credential storage**: Credentials are now stored in a separate credentials file, shared across all profile flows (setup, TUI, CLI).
+- **GitHub organization migration**: All URLs migrated to `clido-ai/clido-cli`. Install script URL updated to `clido.ai/install.sh`.
+
+### Changed
+
+- **Public repo preparation**: Rewrote `CONTRIBUTING.md` for public consumption. Removed project-local and IDE files from git tracking. Fixed formatting and coverage config for CI.
+
+### Fixed
+
+- **Update check**: Switched from `/releases/latest` (which ignores prereleases and has aggressive caching) to `/releases?per_page=1` for accurate update detection.
+
 ## [0.1.0-beta.5] - 2026-04-03
 
 ### Changed

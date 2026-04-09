@@ -144,6 +144,24 @@ fn format_tool_detail(name: &str, input: &str) -> String {
                     None => format!("unified diff  ·  {lines} lines"),
                 }
             }
+            "MultiEdit" | "multi_edit" => {
+                let edits = json.get("edits").and_then(|v| v.as_array());
+                let n = edits.map(|a| a.len()).unwrap_or(0);
+                if n == 0 {
+                    "multi-edit".to_string()
+                } else {
+                    let first = edits
+                        .and_then(|a| a.first())
+                        .and_then(|o| o.get("file_path"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if n == 1 {
+                        format!("{}  ·  {}", n, first)
+                    } else {
+                        format!("{} edits  ·  {} …", n, first)
+                    }
+                }
+            }
             _ => {
                 // For unknown tools, show first string value or truncate JSON
                 if let Some(obj) = json.as_object() {

@@ -1717,9 +1717,15 @@ impl AgentLoop {
                     self.stall.observe_batch(&tool_uses, &outputs);
                     if self.stall.score() >= self.config.stall_threshold {
                         self.metrics.stall_detected();
+                        let tool_names: Vec<&str> = tool_uses.iter().map(|(_, n, _)| n.as_str()).collect();
+                        let tool_list = tool_names.join(", ");
                         return Err(ClidoError::StallDetected {
-                            reason: "tool stall score reached threshold (repeated batches or all-error rounds)"
-                                .into(),
+                            reason: format!(
+                                "tool stall score {} reached threshold {} (repeated batches or all-error rounds). Tools: {}. Try /stop and rephrase your request, or use /note to guide the agent.",
+                                self.stall.score(),
+                                self.config.stall_threshold,
+                                tool_list
+                            ),
                         });
                     }
 

@@ -354,7 +354,7 @@ pub(super) fn read_clipboard() -> Result<String, String> {
                 }
             }
         }
-        return Err("clipboard read failed (install wl-paste, xclip, or xsel)".into());
+        Err("clipboard read failed (install wl-paste, xclip, or xsel)".into())
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]

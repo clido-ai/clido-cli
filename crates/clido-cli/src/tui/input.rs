@@ -784,15 +784,20 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                         ProfileCreateStep::Model => {
                             // Prefer selected item from picker; fall back to whatever is typed
                             // in the filter box so users can always type a model ID manually.
-                            let model_id = st.profile_model_picker.as_ref().and_then(|p| {
-                                let filtered = p.filtered();
-                                filtered.get(p.selected).map(|m| m.id.clone())
-                            }).or_else(|| {
-                                // Use the filter text as a literal model ID if no picker match.
-                                st.profile_model_picker.as_ref()
-                                    .map(|p| p.filter.trim().to_string())
-                                    .filter(|s| !s.is_empty())
-                            });
+                            let model_id = st
+                                .profile_model_picker
+                                .as_ref()
+                                .and_then(|p| {
+                                    let filtered = p.filtered();
+                                    filtered.get(p.selected).map(|m| m.id.clone())
+                                })
+                                .or_else(|| {
+                                    // Use the filter text as a literal model ID if no picker match.
+                                    st.profile_model_picker
+                                        .as_ref()
+                                        .map(|p| p.filter.trim().to_string())
+                                        .filter(|s| !s.is_empty())
+                                });
                             if let Some(id) = model_id {
                                 st.model = id;
                                 st.input.clear();
@@ -1012,14 +1017,19 @@ pub(super) fn handle_profile_overlay_key(app: &mut App, event: crossterm::event:
                         // Skip validation on the BaseUrl step.
                         const MIN_KEY_LEN: usize = 20;
                         if *step == ProfileCreateStep::ApiKey
-                            && prev_len < MIN_KEY_LEN && st.input.len() >= MIN_KEY_LEN
+                            && prev_len < MIN_KEY_LEN
+                            && st.input.len() >= MIN_KEY_LEN
                             && !app.models_loading
                         {
                             st.status = Some("  Validating…".to_string());
                             spawn_model_fetch(
                                 st.provider.clone(),
                                 st.input.trim().to_string(),
-                                if st.base_url.is_empty() { None } else { Some(st.base_url.clone()) },
+                                if st.base_url.is_empty() {
+                                    None
+                                } else {
+                                    Some(st.base_url.clone())
+                                },
                                 app.channels.fetch_tx.clone(),
                             );
                             app.models_loading = true;
@@ -2213,7 +2223,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 // Apply the step's on_error policy so it doesn't zombify.
                 if app.active_workflow.is_some() {
                     crate::tui::commands::handle_workflow_step_error(
-                        app, "rate limit auto-resume cancelled by user".into()
+                        app,
+                        "rate limit auto-resume cancelled by user".into(),
                     );
                 }
             } else if app.rate_limit_pinging && !app.rate_limit_cancelled {
@@ -2227,7 +2238,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 ));
                 if app.active_workflow.is_some() {
                     crate::tui::commands::handle_workflow_step_error(
-                        app, "rate limit auto-resume cancelled by user".into()
+                        app,
+                        "rate limit auto-resume cancelled by user".into(),
                     );
                 }
             } else if app.editing_queued_item.is_some() {

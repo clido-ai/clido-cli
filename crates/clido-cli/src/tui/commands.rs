@@ -2137,6 +2137,7 @@ pub(super) fn cmd_enhance(app: &mut App, cmd: &str) {
 // the next sequential step starts.
 
 /// Run a single isolated agent step (used for parallel batches only).
+#[allow(clippy::too_many_arguments)]
 async fn run_isolated_step(
     step_id: String,
     rendered_prompt: String,
@@ -2149,10 +2150,10 @@ async fn run_isolated_step(
     outputs: Vec<clido_workflows::OutputDef>,
     context_snapshot: clido_workflows::WorkflowContext,
 ) -> (String, String, f64, u64) {
+    use clido_agent::AgentLoop;
     use clido_core::{agent_config_from_loaded, load_config, load_pricing, PermissionMode};
     use clido_storage::SessionWriter;
     use clido_tools::default_registry_with_options;
-    use clido_agent::AgentLoop;
     use std::io::Write as _;
 
     let do_run = async {
@@ -2161,20 +2162,31 @@ async fn run_isolated_step(
         let profile = loaded.get_profile(&profile_name)?;
         clido_core::LoadedConfig::validate_provider(&profile.provider)?;
         let provider = crate::provider::make_provider(&profile_name, profile, None, None)
-            .map_err(|e| clido_core::ClidoError::Workflow(e))?;
+            .map_err(clido_core::ClidoError::Workflow)?;
         let model = loaded.get_profile(&profile_name)?.model.clone();
-        let blocked = clido_core::global_config_path().into_iter().collect::<Vec<_>>();
+        let blocked = clido_core::global_config_path()
+            .into_iter()
+            .collect::<Vec<_>>();
         let mut registry = default_registry_with_options(workspace_root.clone(), blocked, false);
         registry = crate::agent_setup::load_mcp_tools_from_path(None, true, registry);
-        let tools_explicitly_empty = tools.as_ref().map_or(false, |t| t.is_empty());
+        let tools_explicitly_empty = tools.as_ref().is_some_and(|t| t.is_empty());
         registry = registry.with_filters(tools, None);
         if registry.schemas().is_empty() && !tools_explicitly_empty {
-            return Err(clido_core::ClidoError::Workflow("No tools available for step".into()));
+            return Err(clido_core::ClidoError::Workflow(
+                "No tools available for step".into(),
+            ));
         }
         let sp = system_prompt.unwrap_or_else(|| "You are a helpful coding assistant.".into());
         let mut config = agent_config_from_loaded(
-            &loaded, &profile_name, max_turns, None, Some(model), Some(sp),
-            Some(PermissionMode::AcceptAll), false, None,
+            &loaded,
+            &profile_name,
+            max_turns,
+            None,
+            Some(model),
+            Some(sp),
+            Some(PermissionMode::AcceptAll),
+            false,
+            None,
         )?;
         if config.max_context_tokens.is_none() {
             if let Some(entry) = pricing_table.models.get(&config.model) {
@@ -2185,19 +2197,30 @@ async fn run_isolated_step(
         }
         let session_id = format!("{run_id}_{step_id}");
         let mut writer = SessionWriter::create(&workspace_root, &session_id)?;
-        let mut loop_ = crate::agent_setup::with_optional_trace_metrics(
-            AgentLoop::new(provider, registry, config, None),
-        );
+        let mut loop_ = crate::agent_setup::with_optional_trace_metrics(AgentLoop::new(
+            provider, registry, config, None,
+        ));
         let start = std::time::Instant::now();
-        let text = loop_.run(&rendered_prompt, Some(&mut writer), Some(&pricing_table), None).await?;
+        let text = loop_
+            .run(
+                &rendered_prompt,
+                Some(&mut writer),
+                Some(&pricing_table),
+                None,
+            )
+            .await?;
         let duration_ms = start.elapsed().as_millis() as u64;
         let _ = writer.flush();
         // Apply save_to for this step.
         for out in &outputs {
             if let Some(ref tmpl) = out.save_to {
-                if let Ok(path_str) = clido_workflows::render_save_to(tmpl, &context_snapshot, &step_id) {
+                if let Ok(path_str) =
+                    clido_workflows::render_save_to(tmpl, &context_snapshot, &step_id)
+                {
                     let p = std::path::Path::new(&path_str);
-                    if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+                    if let Some(parent) = p.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
                     let _ = std::fs::write(p, &text);
                 }
             }
@@ -2223,13 +2246,20 @@ fn start_workflow(
 
     let def = match load_workflow(&path) {
         Ok(d) => d,
-        Err(e) => { app.push(ChatLine::Info(format!("  ✗ {e}"))); return; }
+        Err(e) => {
+            app.push(ChatLine::Info(format!("  ✗ {e}")));
+            return;
+        }
     };
     if let Err(e) = validate_workflow(&def) {
-        app.push(ChatLine::Info(format!("  ✗ Invalid workflow: {e}"))); return;
+        app.push(ChatLine::Info(format!("  ✗ Invalid workflow: {e}")));
+        return;
     }
     if let Err(e) = clido_workflows::check_prerequisites(&def) {
-        app.push(ChatLine::Info(format!("  ✗ Prerequisite check failed: {e}"))); return;
+        app.push(ChatLine::Info(format!(
+            "  ✗ Prerequisite check failed: {e}"
+        )));
+        return;
     }
 
     let overrides: Vec<(String, serde_json::Value)> = inputs
@@ -2238,14 +2268,21 @@ fn start_workflow(
         .collect();
     let resolved = match WorkflowContext::resolve_inputs(&def, &overrides) {
         Ok(r) => r,
-        Err(e) => { app.push(ChatLine::Info(format!("  ✗ Input error: {e}"))); return; }
+        Err(e) => {
+            app.push(ChatLine::Info(format!("  ✗ Input error: {e}")));
+            return;
+        }
     };
 
-    let panel_steps = def.steps.iter().map(|s| crate::tui::app_state::WorkflowStepEntry {
-        step_id: s.id.clone(),
-        name: s.name.clone().unwrap_or_else(|| s.id.clone()),
-        status: crate::tui::app_state::WorkflowStepStatus::Pending,
-    }).collect();
+    let panel_steps = def
+        .steps
+        .iter()
+        .map(|s| crate::tui::app_state::WorkflowStepEntry {
+            step_id: s.id.clone(),
+            name: s.name.clone().unwrap_or_else(|| s.id.clone()),
+            status: crate::tui::app_state::WorkflowStepStatus::Pending,
+        })
+        .collect();
 
     let run_id = uuid::Uuid::new_v4().to_string();
     let sequential_count = def.steps.iter().filter(|s| !s.parallel).count();
@@ -2316,7 +2353,11 @@ pub(super) fn advance_workflow(app: &mut App) {
         let wf = app.active_workflow.as_ref().unwrap();
         let step = &wf.def.steps[current_idx];
         if step.parallel {
-            wf.def.steps[current_idx..].iter().take_while(|s| s.parallel).cloned().collect()
+            wf.def.steps[current_idx..]
+                .iter()
+                .take_while(|s| s.parallel)
+                .cloned()
+                .collect()
         } else {
             vec![]
         }
@@ -2339,13 +2380,18 @@ pub(super) fn advance_workflow(app: &mut App) {
         // Render prompts and collect everything needed for the task.
         let (tasks, context_snapshot, workspace_root, run_id, fetch_tx) = {
             let wf = app.active_workflow.as_ref().unwrap();
-            let fallback_profile = wf.profile_override.clone()
+            let fallback_profile = wf
+                .profile_override
+                .clone()
                 .unwrap_or_else(|| app.current_profile.clone());
             let mut tasks = Vec::new();
             for step in &parallel_batch {
                 let rendered = clido_workflows::render(&step.prompt, &wf.context)
                     .unwrap_or_else(|_| step.prompt.clone());
-                let profile = step.profile.clone().unwrap_or_else(|| fallback_profile.clone());
+                let profile = step
+                    .profile
+                    .clone()
+                    .unwrap_or_else(|| fallback_profile.clone());
                 tasks.push((
                     step.id.clone(),
                     rendered,
@@ -2356,27 +2402,47 @@ pub(super) fn advance_workflow(app: &mut App) {
                     step.outputs.clone(),
                 ));
             }
-            (tasks, wf.context.clone(), app.workspace_root.clone(),
-             wf.run_id.clone(), app.channels.fetch_tx.clone())
+            (
+                tasks,
+                wf.context.clone(),
+                app.workspace_root.clone(),
+                wf.run_id.clone(),
+                app.channels.fetch_tx.clone(),
+            )
         };
 
-        let step_names: Vec<String> = parallel_batch.iter()
+        let step_names: Vec<String> = parallel_batch
+            .iter()
             .map(|s| s.name.clone().unwrap_or_else(|| s.id.clone()))
             .collect();
         app.push(ChatLine::Info(format!(
             "  ⇉ Running {} parallel steps: {}",
-            batch_len, step_names.join(", ")
+            batch_len,
+            step_names.join(", ")
         )));
 
         let handle = tokio::spawn(async move {
-            let futs: Vec<_> = tasks.into_iter().map(|(sid, prompt, prof, tools, sp, mt, outs)| {
-                run_isolated_step(
-                    sid, prompt, prof, workspace_root.clone(),
-                    run_id.clone(), tools, sp, mt, outs, context_snapshot.clone(),
-                )
-            }).collect();
+            let futs: Vec<_> = tasks
+                .into_iter()
+                .map(|(sid, prompt, prof, tools, sp, mt, outs)| {
+                    run_isolated_step(
+                        sid,
+                        prompt,
+                        prof,
+                        workspace_root.clone(),
+                        run_id.clone(),
+                        tools,
+                        sp,
+                        mt,
+                        outs,
+                        context_snapshot.clone(),
+                    )
+                })
+                .collect();
             let outputs = futures::future::join_all(futs).await;
-            let _ = fetch_tx.send(AgentEvent::WorkflowParallelBatchDone { outputs }).await;
+            let _ = fetch_tx
+                .send(AgentEvent::WorkflowParallelBatchDone { outputs })
+                .await;
         });
 
         app.active_workflow.as_mut().unwrap().parallel_abort = Some(handle.abort_handle());
@@ -2392,7 +2458,10 @@ pub(super) fn advance_workflow(app: &mut App) {
         let rendered = match clido_workflows::render(&step.prompt, &wf.context) {
             Ok(p) => p,
             Err(e) => {
-                app.push(ChatLine::Info(format!("  ✗ Failed to render step '{}': {e}", step.id)));
+                app.push(ChatLine::Info(format!(
+                    "  ✗ Failed to render step '{}': {e}",
+                    step.id
+                )));
                 app.on_agent_done();
                 app.active_workflow = None;
                 return;
@@ -2401,15 +2470,25 @@ pub(super) fn advance_workflow(app: &mut App) {
         // Tool restriction hint (best effort — main agent registry can't be changed per-step).
         let tools_hint = step.tools.as_ref().map(|t| {
             if t.is_empty() {
-                "IMPORTANT: Do not use any tools for this step. Write your response directly.".to_string()
+                "IMPORTANT: Do not use any tools for this step. Write your response directly."
+                    .to_string()
             } else {
-                format!("IMPORTANT: For this step, only use these tools if needed: {}.", t.join(", "))
+                format!(
+                    "IMPORTANT: For this step, only use these tools if needed: {}.",
+                    t.join(", ")
+                )
             }
         });
         // Effective profile: step-level > workflow --profile= override > session default.
-        let effective_profile = step.profile.clone()
-            .or_else(|| wf.profile_override.clone());
-        (step.id.clone(), name, rendered, effective_profile, tools_hint, step.system_prompt.clone())
+        let effective_profile = step.profile.clone().or_else(|| wf.profile_override.clone());
+        (
+            step.id.clone(),
+            name,
+            rendered,
+            effective_profile,
+            tools_hint,
+            step.system_prompt.clone(),
+        )
     };
 
     // Update step status to Active.
@@ -2424,7 +2503,8 @@ pub(super) fn advance_workflow(app: &mut App) {
     // Show a step header in chat.
     app.push(ChatLine::Info(format!(
         "  [{}/{}] ▶ {step_name}",
-        current_idx + 1, total
+        current_idx + 1,
+        total
     )));
 
     // Switch model if effective profile specifies a different model.
@@ -2438,7 +2518,8 @@ pub(super) fn advance_workflow(app: &mut App) {
                     let _ = app.channels.model_switch_tx.send(profile.model.clone());
                     app.active_workflow.as_mut().unwrap().step_prev_model = Some(prev);
                     app.push(ChatLine::Info(format!(
-                        "  ↻ Using {} ({}) for this step", profile.model, profile_name
+                        "  ↻ Using {} ({}) for this step",
+                        profile.model, profile_name
                     )));
                 }
             }
@@ -2473,7 +2554,9 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
 
     // Extract everything we need before borrowing mutably.
     let (step_id, step_num, total, step_name, outputs, on_error, prev_model, dur_ms) = {
-        let Some(ref mut wf) = app.active_workflow else { return; };
+        let Some(ref mut wf) = app.active_workflow else {
+            return;
+        };
         let step = &wf.def.steps[wf.current_idx];
         let step_id = step.id.clone();
         let step_num = wf.current_idx + 1;
@@ -2486,7 +2569,8 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
         wf.context.set_step_output(&step_id, "output", text.clone());
         for out in &outputs {
             if out.name != "output" {
-                wf.context.set_step_output(&step_id, &out.name, text.clone());
+                wf.context
+                    .set_step_output(&step_id, &out.name, text.clone());
             }
         }
 
@@ -2495,7 +2579,8 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
             e.status = crate::tui::app_state::WorkflowStepStatus::Done;
         }
 
-        let dur_ms = wf.step_start_time
+        let dur_ms = wf
+            .step_start_time
             .map(|t| t.elapsed().as_millis() as u64)
             .unwrap_or(0);
         wf.step_start_time = None;
@@ -2503,7 +2588,9 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
         let prev_model = wf.step_prev_model.take();
         wf.retry_attempts = 0;
         wf.current_idx += 1;
-        (step_id, step_num, total, step_name, outputs, on_error, prev_model, dur_ms)
+        (
+            step_id, step_num, total, step_name, outputs, on_error, prev_model, dur_ms,
+        )
     };
 
     // Show step timing.
@@ -2520,7 +2607,9 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
                 match clido_workflows::render_save_to(tmpl, &wf.context, &step_id) {
                     Ok(path_str) => {
                         let p = std::path::Path::new(&path_str);
-                        if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+                        if let Some(parent) = p.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
                         if let Err(e) = std::fs::write(p, &text) {
                             errors.push(format!("save_to write failed for '{step_id}': {e}"));
                         }
@@ -2573,7 +2662,9 @@ pub(super) fn handle_workflow_step_error(app: &mut App, error: String) {
     };
 
     // Revert any per-step model override before deciding what to do.
-    let prev_model = app.active_workflow.as_mut()
+    let prev_model = app
+        .active_workflow
+        .as_mut()
         .and_then(|wf| wf.step_prev_model.take());
     if let Some(prev) = prev_model {
         app.model = prev.clone();
@@ -2587,9 +2678,7 @@ pub(super) fn handle_workflow_step_error(app: &mut App, error: String) {
             app.push(ChatLine::Info(format!(
                 "  ↻ Step '{step_name}' failed (attempt {attempt}/{retry_limit}): {error}"
             )));
-            app.push(ChatLine::Info(format!(
-                "  ↻ Retrying '{step_name}'…"
-            )));
+            app.push(ChatLine::Info(format!("  ↻ Retrying '{step_name}'…")));
             // Re-send the same step prompt (current_idx unchanged).
             advance_workflow(app);
         }
@@ -2602,7 +2691,8 @@ pub(super) fn handle_workflow_step_error(app: &mut App, error: String) {
                     e.status = crate::tui::app_state::WorkflowStepStatus::Skipped;
                 }
                 // Store empty output so downstream templates don't break.
-                wf.context.set_step_output(&step_id, "output", String::new());
+                wf.context
+                    .set_step_output(&step_id, "output", String::new());
                 wf.current_idx += 1;
                 wf.retry_attempts = 0;
                 wf.step_start_time = None;
@@ -2623,7 +2713,7 @@ pub(super) fn handle_workflow_step_error(app: &mut App, error: String) {
                 }
             }
             app.push(ChatLine::Info(
-                "  Workflow stopped — type a message to debug or /workflow run to restart.".into()
+                "  Workflow stopped — type a message to debug or /workflow run to restart.".into(),
             ));
             app.on_agent_done();
             app.active_workflow = None;
@@ -2634,12 +2724,15 @@ pub(super) fn handle_workflow_step_error(app: &mut App, error: String) {
 /// Abort the active workflow (parallel batch + main agent), called on Ctrl-C.
 pub(super) fn abort_workflow(app: &mut App) {
     // Extract model to revert and abort any parallel batch.
-    let prev_model = app.active_workflow.as_mut().map(|wf| {
-        if let Some(handle) = wf.parallel_abort.take() {
-            handle.abort();
-        }
-        wf.step_prev_model.take()
-    }).flatten();
+    let prev_model = app
+        .active_workflow
+        .as_mut()
+        .and_then(|wf| {
+            if let Some(handle) = wf.parallel_abort.take() {
+                handle.abort();
+            }
+            wf.step_prev_model.take()
+        });
 
     app.active_workflow = None;
     app.push(ChatLine::Info("  ✗ Workflow cancelled.".into()));

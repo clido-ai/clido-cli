@@ -152,11 +152,13 @@ pub fn run_interactive_setup_blocking(
         (credential.as_str(), None)
     };
     let handle = tokio::runtime::Handle::current();
-    let fetched = handle.block_on(clido_providers::fetch_provider_models(
-        provider,
-        api_key_for_fetch,
-        base_url_for_fetch,
-    )).unwrap_or_default();
+    let fetched = handle
+        .block_on(clido_providers::fetch_provider_models(
+            provider,
+            api_key_for_fetch,
+            base_url_for_fetch,
+        ))
+        .unwrap_or_default();
 
     let model = if fetched.is_empty() {
         eprintln!("  (Couldn't fetch model list — enter model ID manually)");

@@ -134,15 +134,26 @@ pub(crate) fn render_profile_overlay(
         ProfileOverlayMode::Overview | ProfileOverlayMode::EditField(_) => {
             render_profile_overview(frame, popup_rect, content_area, hint_area, st)
         }
-        ProfileOverlayMode::Creating { step } => {
-            render_profile_create(frame, popup_rect, content_area, hint_area, st, step, models_loading)
-        }
+        ProfileOverlayMode::Creating { step } => render_profile_create(
+            frame,
+            popup_rect,
+            content_area,
+            hint_area,
+            st,
+            step,
+            models_loading,
+        ),
         ProfileOverlayMode::PickingProvider { .. } => {
             render_profile_provider_picker(frame, popup_rect, content_area, hint_area, st)
         }
-        ProfileOverlayMode::PickingModel { .. } => {
-            render_profile_model_picker(frame, popup_rect, content_area, hint_area, st, models_loading)
-        }
+        ProfileOverlayMode::PickingModel { .. } => render_profile_model_picker(
+            frame,
+            popup_rect,
+            content_area,
+            hint_area,
+            st,
+            models_loading,
+        ),
         ProfileOverlayMode::PickingSavedKey { .. } => {
             render_profile_saved_key_picker(frame, popup_rect, content_area, hint_area, st)
         }
@@ -359,7 +370,14 @@ pub(crate) fn render_profile_create(
             return;
         }
         ProfileCreateStep::Model => {
-            render_profile_model_picker(frame, popup_rect, content_area, hint_area, st, models_loading);
+            render_profile_model_picker(
+                frame,
+                popup_rect,
+                content_area,
+                hint_area,
+                st,
+                models_loading,
+            );
             return;
         }
         ProfileCreateStep::Name => {

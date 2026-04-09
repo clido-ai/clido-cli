@@ -34,11 +34,13 @@ pub(super) fn setup_event_loop(
                 (s.credential.as_str(), None)
             };
             let handle = tokio::runtime::Handle::current();
-            s.fetched_models = handle.block_on(clido_providers::fetch_provider_models(
-                provider_id,
-                api_key,
-                base_url,
-            )).unwrap_or_default();
+            s.fetched_models = handle
+                .block_on(clido_providers::fetch_provider_models(
+                    provider_id,
+                    api_key,
+                    base_url,
+                ))
+                .unwrap_or_default();
             s.model_picker = make_model_picker(&s.fetched_models);
             // If reinit, pre-select the current model in the list.
             if !s.current_model.is_empty() {
@@ -70,11 +72,13 @@ pub(super) fn setup_event_loop(
                 (s.fast_credential.as_str(), None)
             };
             let handle = tokio::runtime::Handle::current();
-            s.fast_fetched_models = handle.block_on(clido_providers::fetch_provider_models(
-                provider_id,
-                api_key,
-                base_url,
-            )).unwrap_or_default();
+            s.fast_fetched_models = handle
+                .block_on(clido_providers::fetch_provider_models(
+                    provider_id,
+                    api_key,
+                    base_url,
+                ))
+                .unwrap_or_default();
             s.fast_custom_model = s.fast_fetched_models.is_empty();
             s.fast_model_picker = make_model_picker(&s.fast_fetched_models);
             s.clear_typed_input();

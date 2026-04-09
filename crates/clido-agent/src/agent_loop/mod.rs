@@ -2435,8 +2435,8 @@ mod tests {
         > {
             unimplemented!()
         }
-        async fn list_models(&self) -> Vec<clido_providers::ModelEntry> {
-            vec![]
+        async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+            Ok(vec![])
         }
     }
 
@@ -2496,8 +2496,8 @@ mod tests {
             unimplemented!()
         }
 
-        async fn list_models(&self) -> Vec<clido_providers::ModelEntry> {
-            vec![]
+        async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+            Ok(vec![])
         }
     }
 
@@ -2882,13 +2882,13 @@ mod tests {
         > {
             unimplemented!()
         }
-        async fn list_models(&self) -> Vec<clido_providers::ModelEntry> {
-            vec![]
+        async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+            Ok(vec![])
         }
     }
 
     #[tokio::test]
-    async fn run_rolls_back_user_message_on_provider_failure() {
+    async fn failed_run_drops_user_message() {
         let provider = Arc::new(FailingProvider);
         let mut agent = AgentLoop::new(provider, empty_registry(), mock_config(), None);
         assert_eq!(agent.history.len(), 0);
@@ -3292,8 +3292,8 @@ mod tests {
         > {
             unimplemented!()
         }
-        async fn list_models(&self) -> Vec<clido_providers::ModelEntry> {
-            vec![]
+        async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+            Ok(vec![])
         }
     }
 
@@ -3374,8 +3374,8 @@ mod tests {
         > {
             unimplemented!()
         }
-        async fn list_models(&self) -> Vec<clido_providers::ModelEntry> {
-            vec![]
+        async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+            Ok(vec![])
         }
     }
 
@@ -3462,8 +3462,8 @@ mod tests {
             > {
                 unimplemented!()
             }
-            async fn list_models(&self) -> Vec<clido_providers::ModelEntry> {
-                vec![]
+            async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+                Ok(vec![])
             }
         }
 

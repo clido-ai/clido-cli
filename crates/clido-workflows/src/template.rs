@@ -52,7 +52,8 @@ pub fn render_default(template_str: &str) -> String {
     tera_ctx.insert("datetime", &Utc::now().to_rfc3339());
     let mut tera = Tera::default();
     if tera.add_raw_template("default", &normalized).is_ok() {
-        tera.render("default", &tera_ctx).unwrap_or_else(|_| template_str.to_string())
+        tera.render("default", &tera_ctx)
+            .unwrap_or_else(|_| template_str.to_string())
     } else {
         template_str.to_string()
     }

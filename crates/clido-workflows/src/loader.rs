@@ -600,11 +600,15 @@ steps:
             output: None,
             prerequisites: Some(PrerequisitesDef {
                 commands: vec![],
-                env: vec![PrereqEntry::Required("__CLIDO_DEFINITELY_NOT_SET_XYZ__".into())],
+                env: vec![PrereqEntry::Required(
+                    "__CLIDO_DEFINITELY_NOT_SET_XYZ__".into(),
+                )],
             }),
         };
         let err = check_prerequisites(&def).unwrap_err();
-        assert!(err.to_string().contains("Missing required environment variable"));
+        assert!(err
+            .to_string()
+            .contains("Missing required environment variable"));
     }
 
     #[test]

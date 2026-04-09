@@ -73,10 +73,7 @@ fn apply_save_to(step: &StepDef, ctx: &WorkflowContext, output_text: &str) -> Re
             })?;
         }
         std::fs::write(path, output_text).map_err(|e| {
-            ClidoError::Workflow(format!(
-                "save_to: failed to write '{}': {}",
-                path_str, e
-            ))
+            ClidoError::Workflow(format!("save_to: failed to write '{}': {}", path_str, e))
         })?;
     }
     Ok(())
@@ -161,7 +158,11 @@ pub async fn run(
                 context.set_step_output(&step.id, "output", step_result.output_text.clone());
                 for out in &step.outputs {
                     if out.name != "output" {
-                        context.set_step_output(&step.id, &out.name, step_result.output_text.clone());
+                        context.set_step_output(
+                            &step.id,
+                            &out.name,
+                            step_result.output_text.clone(),
+                        );
                     }
                 }
                 if run_res.error.is_none() {
@@ -1049,8 +1050,16 @@ mod tests {
                     tools: None,
                     prompt: "P1".into(),
                     outputs: vec![
-                        OutputDef { name: "output".into(), r#type: "text".into(), save_to: None },
-                        OutputDef { name: "findings".into(), r#type: "text".into(), save_to: None },
+                        OutputDef {
+                            name: "output".into(),
+                            r#type: "text".into(),
+                            save_to: None,
+                        },
+                        OutputDef {
+                            name: "findings".into(),
+                            r#type: "text".into(),
+                            save_to: None,
+                        },
                     ],
                     on_error: OnErrorPolicy::Fail,
                     retry: None,

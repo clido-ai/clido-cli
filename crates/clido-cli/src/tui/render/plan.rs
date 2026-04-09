@@ -75,16 +75,30 @@ pub(crate) fn gather_plan_panel_steps(app: &App) -> Vec<PlanPanelStep> {
     // If a workflow is running, show its steps in the panel.
     if let Some(ref wf) = app.active_workflow {
         if !wf.steps.is_empty() {
-            return wf.steps.iter().map(|s| PlanPanelStep {
-                status: match s.status {
-                    crate::tui::app_state::WorkflowStepStatus::Pending => PlanPanelStepStatus::Pending,
-                    crate::tui::app_state::WorkflowStepStatus::Active => PlanPanelStepStatus::Active,
-                    crate::tui::app_state::WorkflowStepStatus::Done => PlanPanelStepStatus::Completed,
-                    crate::tui::app_state::WorkflowStepStatus::Failed => PlanPanelStepStatus::Blocked,
-                    crate::tui::app_state::WorkflowStepStatus::Skipped => PlanPanelStepStatus::Completed,
-                },
-                text: s.name.clone(),
-            }).collect();
+            return wf
+                .steps
+                .iter()
+                .map(|s| PlanPanelStep {
+                    status: match s.status {
+                        crate::tui::app_state::WorkflowStepStatus::Pending => {
+                            PlanPanelStepStatus::Pending
+                        }
+                        crate::tui::app_state::WorkflowStepStatus::Active => {
+                            PlanPanelStepStatus::Active
+                        }
+                        crate::tui::app_state::WorkflowStepStatus::Done => {
+                            PlanPanelStepStatus::Completed
+                        }
+                        crate::tui::app_state::WorkflowStepStatus::Failed => {
+                            PlanPanelStepStatus::Blocked
+                        }
+                        crate::tui::app_state::WorkflowStepStatus::Skipped => {
+                            PlanPanelStepStatus::Completed
+                        }
+                    },
+                    text: s.name.clone(),
+                })
+                .collect();
         }
     }
     if app.harness_mode {

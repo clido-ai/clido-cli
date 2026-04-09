@@ -128,8 +128,8 @@ mod tests {
             unimplemented!()
         }
 
-        async fn list_models(&self) -> Vec<ModelEntry> {
-            vec![]
+        async fn list_models(&self) -> std::result::Result<Vec<ModelEntry>, String> {
+            Ok(vec![])
         }
     }
 

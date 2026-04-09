@@ -55,8 +55,8 @@ impl ModelProvider for MockProvider {
     > {
         unimplemented!("stream not used in this test")
     }
-    async fn list_models(&self) -> Vec<clido_providers::ModelEntry> {
-        vec![]
+    async fn list_models(&self) -> std::result::Result<Vec<clido_providers::ModelEntry>, String> {
+        Ok(vec![])
     }
 }
 

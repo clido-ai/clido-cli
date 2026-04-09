@@ -78,7 +78,7 @@ impl WorkflowStepRunner for CliWorkflowRunner {
             self.quiet,
             registry,
         );
-        let tools_explicitly_empty = request.tools.as_ref().map_or(false, |t| t.is_empty());
+        let tools_explicitly_empty = request.tools.as_ref().is_some_and(|t| t.is_empty());
         registry = registry.with_filters(request.tools, None);
         // Only error if tools became empty unintentionally (not when tools: [] was set explicitly).
         if registry.schemas().is_empty() && !tools_explicitly_empty {

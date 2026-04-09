@@ -113,7 +113,11 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &["mistral-large-latest", "mistral-small-latest", "codestral-latest"],
+        fallback_models: &[
+            "mistral-large-latest",
+            "mistral-small-latest",
+            "codestral-latest",
+        ],
         needs_base_url: false,
     },
     ProviderDef {

@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-beta.9] - 2026-04-04
+
+### Added
+
+- **Solidity audit workflow**: Comprehensive Solidity smart contract audit workflow (`workflows/solidity-audit.yaml`) with automated security analysis, common vulnerability checks, gas optimization suggestions, and report generation.
+- **Workflow `save_to` output**: Workflow steps can now specify a `save_to` field to write step output to a file on disk.
+- **Workflow prerequisites**: Workflow steps can declare `prerequisites` — a list of files that must exist before the step runs.
+- **Workflow `--profile` CLI flag** (`-p`): Override the default profile when running workflows, allowing different provider/model combinations per run.
+- **Alibaba Cloud, MiniMax, and local providers**: New provider integrations in `clido-providers`.
+
+### Changed
+
+- **`list_models()` error propagation**: Changed from returning `Vec<ProviderInfo>` to `Result<Vec<ProviderInfo>, ProviderError>`. Callers now receive structured error information instead of silently dropping failures.
+- **Model fetch failure handling**: `clido-cli` now surfaces model fetch errors gracefully instead of swallowing them.
+- **Profile overlay improvements**: Profile configuration resolution and merging logic refined for more predictable behavior.
+- **Removed stale providers**: Cohere, Together AI, Azure OpenAI, Custom, and LM Studio providers removed.
+
+### Fixed
+
+- **TUI workflow orchestration**: Major overhaul of workflow execution in the TUI — improved state management, event handling, and command dispatch for reliable workflow runs from the interactive interface.
+- **Plan rendering in TUI**: Better handling of plan display with correct column/byte-width tracking.
+
 ## [0.1.0-beta.5] - 2026-04-03
 
 ### Changed

@@ -610,7 +610,7 @@ mod tests {
     #[test]
     fn build_toml_local_provider() {
         let mut s = SetupState::new();
-        s.provider = 16; // Local / Ollama
+        s.provider = 17; // Local / Ollama
         s.model = "llama3.2".to_string();
         s.credential.clear();
         let toml = build_toml(&s);
@@ -623,7 +623,7 @@ mod tests {
     #[test]
     fn build_toml_local_provider_custom_url() {
         let mut s = SetupState::new();
-        s.provider = 16; // Local / Ollama
+        s.provider = 17; // Local / Ollama
         s.model = "mistral".to_string();
         s.credential = "http://127.0.0.1:8080".to_string();
         let toml = build_toml(&s);
@@ -716,7 +716,7 @@ mod tests {
     #[test]
     fn setup_state_is_local() {
         let mut s = SetupState::new();
-        s.provider = 16; // Local / Ollama is index 16
+        s.provider = 17; // Local / Ollama is index 17
         assert!(s.is_local());
         s.provider = 0;
         assert!(!s.is_local());
@@ -735,7 +735,7 @@ mod tests {
     #[test]
     fn provider_registry_consistency() {
         use clido_providers::registry::PROVIDER_REGISTRY;
-        assert_eq!(PROVIDER_REGISTRY.len(), 17);
+        assert_eq!(PROVIDER_REGISTRY.len(), 18);
         assert!(PROVIDER_REGISTRY.last().unwrap().is_local);
         assert_eq!(PROVIDER_REGISTRY.last().unwrap().api_key_env, "");
         for def in PROVIDER_REGISTRY {
@@ -799,7 +799,7 @@ mod tests {
         s.model = "claude-sonnet-4-5".to_string();
         s.credential = "sk-ant-key".to_string();
         s.configure_fast = true;
-        s.fast_provider_idx = 16; // Local
+        s.fast_provider_idx = 17; // Local
         s.fast_model = "llama3.2".to_string();
         s.fast_credential = "http://127.0.0.1:8080".to_string();
         let toml = build_toml(&s);
@@ -857,7 +857,7 @@ mod tests {
     #[test]
     fn collect_credentials_local_provider_excluded() {
         let mut s = SetupState::new();
-        s.provider = 16; // Local
+        s.provider = 17; // Local
         s.model = "llama3.2".to_string();
         s.credential = "http://localhost:11434".to_string();
         let creds = collect_credentials_from_state(&s);

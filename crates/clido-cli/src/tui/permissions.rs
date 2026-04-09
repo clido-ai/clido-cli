@@ -147,6 +147,29 @@ pub(super) fn format_tool_input(name: &str, input: &serde_json::Value) -> String
                 .map(|p| format!("  {}", p))
                 .unwrap_or_default()
         ),
+        "TodoWrite" | "todo_write" => {
+            let n = input["todos"].as_array().map(|a| a.len()).unwrap_or(0);
+            if n == 0 {
+                "todo list".to_string()
+            } else {
+                let first = input["todos"]
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|o| o.get("content"))
+                    .and_then(|v| v.as_str())
+                    .map(|c| {
+                        if c.chars().count() > 48 {
+                            format!("{}…", c.chars().take(48).collect::<String>())
+                        } else {
+                            c.to_string()
+                        }
+                    });
+                match first {
+                    Some(f) if !f.is_empty() => format!("{n} items  ·  {f}"),
+                    _ => format!("{n} items"),
+                }
+            }
+        }
         _ => input.to_string(),
     };
     if s.chars().count() > 72 {

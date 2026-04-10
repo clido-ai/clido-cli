@@ -218,6 +218,7 @@ mod tests {
         let mut cfg = AgentConfig::default();
         cfg.stream_model_completion = false;
         cfg.provider_min_request_interval_ms = 0;
+        cfg.max_input_chars = Some(0);
         let r = invoke_model_completion(
             Arc::new(OkNonStreamProvider),
             &[],
@@ -241,6 +242,7 @@ mod tests {
         let mut last = None;
         let mut cfg = AgentConfig::default();
         cfg.stream_model_completion = false;
+        cfg.max_input_chars = Some(0);
         let cancel = Arc::new(AtomicBool::new(true));
         let err = invoke_model_completion(
             Arc::new(PanicNonStreamProvider),
@@ -263,6 +265,7 @@ mod tests {
         cfg.stream_model_completion = true;
         cfg.model = "stream-m".into();
         cfg.provider_min_request_interval_ms = 0;
+        cfg.max_input_chars = Some(0);
         let r = invoke_model_completion(
             Arc::new(StreamTextProvider),
             &[],

@@ -98,3 +98,26 @@ When asked only to *create* a plan (e.g. user invoked plan-only mode), output th
 - Reference specific file paths and line numbers when discussing code.
 - If the task is unclear, state your interpretation before acting.
 - If you discover something unexpected (unknown files, foreign config, merge conflicts), investigate before overwriting.
+
+## Multi-Agent Exploration
+
+When you need to explore multiple files or directories to understand a codebase, use the **ExploreParallel** tool to spawn parallel sub-agents. This is significantly faster than sequential exploration.
+
+**Use ExploreParallel when:**
+- You need to understand multiple modules/directories at once
+- You're searching for patterns across many files
+- You need a high-level overview of a large codebase
+- Initial task analysis requires reading 5+ files
+
+**How it works:**
+- Spawns up to 3 sub-agents working in parallel
+- Each sub-agent uses the same model as you (no cheap models)
+- Sub-agents share a cache to avoid duplicate reads
+- Results are merged and returned to you
+
+**Example tasks:**
+- `ExploreParallel` with `["explore_directory: /src", "find_files: **/*.rs", "search_symbol: Config"]`
+- Use `read_files` for specific files you know you need
+- Use `codebase_overview` for initial high-level understanding
+
+**Note:** Sub-agents are read-only (no Write/Edit) to prevent conflicts. You handle all modifications based on their findings.

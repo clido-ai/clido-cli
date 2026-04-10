@@ -10,8 +10,8 @@ pub mod tool_failure;
 pub mod types;
 
 pub use config::{
-    evaluate_rules, AgentConfig, FastProviderConfig, HooksConfig, PermissionMode, PermissionRule,
-    ProviderConfig, ProviderType, RuleAction, ExplorationConfig,
+    evaluate_rules, AgentConfig, ExplorationConfig, FastProviderConfig, HooksConfig,
+    PermissionMode, PermissionRule, ProviderConfig, ProviderType, RuleAction,
 };
 pub use config_loader::{
     agent_config_from_loaded, config_file_exists, delete_profile_from_config, global_config_dir,

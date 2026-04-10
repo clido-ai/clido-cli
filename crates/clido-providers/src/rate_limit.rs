@@ -87,7 +87,6 @@ pub struct RateLimiter {
 impl RateLimiter {
     /// Create a new rate limiter for a provider.
     pub fn new(provider_id: impl Into<String>, config: RateLimitConfig) -> Self {
-        let config = config;
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent));
 
         Self {
@@ -188,7 +187,7 @@ impl RateLimiter {
         let mut backoff = self.current_backoff.lock().await;
         if *backoff > Duration::from_secs(0) {
             // Reduce by half, but not below 0
-            *backoff = *backoff / 2;
+            *backoff /= 2;
         }
     }
 
@@ -312,12 +311,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_rate_limiter_basic() {
-        let limiter = RateLimiter::new("test", RateLimitConfig {
-            requests_per_minute: 10,
-            max_concurrent: 2,
-            backoff_base_secs: 1,
-            max_backoff_secs: 10,
-        });
+        let limiter = RateLimiter::new(
+            "test",
+            RateLimitConfig {
+                requests_per_minute: 10,
+                max_concurrent: 2,
+                backoff_base_secs: 1,
+                max_backoff_secs: 10,
+            },
+        );
 
         // Should acquire successfully
         let permit = limiter.acquire().await.unwrap();
@@ -329,12 +331,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_limit() {
-        let limiter = RateLimiter::new("test", RateLimitConfig {
-            requests_per_minute: 100,
-            max_concurrent: 2,
-            backoff_base_secs: 1,
-            max_backoff_secs: 10,
-        });
+        let limiter = RateLimiter::new(
+            "test",
+            RateLimitConfig {
+                requests_per_minute: 100,
+                max_concurrent: 2,
+                backoff_base_secs: 1,
+                max_backoff_secs: 10,
+            },
+        );
 
         // Acquire 2 permits (max)
         let _permit1 = limiter.acquire().await.unwrap();
@@ -347,12 +352,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_backoff_increases() {
-        let limiter = RateLimiter::new("test", RateLimitConfig {
-            requests_per_minute: 100,
-            max_concurrent: 10,
-            backoff_base_secs: 1,
-            max_backoff_secs: 10,
-        });
+        let limiter = RateLimiter::new(
+            "test",
+            RateLimitConfig {
+                requests_per_minute: 100,
+                max_concurrent: 10,
+                backoff_base_secs: 1,
+                max_backoff_secs: 10,
+            },
+        );
 
         // Simulate rate limited responses
         let permit = limiter.acquire().await.unwrap();
@@ -370,12 +378,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_backoff_decreases_on_success() {
-        let limiter = RateLimiter::new("test", RateLimitConfig {
-            requests_per_minute: 100,
-            max_concurrent: 10,
-            backoff_base_secs: 1,
-            max_backoff_secs: 10,
-        });
+        let limiter = RateLimiter::new(
+            "test",
+            RateLimitConfig {
+                requests_per_minute: 100,
+                max_concurrent: 10,
+                backoff_base_secs: 1,
+                max_backoff_secs: 10,
+            },
+        );
 
         // Set backoff to 4 seconds
         let permit = limiter.acquire().await.unwrap();

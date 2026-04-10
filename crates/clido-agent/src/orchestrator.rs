@@ -8,14 +8,12 @@ use std::time::Duration;
 
 use clido_core::{AgentConfig, Usage};
 use clido_memory::SharedMemory;
-use clido_providers::{ModelProvider, RateLimiter, RateLimiterRegistry, RateLimitConfig};
+use clido_providers::{ModelProvider, RateLimitConfig, RateLimiterRegistry};
 use clido_tools::ToolRegistry;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
-use crate::exploration::{
-    ExplorationResult, ExplorationTask, TaskComplexity, TaskSplitter,
-};
+use crate::exploration::{ExplorationResult, ExplorationTask, TaskSplitter};
 use crate::sub_agent::SubAgent;
 
 /// Configuration for the exploration orchestrator.
@@ -88,10 +86,7 @@ impl ExplorationOrchestrator {
     /// 2. Spawns sub-agents up to max_concurrent
     /// 3. Waits for all to complete
     /// 4. Merges and deduplicates results
-    pub async fn execute_parallel(
-        &self,
-        tasks: Vec<ExplorationTask>,
-    ) -> Vec<ExplorationResult> {
+    pub async fn execute_parallel(&self, tasks: Vec<ExplorationTask>) -> Vec<ExplorationResult> {
         if tasks.is_empty() {
             return Vec::new();
         }
@@ -274,6 +269,7 @@ impl ExplorationOrchestrator {
     }
 
     /// Execute a single exploration task.
+    #[allow(dead_code)]
     async fn execute_single_task(&self, task: ExplorationTask) -> ExplorationResult {
         Self::execute_single_task_static(
             self.config.clone(),
@@ -401,7 +397,8 @@ impl MultiAgentCostTracker {
             total.output_tokens += cost.output_tokens;
             if let Some(parent_cache_create) = total.cache_creation_input_tokens {
                 if let Some(sub_cache_create) = cost.cache_creation_input_tokens {
-                    total.cache_creation_input_tokens = Some(parent_cache_create + sub_cache_create);
+                    total.cache_creation_input_tokens =
+                        Some(parent_cache_create + sub_cache_create);
                 }
             }
             if let Some(parent_cache_read) = total.cache_read_input_tokens {
@@ -426,7 +423,7 @@ impl MultiAgentCostTracker {
         let parent_output = self.parent_cost.output_tokens;
         let sub_agents_input: u64 = self.sub_agent_costs.iter().map(|c| c.input_tokens).sum();
         let sub_agents_output: u64 = self.sub_agent_costs.iter().map(|c| c.output_tokens).sum();
-        
+
         format!(
             "Total: {} input / {} output tokens (parent: {} / {}, sub-agents: {} / {}, cache hits: {})",
             total.input_tokens, total.output_tokens,

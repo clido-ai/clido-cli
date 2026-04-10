@@ -42,7 +42,11 @@ pub struct SharedMemory {
 impl SharedMemory {
     /// Create a new shared memory instance with default settings.
     pub fn new() -> Self {
-        Self::with_config(1000, std::time::Duration::from_secs(300), std::time::Duration::from_secs(60))
+        Self::with_config(
+            1000,
+            std::time::Duration::from_secs(300),
+            std::time::Duration::from_secs(60),
+        )
     }
 
     /// Create a new shared memory instance with custom configuration.
@@ -206,7 +210,11 @@ mod tests {
 
     #[test]
     fn test_file_cache_ttl_expiration() {
-        let memory = SharedMemory::with_config(100, std::time::Duration::from_millis(10), std::time::Duration::from_secs(60));
+        let memory = SharedMemory::with_config(
+            100,
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(60),
+        );
         let path = PathBuf::from("/test/file.rs");
 
         memory.cache_file(path.clone(), "content".to_string());
@@ -221,7 +229,11 @@ mod tests {
 
     #[test]
     fn test_file_cache_lru_eviction() {
-        let memory = SharedMemory::with_config(2, std::time::Duration::from_secs(300), std::time::Duration::from_secs(60));
+        let memory = SharedMemory::with_config(
+            2,
+            std::time::Duration::from_secs(300),
+            std::time::Duration::from_secs(60),
+        );
 
         let path1 = PathBuf::from("/test/file1.rs");
         let path2 = PathBuf::from("/test/file2.rs");
@@ -232,10 +244,14 @@ mod tests {
         memory.cache_file(path3.clone(), "content3".to_string());
 
         // One of the first two should be evicted
-        let count = [memory.get_file(&path1).is_some(), memory.get_file(&path2).is_some(), memory.get_file(&path3).is_some()]
-            .iter()
-            .filter(|&&x| x)
-            .count();
+        let count = [
+            memory.get_file(&path1).is_some(),
+            memory.get_file(&path2).is_some(),
+            memory.get_file(&path3).is_some(),
+        ]
+        .iter()
+        .filter(|&&x| x)
+        .count();
         assert_eq!(count, 2);
     }
 
@@ -269,7 +285,10 @@ mod tests {
 
         assert!(memory.get_search(query).is_none());
 
-        memory.cache_search(query.to_string(), vec!["result1".to_string(), "result2".to_string()]);
+        memory.cache_search(
+            query.to_string(),
+            vec!["result1".to_string(), "result2".to_string()],
+        );
 
         let cached = memory.get_search(query).unwrap();
         assert_eq!(cached.results.len(), 2);

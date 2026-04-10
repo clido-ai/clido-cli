@@ -185,11 +185,14 @@ pub(crate) fn build_status_rail_lines(
                     Style::default().fg(TUI_STATE_OK),
                 ),
                 Span::styled(
-                    format!(" · {}/{}", exploration.completed_tasks, exploration.total_tasks),
+                    format!(
+                        " · {}/{}",
+                        exploration.completed_tasks, exploration.total_tasks
+                    ),
                     dim,
                 ),
             ]));
-            
+
             // Show current task per agent
             for (idx, task) in exploration.agent_tasks.iter().take(3).enumerate() {
                 lines.push(Line::from(vec![Span::styled(
@@ -201,14 +204,14 @@ pub(crate) fn build_status_rail_lines(
                     dim,
                 )]));
             }
-            
+
             if exploration.agent_tasks.len() > 3 {
                 lines.push(Line::from(vec![Span::styled(
                     format!("  └─ …+{} more", exploration.agent_tasks.len() - 3),
                     dim,
                 )]));
             }
-            
+
             // Show cost
             lines.push(Line::from(vec![Span::styled(
                 format!("  Cost: ${:.4}", exploration.total_cost_usd),

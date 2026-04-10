@@ -67,17 +67,17 @@ impl ExplorationTask {
             ExplorationTask::ExploreDirectory { path, depth } => {
                 format!("Explore directory {} (depth {})", path.display(), depth)
             }
-            ExplorationTask::FindFiles { pattern, max_results } => {
+            ExplorationTask::FindFiles {
+                pattern,
+                max_results,
+            } => {
                 format!("Find files matching '{}' (max {})", pattern, max_results)
             }
             ExplorationTask::SearchSymbol { symbol, file_types } => {
                 if file_types.is_empty() {
                     format!("Search for symbol '{}'", symbol)
                 } else {
-                    format!(
-                        "Search for symbol '{}' in {:?}",
-                        symbol, file_types
-                    )
+                    format!("Search for symbol '{}' in {:?}", symbol, file_types)
                 }
             }
             ExplorationTask::AnalyzeDependencies { entry_points } => {
@@ -92,12 +92,10 @@ impl ExplorationTask {
             ExplorationTask::ReadFiles { paths } => {
                 format!("Read {} files", paths.len())
             }
-            ExplorationTask::GrepSearch { pattern, path } => {
-                match path {
-                    Some(p) => format!("Grep '{}' in {}", pattern, p.display()),
-                    None => format!("Grep '{}'", pattern),
-                }
-            }
+            ExplorationTask::GrepSearch { pattern, path } => match path {
+                Some(p) => format!("Grep '{}' in {}", pattern, p.display()),
+                None => format!("Grep '{}'", pattern),
+            },
         }
     }
 
@@ -264,11 +262,12 @@ impl TaskSplitter {
             }
             ExplorationTask::ReadFiles { paths } if paths.len() > 10 => {
                 // Split large file reads into chunks
-                let chunks: Vec<_> = paths.chunks(5).map(|chunk| {
-                    ExplorationTask::ReadFiles {
+                let chunks: Vec<_> = paths
+                    .chunks(5)
+                    .map(|chunk| ExplorationTask::ReadFiles {
                         paths: chunk.to_vec(),
-                    }
-                }).collect();
+                    })
+                    .collect();
                 Some(chunks)
             }
             _ => None, // Don't split other tasks
@@ -339,7 +338,9 @@ mod tests {
     #[test]
     fn test_task_splitting() {
         let task = ExplorationTask::ReadFiles {
-            paths: (0..15).map(|i| PathBuf::from(format!("/file{}.rs", i))).collect(),
+            paths: (0..15)
+                .map(|i| PathBuf::from(format!("/file{}.rs", i)))
+                .collect(),
         };
 
         let split = TaskSplitter::split(&task);

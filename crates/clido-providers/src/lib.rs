@@ -18,7 +18,7 @@ pub use fallback::FallbackProvider;
 pub use openai::OpenAICompatProvider;
 pub use provider::{ModelEntry, ModelProvider, StreamEvent};
 pub use rate_limit::{
-    RateLimitConfig, RateLimitError, RateLimiter, RateLimitPermit, RateLimiterRegistry,
+    RateLimitConfig, RateLimitError, RateLimitPermit, RateLimiter, RateLimiterRegistry,
     RateLimiterStats,
 };
 pub use registry::{is_subscription_provider, ProviderDef, PROVIDER_REGISTRY};

@@ -8,6 +8,7 @@ pub mod fallback;
 pub mod http_client;
 pub mod openai;
 pub mod provider;
+pub mod rate_limit;
 pub mod registry;
 pub mod retry;
 pub(crate) mod sse;
@@ -16,6 +17,10 @@ pub use anthropic::AnthropicProvider;
 pub use fallback::FallbackProvider;
 pub use openai::OpenAICompatProvider;
 pub use provider::{ModelEntry, ModelProvider, StreamEvent};
+pub use rate_limit::{
+    RateLimitConfig, RateLimitError, RateLimiter, RateLimitPermit, RateLimiterRegistry,
+    RateLimiterStats,
+};
 pub use registry::{is_subscription_provider, ProviderDef, PROVIDER_REGISTRY};
 pub use retry::RetryProvider;
 

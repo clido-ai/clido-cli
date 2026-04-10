@@ -344,6 +344,82 @@ pub struct OrchestratorStats {
     pub available_permits: usize,
     pub rate_limiter_stats: Vec<clido_providers::RateLimiterStats>,
     pub memory_stats: clido_memory::CacheStats,
+    /// Total cost across all completed tasks.
+    pub total_cost_usd: f64,
+    /// Number of tasks completed.
+    pub tasks_completed: usize,
+    /// Estimated cost savings from caching.
+    pub cache_savings_usd: f64,
+}
+
+/// Multi-agent cost tracker.
+#[derive(Clone, Debug, Default)]
+pub struct MultiAgentCostTracker {
+    /// Parent agent cost.
+    pub parent_cost: Usage,
+    /// Costs per sub-agent.
+    pub sub_agent_costs: Vec<Usage>,
+    /// Cache hits (avoided API calls).
+    pub cache_hits: usize,
+    /// Estimated savings from caching.
+    pub estimated_savings_usd: f64,
+}
+
+impl MultiAgentCostTracker {
+    /// Create a new cost tracker.
+    pub fn new(parent_cost: Usage) -> Self {
+        Self {
+            parent_cost,
+            sub_agent_costs: Vec::new(),
+            cache_hits: 0,
+            estimated_savings_usd: 0.0,
+        }
+    }
+
+    /// Add a sub-agent's cost.
+    pub fn add_sub_agent_cost(&mut self, cost: Usage) {
+        self.sub_agent_costs.push(cost);
+    }
+
+    /// Record a cache hit.
+    pub fn record_cache_hit(&mut self, estimated_cost_usd: f64) {
+        self.cache_hits += 1;
+        self.estimated_savings_usd += estimated_cost_usd;
+    }
+
+    /// Get total cost (parent + all sub-agents).
+    pub fn total_cost(&self) -> Usage {
+        let mut total = self.parent_cost.clone();
+        for cost in &self.sub_agent_costs {
+            total.input_tokens += cost.input_tokens;
+            total.output_tokens += cost.output_tokens;
+            if let Some(parent_cost) = total.total_cost_usd {
+                if let Some(sub_cost) = cost.total_cost_usd {
+                    total.total_cost_usd = Some(parent_cost + sub_cost);
+                }
+            }
+        }
+        total
+    }
+
+    /// Get total cost in USD.
+    pub fn total_cost_usd(&self) -> f64 {
+        self.total_cost().total_cost_usd.unwrap_or(0.0)
+    }
+
+    /// Get summary string for display.
+    pub fn summary(&self) -> String {
+        let total = self.total_cost_usd();
+        let parent = self.parent_cost.total_cost_usd.unwrap_or(0.0);
+        let sub_agents: f64 = self.sub_agent_costs.iter()
+            .map(|c| c.total_cost_usd.unwrap_or(0.0))
+            .sum();
+        
+        format!(
+            "Total: ${:.4} (parent: ${:.4}, sub-agents: ${:.4}, cache savings: ${:.4})",
+            total, parent, sub_agents, self.estimated_savings_usd
+        )
+    }
 }
 
 #[cfg(test)]

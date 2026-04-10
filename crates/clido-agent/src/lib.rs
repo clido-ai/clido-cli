@@ -15,5 +15,5 @@ pub use agent_loop::{
 pub use exploration::{
     ExplorationResult, ExplorationTask, Finding, FindingKind, TaskComplexity, TaskSplitter,
 };
-pub use orchestrator::{ExplorationOrchestrator, OrchestratorConfig, OrchestratorStats};
+pub use orchestrator::{ExplorationOrchestrator, MultiAgentCostTracker, OrchestratorConfig, OrchestratorStats};
 pub use sub_agent::SubAgent;

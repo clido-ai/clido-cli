@@ -37,10 +37,6 @@ pub fn load_and_assemble_rules_with_trust(
 /// Default max context tokens when not set in config or pricing.
 pub const DEFAULT_MAX_CONTEXT_TOKENS: u32 = 200_000;
 
-/// Default maximum input characters allowed by providers with character-based limits.
-/// 260096 is a common limit for providers like Kimi / MiniMax.
-pub const DEFAULT_MAX_INPUT_CHARS: u64 = 260_096;
-
 /// Default compaction threshold (compact when context > max * threshold).
 pub const DEFAULT_COMPACTION_THRESHOLD: f64 = 0.58;
 

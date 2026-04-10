@@ -174,7 +174,9 @@ pub struct ContextSection {
     pub compaction_threshold: f64,
     #[serde(default)]
     pub max_context_tokens: Option<u32>,
-    /// Max input characters enforced before sending to provider. None = use DEFAULT_MAX_INPUT_CHARS.
+    /// Max input characters enforced before sending to the provider.
+    /// Provider-specific — only set when your provider has a character-based limit.
+    /// None = no pre-validation.
     #[serde(default)]
     pub max_input_chars: Option<u64>,
 }

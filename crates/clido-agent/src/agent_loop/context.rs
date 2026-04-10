@@ -2,7 +2,7 @@
 
 use clido_context::{
     assemble, dedup_file_reads, estimate_tokens_message, estimate_tokens_messages,
-    estimate_tokens_str, DEFAULT_MAX_INPUT_CHARS,
+    estimate_tokens_str,
 };
 use clido_core::{AgentConfig, ClidoError, ContentBlock, Message, Result, Role};
 use clido_providers::ModelProvider;
@@ -351,7 +351,7 @@ pub(crate) async fn compact_for_model_request(
     let budget = max_context_tokens
         .saturating_sub(CONTEXT_OUTPUT_RESERVE)
         .max(24_000);
-    let result = match compact_with_summary(
+    let mut compacted = match compact_with_summary(
         messages,
         system_prompt_tokens,
         budget,
@@ -361,38 +361,33 @@ pub(crate) async fn compact_for_model_request(
     )
     .await
     {
-        Ok(m) => Ok(m),
+        Ok(m) => m,
         Err(ClidoError::ContextLimit { .. }) => {
             warn!(
                 "context assembly exceeded budget={budget}; retrying with tighter budget and full compaction"
             );
             let tight = budget.saturating_sub(8192).max(16_000);
-            compact_with_summary(messages, system_prompt_tokens, tight, 0.0, provider, config).await
+            compact_with_summary(messages, system_prompt_tokens, tight, 0.0, provider, config).await?
         }
-        Err(e) => Err(e),
+        Err(e) => return Err(e),
     };
 
-    // After token-based compaction, enforce character-based provider limits.
-    let max_chars = config.max_input_chars.unwrap_or(DEFAULT_MAX_INPUT_CHARS);
-    if max_chars > 0 {
-        match result {
-            Ok(compacted) => {
-                let chars = count_message_chars(&compacted);
-                if chars > max_chars {
-                    warn!(
-                        "compacted context exceeds char limit ({} > {}); dropping oldest messages",
-                        chars, max_chars
-                    );
-                    Ok(truncate_to_char_limit(compacted, max_chars))
-                } else {
-                    Ok(compacted)
-                }
+    // After token-based compaction, enforce character-based provider limits
+    // (only when explicitly configured — provider-specific).
+    if let Some(max_chars) = config.max_input_chars {
+        if max_chars > 0 {
+            let chars = count_message_chars(&compacted);
+            if chars > max_chars {
+                warn!(
+                    "compacted context exceeds char limit ({} > {}); dropping oldest messages",
+                    chars, max_chars
+                );
+                compacted = truncate_to_char_limit(compacted, max_chars);
             }
-            Err(e) => Err(e),
         }
-    } else {
-        result
     }
+
+    Ok(compacted)
 }
 
 /// Format `messages` as a flat transcript and ask the provider to summarize them.

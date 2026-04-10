@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use clido_core::{AgentConfig, ClidoError, ContentBlock, Message, ModelResponse, Result, ToolSchema};
-use clido_context::DEFAULT_MAX_INPUT_CHARS;
 use clido_providers::ModelProvider;
 
 use super::stream_aggregate;
@@ -50,20 +49,22 @@ pub async fn invoke_model_completion(
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<ModelResponse> {
     // Pre-validate input character count against provider limit.
-    let max_chars = config.max_input_chars.unwrap_or(DEFAULT_MAX_INPUT_CHARS);
-    if max_chars > 0 {
-        let total_chars = count_input_chars(messages);
-        if total_chars == 0 {
-            return Err(ClidoError::InputTooLong {
-                chars: 0,
-                max_chars,
-            });
-        }
-        if total_chars > max_chars {
-            return Err(ClidoError::InputTooLong {
-                chars: total_chars,
-                max_chars,
-            });
+    // Only active when explicitly configured (provider-specific).
+    if let Some(max_chars) = config.max_input_chars {
+        if max_chars > 0 {
+            let total_chars = count_input_chars(messages);
+            if total_chars == 0 {
+                return Err(ClidoError::InputTooLong {
+                    chars: 0,
+                    max_chars,
+                });
+            }
+            if total_chars > max_chars {
+                return Err(ClidoError::InputTooLong {
+                    chars: total_chars,
+                    max_chars,
+                });
+            }
         }
     }
 

@@ -24,6 +24,10 @@ pub enum ClidoError {
     #[error("context limit exceeded: {tokens} tokens")]
     ContextLimit { tokens: u64 },
 
+    /// Input exceeded the provider's maximum character limit.
+    #[error("input too long: {chars} chars exceeds provider limit of {max_chars} chars")]
+    InputTooLong { chars: u64, max_chars: u64 },
+
     #[error("session not found: {session_id}")]
     SessionNotFound { session_id: String },
 
@@ -122,6 +126,7 @@ impl ClidoError {
         match self {
             ClidoError::RateLimited { .. }
             | ClidoError::ContextLimit { .. }
+            | ClidoError::InputTooLong { .. }
             | ClidoError::SessionPersistence { .. }
             | ClidoError::SessionLoadInvalid { .. } => false,
             ClidoError::MaxTurnsExceeded
@@ -189,6 +194,28 @@ mod tests {
         let e = ClidoError::ContextLimit { tokens: 200_001 };
         assert!(e.to_string().contains("context limit exceeded"));
         assert!(e.to_string().contains("200001"));
+    }
+
+    #[test]
+    fn input_too_long_display() {
+        let e = ClidoError::InputTooLong {
+            chars: 300_000,
+            max_chars: 260_096,
+        };
+        let s = e.to_string();
+        assert!(s.contains("input too long"), "got: {s}");
+        assert!(s.contains("300000"), "got: {s}");
+        assert!(s.contains("260096"), "got: {s}");
+    }
+
+    #[test]
+    fn truncate_policy_input_too_long_never() {
+        let e = ClidoError::InputTooLong {
+            chars: 500_000,
+            max_chars: 260_096,
+        };
+        assert!(!e.should_truncate_history_after_failed_run(99, 0));
+        assert!(!e.should_truncate_history_after_failed_run(3, 1));
     }
 
     #[test]

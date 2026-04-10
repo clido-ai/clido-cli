@@ -3,12 +3,42 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use clido_core::{AgentConfig, Message, ModelResponse, Result, ToolSchema};
+use clido_core::{AgentConfig, ClidoError, ContentBlock, Message, ModelResponse, Result, ToolSchema};
+use clido_context::DEFAULT_MAX_INPUT_CHARS;
 use clido_providers::ModelProvider;
 
 use super::stream_aggregate;
 use super::throttle;
 use super::EventEmitter;
+
+/// Compute the total character count across all message content blocks.
+fn count_input_chars(messages: &[Message]) -> u64 {
+    messages
+        .iter()
+        .map(|m| {
+            m.content
+                .iter()
+                .map(|b| match b {
+                    ContentBlock::Text { text } => text.chars().count() as u64,
+                    ContentBlock::ToolUse { id, name, input } => {
+                        id.chars().count() as u64
+                            + name.chars().count() as u64
+                            + input.to_string().chars().count() as u64
+                    }
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        ..
+                    } => {
+                        tool_use_id.chars().count() as u64 + content.chars().count() as u64
+                    }
+                    ContentBlock::Thinking { thinking } => thinking.chars().count() as u64,
+                    ContentBlock::Image { base64_data, .. } => base64_data.chars().count() as u64,
+                })
+                .sum::<u64>()
+        })
+        .sum()
+}
 
 pub async fn invoke_model_completion(
     provider: Arc<dyn ModelProvider>,
@@ -19,6 +49,24 @@ pub async fn invoke_model_completion(
     last_complete_end: &mut Option<std::time::Instant>,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<ModelResponse> {
+    // Pre-validate input character count against provider limit.
+    let max_chars = config.max_input_chars.unwrap_or(DEFAULT_MAX_INPUT_CHARS);
+    if max_chars > 0 {
+        let total_chars = count_input_chars(messages);
+        if total_chars == 0 {
+            return Err(ClidoError::InputTooLong {
+                chars: 0,
+                max_chars,
+            });
+        }
+        if total_chars > max_chars {
+            return Err(ClidoError::InputTooLong {
+                chars: total_chars,
+                max_chars,
+            });
+        }
+    }
+
     throttle::throttle_before_complete(last_complete_end, config.provider_min_request_interval_ms)
         .await;
 
@@ -236,5 +284,145 @@ mod tests {
         assert_eq!(r.usage.cache_creation_input_tokens, Some(1));
         assert_eq!(r.usage.cache_read_input_tokens, Some(2));
         assert!(last.is_some());
+    }
+
+    #[test]
+    fn count_input_chars_empty_messages() {
+        assert_eq!(count_input_chars(&[]), 0);
+    }
+
+    #[test]
+    fn count_input_chars_text_only() {
+        let msgs = vec![Message {
+            role: clido_core::Role::User,
+            content: vec![ContentBlock::Text {
+                text: "hello".to_string(),
+            }],
+        }];
+        assert_eq!(count_input_chars(&msgs), 5);
+    }
+
+    #[test]
+    fn count_input_chars_multiple_blocks() {
+        let msgs = vec![
+            Message {
+                role: clido_core::Role::User,
+                content: vec![ContentBlock::Text {
+                    text: "hi".to_string(),
+                }],
+            },
+            Message {
+                role: clido_core::Role::Assistant,
+                content: vec![ContentBlock::Text {
+                    text: "ok".to_string(),
+                }],
+            },
+        ];
+        assert_eq!(count_input_chars(&msgs), 4);
+    }
+
+    #[tokio::test]
+    async fn invoke_rejects_empty_input() {
+        let mut cfg = AgentConfig::default();
+        cfg.max_input_chars = Some(100);
+        cfg.stream_model_completion = false;
+        cfg.provider_min_request_interval_ms = 0;
+        let mut last = None;
+        let err = invoke_model_completion(
+            Arc::new(OkNonStreamProvider),
+            &[],
+            &[],
+            &cfg,
+            None,
+            &mut last,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, clido_core::ClidoError::InputTooLong { .. }));
+    }
+
+    #[tokio::test]
+    async fn invoke_rejects_oversized_input() {
+        let mut cfg = AgentConfig::default();
+        cfg.max_input_chars = Some(10);
+        cfg.stream_model_completion = false;
+        cfg.provider_min_request_interval_ms = 0;
+        let msgs = vec![Message {
+            role: clido_core::Role::User,
+            content: vec![ContentBlock::Text {
+                text: "this is way too long for the limit".to_string(),
+            }],
+        }];
+        let mut last = None;
+        let err = invoke_model_completion(
+            Arc::new(OkNonStreamProvider),
+            &msgs,
+            &[],
+            &cfg,
+            None,
+            &mut last,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, clido_core::ClidoError::InputTooLong { .. }));
+    }
+
+    #[tokio::test]
+    async fn invoke_accepts_input_under_limit() {
+        let mut cfg = AgentConfig::default();
+        cfg.max_input_chars = Some(1000);
+        cfg.stream_model_completion = false;
+        cfg.provider_min_request_interval_ms = 0;
+        let msgs = vec![Message {
+            role: clido_core::Role::User,
+            content: vec![ContentBlock::Text {
+                text: "short".to_string(),
+            }],
+        }];
+        let mut last = None;
+        let r = invoke_model_completion(
+            Arc::new(OkNonStreamProvider),
+            &msgs,
+            &[],
+            &cfg,
+            None,
+            &mut last,
+            None,
+        )
+        .await
+        .unwrap();
+        match &r.content[0] {
+            ContentBlock::Text { text } => assert_eq!(text, "from-complete"),
+            _ => panic!("expected text block"),
+        }
+    }
+
+    #[tokio::test]
+    async fn invoke_skips_validation_when_max_chars_zero() {
+        let mut cfg = AgentConfig::default();
+        cfg.max_input_chars = Some(0); // disabled
+        cfg.stream_model_completion = false;
+        cfg.provider_min_request_interval_ms = 0;
+        let msgs: Vec<Message> = vec![];
+        let mut last = None;
+        // With max_input_chars=0, empty input should NOT be rejected by pre-validation
+        // (the provider will handle it or return its own error)
+        let r = invoke_model_completion(
+            Arc::new(OkNonStreamProvider),
+            &msgs,
+            &[],
+            &cfg,
+            None,
+            &mut last,
+            None,
+        )
+        .await
+        .unwrap();
+        match &r.content[0] {
+            ContentBlock::Text { text } => assert_eq!(text, "from-complete"),
+            _ => panic!("expected text block"),
+        }
     }
 }

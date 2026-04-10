@@ -172,6 +172,11 @@ pub struct AgentConfig {
     /// Max context tokens (from config or pricing). None = use default in context engine (e.g. 200000).
     #[serde(default)]
     pub max_context_tokens: Option<u32>,
+    /// Max input characters enforced before sending to the provider.
+    /// None = use DEFAULT_MAX_INPUT_CHARS from clido-context (260096).
+    /// Set higher or 0 to disable for providers without character-based limits.
+    #[serde(default)]
+    pub max_input_chars: Option<u64>,
     /// Compact when context_tokens > max_context_tokens * compaction_threshold. Default 0.58.
     #[serde(default)]
     pub compaction_threshold: Option<f64>,
@@ -358,6 +363,7 @@ impl Default for AgentConfig {
             use_planner: false,
             use_index: false,
             max_context_tokens: None,
+            max_input_chars: None,
             compaction_threshold: None,
             quiet: false,
             max_parallel_tools: 4,

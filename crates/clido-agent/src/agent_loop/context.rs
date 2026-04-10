@@ -2,7 +2,7 @@
 
 use clido_context::{
     assemble, dedup_file_reads, estimate_tokens_message, estimate_tokens_messages,
-    estimate_tokens_str,
+    estimate_tokens_str, DEFAULT_MAX_INPUT_CHARS,
 };
 use clido_core::{AgentConfig, ClidoError, ContentBlock, Message, Result, Role};
 use clido_providers::ModelProvider;
@@ -300,6 +300,44 @@ pub(crate) async fn compact_with_summary(
     Ok(out)
 }
 
+/// Count total characters across all message content blocks.
+fn count_message_chars(messages: &[Message]) -> u64 {
+    messages
+        .iter()
+        .map(|m| {
+            m.content
+                .iter()
+                .map(|b| match b {
+                    ContentBlock::Text { text } => text.chars().count() as u64,
+                    ContentBlock::ToolUse { id, name, input } => {
+                        id.chars().count() as u64
+                            + name.chars().count() as u64
+                            + input.to_string().chars().count() as u64
+                    }
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        ..
+                    } => {
+                        tool_use_id.chars().count() as u64 + content.chars().count() as u64
+                    }
+                    ContentBlock::Thinking { thinking } => thinking.chars().count() as u64,
+                    ContentBlock::Image { base64_data, .. } => base64_data.chars().count() as u64,
+                })
+                .sum::<u64>()
+        })
+        .sum()
+}
+
+/// Drop oldest messages until total character count fits within `max_chars`.
+/// Preserves at least the last 2 messages (the user prompt and its immediate context).
+fn truncate_to_char_limit(mut messages: Vec<Message>, max_chars: u64) -> Vec<Message> {
+    while count_message_chars(&messages) > max_chars && messages.len() > 2 {
+        messages.remove(0);
+    }
+    messages
+}
+
 /// Like [`compact_with_summary`], but subtracts an output reserve from the context budget and
 /// retries once with a tighter budget + forced compaction if the first pass hits `ContextLimit`.
 pub(crate) async fn compact_for_model_request(
@@ -313,7 +351,7 @@ pub(crate) async fn compact_for_model_request(
     let budget = max_context_tokens
         .saturating_sub(CONTEXT_OUTPUT_RESERVE)
         .max(24_000);
-    match compact_with_summary(
+    let result = match compact_with_summary(
         messages,
         system_prompt_tokens,
         budget,
@@ -332,6 +370,28 @@ pub(crate) async fn compact_for_model_request(
             compact_with_summary(messages, system_prompt_tokens, tight, 0.0, provider, config).await
         }
         Err(e) => Err(e),
+    };
+
+    // After token-based compaction, enforce character-based provider limits.
+    let max_chars = config.max_input_chars.unwrap_or(DEFAULT_MAX_INPUT_CHARS);
+    if max_chars > 0 {
+        match result {
+            Ok(compacted) => {
+                let chars = count_message_chars(&compacted);
+                if chars > max_chars {
+                    warn!(
+                        "compacted context exceeds char limit ({} > {}); dropping oldest messages",
+                        chars, max_chars
+                    );
+                    Ok(truncate_to_char_limit(compacted, max_chars))
+                } else {
+                    Ok(compacted)
+                }
+            }
+            Err(e) => Err(e),
+        }
+    } else {
+        result
     }
 }
 
@@ -426,4 +486,115 @@ pub(crate) async fn summarize_messages(
     }
 
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn count_message_chars_empty() {
+        assert_eq!(count_message_chars(&[]), 0);
+    }
+
+    #[test]
+    fn count_message_chars_single_text() {
+        let msgs = vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "hello".to_string(),
+            }],
+        }];
+        assert_eq!(count_message_chars(&msgs), 5);
+    }
+
+    #[test]
+    fn count_message_chars_tool_result() {
+        let msgs = vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "id1".to_string(),
+                content: "file content".to_string(),
+                is_error: false,
+            }],
+        }];
+        // "id1" (3) + "file content" (12) = 15
+        assert_eq!(count_message_chars(&msgs), 15);
+    }
+
+    #[test]
+    fn truncate_to_char_limit_no_truncation_needed() {
+        let msgs = vec![
+            Message {
+                role: Role::User,
+                content: vec![ContentBlock::Text {
+                    text: "hello".to_string(),
+                }],
+            },
+            Message {
+                role: Role::Assistant,
+                content: vec![ContentBlock::Text {
+                    text: "world".to_string(),
+                }],
+            },
+        ];
+        let result = truncate_to_char_limit(msgs.clone(), 100);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn truncate_to_char_limit_drops_oldest() {
+        let msgs = vec![
+            Message {
+                role: Role::User,
+                content: vec![ContentBlock::Text {
+                    text: "old message one".to_string(),
+                }],
+            },
+            Message {
+                role: Role::Assistant,
+                content: vec![ContentBlock::Text {
+                    text: "old message two".to_string(),
+                }],
+            },
+            Message {
+                role: Role::User,
+                content: vec![ContentBlock::Text {
+                    text: "recent".to_string(),
+                }],
+            },
+        ];
+        // Total: 15 + 15 + 6 = 36 chars. Limit to 25 → should drop first message.
+        let result = truncate_to_char_limit(msgs, 25);
+        assert_eq!(result.len(), 2);
+        // Should keep the last 2 messages
+        assert!(result[0].content.iter().any(|b| matches!(b, ContentBlock::Text { text } if text == "old message two")));
+    }
+
+    #[test]
+    fn truncate_to_char_limit_preserves_minimum() {
+        let msgs = vec![
+            Message {
+                role: Role::User,
+                content: vec![ContentBlock::Text {
+                    text: "a".repeat(100).to_string(),
+                }],
+            },
+            Message {
+                role: Role::Assistant,
+                content: vec![ContentBlock::Text {
+                    text: "b".repeat(100).to_string(),
+                }],
+            },
+            Message {
+                role: Role::User,
+                content: vec![ContentBlock::Text {
+                    text: "prompt".to_string(),
+                }],
+            },
+        ];
+        // Even with a very small limit, should preserve at least 2 messages
+        let result = truncate_to_char_limit(msgs, 10);
+        assert_eq!(result.len(), 2);
+    }
 }

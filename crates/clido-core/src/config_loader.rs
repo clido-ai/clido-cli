@@ -174,6 +174,9 @@ pub struct ContextSection {
     pub compaction_threshold: f64,
     #[serde(default)]
     pub max_context_tokens: Option<u32>,
+    /// Max input characters enforced before sending to provider. None = use DEFAULT_MAX_INPUT_CHARS.
+    #[serde(default)]
+    pub max_input_chars: Option<u64>,
 }
 
 fn default_compaction_threshold() -> f64 {
@@ -185,6 +188,7 @@ impl Default for ContextSection {
         Self {
             compaction_threshold: default_compaction_threshold(),
             max_context_tokens: None,
+            max_input_chars: None,
         }
     }
 }
@@ -518,6 +522,10 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
             .context
             .max_context_tokens
             .or(base.context.max_context_tokens),
+        max_input_chars: later
+            .context
+            .max_input_chars
+            .or(base.context.max_input_chars),
     };
     let workflows = WorkflowsSection {
         directory: if later.workflows.directory != default_workflows_directory() {
@@ -802,6 +810,7 @@ pub fn agent_config_from_loaded(
         use_planner: false,
         use_index: false,
         max_context_tokens: loaded.context.max_context_tokens,
+        max_input_chars: loaded.context.max_input_chars,
         compaction_threshold: Some(loaded.context.compaction_threshold),
         quiet: cli_quiet || loaded.agent.quiet,
         max_parallel_tools,
@@ -1813,6 +1822,7 @@ max-turns = 100
             context: ContextSection {
                 compaction_threshold: 0.5,
                 max_context_tokens: Some(100_000),
+                max_input_chars: None,
             },
             workflows: WorkflowsSection::default(),
             hooks: HooksConfig::default(),

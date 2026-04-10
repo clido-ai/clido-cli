@@ -343,6 +343,25 @@ pub(super) struct App {
     /// The most recent user prompt — shown as a banner below the header while the
     /// agent is busy, so the user always knows what task is in flight.
     pub(super) active_prompt: Option<String>,
+    /// Multi-agent exploration state (active sub-agents, progress, etc.)
+    pub(super) exploration_state: Option<ExplorationState>,
+}
+
+/// State for multi-agent exploration.
+#[derive(Clone, Debug)]
+pub struct ExplorationState {
+    /// Number of active sub-agents.
+    pub active_agents: usize,
+    /// Total number of tasks.
+    pub total_tasks: usize,
+    /// Completed tasks.
+    pub completed_tasks: usize,
+    /// Current task per agent.
+    pub agent_tasks: Vec<String>,
+    /// Total cost so far.
+    pub total_cost_usd: f64,
+    /// Whether exploration is in progress.
+    pub in_progress: bool,
 }
 
 impl App {
@@ -468,6 +487,7 @@ impl App {
             selection_mode: false,
             ui_emit_unhealthy,
             active_prompt: None,
+            exploration_state: None,
         };
         app.messages.push(ChatLine::WelcomeSplash);
         app

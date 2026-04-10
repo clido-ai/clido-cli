@@ -173,6 +173,50 @@ pub(crate) fn build_status_rail_lines(
         ]));
     }
 
+    // ── EXPLORATION (multi-agent) ──────────────────────────────────────────
+    if let Some(ref exploration) = app.exploration_state {
+        if exploration.in_progress {
+            lines.push(Line::raw(""));
+            lines.push(rail_section_title("EXPLORATION"));
+            lines.push(Line::from(vec![
+                Span::styled(" ", Style::default()),
+                Span::styled(
+                    format!("{} agents", exploration.active_agents),
+                    Style::default().fg(TUI_STATE_OK),
+                ),
+                Span::styled(
+                    format!(" · {}/{}", exploration.completed_tasks, exploration.total_tasks),
+                    dim,
+                ),
+            ]));
+            
+            // Show current task per agent
+            for (idx, task) in exploration.agent_tasks.iter().take(3).enumerate() {
+                lines.push(Line::from(vec![Span::styled(
+                    format!(
+                        "  {} {}",
+                        if idx == 0 { "├─" } else { "└─" },
+                        truncate_chars(task, w.saturating_sub(4) as usize)
+                    ),
+                    dim,
+                )]));
+            }
+            
+            if exploration.agent_tasks.len() > 3 {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  └─ …+{} more", exploration.agent_tasks.len() - 3),
+                    dim,
+                )]));
+            }
+            
+            // Show cost
+            lines.push(Line::from(vec![Span::styled(
+                format!("  Cost: ${:.4}", exploration.total_cost_usd),
+                dim,
+            )]));
+        }
+    }
+
     // ── QUEUE ───────────────────────────────────────────────────────────────
     lines.push(Line::raw(""));
     lines.push(rail_section_title("QUEUE"));

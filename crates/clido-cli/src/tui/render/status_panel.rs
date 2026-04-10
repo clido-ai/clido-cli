@@ -100,6 +100,13 @@ pub(crate) fn build_status_rail_lines(
     // ── CONTEXT ────────────────────────────────────────────────────────────
     lines.push(Line::raw(""));
     lines.push(rail_section_title("CONTEXT"));
+    // Workdir first
+    let wd = shorten_workdir(&app.workspace_root);
+    lines.push(Line::from(vec![Span::styled(
+        format!(" {}", truncate_chars(&wd, w.saturating_sub(2) as usize)),
+        dim,
+    )]));
+    // Branch below workdir
     if let Some(ref git) = app.tui_git_snapshot {
         let dirty = if git.status_short.is_empty() {
             "clean"
@@ -117,11 +124,6 @@ pub(crate) fn build_status_rail_lines(
     } else {
         lines.push(Line::from(vec![Span::styled(" (not a git repo)", dim)]));
     }
-    let wd = shorten_workdir(&app.workspace_root);
-    lines.push(Line::from(vec![Span::styled(
-        format!(" {}", truncate_chars(&wd, w.saturating_sub(2) as usize)),
-        dim,
-    )]));
 
     // ── AGENT ───────────────────────────────────────────────────────────────
     lines.push(Line::raw(""));

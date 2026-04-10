@@ -378,6 +378,7 @@ impl Default for AgentConfig {
             stream_model_completion: false,
             tool_timeout_secs: default_tool_timeout_secs(),
             max_tool_output_bytes: default_max_tool_output_bytes(),
+            exploration: ExplorationConfig::default(),
         }
     }
 }

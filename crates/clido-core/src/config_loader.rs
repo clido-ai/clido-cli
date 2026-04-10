@@ -858,6 +858,7 @@ pub fn agent_config_from_loaded(
             .agent
             .max_tool_output_bytes
             .unwrap_or(def.max_tool_output_bytes),
+        exploration: def.exploration.clone(),
     })
 }
 

@@ -333,6 +333,9 @@ impl ExplorationOrchestrator {
             available_permits: self.concurrency_semaphore.available_permits(),
             rate_limiter_stats,
             memory_stats,
+            total_cost_usd: 0.0, // TODO: Track actual cost
+            tasks_completed: 0,
+            cache_savings_usd: 0.0,
         }
     }
 }
@@ -361,8 +364,9 @@ pub struct MultiAgentCostTracker {
     pub sub_agent_costs: Vec<Usage>,
     /// Cache hits (avoided API calls).
     pub cache_hits: usize,
-    /// Estimated savings from caching.
-    pub estimated_savings_usd: f64,
+    /// Estimated savings from caching (in tokens).
+    pub estimated_savings_input_tokens: u64,
+    pub estimated_savings_output_tokens: u64,
 }
 
 impl MultiAgentCostTracker {
@@ -372,7 +376,8 @@ impl MultiAgentCostTracker {
             parent_cost,
             sub_agent_costs: Vec::new(),
             cache_hits: 0,
-            estimated_savings_usd: 0.0,
+            estimated_savings_input_tokens: 0,
+            estimated_savings_output_tokens: 0,
         }
     }
 
@@ -382,9 +387,10 @@ impl MultiAgentCostTracker {
     }
 
     /// Record a cache hit.
-    pub fn record_cache_hit(&mut self, estimated_cost_usd: f64) {
+    pub fn record_cache_hit(&mut self, input_tokens: u64, output_tokens: u64) {
         self.cache_hits += 1;
-        self.estimated_savings_usd += estimated_cost_usd;
+        self.estimated_savings_input_tokens += input_tokens;
+        self.estimated_savings_output_tokens += output_tokens;
     }
 
     /// Get total cost (parent + all sub-agents).
@@ -393,31 +399,40 @@ impl MultiAgentCostTracker {
         for cost in &self.sub_agent_costs {
             total.input_tokens += cost.input_tokens;
             total.output_tokens += cost.output_tokens;
-            if let Some(parent_cost) = total.total_cost_usd {
-                if let Some(sub_cost) = cost.total_cost_usd {
-                    total.total_cost_usd = Some(parent_cost + sub_cost);
+            if let Some(parent_cache_create) = total.cache_creation_input_tokens {
+                if let Some(sub_cache_create) = cost.cache_creation_input_tokens {
+                    total.cache_creation_input_tokens = Some(parent_cache_create + sub_cache_create);
+                }
+            }
+            if let Some(parent_cache_read) = total.cache_read_input_tokens {
+                if let Some(sub_cache_read) = cost.cache_read_input_tokens {
+                    total.cache_read_input_tokens = Some(parent_cache_read + sub_cache_read);
                 }
             }
         }
         total
     }
 
-    /// Get total cost in USD.
-    pub fn total_cost_usd(&self) -> f64 {
-        self.total_cost().total_cost_usd.unwrap_or(0.0)
+    /// Get total tokens.
+    pub fn total_tokens(&self) -> u64 {
+        let total = self.total_cost();
+        total.input_tokens + total.output_tokens
     }
 
     /// Get summary string for display.
     pub fn summary(&self) -> String {
-        let total = self.total_cost_usd();
-        let parent = self.parent_cost.total_cost_usd.unwrap_or(0.0);
-        let sub_agents: f64 = self.sub_agent_costs.iter()
-            .map(|c| c.total_cost_usd.unwrap_or(0.0))
-            .sum();
+        let total = self.total_cost();
+        let parent_input = self.parent_cost.input_tokens;
+        let parent_output = self.parent_cost.output_tokens;
+        let sub_agents_input: u64 = self.sub_agent_costs.iter().map(|c| c.input_tokens).sum();
+        let sub_agents_output: u64 = self.sub_agent_costs.iter().map(|c| c.output_tokens).sum();
         
         format!(
-            "Total: ${:.4} (parent: ${:.4}, sub-agents: ${:.4}, cache savings: ${:.4})",
-            total, parent, sub_agents, self.estimated_savings_usd
+            "Total: {} input / {} output tokens (parent: {} / {}, sub-agents: {} / {}, cache hits: {})",
+            total.input_tokens, total.output_tokens,
+            parent_input, parent_output,
+            sub_agents_input, sub_agents_output,
+            self.cache_hits
         )
     }
 }

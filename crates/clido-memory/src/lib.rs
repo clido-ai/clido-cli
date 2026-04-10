@@ -1,9 +1,13 @@
 //! Long-term memory: SQLite + FTS5 for keyword search, with optional embedding support.
 
+pub mod shared;
+
 use std::path::Path;
 
 use rusqlite::{params, Connection};
 use uuid::Uuid;
+
+pub use shared::{CacheStats, FileContent, SearchResults, SharedMemory};
 
 /// A stored memory entry.
 #[derive(Debug, Clone)]

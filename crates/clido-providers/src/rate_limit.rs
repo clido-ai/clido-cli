@@ -258,7 +258,7 @@ impl std::fmt::Display for RateLimitError {
 impl std::error::Error for RateLimitError {}
 
 /// Registry of rate limiters for multiple providers.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct RateLimiterRegistry {
     limiters: Arc<Mutex<HashMap<String, Arc<RateLimiter>>>>,
 }

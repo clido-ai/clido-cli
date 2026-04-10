@@ -2,6 +2,7 @@
 
 pub mod agent_loop;
 pub mod exploration;
+pub mod orchestrator;
 pub mod prompts;
 pub mod provider_prompts;
 pub mod sub_agent;
@@ -14,4 +15,5 @@ pub use agent_loop::{
 pub use exploration::{
     ExplorationResult, ExplorationTask, Finding, FindingKind, TaskComplexity, TaskSplitter,
 };
+pub use orchestrator::{ExplorationOrchestrator, OrchestratorConfig, OrchestratorStats};
 pub use sub_agent::SubAgent;

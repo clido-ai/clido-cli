@@ -236,6 +236,61 @@ pub struct AgentConfig {
     /// Truncate tool output text beyond this many bytes (0 = unlimited).
     #[serde(default = "default_max_tool_output_bytes")]
     pub max_tool_output_bytes: usize,
+    /// Multi-agent exploration configuration.
+    #[serde(default)]
+    pub exploration: ExplorationConfig,
+}
+
+/// Configuration for multi-agent exploration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplorationConfig {
+    /// Enable multi-agent exploration.
+    #[serde(default = "default_exploration_enabled")]
+    pub enabled: bool,
+    /// Maximum concurrent sub-agents.
+    #[serde(default = "default_max_concurrent_agents")]
+    pub max_concurrent_agents: usize,
+    /// Timeout per sub-agent task (seconds).
+    #[serde(default = "default_exploration_timeout_secs")]
+    pub timeout_secs: u64,
+    /// Enable result caching.
+    #[serde(default = "default_exploration_caching")]
+    pub enable_caching: bool,
+    /// Cache TTL for file contents (seconds).
+    #[serde(default = "default_exploration_cache_ttl_secs")]
+    pub cache_ttl_secs: u64,
+}
+
+impl Default for ExplorationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_exploration_enabled(),
+            max_concurrent_agents: default_max_concurrent_agents(),
+            timeout_secs: default_exploration_timeout_secs(),
+            enable_caching: default_exploration_caching(),
+            cache_ttl_secs: default_exploration_cache_ttl_secs(),
+        }
+    }
+}
+
+fn default_exploration_enabled() -> bool {
+    true
+}
+
+fn default_max_concurrent_agents() -> usize {
+    3
+}
+
+fn default_exploration_timeout_secs() -> u64 {
+    30
+}
+
+fn default_exploration_caching() -> bool {
+    true
+}
+
+fn default_exploration_cache_ttl_secs() -> u64 {
+    300
 }
 
 fn default_max_parallel_tools() -> u32 {

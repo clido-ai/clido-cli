@@ -2403,6 +2403,8 @@ pub(super) async fn event_loop(
     let mut crossterm_events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(80));
     let mut last_agent_activity = std::time::Instant::now();
+    // Git refresh counter - refresh every ~5 seconds (80ms * 62 = ~5s)
+    let mut git_refresh_counter: u32 = 0;
     // Stall timeout: trigger recovery only if truly no activity (heartbeats keep this fresh
     // during long LLM calls, so 120 s is a reliable hard ceiling for genuinely hung agents).
     const STALL_TIMEOUT_SECS: u64 = 120;
@@ -2418,6 +2420,14 @@ pub(super) async fn event_loop(
 
         tokio::select! {
             _ = tick.tick() => {
+                // Refresh git snapshot periodically to catch branch changes
+                git_refresh_counter += 1;
+                if git_refresh_counter >= 62 {
+                    git_refresh_counter = 0;
+                    app.refresh_git_snapshot();
+                    dirty = true;
+                }
+
                 // Only mark dirty when spinner is actually animating.
                 if app.busy || app.pending_perm.is_some() {
                     app.tick_spinner();

@@ -2259,7 +2259,9 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         // Enter: submit the message.
         (Km::NONE, Enter) => app.submit(),
         // Shift+Enter: insert a newline without sending (multiline input).
-        (Km::SHIFT, Enter) | (Km::CONTROL, Char('j')) => {
+        // Requires Kitty keyboard protocol support (kitty, WezTerm, Ghostty, foot).
+        // Ctrl+J: reliable fallback for inserting a newline on all terminals.
+        (Km::SHIFT, Enter) | (Km::CONTROL, Char('j')) | (Km::ALT, Enter) => {
             let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor);
             app.text_input.text.insert(byte_pos, '\n');
             app.text_input.cursor += 1;

@@ -2044,9 +2044,9 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 }
             }
             ChatLine::Thinking(text) => {
-                // Show "thinking..." label in muted color
+                // Show "clido" label in muted color for thinking state
                 out.push(Line::from(vec![Span::styled(
-                    format!("{TUI_GUTTER}thinking..."),
+                    format!("{TUI_GUTTER}clido"),
                     Style::default().fg(TUI_MUTED).add_modifier(Modifier::BOLD),
                 )]));
                 // Render thinking text with markdown but apply muted style

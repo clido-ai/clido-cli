@@ -1270,6 +1270,8 @@ pub(super) fn cmd_plan(app: &mut App, cmd: &str) {
         task => {
             // /plan <task> — ask the agent to plan first, then wait for confirmation
             let task = task.to_string();
+            // Echo the user's /plan command to the chat like a normal prompt
+            app.push(ChatLine::User(format!("/plan {task}")));
             app.plan.awaiting_plan_response = true;
             let prompt = format!(
                 "Create a plan for the following task using **exactly** these sections (in order):\n\

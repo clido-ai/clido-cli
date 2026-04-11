@@ -609,6 +609,15 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     if app.busy || app.pending_perm.is_some() || app.enhancing {
         let spinner = SPINNER[app.spinner_tick];
         let chrome_note = Style::default().fg(TUI_ROW_DIM).add_modifier(Modifier::DIM);
+
+        // Calculate elapsed time for display in all busy states
+        let elapsed_s = app.turn_start.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+        let elapsed_hint = if elapsed_s >= 1 {
+            format!(" {elapsed_s}s")
+        } else {
+            String::new()
+        };
+
         let title_line = if app.pending_perm.is_some() {
             Line::from(vec![
                 Span::styled("▸ ", Style::default().fg(TUI_STATE_WARN)),
@@ -626,9 +635,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             ])
         } else if !app.queued.is_empty() {
             let phase = match app.agent_run_state {
-                AppRunState::RunningTools => "Running tools",
-                AppRunState::Generating => "Generating",
-                AppRunState::Idle => "Agent running",
+                AppRunState::RunningTools => format!("Running tools{elapsed_hint}"),
+                AppRunState::Generating => format!("Generating{elapsed_hint}"),
+                AppRunState::Idle => format!("Agent running{elapsed_hint}"),
             };
             Line::from(vec![
                 Span::styled(format!("{} ", spinner), Style::default().fg(TUI_STATE_BUSY)),
@@ -639,12 +648,6 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 ),
             ])
         } else if app.text_input.is_empty() {
-            let elapsed_s = app.turn_start.map(|t| t.elapsed().as_secs()).unwrap_or(0);
-            let elapsed_hint = if elapsed_s >= 1 {
-                format!(" {elapsed_s}s")
-            } else {
-                String::new()
-            };
             let phase = match app.agent_run_state {
                 AppRunState::RunningTools => format!("Running tools{elapsed_hint}"),
                 AppRunState::Generating => format!("Generating{elapsed_hint}"),
@@ -660,9 +663,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             ])
         } else {
             let phase = match app.agent_run_state {
-                AppRunState::RunningTools => "Running tools",
-                AppRunState::Generating => "Generating",
-                AppRunState::Idle => "Thinking",
+                AppRunState::RunningTools => format!("Running tools{elapsed_hint}"),
+                AppRunState::Generating => format!("Generating{elapsed_hint}"),
+                AppRunState::Idle => format!("Thinking{elapsed_hint}"),
             };
             Line::from(vec![
                 Span::styled(format!("{} ", spinner), Style::default().fg(TUI_STATE_BUSY)),
@@ -1709,6 +1712,9 @@ fn apply_selection_highlight(
 /// After this, `Vec<Line>` index == visual row, which means mouse
 /// coordinates (post-wrap) map 1:1 to vector indices. This is critical
 /// for selection highlighting and text extraction.
+///
+/// Word-aware wrapping: never splits words, only breaks at whitespace.
+/// Preserves indentation on continuation lines.
 fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
     if width == 0 {
         return lines;
@@ -1725,38 +1731,124 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
             out.push(line);
             continue;
         }
-        // Slow path: split spans across multiple output lines.
-        let mut cur_spans: Vec<Span<'static>> = Vec::new();
-        let mut col = 0usize;
-        for span in line.spans {
-            let style = span.style;
-            let mut remaining: &str = span.content.as_ref();
-            while !remaining.is_empty() {
-                let avail = width.saturating_sub(col);
-                if avail == 0 {
-                    out.push(Line::from(std::mem::take(&mut cur_spans)));
-                    col = 0;
-                    continue;
+
+        // Slow path: word-aware wrapping with indentation preservation
+        // Collect all text and detect indentation
+        let mut full_text = String::new();
+        for span in &line.spans {
+            full_text.push_str(span.content.as_ref());
+        }
+
+        // Detect indentation (leading whitespace)
+        let trimmed = full_text.trim_start();
+        let indent_len = full_text.len() - trimmed.len();
+        let indent = &full_text[..indent_len];
+        let content = trimmed;
+        let indent_width = unicode_display_width(indent);
+        let avail_width = width.saturating_sub(indent_width);
+
+        if avail_width < 10 {
+            // Not enough space for word wrapping, fall back to character-based
+            out.push(line);
+            continue;
+        }
+
+        // Word-wrap the content
+        let words: Vec<&str> = content.split_whitespace().collect();
+        if words.is_empty() {
+            out.push(line);
+            continue;
+        }
+
+        let mut wrapped_lines: Vec<String> = Vec::new();
+        let mut current_line = String::new();
+        let mut current_width = 0usize;
+        let mut is_first_line = true;
+
+        for word in words {
+            let word_width = unicode_display_width(word);
+            let effective_width = if is_first_line { width } else { avail_width };
+
+            // Check if word fits
+            let needs_space = !current_line.is_empty();
+            let space_width = if needs_space { 1 } else { 0 };
+
+            if current_width + space_width + word_width <= effective_width {
+                // Word fits - add it
+                if needs_space {
+                    current_line.push(' ');
+                    current_width += 1;
                 }
-                // Take as many chars as fit within `avail` columns.
-                let (chunk, chunk_w) = take_cols(remaining, avail);
-                if chunk.is_empty() {
-                    // Single character wider than available space — force wrap.
-                    out.push(Line::from(std::mem::take(&mut cur_spans)));
-                    col = 0;
-                    continue;
+                current_line.push_str(word);
+                current_width += word_width;
+            } else {
+                // Word doesn't fit - flush current line
+                if !current_line.is_empty() {
+                    if is_first_line {
+                        wrapped_lines.push(current_line);
+                        is_first_line = false;
+                    } else {
+                        wrapped_lines.push(format!("{}{}", indent, current_line));
+                    }
+                    current_line = String::new();
+                    current_width = 0;
                 }
-                cur_spans.push(Span::styled(chunk.to_string(), style));
-                col += chunk_w;
-                remaining = &remaining[chunk.len()..];
-                if col >= width && !remaining.is_empty() {
-                    out.push(Line::from(std::mem::take(&mut cur_spans)));
-                    col = 0;
+
+                // Handle very long words
+                if word_width > avail_width {
+                    let mut remaining = word;
+                    while !remaining.is_empty() {
+                        let space_left = avail_width.saturating_sub(current_width);
+                        if space_left == 0 {
+                            // Flush and start new line with indent
+                            if !current_line.is_empty() {
+                                wrapped_lines.push(format!("{}{}", indent, current_line));
+                                current_line = String::new();
+                                current_width = 0;
+                            }
+                            continue;
+                        }
+
+                        let (chunk, chunk_w) = take_cols(remaining, space_left);
+                        if chunk.is_empty() {
+                            // Force at least one char
+                            let mut chars = remaining.chars();
+                            if let Some(c) = chars.next() {
+                                let c_str = c.to_string();
+                                let c_w = unicode_display_width(&c_str);
+                                current_line.push_str(&c_str);
+                                current_width += c_w;
+                                remaining = chars.as_str();
+                            } else {
+                                break;
+                            }
+                        } else {
+                            current_line.push_str(chunk);
+                            current_width += chunk_w;
+                            remaining = &remaining[chunk.len()..];
+                        }
+                    }
+                } else {
+                    current_line.push_str(word);
+                    current_width = word_width;
                 }
             }
         }
-        if !cur_spans.is_empty() {
-            out.push(Line::from(cur_spans));
+
+        // Flush last line
+        if !current_line.is_empty() {
+            if is_first_line {
+                wrapped_lines.push(current_line);
+            } else {
+                wrapped_lines.push(format!("{}{}", indent, current_line));
+            }
+        }
+
+        // Create Line objects from wrapped text
+        // Use the style of the first span for all wrapped lines
+        let dominant_style = line.spans.first().map(|s| s.style).unwrap_or_default();
+        for wrapped in wrapped_lines {
+            out.push(Line::from(vec![Span::styled(wrapped, dominant_style)]));
         }
     }
     out
@@ -1899,15 +1991,25 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 let think = Style::default()
                     .fg(TUI_MUTED)
                     .add_modifier(Modifier::DIM | Modifier::ITALIC);
+                // Show "thinking" label like "clido" for Assistant
+                out.push(Line::from(vec![
+                    Span::styled(
+                        format!("{TUI_GUTTER}thinking"),
+                        Style::default()
+                            .fg(TUI_SOFT_ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
                 for part in text.lines() {
                     if part.trim().is_empty() {
                         continue;
                     }
                     out.push(Line::from(vec![
-                        Span::styled(format!("{TUI_GUTTER_DEEP}‥  "), think),
+                        Span::styled(format!("{TUI_GUTTER}  "), think),
                         Span::styled(part.to_string(), think),
                     ]));
                 }
+                out.push(Line::raw(""));
             }
             ChatLine::ToolCall {
                 name,
@@ -1932,13 +2034,21 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 if text.is_empty() {
                     out.push(Line::raw(""));
                 } else {
-                    out.push(Line::from(vec![
-                        Span::styled(
-                            format!("{TUI_GUTTER}› "),
+                    // Render info text with markdown formatting but keep it muted/decent
+                    let muted_style = Style::default().fg(TUI_ROW_DIM);
+                    let prefix = format!("{TUI_GUTTER}› ");
+                    for line in render_markdown(text, width) {
+                        // Apply muted style to all spans in the line, but prepend the gutter prefix
+                        let mut spans = vec![Span::styled(
+                            prefix.clone(),
                             Style::default().fg(TUI_DIVIDER).add_modifier(Modifier::DIM),
-                        ),
-                        Span::styled(text.clone(), Style::default().fg(TUI_ROW_DIM)),
-                    ]));
+                        )];
+                        spans.extend(line.spans.into_iter().map(|span| {
+                            // Keep the original style but make it dimmer
+                            Span::styled(span.content.to_string(), muted_style.patch(span.style))
+                        }));
+                        out.push(Line::from(spans));
+                    }
                 }
             }
             ChatLine::Section(text) => {

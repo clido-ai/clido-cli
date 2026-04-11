@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`/plan` command echo**: The `/plan <task>` command now shows the user's input in the chat like a normal prompt.
+- **Thinking label**: `ChatLine::Thinking` messages now display a "thinking" label (similar to "clido" for assistant messages) for consistent sender identification.
+
+### Changed
+
+- **Markdown formatting for info messages**: All `ChatLine::Info` messages are now rendered with Markdown formatting (still muted/decent color).
+- **Timer always visible**: The elapsed time counter is now displayed in all agent activity states (Generating, Running tools, Thinking, etc.), not just when the input field is empty.
+- **Softer error color**: Changed `TUI_STATE_ERR` from bright red (`Rgb(240, 118, 128)`) to a more muted red (`Rgb(200, 100, 100)`) for reduced eye strain.
+- **Softer branch name color**: Git branch names in the sidebar now use `TUI_MUTED` instead of `TUI_BRAND_TEXT` for a more neutral appearance.
+- **Selection reset on auto-scroll**: Text selection is now reset when the chat auto-scrolls with new messages, preventing the cursor from jumping to old positions.
+
+### Fixed
+
+- **Word wrapping**: Words are no longer split mid-word when wrapping. Line breaks now occur at word boundaries, and indentation is preserved on continuation lines.
+- **Mouse selection coordinates**: Fixed text selection to use correct coordinates after word-wrapping changes.
+
 ## [0.1.0-beta.13] - 2026-04-10
 
 ### Fixed

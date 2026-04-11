@@ -583,6 +583,8 @@ impl App {
         self.busy = true;
         self.agent_run_state = AppRunState::Generating;
         self.following = true;
+        // Reset selection when auto-scrolling to prevent cursor jumping to old position
+        self.clear_selection();
         self.turn_start = Some(std::time::Instant::now());
         self.text_input.history_idx = None;
         self.text_input.history_draft.clear();
@@ -601,6 +603,8 @@ impl App {
         self.busy = true;
         self.agent_run_state = AppRunState::Generating;
         self.following = true;
+        // Reset selection when auto-scrolling to prevent cursor jumping to old position
+        self.clear_selection();
         self.turn_start = Some(std::time::Instant::now());
         self.text_input.history_idx = None;
         self.text_input.history_draft.clear();

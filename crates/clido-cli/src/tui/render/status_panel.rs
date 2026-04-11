@@ -117,7 +117,7 @@ pub(crate) fn build_status_rail_lines(
             Span::styled(" ⎇ ", Style::default().fg(TUI_MARK)),
             Span::styled(
                 truncate_chars(&git.branch, w.saturating_sub(8) as usize),
-                Style::default().fg(TUI_BRAND_TEXT),
+                Style::default().fg(TUI_MUTED),
             ),
             Span::styled(format!(" · {dirty}"), dim),
         ]));

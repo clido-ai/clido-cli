@@ -653,11 +653,6 @@ impl App {
             return;
         }
 
-        // Show acknowledgment that the agent understood and is working
-        self.push(ChatLine::Info(
-            "  Understood — analyzing and working on it...".into(),
-        ));
-
         self.turn_tool_tally.clear();
 
         // Only clear input field if this text matches what's currently in the input

@@ -1737,7 +1737,7 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
         let mut indent_spans: Vec<Span<'static>> = Vec::new();
         let mut content_spans: Vec<Span<'static>> = Vec::new();
         let mut found_non_whitespace = false;
-        
+
         for span in &line.spans {
             if !found_non_whitespace && span.content.chars().all(|c| c.is_whitespace()) {
                 indent_spans.push(span.clone());
@@ -1746,33 +1746,33 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
                 content_spans.push(span.clone());
             }
         }
-        
+
         // Calculate indent width
         let indent_width: usize = indent_spans
             .iter()
             .map(|s| unicode_display_width(s.content.as_ref()))
             .sum();
         let avail_width = width.saturating_sub(indent_width);
-        
+
         if avail_width < 10 {
             // Not enough space for word wrapping, fall back to character-based
             out.push(line);
             continue;
         }
-        
+
         // Collect all content text
         let mut full_text = String::new();
         for span in &content_spans {
             full_text.push_str(span.content.as_ref());
         }
-        
+
         // Word-wrap the content
         let words: Vec<&str> = full_text.split_whitespace().collect();
         if words.is_empty() {
             out.push(line);
             continue;
         }
-        
+
         // Build style map: for each byte position in full_text, track the style
         let mut style_map: Vec<Style> = Vec::with_capacity(full_text.len());
         for span in &content_spans {
@@ -1781,21 +1781,21 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
                 style_map.push(span.style);
             }
         }
-        
+
         let mut wrapped_lines: Vec<(String, Vec<Style>)> = Vec::new();
         let mut current_line = String::new();
         let mut current_styles: Vec<Style> = Vec::new();
         let mut current_width = 0usize;
         let mut is_first_line = true;
-        
+
         for word in words {
             let word_width = unicode_display_width(word);
             let effective_width = if is_first_line { width } else { avail_width };
-            
+
             // Check if word fits
             let needs_space = !current_line.is_empty();
             let space_width = if needs_space { 1 } else { 0 };
-            
+
             if current_width + space_width + word_width <= effective_width {
                 // Word fits - add it
                 if needs_space {
@@ -1830,7 +1830,7 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
                     current_styles = Vec::new();
                     is_first_line = false;
                 }
-                
+
                 // Add word to new line
                 if let Some(word_pos) = full_text.find(word) {
                     for (i, c) in word.chars().enumerate() {
@@ -1851,16 +1851,16 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
                 current_width = word_width;
             }
         }
-        
+
         // Flush last line
         if !current_line.is_empty() {
             wrapped_lines.push((current_line, current_styles));
         }
-        
+
         // Create Line objects from wrapped text with proper styles
         for (i, (wrapped_text, styles)) in wrapped_lines.iter().enumerate() {
             let mut line_spans: Vec<Span<'static>> = Vec::new();
-            
+
             // Add indent spans for continuation lines (not first line)
             if i > 0 {
                 line_spans.extend(indent_spans.clone());
@@ -1868,13 +1868,13 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
                 // First line gets original indent spans
                 line_spans.extend(indent_spans.clone());
             }
-            
+
             // Build spans from text and styles
             if !wrapped_text.is_empty() {
                 // Group consecutive characters with the same style
                 let mut current_style = styles.first().copied().unwrap_or_default();
                 let mut current_text = String::new();
-                
+
                 for (j, c) in wrapped_text.chars().enumerate() {
                     let style = styles.get(j).copied().unwrap_or_default();
                     if style == current_style {
@@ -1891,7 +1891,7 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
                     line_spans.push(Span::styled(current_text, current_style));
                 }
             }
-            
+
             out.push(Line::from(line_spans));
         }
     }
@@ -2036,9 +2036,7 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 // Show "thinking..." label in muted color
                 out.push(Line::from(vec![Span::styled(
                     format!("{TUI_GUTTER}thinking..."),
-                    Style::default()
-                        .fg(TUI_MUTED)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::BOLD),
                 )]));
                 // Render thinking text with markdown but apply muted style
                 let think = Style::default()

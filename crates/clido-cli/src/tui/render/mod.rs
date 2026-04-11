@@ -2034,13 +2034,21 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 if text.is_empty() {
                     out.push(Line::raw(""));
                 } else {
-                    out.push(Line::from(vec![
-                        Span::styled(
-                            format!("{TUI_GUTTER}› "),
+                    // Render info text with markdown formatting but keep it muted/decent
+                    let muted_style = Style::default().fg(TUI_ROW_DIM);
+                    let prefix = format!("{TUI_GUTTER}› ");
+                    for line in render_markdown(text, width) {
+                        // Apply muted style to all spans in the line, but prepend the gutter prefix
+                        let mut spans = vec![Span::styled(
+                            prefix.clone(),
                             Style::default().fg(TUI_DIVIDER).add_modifier(Modifier::DIM),
-                        ),
-                        Span::styled(text.clone(), Style::default().fg(TUI_ROW_DIM)),
-                    ]));
+                        )];
+                        spans.extend(line.spans.into_iter().map(|span| {
+                            // Keep the original style but make it dimmer
+                            Span::styled(span.content.to_string(), muted_style.patch(span.style))
+                        }));
+                        out.push(Line::from(spans));
+                    }
                 }
             }
             ChatLine::Section(text) => {

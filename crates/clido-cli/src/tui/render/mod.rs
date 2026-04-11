@@ -1989,9 +1989,8 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
 
 pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'static>> {
     let mut out = Vec::new();
-    // Calculate gutter width for proper content wrapping
-    let gutter_width = unicode_display_width(TUI_GUTTER) + 2; // TUI_GUTTER + "  "
-    let content_width = width.saturating_sub(gutter_width);
+    // Note: render_markdown already accounts for gutter width internally,
+    // so we pass the full width. The gutter is added after rendering.
     
     for msg in &app.messages {
         match msg {
@@ -2001,8 +2000,8 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     Style::default().fg(TUI_ACCENT).add_modifier(Modifier::BOLD),
                 )));
                 // Add gutter indentation to each line of content
-                // Use reduced width to account for gutter
-                for line in render_markdown(text, content_width) {
+                // render_markdown already accounts for gutter width internally
+                for line in render_markdown(text, width) {
                     let indented = Line::from(vec![Span::raw(TUI_GUTTER), Span::raw("  ")]);
                     let mut new_line = indented;
                     new_line.spans.extend(line.spans);
@@ -2032,8 +2031,8 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     ),
                 ]));
                 // Add gutter indentation to each line of content
-                // Use reduced width to account for gutter
-                for line in render_markdown(text, content_width) {
+                // render_markdown already accounts for gutter width internally
+                for line in render_markdown(text, width) {
                     let indented = Line::from(vec![Span::raw(TUI_GUTTER), Span::raw("  ")]);
                     let mut new_line = indented;
                     new_line.spans.extend(line.spans);
@@ -2055,11 +2054,11 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     Style::default().fg(TUI_MUTED).add_modifier(Modifier::BOLD),
                 )]));
                 // Render thinking text with markdown but apply muted style
-                // Use reduced width to account for gutter
+                // render_markdown already accounts for gutter width internally
                 let think = Style::default()
                     .fg(TUI_MUTED)
                     .add_modifier(Modifier::DIM | Modifier::ITALIC);
-                for line in render_markdown(text, content_width) {
+                for line in render_markdown(text, width) {
                     let mut spans = vec![Span::styled(format!("{TUI_GUTTER}  "), think)];
                     spans.extend(line.spans.into_iter().map(|span| {
                         Span::styled(span.content.to_string(), think.patch(span.style))

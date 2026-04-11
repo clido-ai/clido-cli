@@ -1860,8 +1860,7 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     Style::default().fg(TUI_ACCENT).add_modifier(Modifier::BOLD),
                 )));
                 // Add gutter indentation to each line of content
-                let content_w = width.saturating_sub(4);
-                for line in render_markdown(text, content_w) {
+                for line in render_markdown(text, width) {
                     let indented = Line::from(vec![Span::raw(TUI_GUTTER), Span::raw("  ")]);
                     let mut new_line = indented;
                     new_line.spans.extend(line.spans);
@@ -1888,7 +1887,7 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     ),
                 ]));
                 // Add gutter indentation to each line of content
-                for line in render_markdown(text, width.saturating_sub(4)) {
+                for line in render_markdown(text, width) {
                     let indented = Line::from(vec![Span::raw(TUI_GUTTER), Span::raw("  ")]);
                     let mut new_line = indented;
                     new_line.spans.extend(line.spans);

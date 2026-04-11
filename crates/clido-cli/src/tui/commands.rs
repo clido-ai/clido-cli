@@ -691,7 +691,12 @@ pub(super) fn cmd_memory(app: &mut App, cmd: &str) {
 }
 
 pub(super) fn cmd_cost(app: &mut App) {
-    if app.stats.session_total_cost_usd == 0.0 {
+    let is_subscription = clido_providers::is_subscription_provider(&app.provider);
+    if is_subscription {
+        app.push(ChatLine::Info(
+            "  Subscription provider — no per-call cost tracking available.".into(),
+        ));
+    } else if app.stats.session_total_cost_usd == 0.0 {
         app.push(ChatLine::Info(
             "  Session cost: $0.0000 (no API calls yet)".into(),
         ));
@@ -738,10 +743,13 @@ pub(super) fn cmd_tokens(app: &mut App) {
         app.stats.session_total_output_tokens
     )));
     app.push(ChatLine::Info(format!("  Total tokens:   {}", total_str)));
-    app.push(ChatLine::Info(format!(
-        "  Estimated cost: ${:.6}",
-        app.stats.session_total_cost_usd
-    )));
+    let is_subscription = clido_providers::is_subscription_provider(&app.provider);
+    if !is_subscription {
+        app.push(ChatLine::Info(format!(
+            "  Estimated cost: ${:.6}",
+            app.stats.session_total_cost_usd
+        )));
+    }
     if let Some(budget) = app.max_budget_usd {
         let remaining = (budget - app.stats.session_total_cost_usd).max(0.0);
         let pct = (app.stats.session_total_cost_usd / budget * 100.0).min(100.0);

@@ -870,9 +870,9 @@ impl App {
             } else {
                 format!("{}ms", elapsed.as_millis())
             };
-            // Include per-turn cost if available.
+            // Include per-turn cost if available (only show if cost is meaningful, i.e., > $0.0001).
             let cost_usd = self.stats.session_cost_usd;
-            let cost_str = if cost_usd > 0.0 {
+            let cost_str = if cost_usd > 0.0001 {
                 format!("  ${:.4}", cost_usd)
             } else {
                 String::new()

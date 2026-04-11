@@ -1733,122 +1733,166 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
         }
 
         // Slow path: word-aware wrapping with indentation preservation
-        // Collect all text and detect indentation
-        let mut full_text = String::new();
+        // Extract indentation from leading whitespace-only spans
+        let mut indent_spans: Vec<Span<'static>> = Vec::new();
+        let mut content_spans: Vec<Span<'static>> = Vec::new();
+        let mut found_non_whitespace = false;
+        
         for span in &line.spans {
-            full_text.push_str(span.content.as_ref());
+            if !found_non_whitespace && span.content.chars().all(|c| c.is_whitespace()) {
+                indent_spans.push(span.clone());
+            } else {
+                found_non_whitespace = true;
+                content_spans.push(span.clone());
+            }
         }
-
-        // Detect indentation (leading whitespace)
-        let trimmed = full_text.trim_start();
-        let indent_len = full_text.len() - trimmed.len();
-        let indent = &full_text[..indent_len];
-        let content = trimmed;
-        let indent_width = unicode_display_width(indent);
+        
+        // Calculate indent width
+        let indent_width: usize = indent_spans
+            .iter()
+            .map(|s| unicode_display_width(s.content.as_ref()))
+            .sum();
         let avail_width = width.saturating_sub(indent_width);
-
+        
         if avail_width < 10 {
             // Not enough space for word wrapping, fall back to character-based
             out.push(line);
             continue;
         }
-
+        
+        // Collect all content text
+        let mut full_text = String::new();
+        for span in &content_spans {
+            full_text.push_str(span.content.as_ref());
+        }
+        
         // Word-wrap the content
-        let words: Vec<&str> = content.split_whitespace().collect();
+        let words: Vec<&str> = full_text.split_whitespace().collect();
         if words.is_empty() {
             out.push(line);
             continue;
         }
-
-        let mut wrapped_lines: Vec<String> = Vec::new();
+        
+        // Build style map: for each byte position in full_text, track the style
+        let mut style_map: Vec<Style> = Vec::with_capacity(full_text.len());
+        for span in &content_spans {
+            let span_len = span.content.len();
+            for _ in 0..span_len {
+                style_map.push(span.style);
+            }
+        }
+        
+        let mut wrapped_lines: Vec<(String, Vec<Style>)> = Vec::new();
         let mut current_line = String::new();
+        let mut current_styles: Vec<Style> = Vec::new();
         let mut current_width = 0usize;
         let mut is_first_line = true;
-
+        
         for word in words {
             let word_width = unicode_display_width(word);
             let effective_width = if is_first_line { width } else { avail_width };
-
+            
             // Check if word fits
             let needs_space = !current_line.is_empty();
             let space_width = if needs_space { 1 } else { 0 };
-
+            
             if current_width + space_width + word_width <= effective_width {
                 // Word fits - add it
                 if needs_space {
                     current_line.push(' ');
+                    current_styles.push(Style::default());
                     current_width += 1;
                 }
-                current_line.push_str(word);
+                // Find the byte position of this word in full_text
+                if let Some(word_pos) = full_text.find(word) {
+                    for (i, c) in word.chars().enumerate() {
+                        current_line.push(c);
+                        let style_idx = word_pos + i;
+                        if style_idx < style_map.len() {
+                            current_styles.push(style_map[style_idx]);
+                        } else {
+                            current_styles.push(Style::default());
+                        }
+                    }
+                } else {
+                    // Fallback: add word without style
+                    for c in word.chars() {
+                        current_line.push(c);
+                        current_styles.push(Style::default());
+                    }
+                }
                 current_width += word_width;
             } else {
                 // Word doesn't fit - flush current line
                 if !current_line.is_empty() {
-                    if is_first_line {
-                        wrapped_lines.push(current_line);
-                        is_first_line = false;
-                    } else {
-                        wrapped_lines.push(format!("{}{}", indent, current_line));
-                    }
+                    wrapped_lines.push((current_line, current_styles));
                     current_line = String::new();
-                    current_width = 0;
+                    current_styles = Vec::new();
+                    is_first_line = false;
                 }
-
-                // Handle very long words
-                if word_width > avail_width {
-                    let mut remaining = word;
-                    while !remaining.is_empty() {
-                        let space_left = avail_width.saturating_sub(current_width);
-                        if space_left == 0 {
-                            // Flush and start new line with indent
-                            if !current_line.is_empty() {
-                                wrapped_lines.push(format!("{}{}", indent, current_line));
-                                current_line = String::new();
-                                current_width = 0;
-                            }
-                            continue;
-                        }
-
-                        let (chunk, chunk_w) = take_cols(remaining, space_left);
-                        if chunk.is_empty() {
-                            // Force at least one char
-                            let mut chars = remaining.chars();
-                            if let Some(c) = chars.next() {
-                                let c_str = c.to_string();
-                                let c_w = unicode_display_width(&c_str);
-                                current_line.push_str(&c_str);
-                                current_width += c_w;
-                                remaining = chars.as_str();
-                            } else {
-                                break;
-                            }
+                
+                // Add word to new line
+                if let Some(word_pos) = full_text.find(word) {
+                    for (i, c) in word.chars().enumerate() {
+                        current_line.push(c);
+                        let style_idx = word_pos + i;
+                        if style_idx < style_map.len() {
+                            current_styles.push(style_map[style_idx]);
                         } else {
-                            current_line.push_str(chunk);
-                            current_width += chunk_w;
-                            remaining = &remaining[chunk.len()..];
+                            current_styles.push(Style::default());
                         }
                     }
                 } else {
-                    current_line.push_str(word);
-                    current_width = word_width;
+                    for c in word.chars() {
+                        current_line.push(c);
+                        current_styles.push(Style::default());
+                    }
                 }
+                current_width = word_width;
             }
         }
-
+        
         // Flush last line
         if !current_line.is_empty() {
-            if is_first_line {
-                wrapped_lines.push(current_line);
-            } else {
-                wrapped_lines.push(format!("{}{}", indent, current_line));
-            }
+            wrapped_lines.push((current_line, current_styles));
         }
-
-        // Create Line objects from wrapped text
-        // Use the style of the first span for all wrapped lines
-        let dominant_style = line.spans.first().map(|s| s.style).unwrap_or_default();
-        for wrapped in wrapped_lines {
-            out.push(Line::from(vec![Span::styled(wrapped, dominant_style)]));
+        
+        // Create Line objects from wrapped text with proper styles
+        for (i, (wrapped_text, styles)) in wrapped_lines.iter().enumerate() {
+            let mut line_spans: Vec<Span<'static>> = Vec::new();
+            
+            // Add indent spans for continuation lines (not first line)
+            if i > 0 {
+                line_spans.extend(indent_spans.clone());
+            } else {
+                // First line gets original indent spans
+                line_spans.extend(indent_spans.clone());
+            }
+            
+            // Build spans from text and styles
+            if !wrapped_text.is_empty() {
+                // Group consecutive characters with the same style
+                let mut current_style = styles.first().copied().unwrap_or_default();
+                let mut current_text = String::new();
+                
+                for (j, c) in wrapped_text.chars().enumerate() {
+                    let style = styles.get(j).copied().unwrap_or_default();
+                    if style == current_style {
+                        current_text.push(c);
+                    } else {
+                        if !current_text.is_empty() {
+                            line_spans.push(Span::styled(current_text, current_style));
+                        }
+                        current_text = String::from(c);
+                        current_style = style;
+                    }
+                }
+                if !current_text.is_empty() {
+                    line_spans.push(Span::styled(current_text, current_style));
+                }
+            }
+            
+            out.push(Line::from(line_spans));
         }
     }
     out
@@ -1864,6 +1908,7 @@ fn unicode_display_width(s: &str) -> usize {
 
 /// Take the longest prefix of `s` that fits in `max_cols` terminal columns.
 /// Returns (prefix_str, display_width_of_prefix).
+#[allow(dead_code)]
 fn take_cols(s: &str, max_cols: usize) -> (&str, usize) {
     let mut col = 0usize;
     for (i, c) in s.char_indices() {
@@ -1988,24 +2033,23 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 out.push(Line::raw(""));
             }
             ChatLine::Thinking(text) => {
+                // Show "thinking..." label in muted color
+                out.push(Line::from(vec![Span::styled(
+                    format!("{TUI_GUTTER}thinking..."),
+                    Style::default()
+                        .fg(TUI_MUTED)
+                        .add_modifier(Modifier::BOLD),
+                )]));
+                // Render thinking text with markdown but apply muted style
                 let think = Style::default()
                     .fg(TUI_MUTED)
                     .add_modifier(Modifier::DIM | Modifier::ITALIC);
-                // Show "thinking" label like "clido" for Assistant
-                out.push(Line::from(vec![Span::styled(
-                    format!("{TUI_GUTTER}thinking"),
-                    Style::default()
-                        .fg(TUI_SOFT_ACCENT)
-                        .add_modifier(Modifier::BOLD),
-                )]));
-                for part in text.lines() {
-                    if part.trim().is_empty() {
-                        continue;
-                    }
-                    out.push(Line::from(vec![
-                        Span::styled(format!("{TUI_GUTTER}  "), think),
-                        Span::styled(part.to_string(), think),
-                    ]));
+                for line in render_markdown(text, width) {
+                    let mut spans = vec![Span::styled(format!("{TUI_GUTTER}  "), think)];
+                    spans.extend(line.spans.into_iter().map(|span| {
+                        Span::styled(span.content.to_string(), think.patch(span.style))
+                    }));
+                    out.push(Line::from(spans));
                 }
                 out.push(Line::raw(""));
             }

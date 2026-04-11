@@ -2007,7 +2007,10 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     new_line.spans.extend(line.spans);
                     out.push(new_line);
                 }
-                out.push(Line::raw(""));
+                // Only add blank line if last line is not already blank
+                if !out.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
+                    out.push(Line::raw(""));
+                }
             }
             ChatLine::Assistant(text) => {
                 let model_bit = if app.model.is_empty() {
@@ -2035,7 +2038,10 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     new_line.spans.extend(line.spans);
                     out.push(new_line);
                 }
-                out.push(Line::raw(""));
+                // Only add blank line if last line is not already blank
+                if !out.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
+                    out.push(Line::raw(""));
+                }
             }
             ChatLine::Thinking(text) => {
                 // Show "thinking..." label in muted color
@@ -2055,7 +2061,10 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     }));
                     out.push(Line::from(spans));
                 }
-                out.push(Line::raw(""));
+                // Only add blank line if last line is not already blank
+                if !out.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
+                    out.push(Line::raw(""));
+                }
             }
             ChatLine::ToolCall {
                 name,
@@ -2071,14 +2080,24 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     *done,
                     *is_error,
                 ));
-                out.push(Line::raw(""));
+                // Only add blank line if last line is not already blank
+                if !out.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
+                    out.push(Line::raw(""));
+                }
             }
             ChatLine::Diff(text) => {
                 out.extend(diff::render_diff(text, width));
+                // Only add blank line if last line is not already blank
+                if !out.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
+                    out.push(Line::raw(""));
+                }
             }
             ChatLine::Info(text) => {
                 if text.is_empty() {
-                    out.push(Line::raw(""));
+                    // Only add blank line if last line is not already blank
+                    if !out.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
+                        out.push(Line::raw(""));
+                    }
                 } else {
                     // Render info text with markdown formatting but keep it muted/decent
                     // Note: Info uses "› " prefix instead of "  ", so we need different width
@@ -2098,10 +2117,17 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                         }));
                         out.push(Line::from(spans));
                     }
+                    // Only add blank line if last line is not already blank
+                    if !out.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
+                        out.push(Line::raw(""));
+                    }
                 }
             }
             ChatLine::Section(text) => {
-                out.push(Line::raw(""));
+                // Only add blank line if last line is not already blank
+                if !out.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
+                    out.push(Line::raw(""));
+                }
                 let rule = "─".repeat((width / 3).clamp(4, 24));
                 out.push(Line::from(vec![
                     Span::styled(
@@ -2119,7 +2145,10 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                         Style::default().fg(TUI_DIVIDER).add_modifier(Modifier::DIM),
                     ),
                 ]));
-                out.push(Line::raw(""));
+                // Only add blank line if last line is not already blank
+                if !out.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
+                    out.push(Line::raw(""));
+                }
             }
             ChatLine::WelcomeBrand | ChatLine::WelcomeSplash => {
                 // Skipped — no longer displayed

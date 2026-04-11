@@ -1040,12 +1040,10 @@ pub(super) async fn agent_task(
                 let run_start = std::time::Instant::now();
                 cancel.store(false, std::sync::atomic::Ordering::Relaxed);
                 // Clear stale todos from the previous task so the sidebar reflects
-                // only what the agent writes for this new task. Only clear on first turn
-                // to preserve todos across turns within the same task.
-                if first_turn {
-                    if let Ok(mut todos) = todo_store.lock() {
-                        todos.clear();
-                    }
+                // only what the agent writes for this new task. Clear on every prompt
+                // to ensure the task list stays fresh and relevant.
+                if let Ok(mut todos) = todo_store.lock() {
+                    todos.clear();
                 }
 
                 if !title_generated && !heuristic_title_sent && !prompt.trim().is_empty() {

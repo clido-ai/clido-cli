@@ -655,7 +655,7 @@ impl App {
 
         // Show acknowledgment that the agent understood and is working
         self.push(ChatLine::Info(
-            "  🤔 Understood — analyzing and working on it…".into(),
+            "  Understood — analyzing and working on it...".into(),
         ));
 
         self.turn_tool_tally.clear();

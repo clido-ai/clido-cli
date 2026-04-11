@@ -1728,132 +1728,127 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
             out.push(line);
             continue;
         }
+
         // Slow path: word-aware wrapping with indentation preservation
-        // First, collect all text content with styles
+        // Collect all text and detect indentation
         let mut full_text = String::new();
-        let mut style_ranges: Vec<(usize, usize, Style)> = Vec::new();
-        let mut pos = 0usize;
         for span in &line.spans {
-            let content = span.content.as_ref();
-            let len = content.len();
-            style_ranges.push((pos, pos + len, span.style));
-            full_text.push_str(content);
-            pos += len;
+            full_text.push_str(span.content.as_ref());
         }
 
-        // Calculate indentation from the start of the line (leading spaces)
-        let indent_len = full_text.len() - full_text.trim_start().len();
-        let indent_str: String = full_text.chars().take(indent_len).collect();
-        let indent_width = unicode_display_width(&indent_str);
-        let content = full_text.trim_start();
-
-        // Available width for content (accounting for indentation on wrapped lines)
+        // Detect indentation (leading whitespace)
+        let trimmed = full_text.trim_start();
+        let indent_len = full_text.len() - trimmed.len();
+        let indent = &full_text[..indent_len];
+        let content = trimmed;
+        let indent_width = unicode_display_width(indent);
         let avail_width = width.saturating_sub(indent_width);
+
         if avail_width < 10 {
-            // Not enough space, fall back to simple wrapping
+            // Not enough space for word wrapping, fall back to character-based
             out.push(line);
             continue;
         }
 
         // Word-wrap the content
-        let wrapped_lines = word_wrap_with_indent(content, avail_width, &indent_str);
-
-        // Apply styles to wrapped lines
-        for wrapped_text in wrapped_lines.iter() {
-            let mut line_spans: Vec<Span<'static>> = Vec::new();
-
-            // Simple approach: apply the dominant style of the original line
-            // Find which style applies to most of this segment
-            let dominant_style = line.spans.first().map(|s| s.style).unwrap_or_default();
-            line_spans.push(Span::styled(wrapped_text.clone(), dominant_style));
-
-            out.push(Line::from(line_spans));
+        let words: Vec<&str> = content.split_whitespace().collect();
+        if words.is_empty() {
+            out.push(line);
+            continue;
         }
-    }
-    out
-}
 
-/// Word-wrap text to fit within max_width, breaking only at word boundaries.
-/// Returns vector of wrapped lines, with indentation prepended to continuation lines.
-fn word_wrap_with_indent(text: &str, max_width: usize, indent: &str) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    let words: Vec<&str> = text.split_whitespace().collect();
+        let mut wrapped_lines: Vec<String> = Vec::new();
+        let mut current_line = String::new();
+        let mut current_width = 0usize;
+        let mut is_first_line = true;
 
-    if words.is_empty() {
-        return vec![text.to_string()];
-    }
+        for word in words {
+            let word_width = unicode_display_width(word);
+            let effective_width = if is_first_line { width } else { avail_width };
 
-    let mut current_line = String::new();
+            // Check if word fits
+            let needs_space = !current_line.is_empty();
+            let space_width = if needs_space { 1 } else { 0 };
 
-    for word in words.iter() {
-        let word_width = unicode_display_width(word);
-        let current_width = unicode_display_width(&current_line);
+            if current_width + space_width + word_width <= effective_width {
+                // Word fits - add it
+                if needs_space {
+                    current_line.push(' ');
+                    current_width += 1;
+                }
+                current_line.push_str(word);
+                current_width += word_width;
+            } else {
+                // Word doesn't fit - flush current line
+                if !current_line.is_empty() {
+                    if is_first_line {
+                        wrapped_lines.push(current_line);
+                        is_first_line = false;
+                    } else {
+                        wrapped_lines.push(format!("{}{}", indent, current_line));
+                    }
+                    current_line = String::new();
+                    current_width = 0;
+                }
 
-        // Check if word fits on current line
-        let needs_space = !current_line.is_empty();
-        let space_width = if needs_space { 1 } else { 0 };
-
-        if current_width + space_width + word_width <= max_width {
-            // Word fits - add it
-            if needs_space {
-                current_line.push(' ');
-            }
-            current_line.push_str(word);
-        } else {
-            // Word doesn't fit - start new line
-            if !current_line.is_empty() {
-                lines.push(current_line);
-                current_line = String::new();
-            }
-            // For continuation lines, add indentation
-            if !lines.is_empty() && !indent.is_empty() {
-                current_line.push_str(indent);
-            }
-            // Handle very long words that exceed max_width on their own
-            if word_width > max_width {
-                // Long word - we have to break it (rare edge case)
-                let mut remaining = *word;
-                while !remaining.is_empty() {
-                    let (chunk, _chunk_w) = take_cols(remaining, max_width);
-                    if chunk.is_empty() {
-                        // Single char too wide, force take one char
-                        let mut chars = remaining.chars();
-                        if let Some(c) = chars.next() {
-                            let c_str = c.to_string();
-                            let c_w = unicode_display_width(&c_str);
-                            if !lines.is_empty() && !indent.is_empty() {
-                                lines.push(format!("{}{}", indent, c_str));
-                            } else {
-                                lines.push(c_str);
+                // Handle very long words
+                if word_width > avail_width {
+                    let mut remaining = word;
+                    while !remaining.is_empty() {
+                        let space_left = avail_width.saturating_sub(current_width);
+                        if space_left == 0 {
+                            // Flush and start new line with indent
+                            if !current_line.is_empty() {
+                                wrapped_lines.push(format!("{}{}", indent, current_line));
+                                current_line = String::new();
+                                current_width = 0;
                             }
-                            remaining = chars.as_str();
-                            if c_w >= max_width {
+                            continue;
+                        }
+
+                        let (chunk, chunk_w) = take_cols(remaining, space_left);
+                        if chunk.is_empty() {
+                            // Force at least one char
+                            let mut chars = remaining.chars();
+                            if let Some(c) = chars.next() {
+                                let c_str = c.to_string();
+                                let c_w = unicode_display_width(&c_str);
+                                current_line.push_str(&c_str);
+                                current_width += c_w;
+                                remaining = chars.as_str();
+                            } else {
                                 break;
                             }
                         } else {
-                            break;
+                            current_line.push_str(chunk);
+                            current_width += chunk_w;
+                            remaining = &remaining[chunk.len()..];
                         }
-                    } else {
-                        if !lines.is_empty() && !indent.is_empty() {
-                            lines.push(format!("{}{}", indent, chunk));
-                        } else {
-                            lines.push(chunk.to_string());
-                        }
-                        remaining = &remaining[chunk.len()..];
                     }
+                } else {
+                    current_line.push_str(word);
+                    current_width = word_width;
                 }
-            } else {
-                current_line.push_str(word);
             }
         }
-    }
 
-    // Don't forget the last line
-    if !current_line.is_empty() {
-        lines.push(current_line);
-    }
+        // Flush last line
+        if !current_line.is_empty() {
+            if is_first_line {
+                wrapped_lines.push(current_line);
+            } else {
+                wrapped_lines.push(format!("{}{}", indent, current_line));
+            }
+        }
 
-    lines
+        // Create Line objects from wrapped text
+        // Use the style of the first span for all wrapped lines
+        let dominant_style = line.spans.first().map(|s| s.style).unwrap_or_default();
+        for wrapped in wrapped_lines {
+            out.push(Line::from(vec![Span::styled(wrapped, dominant_style)]));
+        }
+    }
+    out
 }
 
 /// Display width of a string (number of terminal columns).

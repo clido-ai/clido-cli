@@ -1759,16 +1759,12 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
         let wrapped_lines = word_wrap_with_indent(content, avail_width, &indent_str);
 
         // Apply styles to wrapped lines
-        for (_line_idx, wrapped_text) in wrapped_lines.iter().enumerate() {
+        for wrapped_text in wrapped_lines.iter() {
             let mut line_spans: Vec<Span<'static>> = Vec::new();
 
             // Simple approach: apply the dominant style of the original line
             // Find which style applies to most of this segment
-            let dominant_style = line
-                .spans
-                .first()
-                .map(|s| s.style)
-                .unwrap_or_default();
+            let dominant_style = line.spans.first().map(|s| s.style).unwrap_or_default();
             line_spans.push(Span::styled(wrapped_text.clone(), dominant_style));
 
             out.push(Line::from(line_spans));
@@ -1790,7 +1786,7 @@ fn word_wrap_with_indent(text: &str, max_width: usize, indent: &str) -> Vec<Stri
     let mut current_line = String::new();
 
     for word in words.iter() {
-        let word_width = unicode_display_width(*word);
+        let word_width = unicode_display_width(word);
         let current_width = unicode_display_width(&current_line);
 
         // Check if word fits on current line

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-beta.13] - 2026-04-10
+
+### Fixed
+
+- **`/note` visibility**: Notes are now wrapped in `<user_note priority="high">` tags and the continue prompt explicitly references the note, ensuring the model recognizes it as a meta-directive rather than a regular user message.
+- **Shift+Enter newline insertion**: Added `Alt+Enter` as a reliable fallback for inserting newlines. The Kitty keyboard protocol (`PushKeyboardEnhancementFlags`) only works in kitty/WezTerm/Ghostty/foot — Alt+Enter and Ctrl+J work on all terminals.
+- **Terminal cleanup on exit**: Fixed incorrect Kitty protocol reset escape sequence (`\x1b[?u` → `\x1b[<1u`) and added `PopKeyboardEnhancementFlags` to both panic hook and normal exit cleanup paths.
+
 ## [0.1.0-beta.12] - 2026-04-09
 
 ### Added

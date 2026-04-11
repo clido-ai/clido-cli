@@ -609,6 +609,15 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     if app.busy || app.pending_perm.is_some() || app.enhancing {
         let spinner = SPINNER[app.spinner_tick];
         let chrome_note = Style::default().fg(TUI_ROW_DIM).add_modifier(Modifier::DIM);
+
+        // Calculate elapsed time for display in all busy states
+        let elapsed_s = app.turn_start.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+        let elapsed_hint = if elapsed_s >= 1 {
+            format!(" {elapsed_s}s")
+        } else {
+            String::new()
+        };
+
         let title_line = if app.pending_perm.is_some() {
             Line::from(vec![
                 Span::styled("▸ ", Style::default().fg(TUI_STATE_WARN)),
@@ -626,9 +635,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             ])
         } else if !app.queued.is_empty() {
             let phase = match app.agent_run_state {
-                AppRunState::RunningTools => "Running tools",
-                AppRunState::Generating => "Generating",
-                AppRunState::Idle => "Agent running",
+                AppRunState::RunningTools => format!("Running tools{elapsed_hint}"),
+                AppRunState::Generating => format!("Generating{elapsed_hint}"),
+                AppRunState::Idle => format!("Agent running{elapsed_hint}"),
             };
             Line::from(vec![
                 Span::styled(format!("{} ", spinner), Style::default().fg(TUI_STATE_BUSY)),
@@ -639,12 +648,6 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 ),
             ])
         } else if app.text_input.is_empty() {
-            let elapsed_s = app.turn_start.map(|t| t.elapsed().as_secs()).unwrap_or(0);
-            let elapsed_hint = if elapsed_s >= 1 {
-                format!(" {elapsed_s}s")
-            } else {
-                String::new()
-            };
             let phase = match app.agent_run_state {
                 AppRunState::RunningTools => format!("Running tools{elapsed_hint}"),
                 AppRunState::Generating => format!("Generating{elapsed_hint}"),
@@ -660,9 +663,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             ])
         } else {
             let phase = match app.agent_run_state {
-                AppRunState::RunningTools => "Running tools",
-                AppRunState::Generating => "Generating",
-                AppRunState::Idle => "Thinking",
+                AppRunState::RunningTools => format!("Running tools{elapsed_hint}"),
+                AppRunState::Generating => format!("Generating{elapsed_hint}"),
+                AppRunState::Idle => format!("Thinking{elapsed_hint}"),
             };
             Line::from(vec![
                 Span::styled(format!("{} ", spinner), Style::default().fg(TUI_STATE_BUSY)),

@@ -5,25 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0-beta.14] - 2026-04-11
 
 ### Added
 
-- **`/plan` command echo**: The `/plan <task>` command now shows the user's input in the chat like a normal prompt.
-- **Thinking label**: `ChatLine::Thinking` messages now display a "thinking" label (similar to "clido" for assistant messages) for consistent sender identification.
+- **Todo list refresh**: Todos are now cleared on every new prompt, ensuring the task list stays fresh and relevant to the current work.
+- **System prompt update**: Added explicit instruction for the agent to always call TodoWrite at the start of every task.
 
 ### Changed
 
-- **Markdown formatting for info messages**: All `ChatLine::Info` messages are now rendered with Markdown formatting (still muted/decent color).
-- **Timer always visible**: The elapsed time counter is now displayed in all agent activity states (Generating, Running tools, Thinking, etc.), not just when the input field is empty.
-- **Softer error color**: Changed `TUI_STATE_ERR` from bright red (`Rgb(240, 118, 128)`) to a more muted red (`Rgb(200, 100, 100)`) for reduced eye strain.
-- **Softer branch name color**: Git branch names in the sidebar now use `TUI_MUTED` instead of `TUI_BRAND_TEXT` for a more neutral appearance.
-- **Selection reset on auto-scroll**: Text selection is now reset when the chat auto-scrolls with new messages, preventing the cursor from jumping to old positions.
+- **Word wrapping with style preservation**: Completely rewrote `wrap_styled_lines` to properly extract indentation from spans and preserve text styles (bold, italic, etc.) across wrapped lines.
+- **Thinking label**: Changed to muted color with "thinking..." (three dots).
+- **Cost display for subscriptions**: Hide dollar values for subscription providers since per-call cost is not tracked.
 
 ### Fixed
 
-- **Word wrapping**: Words are no longer split mid-word when wrapping. Line breaks now occur at word boundaries, and indentation is preserved on continuation lines.
-- **Mouse selection coordinates**: Fixed text selection to use correct coordinates after word-wrapping changes.
+- **Word wrapping indentation**: First word in wrapped lines now properly preserves indentation from gutter spans.
+- **Markdown in thinking**: Thinking messages now use `render_markdown` for proper formatting.
 
 ## [0.1.0-beta.13] - 2026-04-10
 

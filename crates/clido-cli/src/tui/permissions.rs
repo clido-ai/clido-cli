@@ -163,6 +163,27 @@ pub(super) fn format_tool_input(name: &str, input: &serde_json::Value) -> String
                 format!("{} edits  ·  {} …", n, first)
             }
         }
+        "TodoWrite" => {
+            if let Some(todos) = input["todos"].as_array() {
+                let count = todos.len();
+                let first = todos
+                    .first()
+                    .and_then(|t| t.get("content"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("");
+                let mut s = format!("{count} item");
+                if count != 1 {
+                    s.push('s');
+                }
+                if !first.is_empty() {
+                    s.push_str("  ·  ");
+                    s.push_str(&first.chars().take(35).collect::<String>());
+                }
+                s
+            } else {
+                "todo".to_string()
+            }
+        }
         _ => input.to_string(),
     };
     if s.chars().count() > 72 {

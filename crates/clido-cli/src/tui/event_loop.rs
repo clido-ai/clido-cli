@@ -929,9 +929,11 @@ pub(super) async fn agent_task(
                 }
             }
             AgentAction::Note(text) => {
-                // Inject the note into agent history as a user message.
-                // This interrupts current execution so the note is seen immediately.
-                agent.push_user_message(text);
+                // Inject the note into agent history as a prominently formatted user message.
+                // XML-style tags make it clear to the model that this is a meta-directive,
+                // not a new task instruction.
+                let note_msg = format!("<user_note priority=\"high\">\n{}</user_note>", text);
+                agent.push_user_message(note_msg);
                 if event_tx
                     .send(AgentEvent::Info {
                         message: "Note received — agent will see it immediately".to_string(),
@@ -945,11 +947,11 @@ pub(super) async fn agent_task(
                 // The cancel flag is checked after tool execution; agent will return
                 // Interrupted and the loop will continue, picking up the queued action.
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                // Immediately queue a continue action so the agent restarts with the note.
-                // This ensures the note is processed right away, not left waiting.
+                // Queue a continue prompt that explicitly references the note so the model
+                // knows to re-evaluate rather than blindly continue the previous task.
                 if prompt_tx
                     .send(AgentUserInput::Prompt(
-                        "Please continue, taking into account the note I just sent.".to_string(),
+                        "<continue_after_user_note>Review the note above and adjust your approach accordingly. Do not ignore the guidance provided.</continue_after_user_note>".to_string(),
                     ))
                     .is_err()
                 {

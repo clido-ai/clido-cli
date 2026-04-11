@@ -1992,14 +1992,12 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                     .fg(TUI_MUTED)
                     .add_modifier(Modifier::DIM | Modifier::ITALIC);
                 // Show "thinking" label like "clido" for Assistant
-                out.push(Line::from(vec![
-                    Span::styled(
-                        format!("{TUI_GUTTER}thinking"),
-                        Style::default()
-                            .fg(TUI_SOFT_ACCENT)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]));
+                out.push(Line::from(vec![Span::styled(
+                    format!("{TUI_GUTTER}thinking"),
+                    Style::default()
+                        .fg(TUI_SOFT_ACCENT)
+                        .add_modifier(Modifier::BOLD),
+                )]));
                 for part in text.lines() {
                     if part.trim().is_empty() {
                         continue;

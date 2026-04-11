@@ -2966,7 +2966,13 @@ pub(super) async fn event_loop(
                                 s.status = crate::tui::app_state::WorkflowStepStatus::Done;
                             }
                         }
-                        app.push(ChatLine::Info(format!("  ✓ {} ({}ms, ${:.4})", name, duration_ms, cost_usd)));
+                        let is_subscription = clido_providers::is_subscription_provider(&app.provider);
+                        let cost_str = if is_subscription {
+                            String::new()
+                        } else {
+                            format!(", ${:.4}", cost_usd)
+                        };
+                        app.push(ChatLine::Info(format!("  ✓ {} ({}ms{})", name, duration_ms, cost_str)));
                         // Show a preview of the step output in the chat (truncated for readability).
                         if !output_text.is_empty() {
                             let preview = if output_text.len() > 3000 {

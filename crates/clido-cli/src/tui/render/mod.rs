@@ -1988,24 +1988,23 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 out.push(Line::raw(""));
             }
             ChatLine::Thinking(text) => {
+                // Show "thinking..." label in muted color
+                out.push(Line::from(vec![Span::styled(
+                    format!("{TUI_GUTTER}thinking..."),
+                    Style::default()
+                        .fg(TUI_MUTED)
+                        .add_modifier(Modifier::BOLD),
+                )]));
+                // Render thinking text with markdown but apply muted style
                 let think = Style::default()
                     .fg(TUI_MUTED)
                     .add_modifier(Modifier::DIM | Modifier::ITALIC);
-                // Show "thinking" label like "clido" for Assistant
-                out.push(Line::from(vec![Span::styled(
-                    format!("{TUI_GUTTER}thinking"),
-                    Style::default()
-                        .fg(TUI_SOFT_ACCENT)
-                        .add_modifier(Modifier::BOLD),
-                )]));
-                for part in text.lines() {
-                    if part.trim().is_empty() {
-                        continue;
-                    }
-                    out.push(Line::from(vec![
-                        Span::styled(format!("{TUI_GUTTER}  "), think),
-                        Span::styled(part.to_string(), think),
-                    ]));
+                for line in render_markdown(text, width) {
+                    let mut spans = vec![Span::styled(format!("{TUI_GUTTER}  "), think)];
+                    spans.extend(line.spans.into_iter().map(|span| {
+                        Span::styled(span.content.to_string(), think.patch(span.style))
+                    }));
+                    out.push(Line::from(spans));
                 }
                 out.push(Line::raw(""));
             }

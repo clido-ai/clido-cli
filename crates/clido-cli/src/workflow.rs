@@ -213,17 +213,8 @@ fn resolve_workflow_path(
     if p.is_absolute() || p.exists() {
         return Ok(p.to_path_buf());
     }
-    let project_base = workspace_root.join(project_workflow_dir);
-    for candidate in [
-        workflow,
-        &format!("{}.yaml", workflow),
-        &format!("{}.yml", workflow),
-    ] {
-        let path = project_base.join(candidate);
-        if path.exists() {
-            return Ok(path);
-        }
-    }
+
+    // Check GLOBAL workflows first (default location)
     if let Some(dirs) = directories::ProjectDirs::from("", "", "clido") {
         let global_base = dirs.config_dir().join("workflows");
         for candidate in [
@@ -237,8 +228,22 @@ fn resolve_workflow_path(
             }
         }
     }
+
+    // Check project-local workflows as fallback
+    let project_base = workspace_root.join(project_workflow_dir);
+    for candidate in [
+        workflow,
+        &format!("{}.yaml", workflow),
+        &format!("{}.yml", workflow),
+    ] {
+        let path = project_base.join(candidate);
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+
     Err(anyhow::anyhow!(
-        "Workflow not found: {} (tried current path, {}, ~/.config/clido/workflows/)",
+        "Workflow not found: {} (tried ~/.config/clido/workflows/, {}, current path)",
         workflow,
         project_workflow_dir
     ))

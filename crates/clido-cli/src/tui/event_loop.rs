@@ -189,7 +189,7 @@ use super::state::AgentUserInput;
 use crossterm::{
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, EventStream, MouseEventKind,
+        Event, EventStream, KeyboardEnhancementFlags, MouseEventKind, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -2137,7 +2137,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
         // Reset terminal: disable mouse tracking, bracketed paste, show cursor
-        let reset_seq = b"\x1b[?1002l\x1b[?1003l\x1b[?2004l\x1b[?25h\x1b[0m";
+        let reset_seq = b"\x1b[?1002l\x1b[?1003l\x1b[?2004l\x1b[?25h\x1b[?u\x1b[0m";
         let _ = std::io::stderr().write_all(reset_seq);
         let _ = execute!(
             std::io::stderr(),
@@ -2184,7 +2184,8 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         out,
         EnterAlternateScreen,
         EnableMouseCapture,
-        EnableBracketedPaste
+        EnableBracketedPaste,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
     )?;
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
@@ -2325,7 +2326,7 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
 
     let _ = disable_raw_mode();
     // Reset terminal: disable mouse tracking, bracketed paste, show cursor, reset colors
-    let reset_seq = b"\x1b[?1002l\x1b[?1003l\x1b[?2004l\x1b[?25h\x1b[0m";
+    let reset_seq = b"\x1b[?1002l\x1b[?1003l\x1b[?2004l\x1b[?25h\x1b[?u\x1b[0m";
     let _ = terminal.backend_mut().write_all(reset_seq);
     let _ = execute!(
         terminal.backend_mut(),

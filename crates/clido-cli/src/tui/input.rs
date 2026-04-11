@@ -2256,16 +2256,18 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.text_input.history_idx = None;
             }
         }
-        // Enter: insert a newline (multiline input, like Slack/Discord).
-        // Terminals cannot distinguish Shift+Enter from plain Enter.
-        (_, Enter) => {
+        // Enter: submit the message.
+        (Km::NONE, Enter) => app.submit(),
+        // Shift+Enter: insert a newline without sending (multiline input).
+        (Km::SHIFT, Enter) | (Km::CONTROL, Char('j')) => {
             let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor);
             app.text_input.text.insert(byte_pos, '\n');
             app.text_input.cursor += 1;
             app.selected_cmd = None;
+            app.text_input.history_idx = None;
         }
-        // Ctrl+Enter: submit the message.
-        (Km::CONTROL, Enter) => app.submit(),
+        // Ctrl+Enter: interrupt current run and force-send immediately.
+        (Km::CONTROL, Enter) => app.force_send(),
         // Ctrl+Shift+C: enter copy mode for selecting chat lines.
         (Km::CONTROL, Char('c')) if event.modifiers.contains(Km::SHIFT) => {
             app.selection_mode = !app.selection_mode;

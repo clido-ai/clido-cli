@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-beta.16] - 2026-04-11
+
+### Changed
+
+- **Error color**: Made error color (`TUI_STATE_ERR`) more muted — changed from `Rgb(200, 100, 100)` to `Rgb(180, 90, 90)` for reduced eye strain on failed commands.
+
 ## [0.1.0-beta.15] - 2026-04-11
 
 ### Fixed

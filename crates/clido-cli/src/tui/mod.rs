@@ -107,7 +107,7 @@ pub(super) const TUI_STATE_INFO: Color = Color::Rgb(110, 200, 220);
 /// Warnings, rate-limit, queue headers.
 pub(super) const TUI_STATE_WARN: Color = Color::Rgb(230, 196, 120);
 /// Errors, destructive affordances.
-pub(super) const TUI_STATE_ERR: Color = Color::Rgb(200, 100, 100);
+pub(super) const TUI_STATE_ERR: Color = Color::Rgb(180, 90, 90);
 /// Success checkmarks, reviewer on-dot.
 pub(super) const TUI_STATE_OK: Color = Color::Rgb(120, 206, 160);
 

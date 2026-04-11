@@ -2283,14 +2283,6 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 );
             }
         }
-        // Ctrl+J: also inserts a newline (for terminals where Enter doesn't).
-        (Km::CONTROL, Char('j')) => {
-            let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor);
-            app.text_input.text.insert(byte_pos, '\n');
-            app.text_input.cursor += 1;
-            app.selected_cmd = None;
-            app.text_input.history_idx = None;
-        }
         (_, Backspace) => {
             if app.text_input.cursor > 0 {
                 let byte_pos = char_byte_pos(&app.text_input.text, app.text_input.cursor - 1);

@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-04-11
+
+### 🎉 First Stable Release
+
+After 16 beta releases, clido reaches 1.0.0 with a stable, production-ready TUI for AI-assisted software engineering.
+
+### Added
+
+- **`/rules edit` command**: Edit project rules (CLIDO.md) or global rules (~/.config/clido/rules.md) with AI assistance. The agent reviews and improves your rules.
+- **Fast Agent credential display**: Fast Agent now shows saved credentials with partial masking (same behavior as Main Provider), allowing you to see and modify existing keys.
+- **Unified credential storage**: Credentials are shared across Main and Fast Agent for the same provider - no need to enter the same API key twice.
+
+### Changed
+
+- **Rules file consolidation**: `CLIDO.md` is now the single primary rules file. `.clido/rules.md` support has been removed to simplify configuration.
+- **Error color**: Further muted to `Rgb(180, 90, 90)` for reduced eye strain.
+
+### Fixed
+
+- **Word wrapping**: Complete rewrite with proper indentation preservation and style handling across wrapped lines.
+- **Double blank lines**: Eliminated duplicate newlines between chat messages.
+- **Thinking label**: Now shows "clido" in muted color for consistency.
+- **Markdown rendering**: Info and Thinking messages now properly render markdown.
+- **Cost display**: Dollar values hidden for subscriptions when no actual cost data exists.
+- **Rules loading**: Rules are now properly injected into the system prompt even when no custom system prompt is configured.
+
 ## [0.1.0-beta.16] - 2026-04-11
 
 ### Changed

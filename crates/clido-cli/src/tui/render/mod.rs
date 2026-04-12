@@ -2193,8 +2193,8 @@ pub(super) fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
 /// horizontal rules, task-list checkboxes, and hard/soft breaks.
 pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
     use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Tag};
-    // Content width: match transcript gutter (2) + body inset (2).
-    let content_w = width.saturating_sub(super::TUI_GUTTER.len() * 2).max(20);
+    // Content width: match transcript gutter (2) + body inset (2) + 5 char safety margin.
+    let content_w = width.saturating_sub(super::TUI_GUTTER.len() * 2 + 5).max(20);
 
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let parser = Parser::new_ext(text, opts);

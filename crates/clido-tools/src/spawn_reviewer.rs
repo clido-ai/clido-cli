@@ -1,6 +1,9 @@
 //! SpawnReviewer tool - spawns a reviewer sub-agent to check work.
 //!
 //! This tool is only available when reviewer is enabled in the TUI.
+//!
+//! TODO: In a future version, this should spawn a real sub-agent with restricted
+//! permissions using the fast provider. Currently, it returns a simulated review.
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -8,6 +11,9 @@ use serde_json::json;
 use crate::{Tool, ToolOutput};
 
 /// SpawnReviewer tool implementation.
+/// 
+/// CURRENTLY SIMULATED: Returns a mock review. Future versions will spawn
+/// a real sub-agent with restricted tool access for independent code review.
 pub struct SpawnReviewerTool {
     /// Whether reviewer is enabled.
     pub reviewer_enabled: bool,
@@ -75,6 +81,7 @@ impl Tool for SpawnReviewerTool {
 
         // For now, return a simulated review
         // In a full implementation, this would spawn a new agent instance
+        // with restricted permissions and run the review
         let feedback = if criteria.is_empty() {
             format!("Reviewed: {}. No major issues found.", subject)
         } else {

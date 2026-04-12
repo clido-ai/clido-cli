@@ -220,9 +220,9 @@ pub struct IndexSection {
 }
 
 pub fn default_workflows_directory() -> String {
-    global_config_dir()
-        .map(|dir| dir.join("workflows").to_string_lossy().to_string())
-        .unwrap_or_else(|| ".clido/workflows".to_string())
+    // Use local .clido/workflows directory instead of global config
+    // This ensures workflows are project-specific
+    ".clido/workflows".to_string()
 }
 
 /// User preferences for Skills discovery and activation (`clido_core::skills`).

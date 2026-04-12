@@ -888,6 +888,7 @@ impl App {
         }
 
         // If a plan was running and not all steps were completed, show remaining steps.
+        // If all steps completed, trigger reviewer if enabled.
         if let Some(last_num) = self.last_executed_step_num {
             if let Some(plans) = self.plan.last_plan.clone() {
                 let total = plans.len();
@@ -899,6 +900,29 @@ impl App {
                     for (i, step) in plans[last_num..].iter().enumerate() {
                         let n = last_num + i + 1;
                         self.push(ChatLine::Info(format!("    {}. {}", n, step)));
+                    }
+                } else if last_num == total && total > 0 {
+                    // All steps completed - trigger reviewer if enabled
+                    if self.reviewer_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+                        self.push(ChatLine::Info(
+                            "  ✓ All plan steps completed. Triggering review...".into()
+                        ));
+                        // Send review request to agent
+                        let review_prompt = format!(
+                            "All {} plan steps have been completed. \
+                            Please review the work done and verify:\n\
+                            1. All tasks were completed correctly\n\
+                            2. No steps were missed\n\
+                            3. The solution is complete and working\n\n\
+                            If everything looks good, confirm with 'REVIEW_PASSED'. \
+                            If issues remain, list what needs to be fixed.",
+                            total
+                        );
+                        self.send_silent(review_prompt);
+                    } else {
+                        self.push(ChatLine::Info(
+                            "  ✓ All plan steps completed. Enable /reviewer for automatic review.".into()
+                        ));
                     }
                 }
             }

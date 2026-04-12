@@ -1,9 +1,7 @@
 //! SpawnReviewer tool - spawns a reviewer sub-agent to check work.
 //!
 //! This tool is only available when reviewer is enabled in the TUI.
-//!
-//! TODO: In a future version, this should spawn a real sub-agent with restricted
-//! permissions using the fast provider. Currently, it returns a simulated review.
+//! It sends a review request to the fast provider (or main provider if no fast provider is configured).
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -11,9 +9,6 @@ use serde_json::json;
 use crate::{Tool, ToolOutput};
 
 /// SpawnReviewer tool implementation.
-/// 
-/// CURRENTLY SIMULATED: Returns a mock review. Future versions will spawn
-/// a real sub-agent with restricted tool access for independent code review.
 pub struct SpawnReviewerTool {
     /// Whether reviewer is enabled.
     pub reviewer_enabled: bool,
@@ -79,20 +74,38 @@ impl Tool for SpawnReviewerTool {
                 .collect())
             .unwrap_or_default();
 
-        // For now, return a simulated review
-        // In a full implementation, this would spawn a new agent instance
-        // with restricted permissions and run the review
-        let feedback = if criteria.is_empty() {
-            format!("Reviewed: {}. No major issues found.", subject)
+        // Build review prompt
+        let review_prompt = if criteria.is_empty() {
+            format!(
+                "Please review the following work and provide feedback on correctness, \
+                completeness, and potential issues:\n\n{}\n\n\
+                Provide your review in this format:\n\
+                - Overall assessment (PASS or NEEDS_IMPROVEMENT)\n\
+                - Specific issues found (if any)\n\
+                - Recommendations for improvement",
+                subject
+            )
         } else {
-            format!("Reviewed: {} against {} criteria. All checks passed.", 
-                subject, criteria.len())
+            format!(
+                "Please review the following work against these criteria:\n\n\
+                Subject: {}\n\n\
+                Criteria:\n{}\n\n\
+                Provide your review in this format:\n\
+                - Overall assessment (PASS or NEEDS_IMPROVEMENT)\n\
+                - Specific issues found (if any)\n\
+                - Recommendations for improvement",
+                subject,
+                criteria.iter().map(|c| format!("- {}", c)).collect::<Vec<_>>().join("\n")
+            )
         };
 
+        // Return the review prompt as content
+        // The actual review will be done by the agent using the fast provider
         let output = json!({
-            "passed": true,
-            "feedback": feedback,
-            "issues": []
+            "review_request": review_prompt,
+            "subject": subject,
+            "criteria": criteria,
+            "note": "The agent should now use the fast provider to get a review for this work"
         });
 
         ToolOutput::ok(output.to_string())

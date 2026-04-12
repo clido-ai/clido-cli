@@ -2878,6 +2878,21 @@ pub(super) async fn event_loop(
                             // Check if we're waiting for a plan response
                             if app.plan.awaiting_plan_response {
                                 app.plan.last_plan_raw = Some(text.clone());
+                                app.plan.awaiting_plan_response = false;
+                            }
+                            // Check if we're waiting for a review response
+                            if app.plan.awaiting_review_response {
+                                app.plan.awaiting_review_response = false;
+                                // Process review response
+                                if text.contains("REVIEW_PASSED") {
+                                    app.push(ChatLine::Info(
+                                        "  ✓ Review passed. Plan completed successfully.".into()
+                                    ));
+                                } else {
+                                    app.push(ChatLine::Info(
+                                        "  ⚠ Review found issues. Please address the feedback.".into()
+                                    ));
+                                }
                             }
                             app.push(ChatLine::Assistant(text));
                             // Fire desktop notification + bell if enabled.

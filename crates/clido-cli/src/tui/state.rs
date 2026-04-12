@@ -207,6 +207,8 @@ pub(crate) struct PlanState {
     pub(crate) last_plan_raw: Option<String>,
     /// Set to true when /plan <task> is sent; cleared after the agent responds and the plan is parsed.
     pub(crate) awaiting_plan_response: bool,
+    /// Set to true when reviewer is triggered after plan completion; cleared after review response.
+    pub(crate) awaiting_review_response: bool,
     /// When `Some`, the plan editor full-screen overlay is active (--plan flag mode).
     pub(crate) editor: Option<PlanEditor>,
     /// Currently selected task index in the plan editor list.

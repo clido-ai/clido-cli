@@ -903,7 +903,9 @@ impl App {
                     }
                 } else if last_num == total && total > 0 {
                     // All steps completed - trigger reviewer if enabled
-                    if self.reviewer_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+                    if self.reviewer_enabled.load(std::sync::atomic::Ordering::Relaxed) 
+                        && !self.plan.awaiting_review_response {
+                        self.plan.awaiting_review_response = true;
                         self.push(ChatLine::Info(
                             "  ✓ All plan steps completed. Triggering review...".into()
                         ));
@@ -919,7 +921,7 @@ impl App {
                             total
                         );
                         self.send_silent(review_prompt);
-                    } else {
+                    } else if !self.reviewer_enabled.load(std::sync::atomic::Ordering::Relaxed) {
                         self.push(ChatLine::Info(
                             "  ✓ All plan steps completed. Enable /reviewer for automatic review.".into()
                         ));

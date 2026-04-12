@@ -1631,18 +1631,8 @@ fn cmd_rules_edit(app: &mut App, global: bool) {
         // Store path for later saving
         app.pending_rules_edit = Some(global_rules_path);
     } else {
-        // Local rules: .clido/rules.md
-        let local_rules_dir = app.workspace_root.join(".clido");
-        let local_rules_path = local_rules_dir.join("rules.md");
-        
-        // Ensure .clido directory exists
-        if let Err(e) = std::fs::create_dir_all(&local_rules_dir) {
-            app.push(ChatLine::Info(format!(
-                "  ✗ Failed to create .clido directory: {}",
-                e
-            )));
-            return;
-        }
+        // Local rules: CLIDO.md in workspace root
+        let local_rules_path = app.workspace_root.join("CLIDO.md");
         
         // Load current content or start with empty
         let current_content = std::fs::read_to_string(&local_rules_path)

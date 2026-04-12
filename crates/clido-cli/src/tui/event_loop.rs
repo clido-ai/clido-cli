@@ -2695,8 +2695,13 @@ const STALL_WARNING_SECS: u64 = 300; // 5 minutes
                                 {
                                     let chat_row = (m.row - cy0) as usize;
                                     let content_row = chat_row + (app.scroll as usize);
-                                    app.selection.start(content_row, m.column as usize);
-                                    app.selection_mode = true;
+                                    // Simple ChatLine-based selection
+                                    if let Some((chatline_idx, _, _)) = app.line_position_map.get(content_row) {
+                                        if *chatline_idx < app.messages.len() {
+                                            app.selection.start(*chatline_idx, 0);
+                                            app.selection_mode = true;
+                                        }
+                                    }
                                 }
                             }
                             MouseEventKind::Drag(_) => {
@@ -2705,7 +2710,12 @@ const STALL_WARNING_SECS: u64 = 300; // 5 minutes
                                     let cy0 = app.layout.chat_area_y.0;
                                     let chat_row = m.row.saturating_sub(cy0) as usize;
                                     let content_row = chat_row + (app.scroll as usize);
-                                    app.selection.update(content_row, m.column as usize);
+                                    // Simple ChatLine-based selection
+                                    if let Some((chatline_idx, _, _)) = app.line_position_map.get(content_row) {
+                                        if *chatline_idx < app.messages.len() {
+                                            app.selection.update(*chatline_idx, usize::MAX);
+                                        }
+                                    }
                                 }
                             }
                             MouseEventKind::Up(_) => {

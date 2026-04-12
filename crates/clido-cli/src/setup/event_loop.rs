@@ -69,7 +69,13 @@ pub(super) fn setup_event_loop(
             let (api_key, base_url): (&str, Option<&str>) = if is_local_fast {
                 ("", Some(s.fast_credential.as_str()))
             } else {
-                (s.fast_credential.as_str(), None)
+                // Use typed credential if available, otherwise use saved credential
+                let key = if s.fast_credential.is_empty() {
+                    s.current_fast_credential.as_deref().unwrap_or("")
+                } else {
+                    s.fast_credential.as_str()
+                };
+                (key, None)
             };
             let handle = tokio::runtime::Handle::current();
             s.fast_fetched_models = handle

@@ -190,6 +190,8 @@ pub(super) struct SetupState {
     /// When true, credential step shows ↑↓ picker for `saved_api_keys` (non-local).
     pub credential_pick_active: bool,
     pub credential_pick_index: usize,
+    /// Saved credential for fast agent (displayed partially masked).
+    pub current_fast_credential: Option<String>,
 }
 
 /// Result of the interactive setup TUI: finished configuration or user cancelled.
@@ -229,6 +231,7 @@ impl SetupState {
             saved_api_keys: Vec::new(),
             credential_pick_active: false,
             credential_pick_index: 0,
+            current_fast_credential: None,
         }
     }
 
@@ -271,6 +274,7 @@ impl SetupState {
             fast_needs_fetch: false,
             error: None,
             current_credential,
+            current_fast_credential: None, // Will be loaded when fast provider is selected
             current_model: pre_fill.model,
             started_with_profile_name: pre_fill.is_new_profile,
             saved_api_keys: pre_fill.saved_api_keys.clone(),
@@ -300,6 +304,33 @@ impl SetupState {
             .iter()
             .filter(|o| o.provider_id == pid)
             .collect()
+    }
+
+    pub fn saved_keys_for_fast_provider(&self) -> Vec<&SavedApiKeyOffer> {
+        let pid = PROVIDER_REGISTRY[self.fast_provider_idx].id;
+        self.saved_api_keys
+            .iter()
+            .filter(|o| o.provider_id == pid)
+            .collect()
+    }
+
+    pub fn init_fast_credential_step(&mut self) {
+        self.fast_credential.clear();
+        if self.is_fast_local() {
+            self.credential_pick_active = false;
+            self.current_fast_credential = None;
+            return;
+        }
+        // Collect saved keys first to avoid borrow issues
+        let saved: Vec<SavedApiKeyOffer> = self.saved_keys_for_fast_provider().into_iter().cloned().collect();
+        self.credential_pick_active = !saved.is_empty();
+        self.credential_pick_index = 0;
+        // Load first saved key as current_fast_credential if available
+        self.current_fast_credential = saved.first().map(|k| k.api_key.clone());
+    }
+
+    pub fn is_fast_local(&self) -> bool {
+        PROVIDER_REGISTRY[self.fast_provider_idx].is_local
     }
 
     pub fn is_local(&self) -> bool {

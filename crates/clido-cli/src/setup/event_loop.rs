@@ -372,10 +372,12 @@ pub(super) fn setup_event_loop(
                         if s.fast_provider_idx == s.provider {
                             // Same provider as main — reuse credential
                             s.fast_credential = s.credential.clone();
+                            s.current_fast_credential = s.current_credential.clone();
                             s.fast_needs_fetch = true;
                             s.step = SetupStep::FetchingFastModels;
                         } else {
                             s.clear_typed_input();
+                            s.init_fast_credential_step();
                             s.step = SetupStep::FastCredential;
                         }
                     }

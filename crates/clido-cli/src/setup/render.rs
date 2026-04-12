@@ -781,12 +781,24 @@ fn draw_subagent_credential(f: &mut Frame, area: Rect, s: &SetupState) {
     };
     let masked: String = s.text_input.text.chars().map(|_| '•').collect();
     let display = if s.text_input.text.is_empty() {
-        Line::from(vec![Span::styled(
-            " paste key here",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
-        )])
+        // Show saved credential partially masked if available
+        if let Some(ref saved) = s.current_fast_credential {
+            let visible_len = saved.len().min(8);
+            let hidden_len = saved.len().saturating_sub(visible_len);
+            let visible = &saved[..visible_len];
+            let masked = "•".repeat(hidden_len.min(4));
+            Line::from(vec![Span::styled(
+                format!(" {}{}", visible, masked),
+                Style::default().fg(TUI_TEXT),
+            )])
+        } else {
+            Line::from(vec![Span::styled(
+                " paste key here",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )])
+        }
     } else {
         Line::from(vec![Span::styled(
             format!(" {}", masked),

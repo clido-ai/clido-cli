@@ -246,9 +246,9 @@ impl AgentSetup {
             rules_file_path,
         );
         if !rules.is_empty() {
-            if let Some(ref mut sp) = config.system_prompt {
-                *sp = format!("{}\n\n{}", rules, sp);
-            }
+            // Inject rules into system prompt (prepend to existing or create new)
+            let existing_sp = config.system_prompt.take().unwrap_or_default();
+            config.system_prompt = Some(format!("{}\n\n{}", rules, existing_sp));
         }
 
         // Git context is no longer injected here as a one-shot static section.

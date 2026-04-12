@@ -3162,10 +3162,13 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
             match find_workflow(&app.workspace_root, name) {
                 Some(path) => match std::fs::read_to_string(&path) {
                     Ok(content) => {
-                        app.push(ChatLine::Info(format!("  ── {} ──", path.display())));
+                        // Show workflow as a nice code block
+                        app.push(ChatLine::Info(format!("  Workflow: {}", path.display())));
+                        app.push(ChatLine::Info("  ```yaml".into()));
                         for line in content.lines() {
-                            app.push(ChatLine::Info(format!("  {line}")));
+                            app.push(ChatLine::Info(format!("  {}", line)));
                         }
+                        app.push(ChatLine::Info("  ```".into()));
                     }
                     Err(e) => {
                         app.push(ChatLine::Info(format!("  ✗ Failed to read: {e}")));

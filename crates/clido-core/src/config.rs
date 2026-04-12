@@ -283,7 +283,7 @@ fn default_retry_jitter_numerator() -> u8 {
 }
 
 fn default_tool_timeout_secs() -> u64 {
-    60
+    300 // 5 minutes default for long-running tools
 }
 
 fn default_max_tool_output_bytes() -> usize {

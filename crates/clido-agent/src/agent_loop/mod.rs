@@ -2526,7 +2526,7 @@ mod tests {
         AgentConfig {
             model: "mock".to_string(),
             system_prompt: None,
-            max_turns: 3,
+            max_turns: 10,
             max_budget_usd: None,
             permission_mode: PermissionMode::AcceptAll,
             permission_rules: vec![],

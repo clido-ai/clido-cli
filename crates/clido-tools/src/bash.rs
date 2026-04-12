@@ -43,7 +43,7 @@ impl BashTool {
 }
 
 fn default_timeout_ms() -> u64 {
-    30_000
+    300_000 // 5 minutes
 }
 
 /// Env vars that carry credentials and must not be inherited by agent-spawned shells.

@@ -11,7 +11,7 @@ use futures::{SinkExt, StreamExt};
 use crate::provider::StreamEvent;
 
 /// Timeout applied to each chunk read from the SSE byte stream.
-const STREAM_CHUNK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+const STREAM_CHUNK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Turn a raw byte stream into a `Stream<Item = Result<StreamEvent>>` by:
 ///

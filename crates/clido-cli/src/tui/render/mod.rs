@@ -1645,7 +1645,7 @@ fn apply_selection_highlight(
 
         let line_start_col = if line_idx == start_row { start_col } else { 0 };
         let line_end_col = if line_idx == end_row {
-            end_col + 1 // inclusive end
+            end_col.saturating_add(1) // inclusive end, prevent overflow
         } else {
             usize::MAX
         };

@@ -770,7 +770,7 @@ impl AgentLoop {
                         e.on_path_permission_request(&requested_path, name).await;
                     }
 
-                    match tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv()).await
+                    match tokio::time::timeout(std::time::Duration::from_secs(900), rx.recv()).await
                     {
                         Ok(Some(granted_path)) if !granted_path.as_os_str().is_empty() => {
                             if let Some(ref e) = self.emit {

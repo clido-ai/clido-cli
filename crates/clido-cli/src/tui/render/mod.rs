@@ -1991,7 +1991,7 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
     let mut out = Vec::new();
     // Note: render_markdown already accounts for gutter width internally,
     // so we pass the full width. The gutter is added after rendering.
-    
+
     for msg in &app.messages {
         match msg {
             ChatLine::User(text) => {
@@ -2040,9 +2040,12 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
                 }
                 // Only add blank line if last line is not already blank
                 // A line is blank if it has no spans or only whitespace spans
-                let last_is_blank = out.last().map(|l| {
-                    l.spans.is_empty() || l.spans.iter().all(|s| s.content.trim().is_empty())
-                }).unwrap_or(false);
+                let last_is_blank = out
+                    .last()
+                    .map(|l| {
+                        l.spans.is_empty() || l.spans.iter().all(|s| s.content.trim().is_empty())
+                    })
+                    .unwrap_or(false);
                 if !last_is_blank {
                     out.push(Line::raw(""));
                 }

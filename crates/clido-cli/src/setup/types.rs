@@ -322,7 +322,11 @@ impl SetupState {
             return;
         }
         // Collect saved keys first to avoid borrow issues
-        let saved: Vec<SavedApiKeyOffer> = self.saved_keys_for_fast_provider().into_iter().cloned().collect();
+        let saved: Vec<SavedApiKeyOffer> = self
+            .saved_keys_for_fast_provider()
+            .into_iter()
+            .cloned()
+            .collect();
         self.credential_pick_active = !saved.is_empty();
         self.credential_pick_index = 0;
         // Load first saved key as current_fast_credential if available

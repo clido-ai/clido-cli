@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clido_index::RepoIndex;
 use clido_memory::MemoryStore;
@@ -1490,10 +1490,21 @@ pub(super) fn cmd_index(app: &mut App) {
     }
 }
 
-pub(super) fn cmd_rules(app: &mut App) {
+pub(super) fn cmd_rules(app: &mut App, args: &str) {
+    // Parse args for "edit" or "edit global"
+    let args_trimmed = args.trim();
+    let edit_global = args_trimmed == "edit global";
+    let edit_local = args_trimmed == "edit";
+    
+    if edit_local || edit_global {
+        cmd_rules_edit(app, edit_global);
+        return;
+    }
+    
+    // Original /rules command (show rules)
     app.push(ChatLine::Info("".into()));
     app.push(ChatLine::Section(
-        "Project rules (CLIDO.md, .clido/rules.md)".into(),
+        "Project rules (.clido/rules.md)".into(),
     ));
 
     let (no_rules, rules_override) = match clido_core::load_config(&app.workspace_root) {
@@ -1572,6 +1583,90 @@ pub(super) fn cmd_rules(app: &mut App) {
         ));
     }
     app.push(ChatLine::Info("".into()));
+}
+
+/// Edit rules file - local or global
+fn cmd_rules_edit(app: &mut App, global: bool) {
+    if global {
+        // Global rules: ~/.config/clido/rules.md
+        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"));
+        let global_rules_path = match home {
+            Ok(home) => PathBuf::from(home).join(".config").join("clido").join("rules.md"),
+            Err(_) => {
+                app.push(ChatLine::Info("  ✗ Could not determine home directory".into()));
+                return;
+            }
+        };
+        
+        // Ensure config directory exists
+        let global_rules_dir = global_rules_path.parent().unwrap_or(&global_rules_path);
+        if let Err(e) = std::fs::create_dir_all(global_rules_dir) {
+            app.push(ChatLine::Info(format!(
+                "  ✗ Failed to create config directory: {}",
+                e
+            )));
+            return;
+        }
+        
+        // Load current content or start with empty
+        let current_content = std::fs::read_to_string(&global_rules_path)
+            .unwrap_or_default();
+        
+        // Send prompt to agent to edit rules
+        let prompt = format!(
+            "Please review and improve the following global clido rules. \
+            Global rules apply to all clido sessions. Current content:\n\n```\n{}\n```\n\n\
+            Please provide the improved rules. You can:\n\
+            - Fix formatting issues\n\
+            - Add missing guidelines\n\
+            - Remove outdated rules\n\
+            - Improve clarity\n\n\
+            Return ONLY the rules content, no explanations.",
+            if current_content.is_empty() { "(No rules yet - create initial rules)" } else { &current_content }
+        );
+        
+        app.push(ChatLine::Info("  Editing global rules (~/.config/clido/rules.md)...".into()));
+        app.send_silent(prompt);
+        
+        // Store path for later saving
+        app.pending_rules_edit = Some(global_rules_path);
+    } else {
+        // Local rules: .clido/rules.md
+        let local_rules_dir = app.workspace_root.join(".clido");
+        let local_rules_path = local_rules_dir.join("rules.md");
+        
+        // Ensure .clido directory exists
+        if let Err(e) = std::fs::create_dir_all(&local_rules_dir) {
+            app.push(ChatLine::Info(format!(
+                "  ✗ Failed to create .clido directory: {}",
+                e
+            )));
+            return;
+        }
+        
+        // Load current content or start with empty
+        let current_content = std::fs::read_to_string(&local_rules_path)
+            .unwrap_or_default();
+        
+        // Send prompt to agent to edit rules
+        let prompt = format!(
+            "Please review and improve the following project-specific clido rules. \
+            These rules apply only to the current project. Current content:\n\n```\n{}\n```\n\n\
+            Please provide the improved rules. You can:\n\
+            - Fix formatting issues\n\
+            - Add project-specific guidelines\n\
+            - Remove outdated rules\n\
+            - Improve clarity\n\n\
+            Return ONLY the rules content, no explanations.",
+            if current_content.is_empty() { "(No rules yet - create initial rules)" } else { &current_content }
+        );
+        
+        app.push(ChatLine::Info("  Editing local rules (.clido/rules.md)...".into()));
+        app.send_silent(prompt);
+        
+        // Store path for later saving
+        app.pending_rules_edit = Some(local_rules_path);
+    }
 }
 
 pub(super) fn cmd_image(app: &mut App, cmd: &str) {
@@ -3312,7 +3407,7 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
         }
         _ if cmd == "/notify" || cmd.starts_with("/notify ") => cmd_notify(app, cmd),
         "/index" => cmd_index(app),
-        "/rules" => cmd_rules(app),
+        "/rules" => cmd_rules(app, ""),
         _ if cmd == "/image" || cmd.starts_with("/image ") => cmd_image(app, cmd),
         _ if cmd == "/allow-path" || cmd.starts_with("/allow-path ") => cmd_allow_path(app, cmd),
         "/allowed-paths" => cmd_allowed_paths(app),

@@ -2841,6 +2841,29 @@ pub(super) async fn event_loop(
                     }
                     Some(AgentEvent::Response(text)) => {
                         last_agent_activity = std::time::Instant::now();
+                        
+                        // Check if we're waiting for rules edit
+                        if let Some(rules_path) = app.pending_rules_edit.take() {
+                            // Save the agent's response as the new rules
+                            match std::fs::write::<&std::path::Path, &[u8]>(&rules_path, text.as_bytes()) {
+                                Ok(_) => {
+                                    app.push(ChatLine::Info(format!(
+                                        "  ✓ Rules saved to {}",
+                                        rules_path.display()
+                                    )));
+                                }
+                                Err(e) => {
+                                    app.push(ChatLine::Info(format!(
+                                        "  ✗ Failed to save rules: {}",
+                                        e
+                                    )));
+                                    // Restore pending_rules_edit so user can retry
+                                    app.pending_rules_edit = Some(rules_path);
+                                }
+                            }
+                            // Continue to show the response as Assistant message
+                        }
+                        
                         if let Some((num, step)) = extract_current_step_full(&text) {
                             app.current_step = Some(step);
                             app.last_executed_step_num = Some(num);

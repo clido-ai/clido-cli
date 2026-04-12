@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -223,6 +224,8 @@ pub(super) struct App {
     pub(super) model: String,
     /// Active profile name, shown in the header.
     pub(super) current_profile: String,
+    /// When Some(path), we're waiting for the agent to edit rules at this path.
+    pub(super) pending_rules_edit: Option<PathBuf>,
     /// Session ID of the current agent session (set after SessionStarted event).
     pub(super) current_session_id: Option<String>,
     /// Generated title for the current session.
@@ -414,6 +417,7 @@ impl App {
             provider,
             model,
             current_profile,
+            pending_rules_edit: None,
             current_session_id: None,
             session_title: None,
             workspace_root,

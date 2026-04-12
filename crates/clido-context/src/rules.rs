@@ -41,7 +41,7 @@ pub fn discover(cwd: &Path, no_rules: bool, rules_file_override: Option<&Path>) 
         }
         seen_dirs.insert(dir.clone());
 
-        // Check .clido/rules.md first
+        // Check .clido/rules.md (primary location)
         let dot_clido_rules = dir.join(".clido").join("rules.md");
         if dot_clido_rules.exists() {
             if let Some(f) = load_rules_file(&dot_clido_rules) {
@@ -49,11 +49,14 @@ pub fn discover(cwd: &Path, no_rules: bool, rules_file_override: Option<&Path>) 
             }
         }
 
-        // Then check CLIDO.md
-        let clido_md = dir.join("CLIDO.md");
-        if clido_md.exists() {
-            if let Some(f) = load_rules_file(&clido_md) {
-                walk_results.push(f);
+        // Legacy: Check CLIDO.md only if .clido/rules.md doesn't exist
+        // This allows migration from CLIDO.md to .clido/rules.md
+        if !dot_clido_rules.exists() {
+            let clido_md = dir.join("CLIDO.md");
+            if clido_md.exists() {
+                if let Some(f) = load_rules_file(&clido_md) {
+                    walk_results.push(f);
+                }
             }
         }
 

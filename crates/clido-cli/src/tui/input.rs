@@ -191,8 +191,9 @@ pub(super) fn handle_workflow_editor_key(app: &mut App, event: crossterm::event:
                 // Validate YAML
                 match serde_yaml::from_str::<clido_workflows::WorkflowDef>(&yaml_text) {
                     Ok(def) => {
-                        // Determine save path
-                        let save_dir = app.workspace_root.join(".clido").join("workflows");
+                        // Determine save path (global)
+                        let save_dir = clido_core::default_workflows_directory();
+                        let save_dir = std::path::PathBuf::from(&save_dir);
                         let _ = std::fs::create_dir_all(&save_dir);
                         let path = if let Some(p) = app.workflow_editor_path.take() {
                             p

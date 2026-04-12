@@ -3042,7 +3042,7 @@ prerequisites:               # Optional: checked before any steps run
 5. **`tools: []`** (empty list) is valid — it means the step does pure reasoning/writing with no tool access.
 6. **`on_error: continue`** is useful for optional steps (e.g. PoC generation) that shouldn't abort the workflow.
 7. **`default: "{{ cwd }}"`** on inputs enables zero-config auto-discovery — the user can run the workflow from inside the target repository without supplying any arguments.
-8. **Workflow discovery**: save workflows to `.clido/workflows/<name>.yaml` (project-local) or `~/.config/clido/workflows/<name>.yaml` (global). Use `/workflow save` from the TUI after the agent outputs the YAML block.
+8. **Workflow discovery**: save workflows to `~/.config/clido/workflows/<name>.yaml` (global). Use `/workflow save` from the TUI after the agent outputs the YAML block.
 
 ## Running workflows
 
@@ -3089,7 +3089,7 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
                 ));
                 app.push(ChatLine::Info("".into()));
                 app.push(ChatLine::Info(
-                    "  Workflows are saved to .clido/workflows/".into(),
+                    "  Workflows are saved to ~/.config/clido/workflows/".into(),
                 ));
             } else {
                 for (name, path, desc, steps) in &workflows {
@@ -3215,7 +3215,8 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
             match extract_last_yaml_from_chat(&app.messages) {
                 Some(yaml) => match serde_yaml::from_str::<clido_workflows::WorkflowDef>(&yaml) {
                     Ok(def) => {
-                        let save_dir = app.workspace_root.join(".clido").join("workflows");
+                        let save_dir = clido_core::default_workflows_directory();
+                        let save_dir = std::path::PathBuf::from(&save_dir);
                         let _ = std::fs::create_dir_all(&save_dir);
                         let file_name = if !name_arg.is_empty() {
                             name_arg.to_string()

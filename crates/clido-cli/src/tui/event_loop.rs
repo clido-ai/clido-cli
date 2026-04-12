@@ -2411,8 +2411,8 @@ pub(super) async fn event_loop(
     let mut git_refresh_counter: u32 = 0;
     // Stall timeout: trigger recovery only if truly no activity (heartbeats keep this fresh
     // during long LLM calls, so 120 s is a reliable hard ceiling for genuinely hung agents).
-    const STALL_TIMEOUT_SECS: u64 = 120;
-    const STALL_WARNING_SECS: u64 = 30;
+const STALL_TIMEOUT_SECS: u64 = 900; // 15 minutes
+const STALL_WARNING_SECS: u64 = 300; // 5 minutes
     // Only redraw when state has actually changed to reduce CPU usage.
     let mut dirty = true;
 

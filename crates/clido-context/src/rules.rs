@@ -395,16 +395,14 @@ mod tests {
     }
 
     #[test]
-    fn test_dot_clido_rules_discovered() {
+    fn test_clido_md_discovered() {
         let dir = tempdir().unwrap();
-        let dot_clido = dir.path().join(".clido");
-        std::fs::create_dir_all(&dot_clido).unwrap();
-        let rules_md = dot_clido.join("rules.md");
-        std::fs::write(&rules_md, "Always write tests.\n").unwrap();
+        let clido_md = dir.path().join("CLIDO.md");
+        std::fs::write(&clido_md, "Always write tests.\n").unwrap();
 
         let result = discover(dir.path(), false, None);
-        let found = result.iter().any(|f| f.path == rules_md);
-        assert!(found, "Expected to find .clido/rules.md");
+        let found = result.iter().any(|f| f.path == clido_md);
+        assert!(found, "Expected to find CLIDO.md");
     }
 
     #[test]

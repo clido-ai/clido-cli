@@ -20,6 +20,7 @@ pub mod secrets;
 mod semantic_search;
 mod test_loop;
 pub mod test_runner;
+mod spawn_reviewer;
 mod todo_write;
 pub mod truncate;
 pub mod web_fetch;
@@ -52,6 +53,7 @@ pub use read::ReadTool;
 pub use registry::ToolRegistry;
 pub use semantic_search::SemanticSearchTool;
 pub use test_loop::TestLoopTool;
+pub use spawn_reviewer::SpawnReviewerTool;
 pub use todo_write::{TodoItem, TodoPriority, TodoStatus, TodoWriteTool};
 pub use web_fetch::WebFetchTool;
 pub use web_search::WebSearchTool;
@@ -145,8 +147,9 @@ pub fn default_registry_with_options_and_allowed_paths(
     r.register(WebFetchTool::new());
     r.register(WebSearchTool::new());
     r.register(DiagnosticsTool::new());
-    r.register(TestLoopTool::new(workspace_root));
+    r.register(TestLoopTool::new(workspace_root.clone()));
     r.register(truncate::TruncateTool::new());
+    r.register(SpawnReviewerTool::new(true)); // Always enabled for now
     (r, todo_store)
 }
 

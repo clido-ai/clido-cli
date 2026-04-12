@@ -219,8 +219,10 @@ pub struct IndexSection {
     pub include_ignored: bool,
 }
 
-fn default_workflows_directory() -> String {
-    ".clido/workflows".to_string()
+pub fn default_workflows_directory() -> String {
+    global_config_dir()
+        .map(|dir| dir.join("workflows").to_string_lossy().to_string())
+        .unwrap_or_else(|| ".clido/workflows".to_string())
 }
 
 /// User preferences for Skills discovery and activation (`clido_core::skills`).
@@ -520,10 +522,10 @@ fn merge(base: ConfigFile, later: ConfigFile) -> ConfigFile {
             .or(base.context.max_context_tokens),
     };
     let workflows = WorkflowsSection {
-        directory: if later.workflows.directory != default_workflows_directory() {
-            later.workflows.directory
-        } else {
+        directory: if later.workflows.directory.is_empty() {
             base.workflows.directory
+        } else {
+            later.workflows.directory
         },
     };
     let hooks = HooksConfig {

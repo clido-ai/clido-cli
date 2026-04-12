@@ -2851,15 +2851,12 @@ pub(super) fn abort_workflow(app: &mut App) {
     app.on_agent_done();
 }
 
-/// Resolve workflow directories: global `~/.config/clido/workflows/` first, then project-local `.clido/workflows/`.
-fn workflow_dirs(workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
+/// Resolve workflow directories: global `~/.config/clido/workflows/` only.
+fn workflow_dirs(_workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut dirs = Vec::new();
-    // Global workflows take priority (default location)
     if let Some(global) = clido_core::global_config_dir() {
         dirs.push(global.join("workflows"));
     }
-    // Project-local workflows as fallback/override
-    dirs.push(workspace_root.join(".clido").join("workflows"));
     dirs
 }
 

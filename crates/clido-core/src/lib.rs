@@ -14,9 +14,10 @@ pub use config::{
     ProviderConfig, ProviderType, RuleAction,
 };
 pub use config_loader::{
-    agent_config_from_loaded, config_file_exists, delete_profile_from_config, global_config_dir,
-    global_config_path, load_config, set_skill_disabled_in_project, switch_active_profile,
-    upsert_profile_in_config, LoadedConfig, ProfileEntry, SkillsSection,
+    agent_config_from_loaded, config_file_exists, default_workflows_directory,
+    delete_profile_from_config, global_config_dir, global_config_path, load_config,
+    set_skill_disabled_in_project, switch_active_profile, upsert_profile_in_config,
+    LoadedConfig, ProfileEntry, SkillsSection,
 };
 pub use error::{ClidoError, Result};
 pub use model_prefs::ModelPrefs;

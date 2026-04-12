@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 use clido_agent::AgentLoop;
 use clido_core::{
-    agent_config_from_loaded, load_config, load_pricing, ClidoError, LoadedConfig, PermissionMode,
-    Result as CoreResult,
+    agent_config_from_loaded, default_workflows_directory, load_config, load_pricing, ClidoError,
+    LoadedConfig, PermissionMode, Result as CoreResult,
 };
 use clido_storage::{workflow_run_path, SessionWriter};
 use clido_tools::default_registry_with_options;
@@ -150,7 +150,7 @@ async fn run_workflow_run(
 ) -> Result<(), anyhow::Error> {
     let workspace_root = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let loaded = load_config(&workspace_root).map_err(|e| CliError::Usage(e.to_string()))?;
-    let path = resolve_workflow_path(workflow, &workspace_root, &loaded.workflows.directory)?;
+    let path = resolve_workflow_path(workflow)?;
     let def = load_workflow(&path).map_err(|e| CliError::Usage(e.to_string()))?;
     validate_workflow(&def).map_err(|e| CliError::Usage(e.to_string()))?;
     let overrides: Vec<(String, serde_json::Value)> = input
@@ -204,48 +204,29 @@ async fn run_workflow_run(
     Ok(())
 }
 
-fn resolve_workflow_path(
-    workflow: &str,
-    workspace_root: &Path,
-    project_workflow_dir: &str,
-) -> anyhow::Result<std::path::PathBuf> {
+fn resolve_workflow_path(workflow: &str) -> anyhow::Result<std::path::PathBuf> {
     let p = Path::new(workflow);
     if p.is_absolute() || p.exists() {
         return Ok(p.to_path_buf());
     }
 
-    // Check GLOBAL workflows first (default location)
-    if let Some(dirs) = directories::ProjectDirs::from("", "", "clido") {
-        let global_base = dirs.config_dir().join("workflows");
-        for candidate in [
-            workflow,
-            &format!("{}.yaml", workflow),
-            &format!("{}.yml", workflow),
-        ] {
-            let path = global_base.join(candidate);
-            if path.exists() {
-                return Ok(path);
-            }
-        }
-    }
-
-    // Check project-local workflows as fallback
-    let project_base = workspace_root.join(project_workflow_dir);
+    let global_dir = default_workflows_directory();
+    let global_base = Path::new(&global_dir);
     for candidate in [
         workflow,
         &format!("{}.yaml", workflow),
         &format!("{}.yml", workflow),
     ] {
-        let path = project_base.join(candidate);
+        let path = global_base.join(candidate);
         if path.exists() {
             return Ok(path);
         }
     }
 
     Err(anyhow::anyhow!(
-        "Workflow not found: {} (tried ~/.config/clido/workflows/, {}, current path)",
+        "Workflow not found: {} (tried {}, current path)",
         workflow,
-        project_workflow_dir
+        global_dir
     ))
 }
 
@@ -267,15 +248,9 @@ async fn run_workflow_inspect(path: &Path) -> Result<(), anyhow::Error> {
 }
 
 async fn run_workflow_list() -> Result<(), anyhow::Error> {
-    let cwd = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let workflow_dir = load_config(&cwd)
-        .map(|l| l.workflows.directory)
-        .unwrap_or_else(|_| ".clido/workflows".to_string());
+    let global_dir = default_workflows_directory();
     let mut found = Vec::new();
-    collect_yaml_files(&cwd.join(&workflow_dir), &mut found);
-    if let Some(dirs) = directories::ProjectDirs::from("", "", "clido") {
-        collect_yaml_files(&dirs.config_dir().join("workflows"), &mut found);
-    }
+    collect_yaml_files(Path::new(&global_dir), &mut found);
     for path in found {
         if let Ok(def) = load_workflow(&path) {
             println!("  {}  {}", def.name, path.display());

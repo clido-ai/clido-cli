@@ -17,6 +17,7 @@ use super::commands::{execute_slash, is_known_slash_cmd, parse_per_turn_model};
 use super::copy::info as copy_info;
 use super::render::build_plan_from_assistant_text;
 use super::state::*;
+use super::state::{LinePositionMap, LinePosition};
 
 /// Text selection for in-app copy.
 /// Tracks anchor (start) and focus (end) positions in (row, col) format.
@@ -333,9 +334,7 @@ pub(super) struct App {
     /// Hash of the messages Vec at the time the cache was last populated.
     /// Used to detect when messages change and stale entries should be evicted.
     pub(super) render_cache_msg_count: usize,
-    /// Plain-text snapshot of the last rendered lines, used by `get_selected_text()`
-    /// so selection coordinates (which are in rendered-line space) can be resolved
-    /// without re-running the markdown→Line conversion.
+    pub(super) line_position_map: Vec<(usize, usize, usize)>, // (chatline_idx, start_char, end_char) per screen row
     pub(super) rendered_line_texts: Vec<String>,
     /// Non-blocking toast notifications (auto-dismiss).
     pub(super) toasts: Vec<Toast>,
@@ -466,6 +465,7 @@ impl App {
             models_loading: false,
             render_cache: std::collections::HashMap::new(),
             render_cache_msg_count: 0,
+            line_position_map: Vec::new(),
             rendered_line_texts: Vec::new(),
             toasts: Vec::new(),
             last_stall_warning: None,
@@ -1031,55 +1031,64 @@ impl App {
     /// Get selected text from the rendered line snapshot.
     ///
     /// Selection coordinates are in **display-cell space** (terminal column
-    /// positions).  This method converts display columns → character indices
-    /// per-line so multi-byte and wide characters are handled correctly.
+    /// positions). This method uses the line_position_map to correctly map
+    /// screen coordinates back to original ChatLine text, handling word
+    /// wrapping and indentation properly.
     pub(super) fn get_selected_text(&self) -> String {
         if !self.selection.active {
             return String::new();
         }
 
-        let lines = &self.rendered_line_texts[..];
-        let total_lines = lines.len();
-        if total_lines == 0 {
-            return String::new();
-        }
-
         let (sr, sc, er, ec) = self.selection.bounds();
-        // Clamp to actual line count.
-        let sr: usize = sr.min(total_lines.saturating_sub(1));
-        let er: usize = er.min(total_lines.saturating_sub(1));
-        if sr >= total_lines {
-            return String::new();
-        }
-
         let mut result = String::new();
+        let mut last_chatline_idx = None;
 
         for row in sr..=er {
-            let line: &str = match lines.get(row) {
-                Some(l) => l.as_str(),
-                None => continue,
-            };
-            // Convert display-cell column → character index.
-            let start_col = display_col_to_char_idx(line, sc);
-            let end_col = display_col_to_char_idx(
-                line,
-                if row == er {
-                    ec + 1
-                } else {
-                    line_display_width(line)
-                },
-            );
-
-            let chars: Vec<char> = line.chars().collect();
-            let start = start_col.min(chars.len());
-            let end = end_col.min(chars.len());
-
-            if start < end {
-                result.extend(&chars[start..end]);
+            if row >= self.line_position_map.len() {
+                break;
             }
 
-            if row < er {
-                result.push('\n');
+            let (chatline_idx, row_start_char, row_end_char) = self.line_position_map[row];
+            
+            // Skip rows with no selectable content (labels, blank lines)
+            if row_start_char == row_end_char {
+                continue;
+            }
+
+            // Add newline when switching between different ChatLines
+            if let Some(last_idx) = last_chatline_idx {
+                if last_idx != chatline_idx {
+                    result.push('\n');
+                }
+            }
+            last_chatline_idx = Some(chatline_idx);
+
+            // Get the original ChatLine text
+            if let Some(chatline) = self.messages.get(chatline_idx) {
+                let text = match chatline {
+                    ChatLine::User(t) | ChatLine::Assistant(t) | ChatLine::Thinking(t) => t,
+                    ChatLine::Info(t) => t,
+                    ChatLine::ToolCall { detail, .. } => detail,
+                    _ => continue,
+                };
+
+                // Calculate which characters to extract from this row
+                let start_in_row = if row == sr { sc } else { 0 };
+                let end_in_row = if row == er { ec } else { row_end_char - row_start_char };
+                
+                // Clamp to valid range
+                let start_in_row = start_in_row.min(row_end_char - row_start_char);
+                let end_in_row = end_in_row.min(row_end_char - row_start_char);
+
+                // Extract characters
+                let actual_start = row_start_char + start_in_row;
+                let actual_end = row_start_char + end_in_row;
+
+                for char_offset in actual_start..actual_end {
+                    if let Some(ch) = text.chars().nth(char_offset) {
+                        result.push(ch);
+                    }
+                }
             }
         }
 

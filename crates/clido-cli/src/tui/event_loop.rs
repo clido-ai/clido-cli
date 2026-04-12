@@ -2875,6 +2875,10 @@ pub(super) async fn event_loop(
                             crate::tui::commands::handle_workflow_step_response(app, text);
                             // Skip the normal on_agent_done / notification path.
                         } else {
+                            // Check if we're waiting for a plan response
+                            if app.plan.awaiting_plan_response {
+                                app.plan.last_plan_raw = Some(text.clone());
+                            }
                             app.push(ChatLine::Assistant(text));
                             // Fire desktop notification + bell if enabled.
                             if app.notify_enabled {

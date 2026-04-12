@@ -1966,15 +1966,22 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
         wrapped
     };
 
-    // Keep a plain-text snapshot of rendered lines so `get_selected_text()`
+    // Keep a plain-text snapshot of rendered lines so `get_selected_text()
     // can resolve selection coordinates (which live in rendered-line space).
+    // Strip gutter indentation so selection doesn't include it.
     app.rendered_line_texts = result
         .iter()
         .map(|line| {
-            line.spans
+            let full_text: String = line.spans
                 .iter()
                 .map(|s| s.content.as_ref())
-                .collect::<String>()
+                .collect();
+            // Strip leading gutter (TUI_GUTTER + "  " or "› ")
+            full_text
+                .trim_start_matches(TUI_GUTTER)
+                .trim_start_matches("  ")
+                .trim_start_matches("› ")
+                .to_string()
         })
         .collect();
 

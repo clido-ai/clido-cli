@@ -1976,12 +1976,41 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
                 .iter()
                 .map(|s| s.content.as_ref())
                 .collect();
-            // Strip leading gutter (TUI_GUTTER + "  " or "› ")
-            full_text
+            // Strip leading gutter patterns:
+            // - Normal chat: TUI_GUTTER + "  " or "› "
+            // - Diff: "     123 " (line numbers) or "  123 " or "       "
+            let text = full_text
                 .trim_start_matches(TUI_GUTTER)
                 .trim_start_matches("  ")
-                .trim_start_matches("› ")
-                .to_string()
+                .trim_start_matches("› ");
+            
+            // Strip diff line number patterns (5 chars for unified, variable for sbs)
+            // Unified: "  123 " or "     123 "
+            // Side-by-side: "  123 " or "     " or " 123 "
+            let text = text
+                .trim_start_matches("       ")  // 7 spaces (deleted lines in unified)
+                .trim_start_matches("      ")   // 6 spaces (empty in sbs)
+                .trim_start_matches("     ")    // 5 spaces (line number width)
+                .trim_start_matches("  ")
+                .trim_start_matches(" ");
+            
+            // Remove remaining line numbers (digits followed by space)
+            let text = if text.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                // Skip leading digits and following space
+                let digits_end = text
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .count();
+                if digits_end > 0 && text.get(digits_end..=digits_end) == Some(" ") {
+                    text[digits_end + 1..].to_string()
+                } else {
+                    text.to_string()
+                }
+            } else {
+                text.to_string()
+            };
+            
+            text
         })
         .collect();
 

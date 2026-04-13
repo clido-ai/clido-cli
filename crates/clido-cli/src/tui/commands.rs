@@ -2706,48 +2706,132 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
         "  ✓ [{step_num}/{total}] {step_name} ({dur_ms}ms)"
     )));
 
-    // Apply save_to. On fatal write errors, abort if on_error == Fail.
-    let save_errors: Vec<String> = {
+    // Apply save_to with aggressive retry logic.
+    // Files are CRITICAL for workflow continuation - we must ensure they are written.
+    let (save_results, empty_output_warning) = {
         let wf = app.active_workflow.as_ref().unwrap();
-        let mut errors = Vec::new();
+        let mut results = Vec::new();
+        let mut empty_warning = None;
+        
         for out in &outputs {
             if let Some(ref tmpl) = out.save_to {
-                match clido_workflows::render_save_to(tmpl, &wf.context, &step_id) {
-                    Ok(path_str) => {
-                        let p = std::path::Path::new(&path_str);
-                        // Create parent directories if needed
-                        if let Some(parent) = p.parent() {
-                            if let Err(e) = std::fs::create_dir_all(parent) {
-                                errors.push(format!(
-                                    "save_to: failed to create directory '{}': {}",
-                                    parent.display(),
-                                    e
-                                ));
-                                continue; // Skip writing if directory creation failed
-                            }
+                // Try to render the template first
+                let path_str = match clido_workflows::render_save_to(tmpl, &wf.context, &step_id) {
+                    Ok(ps) => ps,
+                    Err(e) => {
+                        let msg = format!("save_to template error for '{step_id}': {e}");
+                        results.push((tmpl.clone(), Err(msg)));
+                        continue;
+                    }
+                };
+                
+                // Check if output text is empty - this is a problem
+                if text.trim().is_empty() {
+                    empty_warning = Some(format!(
+                        "save_to: output text is empty for '{step_id}' - nothing to write to '{}'",
+                        path_str
+                    ));
+                    results.push((path_str.clone(), Err(format!("empty output"))));
+                    continue;
+                }
+                
+                results.push((path_str, Ok(())));
+            }
+        }
+        (results, empty_warning)
+    };
+    
+    // Now process the saves with retry logic (app is not borrowed here)
+    let mut failed_saves = Vec::new();
+    let mut successful_count = 0;
+    
+    for (path_str, _) in save_results {
+        let p = std::path::Path::new(&path_str);
+        
+        // Aggressive retry with exponential backoff
+        let mut last_error = None;
+        let mut succeeded = false;
+        
+        for attempt in 1..=5 {
+            // Create parent directories
+            if let Some(parent) = p.parent() {
+                if !parent.exists() {
+                    match std::fs::create_dir_all(parent) {
+                        Ok(()) => {
+                            app.push(ChatLine::Info(format!(
+                                "  📁 Created directory: {}",
+                                parent.display()
+                            )));
                         }
-                        // Write the file
-                        if let Err(e) = std::fs::write(p, &text) {
-                            errors.push(format!(
-                                "save_to: failed to write '{}': {}",
-                                path_str,
-                                e
-                            ));
+                        Err(e) => {
+                            last_error = Some(format!("create_dir_all failed: {}", e));
+                            std::thread::sleep(std::time::Duration::from_millis(100 * attempt));
+                            continue; // Retry
                         }
                     }
-                    Err(e) => errors.push(format!("save_to template error for '{step_id}': {e}")),
+                }
+            }
+            
+            // Try to write the file
+            match std::fs::write(p, &text) {
+                Ok(()) => {
+                    app.push(ChatLine::Info(format!(
+                        "  💾 Saved output to: {}",
+                        path_str
+                    )));
+                    succeeded = true;
+                    break; // Success!
+                }
+                Err(e) => {
+                    last_error = Some(format!("write failed: {}", e));
+                    if attempt < 5 {
+                        app.push(ChatLine::Info(format!(
+                            "  ⚠ Write attempt {}/5 failed for '{}': {}. Retrying...",
+                            attempt, path_str, e
+                        )));
+                        std::thread::sleep(std::time::Duration::from_millis(100 * attempt * attempt));
+                    }
                 }
             }
         }
-        errors
-    };
-    if !save_errors.is_empty() {
-        for msg in &save_errors {
-            app.push(ChatLine::Info(format!("  ⚠ {msg}")));
+        
+        if succeeded {
+            successful_count += 1;
+        } else if let Some(err) = last_error {
+            failed_saves.push(format!(
+                "save_to: failed to write '{}' after 5 attempts: {}",
+                path_str, err
+            ));
         }
+    }
+    
+    // Show empty output warning if present
+    if let Some(warning) = empty_output_warning {
+        app.push(ChatLine::Info(format!("  ⚠ {warning}")));
+    }
+    
+    let total_saves = successful_count + failed_saves.len();
+    
+    if successful_count > 0 {
+        app.push(ChatLine::Info(format!(
+            "  ✓ Successfully saved {}/{} output files",
+            successful_count, total_saves
+        )));
+    }
+    
+    if !failed_saves.is_empty() {
+        for msg in &failed_saves {
+            app.push(ChatLine::Info(format!("  ✗ {msg}")));
+        }
+        
+        // CRITICAL: If save_to fails, we should abort the workflow regardless of on_error policy
+        // because subsequent steps depend on these files
+        app.push(ChatLine::Info(
+            "  🚨 CRITICAL: Output files could not be saved. Workflow may fail in subsequent steps.".into()
+        ));
+        
         if on_error == OnErrorPolicy::Fail {
-            // Disk write failure with fail policy → abort workflow.
-            handle_workflow_step_error(app, save_errors.join("; "));
+            handle_workflow_step_error(app, failed_saves.join("; "));
             return;
         }
     }

@@ -432,8 +432,8 @@ mod tests {
     }
 
     #[test]
-    fn default_timeout_is_30s() {
-        assert_eq!(default_timeout_ms(), 30_000);
+    fn default_timeout_is_300s() {
+        assert_eq!(default_timeout_ms(), 300_000);
     }
 
     #[tokio::test]

@@ -2463,14 +2463,20 @@ pub(super) fn advance_workflow(app: &mut App) {
 
     if current_idx >= total {
         // All steps done — use session_total_cost_usd for accurate delta including parallel steps.
-        let (name, cost_delta, elapsed_ms) = {
+        let (name, cost_str, elapsed_ms) = {
             let wf = app.active_workflow.as_ref().unwrap();
+            let is_subscription = clido_providers::is_subscription_provider(&app.provider);
             let cost = app.stats.session_total_cost_usd - wf.start_cost;
+            let cost_str = if is_subscription {
+                String::new()
+            } else {
+                format!(", ${:.4}", cost)
+            };
             let ms = wf.start_time.elapsed().as_millis() as u64;
-            (wf.name.clone(), cost, ms)
+            (wf.name.clone(), cost_str, ms)
         };
         app.push(ChatLine::Info(format!(
-            "  ✓ Workflow '{name}' complete — {total} steps, ${cost_delta:.4}, {elapsed_ms}ms"
+            "  ✓ Workflow '{name}' complete — {total} steps{cost_str}, {elapsed_ms}ms"
         )));
         app.push(ChatLine::Info("  Type anything to continue.".into()));
         app.on_agent_done();
@@ -2998,12 +3004,15 @@ pub(super) fn abort_workflow(app: &mut App) {
     app.on_agent_done();
 }
 
-/// Resolve workflow directories: global `~/.config/clido/workflows/` only.
-fn workflow_dirs(_workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
+/// Resolve workflow directories: global `~/.config/clido/workflows/` and project-local `.clido/workflows/`.
+fn workflow_dirs(workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut dirs = Vec::new();
+    // Global workflows
     if let Some(global) = clido_core::global_config_dir() {
         dirs.push(global.join("workflows"));
     }
+    // Project-local workflows
+    dirs.push(workspace_root.join(".clido").join("workflows"));
     dirs
 }
 

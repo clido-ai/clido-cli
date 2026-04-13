@@ -851,8 +851,10 @@ impl App {
                 format!("{}ms", elapsed.as_millis())
             };
             // Include per-turn cost if available (only show if cost is meaningful, i.e., > $0.0001).
+            // Skip for subscription providers since per-call cost tracking is not available.
+            let is_subscription = clido_providers::is_subscription_provider(&self.provider);
             let cost_usd = self.stats.session_cost_usd;
-            let cost_str = if cost_usd > 0.0001 {
+            let cost_str = if !is_subscription && cost_usd > 0.0001 {
                 format!("  ${:.4}", cost_usd)
             } else {
                 String::new()

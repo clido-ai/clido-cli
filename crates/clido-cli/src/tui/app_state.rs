@@ -312,6 +312,8 @@ pub(super) struct App {
     pub(super) render_cache_msg_count: usize,
     pub(super) line_position_map: Vec<(usize, usize, usize)>, // (chatline_idx, start_char, end_char) per screen row
     pub(super) rendered_line_texts: Vec<String>,
+    /// Unified content lines - single source of truth for display and selection
+    pub(super) content_lines: Vec<crate::tui::state::ContentLine>,
     /// Non-blocking toast notifications (auto-dismiss).
     pub(super) toasts: Vec<Toast>,
     /// Last time we showed a "agent seems stuck" warning to avoid spamming.
@@ -443,6 +445,7 @@ impl App {
             render_cache_msg_count: 0,
             line_position_map: Vec::new(),
             rendered_line_texts: Vec::new(),
+            content_lines: Vec::new(),
             toasts: Vec::new(),
             last_stall_warning: None,
             selection_mode: false,

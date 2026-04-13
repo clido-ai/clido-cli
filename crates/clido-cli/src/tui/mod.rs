@@ -38,7 +38,7 @@ use input::{
 };
 #[allow(unused_imports)]
 use render::{
-    build_lines_w, build_lines_w_uncached, build_plan_from_assistant_text, build_plan_from_tasks,
+    build_lines_w, build_plan_from_assistant_text, build_plan_from_tasks,
     extract_current_step_full, filter_indicator_line, fit_spans, is_welcome_only, modal_block,
     modal_block_with_hint, modal_row_two_col, parse_hunk_header, parse_plan_from_text,
     popup_above_input, relative_time, render, render_markdown, render_plan_editor,

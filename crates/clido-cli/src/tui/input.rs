@@ -13,11 +13,10 @@ pub(super) fn scroll_up(app: &mut App, lines: u32) {
         app.suppress_next_chat_scroll_up = false;
         return;
     }
-    // Convert following mode to absolute scroll position first
-    // Note: layout.max_scroll may be slightly stale if new messages arrived
-    // since last render, but this is acceptable - user will be near bottom
+    // When following, use a high value that will be clamped to max_scroll
+    // by the renderer. This avoids using stale max_scroll values.
     if app.following {
-        app.scroll = app.layout.max_scroll;
+        app.scroll = u32::MAX;  // Will be clamped to actual max_scroll on render
     }
     app.scroll = app.scroll.saturating_sub(lines);
     app.following = false;
@@ -25,16 +24,16 @@ pub(super) fn scroll_up(app: &mut App, lines: u32) {
 
 pub(super) fn scroll_down(app: &mut App, lines: u32) {
     app.suppress_next_chat_scroll_up = false;
-    // When following, ensure we start from current max_scroll
-    // to handle case where new messages arrived since last render
+    // When following, use a high value that will be clamped to max_scroll
+    // by the renderer. This avoids using stale max_scroll values.
     let current_scroll = if app.following {
-        app.layout.max_scroll
+        u32::MAX  // Will be clamped to actual max_scroll on render
     } else {
         app.scroll
     };
     let new_scroll = current_scroll.saturating_add(lines);
     if new_scroll >= app.layout.max_scroll {
-        app.scroll = app.layout.max_scroll;
+        app.scroll = u32::MAX;  // Will be clamped on render
         app.following = true;
     } else {
         app.scroll = new_scroll;

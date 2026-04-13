@@ -5,7 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.2] - 2026-04-12
+## [1.0.5] - 2026-04-13
+
+### Changed
+
+- **Version consistency**: All internal crates now at 1.0.0 (was 0.1.0-beta.14) for consistency with clido-cli versioning.
+
+### Fixed
+
+- **Selection/Copy**: Restored working selection/copy functionality from v0.1.0-beta.14 with fixes for coordinate handling.
+- **Scroll behavior**: Fixed scroll position jumping when new content arrives while user has scrolled up.
+- **Mouse wheel scrolling**: Fixed jump-back issue when scrolling with mouse wheel while agent is generating content.
+- **Workflow save_to**: Improved error handling with aggressive retry logic (5 attempts with exponential backoff).
+- **Dead code removal**: Removed unused LinePosition/LinePositionMap structs and selection helper functions.
+
+### Added
+
+- **Workflow save_to feedback**: Save failures and empty output warnings are now stored in workflow context (`steps.{step_id}._save_failed`, `steps.{step_id}._save_warning`) so subsequent steps can detect and handle them.
+
+## [1.0.4] - 2026-04-12
 
 ### Fixed
 

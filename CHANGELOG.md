@@ -5,11 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2026-04-14
+
+### Fixed
+
+- **Workflow discovery on macOS**: Workflows are now correctly discovered on macOS by checking both the platform-standard directory (`~/Library/Application Support/clido/workflows/`) and the legacy XDG-style directory (`~/.config/clido/workflows/`). This ensures existing workflows continue to work while following macOS conventions.
+- **Workflow path display**: `/workflow list` now clearly shows all directories being searched (global and local paths) so users know where workflows are loaded from.
+
 ## [1.0.7] - 2026-04-14
 
 ### Fixed
 
-- **Workflow local path**: Restored project-local `.clido/workflows/` directory for workflows. Workflows are now discovered in both global (`~/.config/clido/workflows/`) and local (`.clido/workflows/`) directories.
+- **Workflow local path**: Restored project-local `.clido/workflows/` directory for workflows. Workflows are now discovered in both global and local directories.
 - **Subscription cost display**: Fixed dollar values showing for subscription providers in workflow step completion and agent done messages.
 - **Reverted slash command formatting**: Removed the new `SlashCommand` chat line type that was breaking text selection and copy functionality.
 

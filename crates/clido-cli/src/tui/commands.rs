@@ -2715,11 +2715,24 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
                 match clido_workflows::render_save_to(tmpl, &wf.context, &step_id) {
                     Ok(path_str) => {
                         let p = std::path::Path::new(&path_str);
+                        // Create parent directories if needed
                         if let Some(parent) = p.parent() {
-                            let _ = std::fs::create_dir_all(parent);
+                            if let Err(e) = std::fs::create_dir_all(parent) {
+                                errors.push(format!(
+                                    "save_to: failed to create directory '{}': {}",
+                                    parent.display(),
+                                    e
+                                ));
+                                continue; // Skip writing if directory creation failed
+                            }
                         }
+                        // Write the file
                         if let Err(e) = std::fs::write(p, &text) {
-                            errors.push(format!("save_to write failed for '{step_id}': {e}"));
+                            errors.push(format!(
+                                "save_to: failed to write '{}': {}",
+                                path_str,
+                                e
+                            ));
                         }
                     }
                     Err(e) => errors.push(format!("save_to template error for '{step_id}': {e}")),

@@ -5,11 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2026-04-14
+
+### Fixed
+
+- **Workflow local path**: Restored project-local `.clido/workflows/` directory for workflows. Workflows are now discovered in both global (`~/.config/clido/workflows/`) and local (`.clido/workflows/`) directories.
+- **Subscription cost display**: Fixed dollar values showing for subscription providers in workflow step completion and agent done messages.
+- **Reverted slash command formatting**: Removed the new `SlashCommand` chat line type that was breaking text selection and copy functionality.
+
 ## [1.0.6] - 2026-04-14
 
 ### Changed
 
-- **Slash command display**: Commands like `/plan <task>` and `/note <text>` now show the command highlighted on its own line, with the text argument below. This makes it clearer what was a command vs user input.
 - **Markdown safety margin**: Increased from 5 to 8 characters for more conservative line wrapping.
 
 ### Fixed

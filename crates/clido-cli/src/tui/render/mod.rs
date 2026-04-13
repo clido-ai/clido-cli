@@ -451,6 +451,12 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             if app.following && prev_max > 0 && max_scroll > prev_max.saturating_add(10) {
                 app.suppress_next_chat_scroll_up = true;
             }
+            // When not following and new content was added (max_scroll increased),
+            // adjust scroll position so user stays at same relative position
+            if !app.following && prev_max > 0 && max_scroll > prev_max {
+                let scroll_diff = max_scroll - prev_max;
+                app.scroll = app.scroll.saturating_add(scroll_diff).min(max_scroll);
+            }
             let scroll = if app.following {
                 max_scroll
             } else {

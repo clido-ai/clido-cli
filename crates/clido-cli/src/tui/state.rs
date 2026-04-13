@@ -1,6 +1,8 @@
 use clido_planner::{Complexity, Plan, PlanEditor};
 use ratatui::style::Color;
+use ratatui::text::Span;
 use tokio::sync::{mpsc, oneshot};
+use unicode_width::UnicodeWidthStr;
 
 use crate::list_picker::{ListPicker, PickerItem};
 
@@ -1168,6 +1170,59 @@ pub(crate) enum ChatLine {
         cmd: String,
         text: Option<String>,
     },
+}
+
+// ── Unified Content Lines ─────────────────────────────────────────────────────
+
+/// A single line of rendered content in the chat area.
+/// This is the unified representation used for display, scrolling, and selection.
+#[derive(Debug, Clone)]
+pub(crate) struct ContentLine {
+    /// The text content with styles
+    pub spans: Vec<Span<'static>>,
+    /// Where this line came from (for debugging and context)
+    pub source: LineSource,
+    /// Whether this line can be selected/copied
+    pub selectable: bool,
+    /// Original message index this line belongs to
+    pub msg_idx: usize,
+}
+
+/// Source of a content line - tracks which type of message generated it
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum LineSource {
+    User,
+    Assistant,
+    Thinking,
+    ToolCall,
+    ToolOutput,
+    Diff,
+    Info,
+    Section,
+    WorkflowStep,
+    WorkflowOutput,
+}
+
+impl ContentLine {
+    /// Create a new content line
+    pub fn new(spans: Vec<Span<'static>>, source: LineSource, selectable: bool, msg_idx: usize) -> Self {
+        Self {
+            spans,
+            source,
+            selectable,
+            msg_idx,
+        }
+    }
+
+    /// Get plain text content (for selection/copy)
+    pub fn plain_text(&self) -> String {
+        self.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    /// Get display width (respecting Unicode)
+    pub fn width(&self) -> usize {
+        self.spans.iter().map(|s| s.content.width()).sum()
+    }
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────

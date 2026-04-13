@@ -26,6 +26,7 @@ use ratatui::{
 
 use crate::overlay::OverlayKind;
 use crate::tui::app_state::AppRunState;
+use crate::tui::state::{ContentLine, LineSource};
 
 use super::*;
 
@@ -2682,4 +2683,324 @@ pub(super) fn render_table_to_lines(
         .join("┴");
     out.push(Line::from(vec![Span::styled(format!("└{}┘", bot), gray)]));
     out.push(Line::raw(""));
+}
+
+// ── Unified Content Line Renderer ─────────────────────────────────────────────
+
+/// Render all chat messages to a unified list of ContentLines.
+/// This is the single source of truth for display, scrolling, and selection.
+pub(super) fn render_chat_to_content_lines(
+    messages: &[ChatLine],
+    width: usize,
+    model: &str,
+) -> Vec<ContentLine> {
+    let mut out = Vec::new();
+    let mut msg_idx = 0;
+
+    for msg in messages {
+        match msg {
+            ChatLine::User(text) => {
+                // Header line
+                out.push(ContentLine::new(
+                    vec![Span::styled(
+                        format!("{TUI_GUTTER}You"),
+                        Style::default().fg(TUI_ACCENT).add_modifier(Modifier::BOLD),
+                    )],
+                    LineSource::User,
+                    false, // Header not selectable
+                    msg_idx,
+                ));
+
+                // Content lines
+                for line in render_markdown(text, width) {
+                    let spans = vec![
+                        Span::raw(TUI_GUTTER),
+                        Span::raw("  "),
+                    ];
+                    let mut content_line = ContentLine::new(
+                        spans,
+                        LineSource::User,
+                        true, // Content selectable
+                        msg_idx,
+                    );
+                    content_line.spans.extend(line.spans);
+                    out.push(content_line);
+                }
+
+                // Blank line separator
+                out.push(ContentLine::new(
+                    vec![],
+                    LineSource::User,
+                    false,
+                    msg_idx,
+                ));
+            }
+
+            ChatLine::Assistant(text) => {
+                let model_bit = if model.is_empty() {
+                    String::new()
+                } else {
+                    format!("{TUI_SEP}{}", model)
+                };
+
+                // Header line
+                out.push(ContentLine::new(
+                    vec![
+                        Span::styled(
+                            format!("{TUI_GUTTER}{TUI_CHAT_AGENT_LABEL}"),
+                            Style::default()
+                                .fg(TUI_SOFT_ACCENT)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            model_bit,
+                            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                        ),
+                    ],
+                    LineSource::Assistant,
+                    false,
+                    msg_idx,
+                ));
+
+                // Content lines
+                for line in render_markdown(text, width) {
+                    let spans = vec![
+                        Span::raw(TUI_GUTTER),
+                        Span::raw("  "),
+                    ];
+                    let mut content_line = ContentLine::new(
+                        spans,
+                        LineSource::Assistant,
+                        true,
+                        msg_idx,
+                    );
+                    content_line.spans.extend(line.spans);
+                    out.push(content_line);
+                }
+
+                // Blank line separator
+                out.push(ContentLine::new(
+                    vec![],
+                    LineSource::Assistant,
+                    false,
+                    msg_idx,
+                ));
+            }
+
+            ChatLine::Thinking(text) => {
+                // Thinking is rendered inline without header
+                for line in render_markdown(text, width) {
+                    let spans = vec![
+                        Span::styled(
+                            TUI_GUTTER,
+                            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+                        ),
+                        Span::raw("  "),
+                    ];
+                    let mut content_line = ContentLine::new(
+                        spans,
+                        LineSource::Thinking,
+                        true,
+                        msg_idx,
+                    );
+                    // Dim all spans
+                    for span in line.spans {
+                        content_line.spans.push(Span::styled(
+                            span.content.to_string(),
+                            span.style.add_modifier(Modifier::DIM),
+                        ));
+                    }
+                    out.push(content_line);
+                }
+            }
+
+            ChatLine::Info(text) => {
+                for line in text.lines() {
+                    out.push(ContentLine::new(
+                        vec![Span::raw(format!("{TUI_GUTTER}{}", line))],
+                        LineSource::Info,
+                        true,
+                        msg_idx,
+                    ));
+                }
+                out.push(ContentLine::new(
+                    vec![],
+                    LineSource::Info,
+                    false,
+                    msg_idx,
+                ));
+            }
+
+            ChatLine::Section(text) => {
+                out.push(ContentLine::new(
+                    vec![Span::styled(
+                        format!("{TUI_GUTTER}{}", text),
+                        Style::default()
+                            .fg(TUI_ACCENT)
+                            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                    )],
+                    LineSource::Section,
+                    false,
+                    msg_idx,
+                ));
+                out.push(ContentLine::new(
+                    vec![],
+                    LineSource::Section,
+                    false,
+                    msg_idx,
+                ));
+            }
+
+            ChatLine::ToolCall { name, detail, .. } => {
+                // Tool call header
+                out.push(ContentLine::new(
+                    vec![
+                        Span::styled(
+                            format!("{TUI_GUTTER}▶ ",),
+                            Style::default().fg(TUI_SOFT_ACCENT),
+                        ),
+                        Span::styled(
+                            name.clone(),
+                            Style::default()
+                                .fg(TUI_SOFT_ACCENT)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ],
+                    LineSource::ToolCall,
+                    false,
+                    msg_idx,
+                ));
+
+                // Tool detail
+                for line in detail.lines() {
+                    out.push(ContentLine::new(
+                        vec![
+                            Span::raw(TUI_GUTTER),
+                            Span::raw("  "),
+                            Span::styled(
+                                line.to_string(),
+                                Style::default().fg(TUI_MUTED),
+                            ),
+                        ],
+                        LineSource::ToolCall,
+                        true,
+                        msg_idx,
+                    ));
+                }
+
+                out.push(ContentLine::new(
+                    vec![],
+                    LineSource::ToolCall,
+                    false,
+                    msg_idx,
+                ));
+            }
+
+            ChatLine::Diff(text) => {
+                // Diff header
+                out.push(ContentLine::new(
+                    vec![Span::styled(
+                        format!("{TUI_GUTTER}Diff"),
+                        Style::default()
+                            .fg(TUI_SOFT_ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    )],
+                    LineSource::Diff,
+                    false,
+                    msg_idx,
+                ));
+
+                // Diff content (preserve original formatting)
+                for line in text.lines() {
+                    let style = if line.starts_with('+') {
+                        Style::default().fg(TUI_STATE_OK)
+                    } else if line.starts_with('-') {
+                        Style::default().fg(TUI_STATE_ERR)
+                    } else {
+                        Style::default()
+                    };
+
+                    out.push(ContentLine::new(
+                        vec![Span::styled(format!("{TUI_GUTTER}{}", line), style)],
+                        LineSource::Diff,
+                        true,
+                        msg_idx,
+                    ));
+                }
+
+                out.push(ContentLine::new(
+                    vec![],
+                    LineSource::Diff,
+                    false,
+                    msg_idx,
+                ));
+            }
+
+            ChatLine::SlashCommand { cmd, text } => {
+                // Command line (highlighted)
+                out.push(ContentLine::new(
+                    vec![
+                        Span::raw(TUI_GUTTER),
+                        Span::styled(
+                            cmd.clone(),
+                            Style::default()
+                                .fg(TUI_SOFT_ACCENT)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ],
+                    LineSource::User,
+                    false,
+                    msg_idx,
+                ));
+
+                // Optional text argument
+                if let Some(t) = text {
+                    if !t.is_empty() {
+                        for line in render_markdown(t, width) {
+                            let spans = vec![
+                                Span::raw(TUI_GUTTER),
+                                Span::raw("  "),
+                            ];
+                            let mut content_line = ContentLine::new(
+                                spans,
+                                LineSource::User,
+                                true,
+                                msg_idx,
+                            );
+                            content_line.spans.extend(line.spans);
+                            out.push(content_line);
+                        }
+                    }
+                }
+
+                out.push(ContentLine::new(
+                    vec![],
+                    LineSource::User,
+                    false,
+                    msg_idx,
+                ));
+            }
+
+            _ => {
+                // Skip WelcomeBrand and WelcomeSplash
+            }
+        }
+
+        msg_idx += 1;
+    }
+
+    out
+}
+
+/// Convert ContentLines to ratatui Lines for display
+pub(super) fn content_lines_to_ratatui(lines: &[ContentLine]) -> Vec<Line<'static>> {
+    lines
+        .iter()
+        .map(|cl| Line::from(cl.spans.clone()))
+        .collect()
+}
+
+/// Extract plain text from ContentLines for selection/copy
+pub(super) fn content_lines_to_plain_text(lines: &[ContentLine]) -> Vec<String> {
+    lines.iter().map(|cl| cl.plain_text()).collect()
 }

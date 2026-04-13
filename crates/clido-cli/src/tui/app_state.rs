@@ -70,31 +70,6 @@ impl Selection {
     }
 }
 
-// ── Selection column helpers ──────────────────────────────────────────────────
-
-/// Display-cell column (terminal position) → character index in `line`.
-/// Each wide character advances the display position by its Unicode width.
-#[allow(dead_code)]
-fn display_col_to_char_idx(line: &str, target_col: usize) -> usize {
-    let mut display_col = 0usize;
-    for (i, ch) in line.char_indices() {
-        if display_col >= target_col {
-            return i;
-        }
-        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        display_col += w;
-    }
-    line.len()
-}
-
-/// Total display width of a line in terminal cells.
-#[allow(dead_code)]
-fn line_display_width(line: &str) -> usize {
-    line.chars()
-        .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
-        .sum()
-}
-
 /// High-level agent activity (complements `busy` for IDE-like status awareness).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum AppRunState {

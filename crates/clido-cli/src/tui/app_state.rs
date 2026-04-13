@@ -1011,11 +1011,11 @@ impl App {
         true
     }
 
-    /// Get selected text from the rendered line snapshot.
+    /// Get selected text from the content lines.
     ///
-    /// Selection coordinates live in rendered-line space (the same indices
-    /// used by `apply_selection_highlight`), so we read directly from
-    /// `rendered_line_texts` which is populated each render tick.
+    /// Selection coordinates live in content-line space (the same indices
+    /// used by the render loop), so we read directly from
+    /// `content_lines` which is populated each render tick.
     pub(super) fn get_selected_text(&self) -> String {
         if !self.selection.active {
             return String::new();
@@ -1025,12 +1025,14 @@ impl App {
         let mut result = String::new();
 
         for row in sr..=er {
-            if row >= self.rendered_line_texts.len() {
+            if row >= self.content_lines.len() {
                 break;
             }
 
-            let line = &self.rendered_line_texts[row];
-            if line.is_empty() {
+            let line = &self.content_lines[row];
+            let line_text = line.plain_text();
+            
+            if !line.selectable || line_text.is_empty() {
                 continue;
             }
 
@@ -1039,16 +1041,16 @@ impl App {
             let end_col = if row == er {
                 ec.saturating_add(1)
             } else {
-                line.len()
+                line_text.len()
             };
 
             // Clamp to valid range
-            let start_col = start_col.min(line.len());
-            let end_col = end_col.min(line.len());
+            let start_col = start_col.min(line_text.len());
+            let end_col = end_col.min(line_text.len());
 
             // Extract characters
             for char_offset in start_col..end_col {
-                if let Some(ch) = line.chars().nth(char_offset) {
+                if let Some(ch) = line_text.chars().nth(char_offset) {
                     result.push(ch);
                 }
             }

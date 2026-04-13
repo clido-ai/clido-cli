@@ -149,7 +149,7 @@ async fn run_workflow_run(
     dry_run: bool,
 ) -> Result<(), anyhow::Error> {
     let workspace_root = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let loaded = load_config(&workspace_root).map_err(|e| CliError::Usage(e.to_string()))?;
+    let _loaded = load_config(&workspace_root).map_err(|e| CliError::Usage(e.to_string()))?;
     let path = resolve_workflow_path(workflow)?;
     let def = load_workflow(&path).map_err(|e| CliError::Usage(e.to_string()))?;
     validate_workflow(&def).map_err(|e| CliError::Usage(e.to_string()))?;

@@ -153,6 +153,7 @@ impl Default for LayoutInfo {
 /// Maps screen row to original chat message position.
 /// Used for accurate mouse selection with word wrapping and indentation.
 #[derive(Default, Clone)]
+#[allow(dead_code)]
 pub(crate) struct LinePosition {
     /// Screen row (0-indexed from top of visible area)
     pub(crate) screen_row: usize,
@@ -166,6 +167,7 @@ pub(crate) struct LinePosition {
 
 /// Collection of line positions for the entire rendered output.
 #[derive(Default)]
+#[allow(dead_code)]
 pub(crate) struct LinePositionMap {
     /// Maps screen_row to LinePosition
     pub(crate) positions: Vec<LinePosition>,
@@ -173,16 +175,19 @@ pub(crate) struct LinePositionMap {
 
 impl LinePositionMap {
     /// Get LinePosition for a screen row
+    #[allow(dead_code)]
     pub(crate) fn get(&self, screen_row: usize) -> Option<&LinePosition> {
         self.positions.get(screen_row)
     }
-    
+
     /// Clear all positions (called before re-render)
+    #[allow(dead_code)]
     pub(crate) fn clear(&mut self) {
         self.positions.clear();
     }
-    
+
     /// Add a new line position
+    #[allow(dead_code)]
     pub(crate) fn push(&mut self, pos: LinePosition) {
         self.positions.push(pos);
     }

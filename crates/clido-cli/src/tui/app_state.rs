@@ -17,7 +17,6 @@ use super::commands::{execute_slash, is_known_slash_cmd, parse_per_turn_model};
 use super::copy::info as copy_info;
 use super::render::build_plan_from_assistant_text;
 use super::state::*;
-use super::state::{LinePositionMap, LinePosition};
 
 /// Text selection for in-app copy.
 /// Tracks anchor (start) and focus (end) positions in (row, col) format.
@@ -75,6 +74,7 @@ impl Selection {
 
 /// Display-cell column (terminal position) → character index in `line`.
 /// Each wide character advances the display position by its Unicode width.
+#[allow(dead_code)]
 fn display_col_to_char_idx(line: &str, target_col: usize) -> usize {
     let mut display_col = 0usize;
     for (i, ch) in line.char_indices() {
@@ -88,6 +88,7 @@ fn display_col_to_char_idx(line: &str, target_col: usize) -> usize {
 }
 
 /// Total display width of a line in terminal cells.
+#[allow(dead_code)]
 fn line_display_width(line: &str) -> usize {
     line.chars()
         .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
@@ -903,11 +904,14 @@ impl App {
                     }
                 } else if last_num == total && total > 0 {
                     // All steps completed - trigger reviewer if enabled
-                    if self.reviewer_enabled.load(std::sync::atomic::Ordering::Relaxed) 
-                        && !self.plan.awaiting_review_response {
+                    if self
+                        .reviewer_enabled
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                        && !self.plan.awaiting_review_response
+                    {
                         self.plan.awaiting_review_response = true;
                         self.push(ChatLine::Info(
-                            "  ✓ All plan steps completed. Triggering review...".into()
+                            "  ✓ All plan steps completed. Triggering review...".into(),
                         ));
                         // Send review request to agent
                         let review_prompt = format!(
@@ -921,9 +925,13 @@ impl App {
                             total
                         );
                         self.send_silent(review_prompt);
-                    } else if !self.reviewer_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+                    } else if !self
+                        .reviewer_enabled
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                    {
                         self.push(ChatLine::Info(
-                            "  ✓ All plan steps completed. Enable /reviewer for automatic review.".into()
+                            "  ✓ All plan steps completed. Enable /reviewer for automatic review."
+                                .into(),
                         ));
                     }
                 }
@@ -1048,8 +1056,12 @@ impl App {
 
             // Calculate which characters to extract from this row
             let start_col = if row == sr { sc } else { 0 };
-            let end_col = if row == er { ec.saturating_add(1) } else { line.len() };
-            
+            let end_col = if row == er {
+                ec.saturating_add(1)
+            } else {
+                line.len()
+            };
+
             // Clamp to valid range
             let start_col = start_col.min(line.len());
             let end_col = end_col.min(line.len());

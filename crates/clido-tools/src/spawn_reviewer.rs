@@ -58,20 +58,22 @@ impl Tool for SpawnReviewerTool {
     async fn execute(&self, input: serde_json::Value) -> ToolOutput {
         // Check if reviewer is enabled
         if !self.reviewer_enabled {
-            return ToolOutput::err(
-                "Reviewer is disabled. Enable with /reviewer on".to_string()
-            );
+            return ToolOutput::err("Reviewer is disabled. Enable with /reviewer on".to_string());
         }
 
-        let subject = input.get("subject")
+        let subject = input
+            .get("subject")
             .and_then(|v| v.as_str())
             .unwrap_or("work");
 
-        let criteria: Vec<String> = input.get("criteria")
+        let criteria: Vec<String> = input
+            .get("criteria")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
 
         // Build review prompt
@@ -95,7 +97,11 @@ impl Tool for SpawnReviewerTool {
                 - Specific issues found (if any)\n\
                 - Recommendations for improvement",
                 subject,
-                criteria.iter().map(|c| format!("- {}", c)).collect::<Vec<_>>().join("\n")
+                criteria
+                    .iter()
+                    .map(|c| format!("- {}", c))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             )
         };
 

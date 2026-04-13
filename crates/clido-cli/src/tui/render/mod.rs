@@ -1978,10 +1978,7 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
     app.rendered_line_texts = result
         .iter()
         .map(|line| {
-            let full_text: String = line.spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect();
+            let full_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             // Strip leading gutter patterns:
             // - Normal chat: TUI_GUTTER + "  " or "› "
             // - Diff: "     123 " (line numbers) or "  123 " or "       "
@@ -1989,24 +1986,26 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
                 .trim_start_matches(TUI_GUTTER)
                 .trim_start_matches("  ")
                 .trim_start_matches("› ");
-            
+
             // Strip diff line number patterns (5 chars for unified, variable for sbs)
             // Unified: "  123 " or "     123 "
             // Side-by-side: "  123 " or "     " or " 123 "
             let text = text
-                .trim_start_matches("       ")  // 7 spaces (deleted lines in unified)
-                .trim_start_matches("      ")   // 6 spaces (empty in sbs)
-                .trim_start_matches("     ")    // 5 spaces (line number width)
+                .trim_start_matches("       ") // 7 spaces (deleted lines in unified)
+                .trim_start_matches("      ") // 6 spaces (empty in sbs)
+                .trim_start_matches("     ") // 5 spaces (line number width)
                 .trim_start_matches("  ")
                 .trim_start_matches(" ");
-            
+
             // Remove remaining line numbers (digits followed by space)
-            let text = if text.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+            let text = if text
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+            {
                 // Skip leading digits and following space
-                let digits_end = text
-                    .chars()
-                    .take_while(|c| c.is_ascii_digit())
-                    .count();
+                let digits_end = text.chars().take_while(|c| c.is_ascii_digit()).count();
                 if digits_end > 0 && text.get(digits_end..=digits_end) == Some(" ") {
                     text[digits_end + 1..].to_string()
                 } else {
@@ -2015,7 +2014,7 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
             } else {
                 text.to_string()
             };
-            
+
             text
         })
         .collect();
@@ -2245,7 +2244,9 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
     use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Tag};
     // Content width: match transcript gutter (2) + body inset (2) + 5 char safety margin
     // + 8 char for max list indentation (4 levels deep).
-    let content_w = width.saturating_sub(super::TUI_GUTTER.len() * 2 + 5 + 8).max(20);
+    let content_w = width
+        .saturating_sub(super::TUI_GUTTER.len() * 2 + 5 + 8)
+        .max(20);
 
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let parser = Parser::new_ext(text, opts);

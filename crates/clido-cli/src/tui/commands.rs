@@ -2712,7 +2712,7 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
         let wf = app.active_workflow.as_ref().unwrap();
         let mut results = Vec::new();
         let mut empty_warning = None;
-        
+
         for out in &outputs {
             if let Some(ref tmpl) = out.save_to {
                 // Try to render the template first
@@ -2724,34 +2724,34 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
                         continue;
                     }
                 };
-                
+
                 // Check if output text is empty - this is a problem
                 if text.trim().is_empty() {
                     empty_warning = Some(format!(
                         "save_to: output text is empty for '{step_id}' - nothing to write to '{}'",
                         path_str
                     ));
-                    results.push((path_str.clone(), Err(format!("empty output"))));
+                    results.push((path_str.clone(), Err("empty output".to_string())));
                     continue;
                 }
-                
+
                 results.push((path_str, Ok(())));
             }
         }
         (results, empty_warning)
     };
-    
+
     // Now process the saves with retry logic (app is not borrowed here)
     let mut failed_saves = Vec::new();
     let mut successful_count = 0;
-    
+
     for (path_str, _) in save_results {
         let p = std::path::Path::new(&path_str);
-        
+
         // Aggressive retry with exponential backoff
         let mut last_error = None;
         let mut succeeded = false;
-        
+
         for attempt in 1..=5 {
             // Create parent directories
             if let Some(parent) = p.parent() {
@@ -2771,7 +2771,7 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
                     }
                 }
             }
-            
+
             // Try to write the file
             match std::fs::write(p, &text) {
                 Ok(()) => {
@@ -2789,12 +2789,14 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
                             "  ⚠ Write attempt {}/5 failed for '{}': {}. Retrying...",
                             attempt, path_str, e
                         )));
-                        std::thread::sleep(std::time::Duration::from_millis(100 * attempt * attempt));
+                        std::thread::sleep(std::time::Duration::from_millis(
+                            100 * attempt * attempt,
+                        ));
                     }
                 }
             }
         }
-        
+
         if succeeded {
             successful_count += 1;
         } else if let Some(err) = last_error {
@@ -2804,45 +2806,46 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
             ));
         }
     }
-    
+
     // Show empty output warning if present
     if let Some(ref warning) = empty_output_warning {
         app.push(ChatLine::Info(format!("  ⚠ {warning}")));
     }
-    
+
     let total_saves = successful_count + failed_saves.len();
-    
+
     if successful_count > 0 {
         app.push(ChatLine::Info(format!(
             "  ✓ Successfully saved {}/{} output files",
             successful_count, total_saves
         )));
     }
-    
+
     if !failed_saves.is_empty() {
         for msg in &failed_saves {
             app.push(ChatLine::Info(format!("  ✗ {msg}")));
         }
-        
+
         // CRITICAL: If save_to fails, we should abort the workflow regardless of on_error policy
         // because subsequent steps depend on these files
         app.push(ChatLine::Info(
             "  🚨 CRITICAL: Output files could not be saved. Workflow may fail in subsequent steps.".into()
         ));
-        
+
         // Store save failures in workflow context so next step can see them
         {
             let wf = app.active_workflow.as_mut().unwrap();
-            wf.context.set_step_output(&step_id, "_save_failed", failed_saves.join("; "));
+            wf.context
+                .set_step_output(&step_id, "_save_failed", failed_saves.join("; "));
         }
-        
+
         // Add system message to inform the agent about the save failure
         let failure_details = failed_saves.join("\n");
         app.push(ChatLine::Info(format!(
             "  📋 [System] The following output files could not be saved:\n{}",
             failure_details
         )));
-        
+
         if on_error == OnErrorPolicy::Fail {
             handle_workflow_step_error(app, failed_saves.join("; "));
             return;
@@ -2850,13 +2853,15 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
     } else {
         // Store success status
         let wf = app.active_workflow.as_mut().unwrap();
-        wf.context.set_step_output(&step_id, "_save_status", "success".to_string());
+        wf.context
+            .set_step_output(&step_id, "_save_status", "success".to_string());
     }
-    
+
     // Also track empty output warning if present
     if let Some(warning) = empty_output_warning {
         let wf = app.active_workflow.as_mut().unwrap();
-        wf.context.set_step_output(&step_id, "_save_warning", warning);
+        wf.context
+            .set_step_output(&step_id, "_save_warning", warning);
     }
 
     // Restore model.

@@ -379,11 +379,22 @@ pub(crate) fn tool_event_lines(
 
     let indent = gutter.chars().count() + 4;
     let wrap_w = width.saturating_sub(indent).max(12);
-    for wline in word_wrap(detail_trim, wrap_w) {
+    let wrapped = word_wrap(detail_trim, wrap_w);
+    const MAX_TOOL_DETAIL_LINES: usize = 3;
+
+    for (i, wline) in wrapped.iter().enumerate().take(MAX_TOOL_DETAIL_LINES) {
         lines.push(Line::from(vec![
             Span::styled(" ".repeat(indent), detail_style),
-            Span::styled(wline, detail_style),
+            Span::styled(wline.clone(), detail_style),
         ]));
+        if i == MAX_TOOL_DETAIL_LINES - 1 && wrapped.len() > MAX_TOOL_DETAIL_LINES {
+            // Add ellipsis indicator if truncated
+            lines.push(Line::from(vec![
+                Span::styled(" ".repeat(indent), detail_style),
+                Span::styled("…", detail_style),
+            ]));
+            break;
+        }
     }
     lines
 }

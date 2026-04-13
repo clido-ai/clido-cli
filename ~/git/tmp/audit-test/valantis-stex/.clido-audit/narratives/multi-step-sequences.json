@@ -1,0 +1,300 @@
+Based on my analysis of the STEXAMM protocol, here are multi-step attack sequences:
+
+```json
+{
+  "sequences": [
+    {
+      "sequenceId": "SEQ-001",
+      "title": "First Depositor Donation Attack",
+      "attackCategory": "flash-loan-composition",
+      "capitalRequired": "1,001 wei + large donation amount",
+      "estimatedProfit": "Victim deposits rounded to 0, attacker claims disproportionate share",
+      "steps": [
+        {
+          "stepIndex": 0,
+          "actor": "attacker",
+          "entryPoint": "STEXAMM.deposit",
+          "stateChangeBefore": "totalSupply = 0, pool reserves = 0",
+          "stateChangeAfter": "totalSupply = 1000 (MINIMUM_LIQUIDITY to address(1)), attacker shares = 1",
+          "rationale": "Attacker becomes first depositor with minimal amount, receives 1 share after MINIMUM_LIQUIDITY burn"
+        },
+        {
+          "stepIndex": 1,
+          "actor": "attacker",
+          "entryPoint": "ERC20.transfer (direct to pool)",
+          "stateChangeBefore": "pool.token1Balance = small amount",
+          "stateChangeAfter": "pool.token1Balance = small amount + 1e18 donation",
+          "rationale": "Attacker donates large amount directly to pool, inflating reserves without minting shares"
+        },
+        {
+          "stepIndex": 2,
+          "actor": "victim",
+          "entryPoint": "STEXAMM.deposit",
+          "stateChangeBefore": "victim has _minShares = expected shares",
+          "stateChangeAfter": "transaction reverts with STEXAMM__deposit_lessThanMinShares OR victim receives 0 shares",
+          "rationale": "Victim's deposit calculates shares = amount * totalSupply / totalAssets. With inflated reserves and small totalSupply, shares round to 0 or below _minShares"
+        },
+        {
+          "stepIndex": 3,
+          "actor": "attacker",
+          "entryPoint": "STEXAMM.withdraw",
+          "stateChangeBefore": "attacker shares = 1",
+          "stateChangeAfter": "attacker receives proportional share of donated amount + original deposit",
+          "rationale": "Attacker withdraws 1 share, claims proportional share of entire pool including donation"
+        }
+      ],
+      "invariantsViolated": ["INV-001", "INV-003", "INV-014"],
+      "preconditions": ["Pool is new or has very low TVL", "Victim does not use sufficient _minShares slippage protection", "Attacker can donate without minting shares"],
+      "feasibilityNotes": "MITIGATED by: MINIMUM_LIQUIDITY = 1000, _minShares parameter, real deployments have owner-funded initial liquidity. Attack only works if victim doesn't use slippage protection."
+    },
+    {
+      "sequenceId": "SEQ-002",
+      "title": "kHYPE Withdrawal Queue DoS",
+      "attackCategory": "epoch-based-reward-extraction",
+      "capitalRequired": "5 unstake requests (gas only)",
+      "estimatedProfit": "Blocking legitimate unstakes, potential griefing",
+      "steps": [
+        {
+          "stepIndex": 0,
+          "actor": "attacker",
+          "entryPoint": "kHYPEWithdrawalModule.unstakeToken0Reserves (via owner compromise or if permissionless)",
+          "stateChangeBefore": "_pendingUnstakeRequestCount = 0",
+          "stateChangeAfter": "_pendingUnstakeRequestCount = 5 (MAX_PENDING_UNSTAKE_REQUESTS)",
+          "rationale": "Fill all 5 pending unstake slots with requests that won't confirm"
+        },
+        {
+          "stepIndex": 1,
+          "actor": "time",
+          "entryPoint": "block.timestamp advancement",
+          "stateChangeBefore": "requests are pending",
+          "stateChangeAfter": "requests remain pending (Kinetiq doesn't process them)",
+          "rationale": "Wait for Kinetiq withdrawal queue to stall or be slow"
+        },
+        {
+          "stepIndex": 2,
+          "actor": "owner",
+          "entryPoint": "kHYPEWithdrawalModule.unstakeToken0Reserves",
+          "stateChangeBefore": "owner wants to unstake for LP obligations",
+          "stateChangeAfter": "revert kHYPEWithdrawalModule__unstakeToken0Reserves_MaxPendingRequestsReached",
+          "rationale": "Owner cannot unstake token0 reserves to fulfill LP withdrawals because slots are full"
+        },
+        {
+          "stepIndex": 3,
+          "actor": "LP",
+          "entryPoint": "STEXAMM.withdraw",
+          "stateChangeBefore": "LP wants to withdraw token0",
+          "stateChangeAfter": "LP receives token0 pending withdrawal request, but protocol cannot unstake to fulfill",
+          "rationale": "LP withdrawals accumulate but protocol cannot process them due to blocked unstake queue"
+        }
+      ],
+      "invariantsViolated": ["INV-006"],
+      "preconditions": ["Attacker can create 5 pending unstake requests", "Kinetiq withdrawal queue is slow or stalled", "Owner doesn't clear slots via confirmWithdrawal"],
+      "feasibilityNotes": "PARTIALLY MITIGATED by: Anyone can call confirmWithdrawal to clear slots, owner can call unstakeExcessToken0 as workaround, try/catch in _syncPendingUnstakeRequests handles reverts. Requires specific conditions to be exploitable."
+    },
+    {
+      "sequenceId": "SEQ-003",
+      "title": "Instant Withdrawal Sandwich Attack",
+      "attackCategory": "flash-loan-composition",
+      "capitalRequired": "Large amount for price manipulation",
+      "estimatedProfit": "Fee arbitrage between instant withdrawal rate and actual swap rate",
+      "steps": [
+        {
+          "stepIndex": 0,
+          "actor": "attacker",
+          "entryPoint": "SovereignPool.swap",
+          "stateChangeBefore": "pool reserves balanced, spot price = 1:1",
+          "stateChangeAfter": "pool reserves imbalanced, spot price skewed",
+          "rationale": "Attacker performs large swap to manipulate pool reserves and spot price"
+        },
+        {
+          "stepIndex": 1,
+          "actor": "victim",
+          "entryPoint": "STEXAMM.withdraw",
+          "stateChangeBefore": "victim expects fair instant withdrawal rate",
+          "stateChangeAfter": "victim receives worse rate due to manipulated pool state",
+          "rationale": "Victim calls withdraw with _isInstantWithdrawal=true, getAmountOut uses manipulated pool state"
+        },
+        {
+          "stepIndex": 2,
+          "actor": "attacker",
+          "entryPoint": "SovereignPool.swap (reverse)",
+          "stateChangeBefore": "pool reserves imbalanced",
+          "stateChangeAfter": "pool reserves restored to original state",
+          "rationale": "Attacker reverses swap, capturing profit from price manipulation"
+        }
+      ],
+      "invariantsViolated": ["INV-003"],
+      "preconditions": ["Attacker has sufficient capital to move pool reserves", "Victim uses instant withdrawal", "Pool has significant liquidity but can be moved"],
+      "feasibilityNotes": "MITIGATED by: Dynamic fee module may adjust fees based on reserves, instant withdrawal fee (poolManagerFeeBips) reduces profit, victim can use _amount1Min slippage protection. Standard AMM sandwich attack, not unique to STEX."
+    },
+    {
+      "sequenceId": "SEQ-004",
+      "title": "Rounding Error Accumulation via Micro-Withdrawals",
+      "attackCategory": "rounding-accumulation",
+      "capitalRequired": "Minimal (gas costs only)",
+      "estimatedProfit": "Dust amounts, likely not profitable after gas",
+      "steps": [
+        {
+          "stepIndex": 0,
+          "actor": "attacker",
+          "entryPoint": "STEXAMM.deposit",
+          "stateChangeBefore": "attacker has small amount of token1",
+          "stateChangeAfter": "attacker receives shares, totalSupply increases",
+          "rationale": "Attacker becomes LP with small position"
+        },
+        {
+          "stepIndex": 1,
+          "actor": "attacker",
+          "entryPoint": "STEXAMM.withdraw (micro amounts, repeated)",
+          "stateChangeBefore": "attacker has shares",
+          "stateChangeAfter": "attacker receives token0/token1, rounding errors accumulate in protocol favor",
+          "rationale": "Repeated micro-withdrawals exploit rounding in amount0Deduction (Ceil) vs amount1 calculation"
+        },
+        {
+          "stepIndex": 2,
+          "actor": "attacker",
+          "entryPoint": "STEXAMM.withdraw (final)",
+          "stateChangeBefore": "attacker has remaining shares",
+          "stateChangeAfter": "attacker withdraws all, potentially with accumulated dust advantage",
+          "rationale": "After many rounds, rounding errors may favor attacker by 1-2 wei per operation"
+        }
+      ],
+      "invariantsViolated": ["INV-012"],
+      "preconditions": ["Attacker willing to spend gas on micro-transactions", "Rounding direction favors attacker in specific cases"],
+      "feasibilityNotes": "NOT EXPLOITABLE economically: Gas costs far exceed dust profits, requires thousands of transactions for meaningful accumulation, protocol rounding is conservative. More of a theoretical concern."
+    },
+    {
+      "sequenceId": "SEQ-005",
+      "title": "Lending Module Liquidity Exhaustion",
+      "attackCategory": "cross-contract-callback-reentrancy",
+      "capitalRequired": "Large LP position",
+      "estimatedProfit": "Blocking withdrawals, potential forced redemption at bad rates",
+      "steps": [
+        {
+          "stepIndex": 0,
+          "actor": "owner",
+          "entryPoint": "MultiMarketLendingModule.deposit",
+          "stateChangeBefore": "token1 reserves in pool",
+          "stateChangeAfter": "token1 deposited to Aave/other lending protocols",
+          "rationale": "Owner maximizes yield by depositing most reserves to lending module"
+        },
+        {
+          "stepIndex": 1,
+          "actor": "time/market",
+          "entryPoint": "Aave utilization increases",
+          "stateChangeBefore": "Aave has available liquidity",
+          "stateChangeAfter": "Aave utilization high, withdraw may revert due to insufficient liquidity",
+          "rationale": "External market conditions change, lending protocol becomes illiquid"
+        },
+        {
+          "stepIndex": 2,
+          "actor": "LP",
+          "entryPoint": "STEXAMM.withdraw",
+          "stateChangeBefore": "LP wants to withdraw large amount of token1",
+          "stateChangeAfter": "withdrawToken1FromLendingPool reverts, LP cannot withdraw fully",
+          "rationale": "LP withdrawal requires lending module withdrawal, which reverts due to Aave illiquidity"
+        },
+        {
+          "stepIndex": 3,
+          "actor": "LP",
+          "entryPoint": "STEXAMM.withdraw (instant withdrawal)",
+          "stateChangeBefore": "LP blocked from normal withdrawal",
+          "stateChangeAfter": "LP forced to use instant withdrawal, paying swap fees + instant withdrawal fee",
+          "rationale": "LP must convert token0 to token1 via pool, potentially at worse rate due to liquidity constraints"
+        }
+      ],
+      "invariantsViolated": ["INV-009"],
+      "preconditions": ["Lending module has significant portion of reserves", "Lending protocol becomes illiquid", "LP needs to withdraw during illiquidity"],
+      "feasibilityNotes": "NOT MALICIOUS ATTACK: This is a protocol design risk, not attacker-exploitable. Code explicitly warns about this in comments. LP assumes risk of lending module illiquidity. Owner can withdraw from lending module if they anticipate issues."
+    },
+    {
+      "sequenceId": "SEQ-006",
+      "title": "Governance Parameter Change Race",
+      "attackCategory": "governance-timing",
+      "capitalRequired": "Position large enough to benefit from parameter change",
+      "estimatedProfit": "Depends on parameter change (fee reduction, etc.)",
+      "steps": [
+        {
+          "stepIndex": 0,
+          "actor": "owner",
+          "entryPoint": "STEXAMM.proposeSwapFeeModule",
+          "stateChangeBefore": "currentFeeModule active",
+          "stateChangeAfter": "swapFeeModuleProposal.startTimestamp = block.timestamp + 3 days",
+          "rationale": "Owner proposes new fee module with lower fees"
+        },
+        {
+          "stepIndex": 1,
+          "actor": "attacker",
+          "entryPoint": "STEXAMM.deposit",
+          "stateChangeBefore": "attacker has no position",
+          "stateChangeAfter": "attacker has LP position",
+          "rationale": "Attacker deposits before fee change to benefit from lower fees later"
+        },
+        {
+          "stepIndex": 2,
+          "actor": "time",
+          "entryPoint": "block.timestamp >= proposal.startTimestamp",
+          "stateChangeBefore": "proposal pending",
+          "stateChangeAfter": "proposal can be executed",
+          "rationale": "Wait for timelock to expire"
+        },
+        {
+          "stepIndex": 3,
+          "actor": "owner",
+          "entryPoint": "STEXAMM.setProposedSwapFeeModule",
+          "stateChangeBefore": "old fee module",
+          "stateChangeAfter": "new fee module with lower fees active",
+          "rationale": "Owner executes fee module change"
+        },
+        {
+          "stepIndex": 4,
+          "actor": "attacker",
+          "entryPoint": "STEXAMM.withdraw",
+          "stateChangeBefore": "attacker has LP position",
+          "stateChangeAfter": "attacker withdraws with lower fees paid",
+          "rationale": "Attacker benefits from lower fees than when they deposited"
+        }
+      ],
+      "invariantsViolated": ["INV-010"],
+      "preconditions": ["Owner proposes beneficial parameter change", "Attacker can predict change will be executed", "Timelock allows time to position"],
+      "feasibilityNotes": "NOT EXPLOITABLE: This is legitimate user behavior, not an attack. Anyone can deposit before fee changes. No unfair advantage gained. Protocol design allows this intentionally."
+    },
+    {
+      "sequenceId": "SEQ-007",
+      "title": "stHYPE Native Token Donation Manipulation",
+      "attackCategory": "cross-contract-callback-reentrancy",
+      "capitalRequired": "Native token donation amount",
+      "estimatedProfit": "Temporary accounting manipulation, unclear direct profit",
+      "steps": [
+        {
+          "stepIndex": 0,
+          "actor": "attacker",
+          "entryPoint": "Address.sendValue (direct to withdrawal module)",
+          "stateChangeBefore": "withdrawal module native balance = X",
+          "stateChangeAfter": "withdrawal module native balance = X + donation",
+          "rationale": "Attacker donates native token directly to withdrawal module"
+        },
+        {
+          "stepIndex": 1,
+          "actor": "anyone",
+          "entryPoint": "stHYPEWithdrawalModule.update",
+          "stateChangeBefore": "excessNativeBalance includes donation",
+          "stateChangeAfter": "donation wrapped to token1 and sent to pool, increasing reserves",
+          "rationale": "Update function wraps excess native token and sends to pool"
+        },
+        {
+          "stepIndex": 2,
+          "actor": "attacker",
+          "entryPoint": "STEXAMM.deposit",
+          "stateChangeBefore": "pool reserves inflated by donation",
+          "stateChangeAfter": "attacker receives shares based on inflated reserves",
+          "rationale": "Attacker deposits after donation, but share calculation uses withdrawalModule.convertToToken1 which may not reflect donation"
+        }
+      ],
+      "invariantsViolated": ["INV-014"],
+      "preconditions": ["Attacker can donate native token to withdrawal module", "update() is called before attacker deposits", "Share calculation doesn't properly account for donation"],
+      "feasibilityNotes": "LIKELY NOT EXPLOITABLE: Donation increases effective TVL, making shares more valuable, not less. Attacker would need to withdraw more than deposited to profit, but donation benefits all LPs. No clear attack vector."
+    }
+  ]
+}
+```

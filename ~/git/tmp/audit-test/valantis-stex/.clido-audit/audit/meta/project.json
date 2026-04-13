@@ -1,0 +1,25 @@
+```json
+{
+  "languages": ["solidity"],
+  "monorepo": false,
+  "repoRoot": "/Users/kurt/git/tmp/audit-test/valantis-stex",
+  "primaryBuildRoot": "/Users/kurt/git/tmp/audit-test/valantis-stex",
+  "buildSystem": "foundry",
+  "buildClean": true,
+  "buildError": "",
+  "testBaselineClean": true,
+  "languageOptions": {
+    "foundry": {
+      "testDir": "test",
+      "remappings": [],
+      "forgeStdTestImport": "forge-std/Test.sol",
+      "src": "src",
+      "out": "out",
+      "libs": ["lib"],
+      "evm_version": "cancun",
+      "optimizer": true,
+      "optimizer_runs": 10000
+    }
+  }
+}
+```

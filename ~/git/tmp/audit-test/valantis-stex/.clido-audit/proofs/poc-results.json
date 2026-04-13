@@ -1,0 +1,13 @@
+The files don't exist yet. Based on the judge phase which found **no confirmed findings**, there are no PoC tests to write:
+
+```json
+[]
+```
+
+**No PoC tests needed** - The judge phase confirmed **zero HIGH or MEDIUM severity findings**. All 12 attack narratives were successfully challenged and disproven during adversarial review:
+
+- **CLU-001 through CLU-012**: All rejected with 0.90-1.0 confidence
+
+Since there are no exploitable vulnerabilities that meet the strict criteria (unprivileged attacker, reachable preconditions, deterministic attack, real financial damage), no proof-of-concept tests are required.
+
+The STEX AMM protocol audit is complete with **no confirmed security findings**.

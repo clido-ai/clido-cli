@@ -1,0 +1,120 @@
+Based on my analysis of the STEXAMM, stHYPEWithdrawalModule, and kHYPEWithdrawalModule contracts, here are the critical protocol invariants:
+
+```json
+{
+  "invariants": [
+    {
+      "id": "INV-001",
+      "expression": "totalSupply >= MINIMUM_LIQUIDITY (1000)",
+      "description": "LP token total supply must never drop below minimum liquidity",
+      "criticalFunctions": ["deposit", "withdraw"],
+      "brokenBy": ["first depositor attack with donation"],
+      "severity": "high"
+    },
+    {
+      "id": "INV-002",
+      "expression": "reserve0Pool + amountToken0PendingUnstaking >= reserve0PendingWithdrawal",
+      "description": "Token0 reserves plus pending unstaking must cover pending LP withdrawals",
+      "criticalFunctions": ["withdraw", "unstakeToken0Reserves"],
+      "brokenBy": ["excessive unstaking", "slashing (if enabled)"],
+      "severity": "critical"
+    },
+    {
+      "id": "INV-003",
+      "expression": "shares = amount * totalSupply / totalAssets",
+      "description": "Share calculation must be consistent with deposit/withdraw",
+      "criticalFunctions": ["deposit", "withdraw"],
+      "brokenBy": ["donation attack", "rounding manipulation"],
+      "severity": "high"
+    },
+    {
+      "id": "INV-004",
+      "expression": "cumulativeAmountToken1ClaimableLPWithdrawal >= amountToken1ClaimableLPWithdrawal",
+      "description": "Cumulative claimable must always be >= current claimable",
+      "criticalFunctions": ["update", "claim"],
+      "brokenBy": ["accounting error in update"],
+      "severity": "critical"
+    },
+    {
+      "id": "INV-005",
+      "expression": "amountToken1PendingLPWithdrawal >= _amountToken1PendingLPWithdrawalCoveredByQueuedUnstake",
+      "description": "Covered withdrawals cannot exceed total pending",
+      "criticalFunctions": ["burnToken0AfterWithdraw", "update"],
+      "brokenBy": ["logic error in coverage tracking"],
+      "severity": "high"
+    },
+    {
+      "id": "INV-006",
+      "expression": "_pendingUnstakeRequestCount <= MAX_PENDING_UNSTAKE_REQUESTS (5)",
+      "description": "Pending unstake requests must not exceed maximum",
+      "criticalFunctions": ["unstakeToken0Reserves", "_syncPendingUnstakeRequests"],
+      "brokenBy": ["DoS by blocking sync"],
+      "severity": "medium"
+    },
+    {
+      "id": "INV-007",
+      "expression": "convertToToken0(convertToToken1(x)) == x (for stHYPE)",
+      "description": "stHYPE conversion must be 1:1 (rebase token)",
+      "criticalFunctions": ["convertToToken0", "convertToToken1"],
+      "brokenBy": ["stHYPE model change"],
+      "severity": "critical"
+    },
+    {
+      "id": "INV-008",
+      "expression": "kHYPE exchange rate must be consistent",
+      "description": "kHYPE HYPEToKHYPE/kHYPEToHYPE must be inverse",
+      "criticalFunctions": ["convertToToken0", "convertToToken1"],
+      "brokenBy": ["StakingAccountant manipulation"],
+      "severity": "critical"
+    },
+    {
+      "id": "INV-009",
+      "expression": "lendingModule.assetBalance() >= amountToken1LendingPool",
+      "description": "Lending module must report accurate balance",
+      "criticalFunctions": ["amountToken1LendingPool", "withdrawToken1FromLendingPool"],
+      "brokenBy": ["lending protocol failure", "oracle manipulation"],
+      "severity": "high"
+    },
+    {
+      "id": "INV-010",
+      "expression": "swapFeeModuleProposal.startTimestamp == 0 || block.timestamp < startTimestamp + MAX_TIMELOCK_DELAY",
+      "description": "Timelock proposals must expire properly",
+      "criticalFunctions": ["proposeSwapFeeModule", "setProposedSwapFeeModule"],
+      "brokenBy": ["timelock bypass"],
+      "severity": "medium"
+    },
+    {
+      "id": "INV-011",
+      "expression": "withdrawalModuleProposal.startTimestamp == 0 || block.timestamp >= startTimestamp + 7 days",
+      "description": "Withdrawal module changes require 7 day timelock",
+      "criticalFunctions": ["proposeWithdrawalModule", "setProposedWithdrawalModule"],
+      "brokenBy": ["timelock bypass"],
+      "severity": "critical"
+    },
+    {
+      "id": "INV-012",
+      "expression": "amount0Deduction conversion consistency",
+      "description": "Ceil rounding on token0 deduction must match Floor on token1",
+      "criticalFunctions": ["withdraw"],
+      "brokenBy": ["rounding direction mismatch"],
+      "severity": "medium"
+    },
+    {
+      "id": "INV-013",
+      "expression": "instantWithdrawalFee1 >= 0",
+      "description": "Instant withdrawal fee must be non-negative",
+      "criticalFunctions": ["withdraw"],
+      "brokenBy": ["fee calculation underflow"],
+      "severity": "medium"
+    },
+    {
+      "id": "INV-014",
+      "expression": "pool reserves measured as balances",
+      "description": "Pool must accurately track token balances",
+      "criticalFunctions": ["deposit", "withdraw", "supplyToken1Reserves", "unstakeToken0Reserves"],
+      "brokenBy": ["donation to pool", "direct transfer"],
+      "severity": "high"
+    }
+  ]
+}
+```

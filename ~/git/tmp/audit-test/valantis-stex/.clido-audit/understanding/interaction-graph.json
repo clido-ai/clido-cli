@@ -1,0 +1,357 @@
+Based on my analysis of the STEXAMM, stHYPEWithdrawalModule, kHYPEWithdrawalModule, AaveLendingModule, and MultiMarketLendingModule contracts, here is the stateful interaction graph:
+
+```json
+{
+  "entryPoints": [
+    {
+      "id": "fn:STEXAMM.deposit",
+      "contract": "STEXAMM",
+      "function": "deposit",
+      "visibility": "external",
+      "stateReads": ["totalSupply", "_withdrawalModule.amountToken0PendingUnstaking", "_withdrawalModule.amountToken1LendingPool", "_withdrawalModule.amountToken1PendingLPWithdrawal", "pool.getReserves"],
+      "stateWrites": ["_mint", "pool.depositLiquidity"],
+      "externalCalls": ["_withdrawalModule.update", "ISovereignPool(pool).getReserves", "ISovereignPool(pool).depositLiquidity"],
+      "emitsEvents": ["Deposit"],
+      "preconditions": ["_amount > 0", "not paused", "deadline not expired"],
+      "postconditions": ["shares minted >= _minShares", "totalSupply increased"]
+    },
+    {
+      "id": "fn:STEXAMM.withdraw",
+      "contract": "STEXAMM",
+      "function": "withdraw",
+      "visibility": "external",
+      "stateReads": ["totalSupply", "_withdrawalModule.amountToken0PendingUnstaking", "_withdrawalModule.amountToken1LendingPool", "_withdrawalModule.amountToken1PendingLPWithdrawal", "pool.getReserves", "pool.poolManagerFeeBips"],
+      "stateWrites": ["_burn", "pool.withdrawLiquidity"],
+      "externalCalls": ["_withdrawalModule.update", "_withdrawalModule.burnToken0AfterWithdraw", "_withdrawalModule.withdrawToken1FromLendingPool", "ISovereignPool(pool).getReserves", "ISovereignPool(pool).withdrawLiquidity"],
+      "emitsEvents": ["Withdraw"],
+      "preconditions": ["_shares > 0", "_recipient != address(0)", "deadline not expired"],
+      "postconditions": ["amount0 >= _amount0Min", "amount1 >= _amount1Min", "LP tokens burned"]
+    },
+    {
+      "id": "fn:STEXAMM.unstakeToken0Reserves",
+      "contract": "STEXAMM",
+      "function": "unstakeToken0Reserves",
+      "visibility": "external",
+      "stateReads": ["pool.getReserves"],
+      "stateWrites": ["pool.withdrawLiquidity"],
+      "externalCalls": ["ISovereignPool(pool).getReserves", "ISovereignPool(pool).withdrawLiquidity"],
+      "emitsEvents": ["Token0ReservesUnstaked"],
+      "preconditions": ["msg.sender == _withdrawalModule", "_unstakeAmountToken0 > 0", "_unstakeAmountToken0 <= reserve0"],
+      "postconditions": ["token0 reserves decreased by _unstakeAmountToken0"]
+    },
+    {
+      "id": "fn:STEXAMM.supplyToken1Reserves",
+      "contract": "STEXAMM",
+      "function": "supplyToken1Reserves",
+      "visibility": "external",
+      "stateReads": [],
+      "stateWrites": ["pool.withdrawLiquidity"],
+      "externalCalls": ["ISovereignPool(pool).withdrawLiquidity"],
+      "emitsEvents": [],
+      "preconditions": ["msg.sender == _withdrawalModule"],
+      "postconditions": ["token1 reserves decreased by _amount1"]
+    },
+    {
+      "id": "fn:stHYPEWithdrawalModule.burnToken0AfterWithdraw",
+      "contract": "stHYPEWithdrawalModule",
+      "function": "burnToken0AfterWithdraw",
+      "visibility": "external",
+      "stateReads": [],
+      "stateWrites": ["_amountToken1PendingLPWithdrawal", "LPWithdrawals", "idLPWithdrawal", "cumulativeAmountToken1LPWithdrawal"],
+      "externalCalls": [],
+      "emitsEvents": ["LPWithdrawalRequestCreated"],
+      "preconditions": ["msg.sender == stex", "_amountToken0 > 0"],
+      "postconditions": ["LP withdrawal request created", "pending withdrawal amount increased"]
+    },
+    {
+      "id": "fn:stHYPEWithdrawalModule.claim",
+      "contract": "stHYPEWithdrawalModule",
+      "function": "claim",
+      "visibility": "external",
+      "stateReads": ["LPWithdrawals", "amountToken1ClaimableLPWithdrawal", "cumulativeAmountToken1ClaimableLPWithdrawal"],
+      "stateWrites": ["amountToken1ClaimableLPWithdrawal", "delete LPWithdrawals[_idLPQueue]"],
+      "externalCalls": ["Address.sendValue"],
+      "emitsEvents": ["LPWithdrawalRequestClaimed"],
+      "preconditions": ["request.amountToken1 > 0", "amountToken1ClaimableLPWithdrawal >= request.amountToken1", "cumulativeAmountToken1ClaimableLPWithdrawal >= checkpoint + amount"],
+      "postconditions": ["native token sent to recipient", "claimable amount decreased", "request deleted"]
+    },
+    {
+      "id": "fn:stHYPEWithdrawalModule.update",
+      "contract": "stHYPEWithdrawalModule",
+      "function": "update",
+      "visibility": "external",
+      "stateReads": ["address(this).balance", "_amountToken0PendingUnstaking", "_amountToken1PendingLPWithdrawal", "amountToken1ClaimableLPWithdrawal"],
+      "stateWrites": ["_amountToken0PendingUnstaking", "_amountToken1PendingLPWithdrawal", "amountToken1ClaimableLPWithdrawal", "cumulativeAmountToken1ClaimableLPWithdrawal"],
+      "externalCalls": ["IWETH9.deposit", "IWETH9.safeTransfer"],
+      "emitsEvents": ["Update"],
+      "preconditions": ["pool not locked"],
+      "postconditions": ["native token wrapped and transferred to pool", "pending withdrawals updated"]
+    },
+    {
+      "id": "fn:kHYPEWithdrawalModule.burnToken0AfterWithdraw",
+      "contract": "kHYPEWithdrawalModule",
+      "function": "burnToken0AfterWithdraw",
+      "visibility": "external",
+      "stateReads": ["stakingManager.unstakeFeeRate", "burnFeeBips"],
+      "stateWrites": ["_amountToken1PendingLPWithdrawal", "LPWithdrawals", "idLPWithdrawal", "cumulativeAmountToken1LPWithdrawal"],
+      "externalCalls": ["IStakingManager.unstakeFeeRate"],
+      "emitsEvents": ["LPWithdrawalRequestCreated"],
+      "preconditions": ["msg.sender == stex", "_amountToken0 > 0"],
+      "postconditions": ["LP withdrawal request created with fee applied", "pending withdrawal amount increased"]
+    },
+    {
+      "id": "fn:kHYPEWithdrawalModule.claim",
+      "contract": "kHYPEWithdrawalModule",
+      "function": "claim",
+      "visibility": "external",
+      "stateReads": ["LPWithdrawals", "amountToken1ClaimableLPWithdrawal", "cumulativeAmountToken1ClaimableLPWithdrawal"],
+      "stateWrites": ["amountToken1ClaimableLPWithdrawal", "delete LPWithdrawals[_idLPQueue]"],
+      "externalCalls": ["Address.sendValue"],
+      "emitsEvents": ["LPWithdrawalRequestClaimed"],
+      "preconditions": ["request.amountToken1 > 0", "amountToken1ClaimableLPWithdrawal >= request.amountToken1", "cumulativeAmountToken1ClaimableLPWithdrawal >= checkpoint + amount"],
+      "postconditions": ["native token sent to recipient", "claimable amount decreased", "request deleted"]
+    },
+    {
+      "id": "fn:kHYPEWithdrawalModule.update",
+      "contract": "kHYPEWithdrawalModule",
+      "function": "update",
+      "visibility": "external",
+      "stateReads": ["_pendingUnstakeRequestIds", "_pendingUnstakeRequestCount", "stakingManager.withdrawalRequests", "stakingManager.confirmWithdrawal", "address(this).balance", "_amountToken0PendingUnstaking", "_amountToken1PendingLPWithdrawal", "_amountToken1PendingLPWithdrawalCoveredByQueuedUnstake"],
+      "stateWrites": ["_amountToken0PendingUnstaking", "_amountToken1PendingLPWithdrawal", "_amountToken1PendingLPWithdrawalCoveredByQueuedUnstake", "amountToken1ClaimableLPWithdrawal", "cumulativeAmountToken1ClaimableLPWithdrawal", "_pendingUnstakeRequestIds", "_pendingUnstakeRequestCount"],
+      "externalCalls": ["IStakingManager.withdrawalRequests", "IStakingManager.confirmWithdrawal", "IWETH9.deposit", "IWETH9.safeTransfer"],
+      "emitsEvents": ["Update", "WithdrawalRequestConfirmed"],
+      "preconditions": ["pool not locked"],
+      "postconditions": ["confirmed withdrawals processed", "native token wrapped and transferred to pool", "pending withdrawals updated"]
+    },
+    {
+      "id": "fn:kHYPEWithdrawalModule.unstakeToken0Reserves",
+      "contract": "kHYPEWithdrawalModule",
+      "function": "unstakeToken0Reserves",
+      "visibility": "external",
+      "stateReads": ["_pendingUnstakeRequestCount", "stakingManager.nextWithdrawalId", "stakingManager.unstakeFeeRate", "stakingAccountant.kHYPEToHYPE"],
+      "stateWrites": ["_amountToken0PendingUnstaking", "_amountToken1PendingLPWithdrawalCoveredByQueuedUnstake", "_pendingUnstakeRequestIds", "_pendingUnstakeRequestCount"],
+      "externalCalls": ["ISTEXAMM(stex).unstakeToken0Reserves", "IStakingManager(stakingManager).queueWithdrawal"],
+      "emitsEvents": ["AmountToken0Unstaked"],
+      "preconditions": ["msg.sender == owner", "_pendingUnstakeRequestCount < MAX_PENDING_UNSTAKE_REQUESTS"],
+      "postconditions": ["token0 unstaked through stakingManager", "pending unstaking tracked"]
+    },
+    {
+      "id": "fn:kHYPEWithdrawalModule.confirmWithdrawal",
+      "contract": "kHYPEWithdrawalModule",
+      "function": "confirmWithdrawal",
+      "visibility": "external",
+      "stateReads": ["stakingManager.withdrawalRequests", "_amountToken0PendingUnstaking", "_pendingUnstakeRequestIds", "_pendingUnstakeRequestCount"],
+      "stateWrites": ["_amountToken0PendingUnstaking", "_pendingUnstakeRequestIds", "_pendingUnstakeRequestCount"],
+      "externalCalls": ["IStakingManager.confirmWithdrawal", "_update"],
+      "emitsEvents": ["WithdrawalRequestConfirmed"],
+      "preconditions": ["pool not locked", "request exists and not confirmed"],
+      "postconditions": ["withdrawal confirmed", "pending unstaking decreased"]
+    },
+    {
+      "id": "fn:MultiMarketLendingModule.deposit",
+      "contract": "MultiMarketLendingModule",
+      "function": "deposit",
+      "visibility": "external",
+      "stateReads": ["_lendingModules", "_lendingModuleConfigs", "asset"],
+      "stateWrites": ["totalPrincipal"],
+      "externalCalls": ["IERC20.safeTransferFrom", "ILendingModule.deposit"],
+      "emitsEvents": [],
+      "preconditions": ["msg.sender == manager", "initialized", "_amount > 0"],
+      "postconditions": ["totalPrincipal increased by _amount", "asset deposited across lending modules"]
+    },
+    {
+      "id": "fn:MultiMarketLendingModule.withdraw",
+      "contract": "MultiMarketLendingModule",
+      "function": "withdraw",
+      "visibility": "external",
+      "stateReads": ["_lendingModules", "_lendingModuleConfigs", "asset", "assetBalance", "totalPrincipal", "virtualYield"],
+      "stateWrites": ["totalPrincipal", "virtualYield"],
+      "externalCalls": ["ILendingModule.withdraw", "IERC20.balanceOf"],
+      "emitsEvents": [],
+      "preconditions": ["msg.sender == manager", "initialized", "_amount > 0", "_amount <= assetBalance"],
+      "postconditions": ["asset withdrawn from lending modules", "totalPrincipal and virtualYield updated"]
+    },
+    {
+      "id": "fn:AaveLendingModule.deposit",
+      "contract": "AaveLendingModule",
+      "function": "deposit",
+      "visibility": "external",
+      "stateReads": ["pool", "asset"],
+      "stateWrites": [],
+      "externalCalls": ["IERC20.safeTransferFrom", "IERC20.forceApprove", "IPool.supply"],
+      "emitsEvents": [],
+      "preconditions": ["msg.sender == owner", "_amount > 0"],
+      "postconditions": ["asset supplied to Aave pool"]
+    },
+    {
+      "id": "fn:AaveLendingModule.withdraw",
+      "contract": "AaveLendingModule",
+      "function": "withdraw",
+      "visibility": "external",
+      "stateReads": ["pool", "asset"],
+      "stateWrites": [],
+      "externalCalls": ["IPool.withdraw"],
+      "emitsEvents": [],
+      "preconditions": ["msg.sender == owner", "_amount > 0"],
+      "postconditions": ["asset withdrawn from Aave pool to recipient"]
+    }
+  ],
+  "callbackHooks": [
+    {
+      "trigger": "STEXAMM.onDepositLiquidityCallback",
+      "callback": "STEXAMM.onDepositLiquidityCallback",
+      "reentrancyWindow": "called by pool during deposit, transfers tokens from user",
+      "notes": "Only callable by pool, no reentrancy risk"
+    },
+    {
+      "trigger": "STEXAMM.onSwapCallback",
+      "callback": "STEXAMM.onSwapCallback",
+      "reentrancyWindow": "reverts - not implemented",
+      "notes": "Always reverts, no callback risk"
+    }
+  ],
+  "externalDependencies": [
+    {
+      "contract": "SovereignPool",
+      "function": "getReserves",
+      "manipulable": false,
+      "notes": "Returns pool reserves, measured as balances"
+    },
+    {
+      "contract": "SovereignPool",
+      "function": "swap",
+      "manipulable": true,
+      "manipulationVector": "large swaps can affect spot price for instant withdrawals",
+      "notes": "Used in getAmountOut for instant withdrawal calculation"
+    },
+    {
+      "contract": "StakingAccountant (kHYPE)",
+      "function": "HYPEToKHYPE/kHYPEToHYPE",
+      "manipulable": true,
+      "manipulationVector": "exchange rate depends on Kinetiq protocol state",
+      "notes": "Critical for share calculations in kHYPE module"
+    },
+    {
+      "contract": "StakingManager (kHYPE)",
+      "function": "unstakeFeeRate",
+      "manipulable": false,
+      "notes": "Protocol fee for unstaking, affects LP withdrawal amounts"
+    },
+    {
+      "contract": "StakingManager (kHYPE)",
+      "function": "queueWithdrawal/confirmWithdrawal",
+      "manipulable": false,
+      "notes": "Async withdrawal queue, state persists across blocks"
+    },
+    {
+      "contract": "Overseer (stHYPE)",
+      "function": "mint/burnAndRedeemIfPossible",
+      "manipulable": false,
+      "notes": "Thunderheads LST protocol integration"
+    },
+    {
+      "contract": "AavePool",
+      "function": "supply/withdraw",
+      "manipulable": false,
+      "notes": "Lending protocol integration, may have liquidity constraints"
+    },
+    {
+      "contract": "ERC20 (token0/token1)",
+      "function": "transfer/transferFrom",
+      "manipulable": true,
+      "manipulationVector": "fee-on-transfer tokens could break accounting",
+      "notes": "Assumes standard ERC20 without fees"
+    }
+  ],
+  "epochMechanics": [
+    {
+      "contract": "kHYPEWithdrawalModule",
+      "epochFunction": "confirmWithdrawal",
+      "exploitableWindow": "async withdrawal queue - LP can front-run unstaking",
+      "notes": "Withdrawal requests processed in FIFO order, timing matters"
+    },
+    {
+      "contract": "stHYPEWithdrawalModule",
+      "epochFunction": "update",
+      "exploitableWindow": "native token settlement timing",
+      "notes": "Excess native token wrapped and sent to pool"
+    },
+    {
+      "contract": "STEXAMM",
+      "epochFunction": "setProposedSwapFeeModule/setProposedWithdrawalModule",
+      "exploitableWindow": "3-7 day timelock",
+      "notes": "Governance parameter changes with delay"
+    },
+    {
+      "contract": "kHYPEWithdrawalModule",
+      "epochFunction": "setProposedLendingModule/setProposedBurnFeeBips",
+      "exploitableWindow": "3-7 day timelock",
+      "notes": "Critical parameter changes with delay"
+    }
+  ],
+  "stateTransitions": [
+    {
+      "from": "STEXAMM.deposit",
+      "to": "_withdrawalModule.update",
+      "dataFlow": "triggers state update before deposit",
+      "sharedState": "pending unstaking, pending withdrawals"
+    },
+    {
+      "from": "STEXAMM.withdraw",
+      "to": "_withdrawalModule.burnToken0AfterWithdraw",
+      "dataFlow": "creates LP withdrawal request",
+      "sharedState": "LPWithdrawals, cumulativeAmountToken1LPWithdrawal"
+    },
+    {
+      "from": "STEXAMM.withdraw",
+      "to": "_withdrawalModule.withdrawToken1FromLendingPool",
+      "dataFlow": "withdraws from lending if pool insufficient",
+      "sharedState": "lendingModule assetBalance"
+    },
+    {
+      "from": "kHYPEWithdrawalModule.update",
+      "to": "kHYPEWithdrawalModule._syncPendingUnstakeRequests",
+      "dataFlow": "processes confirmed unstaking requests",
+      "sharedState": "_pendingUnstakeRequestIds, _amountToken0PendingUnstaking"
+    },
+    {
+      "from": "MultiMarketLendingModule.deposit",
+      "to": "AaveLendingModule.deposit",
+      "dataFlow": "deposits across multiple lending modules",
+      "sharedState": "totalPrincipal"
+    },
+    {
+      "from": "MultiMarketLendingModule.withdraw",
+      "to": "AaveLendingModule.withdraw",
+      "dataFlow": "withdraws from multiple lending modules",
+      "sharedState": "totalPrincipal, virtualYield"
+    }
+  ],
+  "crossContractCallChains": [
+    {
+      "chain": "User → STEXAMM.deposit → _withdrawalModule.update → pool.depositLiquidity",
+      "description": "Deposit flow with state update"
+    },
+    {
+      "chain": "User → STEXAMM.withdraw → _withdrawalModule.burnToken0AfterWithdraw → _withdrawalModule.withdrawToken1FromLendingPool → pool.withdrawLiquidity",
+      "description": "Withdrawal flow with async request creation"
+    },
+    {
+      "chain": "User → kHYPEWithdrawalModule.claim → native token transfer",
+      "description": "Claim fulfilled withdrawal"
+    },
+    {
+      "chain": "Owner → kHYPEWithdrawalModule.unstakeToken0Reserves → stakingManager.queueWithdrawal",
+      "description": "Queue unstaking through Kinetiq"
+    },
+    {
+      "chain": "Anyone → kHYPEWithdrawalModule.confirmWithdrawal → stakingManager.confirmWithdrawal → _update",
+      "description": "Confirm unstaking and update state"
+    },
+    {
+      "chain": "Owner → MultiMarketLendingModule.deposit → AaveLendingModule.deposit → AavePool.supply",
+      "description": "Deposit to lending protocol"
+    }
+  ]
+}
+```

@@ -5,13 +5,20 @@ use std::time::Duration;
 
 fn trunc_tool_detail(s: &str, max_chars: usize) -> String {
     let t = s.trim();
-    if t.chars().count() <= max_chars {
+    let char_count = t.chars().count();
+    
+    // Allow up to 3 lines of content (estimate: ~3x max_chars for typical terminal width)
+    const MAX_LINES: usize = 3;
+    let estimated_line_length = max_chars;
+    let max_total_chars = estimated_line_length * MAX_LINES;
+    
+    if char_count <= max_total_chars {
         t.to_string()
     } else {
         format!(
             "{}…",
             t.chars()
-                .take(max_chars.saturating_sub(1))
+                .take(max_total_chars.saturating_sub(1))
                 .collect::<String>()
         )
     }
@@ -2693,15 +2700,17 @@ const STALL_WARNING_SECS: u64 = 300; // 5 minutes
                                     && m.row >= cy0
                                     && m.row < cy1
                                 {
+                                    // Calculate which message was clicked based on Y position
+                                    // This is an approximation - we track messages, not screen rows
                                     let chat_row = (m.row - cy0) as usize;
                                     let content_row = chat_row + (app.scroll as usize);
-                                    // Simple ChatLine-based selection
-                                    if let Some((chatline_idx, _, _)) = app.line_position_map.get(content_row) {
-                                        if *chatline_idx < app.messages.len() {
-                                            app.selection.start(*chatline_idx, 0);
-                                            app.selection_mode = true;
-                                        }
-                                    }
+                                    
+                                    // Simple approach: estimate message index from row
+                                    // Each message takes ~3-5 rows on average (header + content + blank)
+                                    let estimated_msg_idx = (content_row / 3).min(app.messages.len().saturating_sub(1));
+                                    
+                                    app.selection.start(estimated_msg_idx);
+                                    app.selection_mode = true;
                                 }
                             }
                             MouseEventKind::Drag(_) => {
@@ -2710,21 +2719,19 @@ const STALL_WARNING_SECS: u64 = 300; // 5 minutes
                                     let cy0 = app.layout.chat_area_y.0;
                                     let chat_row = m.row.saturating_sub(cy0) as usize;
                                     let content_row = chat_row + (app.scroll as usize);
-                                    // Simple ChatLine-based selection
-                                    if let Some((chatline_idx, _, _)) = app.line_position_map.get(content_row) {
-                                        if *chatline_idx < app.messages.len() {
-                                            app.selection.update(*chatline_idx, usize::MAX);
-                                        }
-                                    }
+                                    
+                                    // Same estimation as Down
+                                    let estimated_msg_idx = (content_row / 3).min(app.messages.len().saturating_sub(1));
+                                    
+                                    app.selection.update(estimated_msg_idx);
                                 }
                             }
                             MouseEventKind::Up(_) => {
                                 if app.selection_mode {
                                     app.selection_mode = false;
-                                    // If anchor == focus the user just clicked without
-                                    // dragging — clear the selection so it doesn't
-                                    // linger as a zero-width highlight.
-                                    if app.selection.anchor == app.selection.focus {
+                                    // If start == end the user just clicked without dragging
+                                    let (start, end) = app.selection.bounds();
+                                    if start == end {
                                         app.selection.clear();
                                     } else {
                                         // Auto-copy on mouse-up.

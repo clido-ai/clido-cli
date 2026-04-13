@@ -148,46 +148,6 @@ impl Default for LayoutInfo {
     }
 }
 
-// ── Line position mapping for selection ──────────────────────────────────────
-
-/// Maps screen row to original chat message position.
-/// Used for accurate mouse selection with word wrapping and indentation.
-#[derive(Default, Clone)]
-pub(crate) struct LinePosition {
-    /// Screen row (0-indexed from top of visible area)
-    pub(crate) screen_row: usize,
-    /// Index in app.messages (which ChatLine)
-    pub(crate) chatline_index: usize,
-    /// Character offset within that ChatLine's text
-    pub(crate) char_offset: usize,
-    /// Whether this line is gutter/indentation (not selectable)
-    pub(crate) is_gutter: bool,
-}
-
-/// Collection of line positions for the entire rendered output.
-#[derive(Default)]
-pub(crate) struct LinePositionMap {
-    /// Maps screen_row to LinePosition
-    pub(crate) positions: Vec<LinePosition>,
-}
-
-impl LinePositionMap {
-    /// Get LinePosition for a screen row
-    pub(crate) fn get(&self, screen_row: usize) -> Option<&LinePosition> {
-        self.positions.get(screen_row)
-    }
-    
-    /// Clear all positions (called before re-render)
-    pub(crate) fn clear(&mut self) {
-        self.positions.clear();
-    }
-    
-    /// Add a new line position
-    pub(crate) fn push(&mut self, pos: LinePosition) {
-        self.positions.push(pos);
-    }
-}
-
 // ── Session statistics ────────────────────────────────────────────────────────
 
 /// Accumulated token/cost counters for the current TUI session.

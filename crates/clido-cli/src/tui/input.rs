@@ -2166,45 +2166,21 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 return;
             }
             (Km::NONE, Up) => {
-                let (row, col) = app.selection.focus;
-                if row > 0 {
-                    app.selection.update(row.saturating_sub(1), col);
+                if app.selection.end_msg_idx > 0 {
+                    app.selection.update(app.selection.end_msg_idx.saturating_sub(1));
                 }
                 return;
             }
             (Km::NONE, Down) => {
-                let (row, col) = app.selection.focus;
-                let max_row = app.rendered_line_texts.len().saturating_sub(1);
-                app.selection.update((row + 1).min(max_row), col);
-                return;
-            }
-            (Km::NONE, Left) => {
-                let (row, col) = app.selection.focus;
-                if col > 0 {
-                    app.selection.update(row, col - 1);
-                }
-                return;
-            }
-            (Km::NONE, Right) => {
-                let (row, col) = app.selection.focus;
-                let max_row = app.rendered_line_texts.len().saturating_sub(1);
-                let line = app
-                    .rendered_line_texts
-                    .get(row.min(max_row))
-                    .map(|l| l.as_str())
-                    .unwrap_or("");
-                let max_col = line.chars().count().saturating_sub(1);
-                if col < max_col {
-                    app.selection.update(row.min(max_row), col + 1);
-                } else if row < max_row {
-                    app.selection.update(row + 1, 0);
+                let max_idx = app.messages.len().saturating_sub(1);
+                if app.selection.end_msg_idx < max_idx {
+                    app.selection.update(app.selection.end_msg_idx + 1);
                 }
                 return;
             }
             (Km::NONE, Char(' ')) => {
-                let (row, col) = app.selection.focus;
-                let max_row = app.rendered_line_texts.len().saturating_sub(1);
-                app.selection.start(row.min(max_row), col);
+                // Space sets the start point for selection
+                app.selection.start(app.selection.end_msg_idx);
                 return;
             }
             _ => {}
@@ -2276,11 +2252,11 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             app.selection_mode = !app.selection_mode;
             if app.selection_mode {
                 app.selection.clear();
-                let max_row = app.rendered_line_texts.len().saturating_sub(1);
-                let start_row = (app.scroll as usize).min(max_row);
-                app.selection.start(start_row, 0);
+                // Start at the last message (most recent)
+                let start_idx = app.messages.len().saturating_sub(1);
+                app.selection.start(start_idx);
                 app.push_toast(
-                    "Copy mode: ↑↓←→ move · Space toggle · y copy · Esc exit".to_string(),
+                    "Copy mode: ↑↓ move · Space set start · y copy · Esc exit".to_string(),
                     TUI_STATE_WARN,
                     std::time::Duration::from_secs(5),
                 );

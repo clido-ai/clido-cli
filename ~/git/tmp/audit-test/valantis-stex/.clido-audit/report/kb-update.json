@@ -1,0 +1,200 @@
+Based on the audit findings and adversarial challenges, here are the new patterns learned for the knowledge base:
+
+```json
+{
+  "patternsLearned": [
+    {
+      "patternId": "KB-001",
+      "category": "First Depositor Protection",
+      "title": "MINIMUM_LIQUIDITY with Owner-Funded Initialization",
+      "description": "First depositor attacks on ERC4626-style vaults are mitigated by: (1) MINIMUM_LIQUIDITY burned to address(1), (2) Owner-funded initial liquidity in real deployments, (3) _minShares slippage protection parameter",
+      "appliesTo": ["ERC4626", "Uniswap V2 forks", "AMM vaults"],
+      "mitigations": [
+        "MINIMUM_LIQUIDITY >= 1000 wei",
+        "Owner-funded initial liquidity via setSTEX()",
+        "_minShares parameter for slippage protection",
+        "Withdrawal fees reduce attacker profit"
+      ],
+      "falsePositiveIndicators": [
+        "Real deployments have owner-funded liquidity",
+        "Victims use slippage protection",
+        "Attack requires specific victim behavior"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "patternId": "KB-002",
+      "category": "Valuation Consistency",
+      "title": "Withdrawal Module Oracle-Based Pricing",
+      "description": "Share calculations using external withdrawal module conversions (convertToToken1/0) are resistant to reserve manipulation because they use oracle/exchange rates rather than pool spot prices",
+      "appliesTo": ["LST AMMs", "Liquid staking protocols", "Multi-asset vaults"],
+      "mitigations": [
+        "External oracle for exchange rates",
+        "1:1 exchange rate assumption for rebase tokens",
+        "Consistent valuation across deposit/withdraw"
+      ],
+      "falsePositiveIndicators": [
+        "Both deposit and withdraw use same conversion function",
+        "External oracle not manipulable via pool swaps",
+        "Owner-controlled unstaking"
+      ],
+      "confidence": 0.90
+    },
+    {
+      "patternId": "KB-003",
+      "category": "Queue Management",
+      "title": "Bounded Async Queue with Permissionless Clearing",
+      "description": "Bounded queues (MAX_PENDING_UNSTAKE_REQUESTS) with permissionless clearing mechanisms (confirmWithdrawal) are resistant to DoS because anyone can clear slots",
+      "appliesTo": ["Async withdrawal queues", "LST protocols", "Cross-chain bridges"],
+      "mitigations": [
+        "try/catch handling for external call failures",
+        "Permissionless slot clearing",
+        "Owner workarounds for edge cases",
+        "Bounded queue prevents unbounded growth"
+      ],
+      "falsePositiveIndicators": [
+        "Anyone can clear slots",
+        "Owner has emergency functions",
+        "Graceful handling of external failures"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "patternId": "KB-004",
+      "category": "Access Control Validation",
+      "title": "Comprehensive Modifier Coverage",
+      "description": "Proper access control requires: (1) onlyOwner on sensitive functions, (2) onlyContract on callbacks, (3) Role-based access for shared functions, (4) No missing modifiers on state-changers",
+      "appliesTo": ["All Solidity contracts"],
+      "validationSteps": [
+        "Check every external function has modifier",
+        "Verify onlyOwner on parameter changes",
+        "Verify onlyContract on callbacks",
+        "Check role-based access for shared state"
+      ],
+      "confidence": 0.98
+    },
+    {
+      "patternId": "KB-005",
+      "category": "Reentrancy Protection",
+      "title": "Multi-Layer Reentrancy Guards",
+      "description": "Effective reentrancy protection combines: (1) nonReentrant modifier on entry points, (2) onlyContract on callbacks, (3) Immediate revert on unimplemented callbacks, (4) Checks-Effects-Interactions pattern",
+      "appliesTo": ["Callback handlers", "Token receivers", "Flash loan integrators"],
+      "mitigations": [
+        "ReentrancyGuardTransient for gas efficiency",
+        "onlyContract modifier on callbacks",
+        "Revert unimplemented callbacks",
+        "No external calls before state updates"
+      ],
+      "falsePositiveIndicators": [
+        "Callback reverts immediately",
+        "onlyContract restricts caller",
+        "No reentrancy window exists"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "patternId": "KB-006",
+      "category": "Timelock Design",
+      "title": "Timestamp-Resistant Timelocks",
+      "description": "Timelocks resistant to timestamp manipulation require: (1) Duration >> manipulation range (7 days vs 15 seconds), (2) onlyOwner on proposal, (3) Separate proposal and execution phases",
+      "appliesTo": ["Governance", "Parameter changes", "Upgrades"],
+      "mitigations": [
+        "Timelock >= 3 days",
+        "Timestamp manipulation limited to ~15 seconds",
+        "onlyOwner on proposal",
+        "Cannot bypass via timestamp"
+      ],
+      "falsePositiveIndicators": [
+        "Timelock >> timestamp manipulation range",
+        "Requires owner permission",
+        "Separate proposal/execution"
+      ],
+      "confidence": 0.98
+    },
+    {
+      "patternId": "KB-007",
+      "category": "Economic Viability",
+      "title": "Gas Cost vs Profit Analysis",
+      "description": "Attacks requiring many transactions (rounding accumulation) are economically infeasible when gas costs exceed dust profits. Solidity 0.8+ overflow protection prevents accumulation exploits",
+      "appliesTo": ["Rounding-based attacks", "Micro-transaction attacks"],
+      "mitigations": [
+        "Gas costs >> dust profits",
+        "Solidity 0.8+ built-in overflow protection",
+        "Rounding favors protocol",
+        "Requires thousands of transactions"
+      ],
+      "falsePositiveIndicators": [
+        "Gas > profit by orders of magnitude",
+        "Solidity version >= 0.8.0",
+        "Rounding is conservative"
+      ],
+      "confidence": 0.98
+    },
+    {
+      "patternId": "KB-008",
+      "category": "External Dependency Risk",
+      "title": "Documented Assumption Pattern",
+      "description": "External dependency risks (LST model, oracle) are not exploitable vulnerabilities when: (1) Explicitly documented in code, (2) Require external governance action, (3) Affect all users equally",
+      "appliesTo": ["LST integrations", "Oracle dependencies", "Bridge protocols"],
+      "mitigations": [
+        "Explicit code comments documenting assumptions",
+        "Assumption validation in constructor",
+        "Governance-controlled external dependencies",
+        "Equal impact on all users"
+      ],
+      "falsePositiveIndicators": [
+        "Explicit documentation in code",
+        "Requires external governance",
+        "Affects all users equally"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "patternId": "KB-009",
+      "category": "Slippage Protection",
+      "title": "Comprehensive Slippage Parameters",
+      "description": "Effective slippage protection requires parameters for: (1) Minimum shares out (_minShares), (2) Minimum amounts (_amount0Min, _amount1Min), (3) Deadline checks, (4) Revert on insufficient output",
+      "appliesTo": ["AMM deposits", "Vault deposits", "Swaps"],
+      "mitigations": [
+        "_minShares for share-based deposits",
+        "_amount0Min/_amount1Min for withdrawals",
+        "_deadline for time-sensitive operations",
+        "Explicit revert with descriptive error"
+      ],
+      "falsePositiveIndicators": [
+        "All user-facing functions have slippage params",
+        "Revert on insufficient output",
+        "Deadline validation"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "patternId": "KB-010",
+      "category": "Logic Bug Severity",
+      "title": "Off-by-One vs Value Extraction",
+      "description": "Off-by-one errors in comparison operators (< vs <=) are typically Low severity (informational) unless they enable: (1) Value extraction, (2) Unauthorized access, (3) Permanent state corruption. 1 wei delays are not exploitable",
+      "appliesTo": ["Queue implementations", "Index calculations", "Threshold checks"],
+      "severityGuidelines": {
+        "High": "Enables value extraction or unauthorized access",
+        "Medium": "Causes permanent availability impact",
+        "Low": "Causes temporary delay or dust-level issue",
+        "Informational": "Style/consistency issue"
+      },
+      "falsePositiveIndicators": [
+        "Only causes 1 wei delay",
+        "No value extraction possible",
+        "Temporary inconvenience only"
+      ],
+      "confidence": 0.90
+    }
+  ],
+  "auditMetadata": {
+    "auditedProtocol": "Valantis STEX AMM",
+    "auditDate": "2026-04-12",
+    "totalPatternsLearned": 10,
+    "confirmedFindings": 0,
+    "disprovenNarratives": 12,
+    "methodology": "Faultline-based with adversarial review"
+  }
+}
+```

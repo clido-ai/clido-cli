@@ -1,0 +1,85 @@
+The multi-step sequences file doesn't exist yet. Based on my earlier analysis, here are the clustered sequences:
+
+```json
+{
+  "clusters": [
+    {
+      "clusterId": "SEQ-001",
+      "sequenceIds": ["SEQ-001"],
+      "title": "First Depositor Donation Attack",
+      "attackCategory": "flash-loan-composition",
+      "severity": "medium",
+      "description": "Attacker becomes first depositor, donates to pool, victim deposit fails or receives 0 shares, attacker withdraws disproportionate share",
+      "targetContracts": ["STEXAMM", "SovereignPool"],
+      "steps": 4,
+      "economicViability": "Low - requires victim without slippage protection"
+    },
+    {
+      "clusterId": "SEQ-002",
+      "sequenceIds": ["SEQ-002"],
+      "title": "kHYPE Withdrawal Queue DoS",
+      "attackCategory": "epoch-reward",
+      "severity": "medium",
+      "description": "Attacker fills all 5 pending unstake slots, blocking owner unstaking, LP withdrawals accumulate without fulfillment",
+      "targetContracts": ["kHYPEWithdrawalModule", "StakingManager"],
+      "steps": 4,
+      "economicViability": "Medium - griefing attack, no direct profit"
+    },
+    {
+      "clusterId": "SEQ-003",
+      "sequenceIds": ["SEQ-003"],
+      "title": "Instant Withdrawal Sandwich Attack",
+      "attackCategory": "flash-loan-composition",
+      "severity": "medium",
+      "description": "Attacker manipulates pool reserves, victim uses instant withdrawal at bad rate, attacker reverses swap",
+      "targetContracts": ["STEXAMM", "SovereignPool"],
+      "steps": 3,
+      "economicViability": "Medium - standard AMM sandwich"
+    },
+    {
+      "clusterId": "SEQ-004",
+      "sequenceIds": ["SEQ-004"],
+      "title": "Rounding Error Accumulation",
+      "attackCategory": "rounding-accumulation",
+      "severity": "low",
+      "description": "Attacker performs many micro-withdrawals to accumulate rounding errors in their favor",
+      "targetContracts": ["STEXAMM"],
+      "steps": 3,
+      "economicViability": "None - gas costs exceed dust profits"
+    },
+    {
+      "clusterId": "SEQ-005",
+      "sequenceIds": ["SEQ-005"],
+      "title": "Lending Module Liquidity Exhaustion",
+      "attackCategory": "cross-contract-reentrancy",
+      "severity": "medium",
+      "description": "Lending protocol becomes illiquid, blocking LP withdrawals, forcing instant withdrawal at worse rates",
+      "targetContracts": ["MultiMarketLendingModule", "AaveLendingModule", "AavePool"],
+      "steps": 4,
+      "economicViability": "Not exploitable - external market condition"
+    },
+    {
+      "clusterId": "SEQ-006",
+      "sequenceIds": ["SEQ-006"],
+      "title": "Governance Parameter Change Race",
+      "attackCategory": "governance-timing",
+      "severity": "low",
+      "description": "Attacker deposits before fee reduction, benefits from lower fees after timelock expires",
+      "targetContracts": ["STEXAMM"],
+      "steps": 5,
+      "economicViability": "Not exploitable - legitimate user behavior"
+    },
+    {
+      "clusterId": "SEQ-007",
+      "sequenceIds": ["SEQ-007"],
+      "title": "stHYPE Native Token Donation Manipulation",
+      "attackCategory": "cross-contract-reentrancy",
+      "severity": "low",
+      "description": "Attacker donates native token to withdrawal module, update() wraps and sends to pool, potentially manipulating accounting",
+      "targetContracts": ["stHYPEWithdrawalModule", "STEXAMM"],
+      "steps": 3,
+      "economicViability": "None - unclear profit mechanism"
+    }
+  ]
+}
+```

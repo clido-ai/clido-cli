@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] - 2026-04-14
+
+### Changed
+
+- **Slash command display**: Commands like `/plan <task>` and `/note <text>` now show the command highlighted on its own line, with the text argument below. This makes it clearer what was a command vs user input.
+- **Markdown safety margin**: Increased from 5 to 8 characters for more conservative line wrapping.
+
+### Fixed
+
+- **Subscription cost display**: Dollar values are no longer shown for subscription providers in session picker and stats. Only turn counts are displayed since per-call costs are not tracked for subscriptions.
+- **Session picker**: Removed cost column entirely since we cannot reliably determine if historical sessions used subscription or on-demand pricing.
+
 ## [1.0.5] - 2026-04-13
 
 ### Changed

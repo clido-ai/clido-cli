@@ -1618,16 +1618,93 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 /// Uses a per-width render cache keyed by message content hash to avoid re-rendering
 /// unchanged messages on every tick.
 /// Apply selection highlighting to lines within the visible area.
-/// Simple ChatLine-based highlighting - highlights all lines belonging to selected messages.
 fn apply_selection_highlight(
     lines: &[Line<'static>],
-    _selection: &Selection,
-    _scroll_offset: usize,
-    _visible_height: usize,
+    selection: &Selection,
+    scroll_offset: usize,
+    visible_height: usize,
 ) -> Vec<Line<'static>> {
-    // For now, disable complex highlighting - just return lines as-is
-    // The selection works for copying, even if not visually highlighted
-    lines.to_vec()
+    let mut result = lines.to_vec();
+
+    let first_visible = scroll_offset;
+    let last_visible = (scroll_offset + visible_height).min(lines.len());
+
+    let (start_row, start_col, end_row, end_col) = selection.bounds();
+
+    let sel_style = Style::default().bg(TUI_SELECTION_BG).fg(TUI_TEXT);
+
+    for line_idx in first_visible..last_visible {
+        if line_idx >= result.len() {
+            break;
+        }
+
+        let in_selection = line_idx >= start_row && line_idx <= end_row;
+        if !in_selection {
+            continue;
+        }
+
+        let line_start_col = if line_idx == start_row { start_col } else { 0 };
+        let line_end_col = if line_idx == end_row {
+            end_col.saturating_add(1) // inclusive end, prevent overflow
+        } else {
+            usize::MAX
+        };
+
+        let line = &result[line_idx];
+        let mut new_spans: Vec<Span<'static>> = Vec::new();
+        let mut display_col = 0usize;
+
+        for span in line.spans.iter() {
+            let span_display_w: usize = span
+                .content
+                .chars()
+                .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+                .sum();
+            let span_end_col = display_col + span_display_w;
+
+            if span_end_col <= line_start_col || display_col >= line_end_col {
+                // Entirely outside selection.
+                new_spans.push(span.clone());
+            } else if display_col >= line_start_col && span_end_col <= line_end_col {
+                // Entirely inside selection.
+                let mut h = span.clone();
+                h.style = span.style.patch(sel_style);
+                new_spans.push(h);
+            } else {
+                // Partially overlaps — split the span at column boundaries.
+                let mut before = String::new();
+                let mut inside = String::new();
+                let mut after = String::new();
+                let mut col = display_col;
+                for ch in span.content.chars() {
+                    let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                    if col < line_start_col {
+                        before.push(ch);
+                    } else if col < line_end_col {
+                        inside.push(ch);
+                    } else {
+                        after.push(ch);
+                    }
+                    col += cw;
+                }
+                if !before.is_empty() {
+                    new_spans.push(Span::styled(before, span.style));
+                }
+                if !inside.is_empty() {
+                    new_spans.push(Span::styled(inside, span.style.patch(sel_style)));
+                }
+                if !after.is_empty() {
+                    new_spans.push(Span::styled(after, span.style));
+                }
+            }
+
+            display_col = span_end_col;
+        }
+
+        result[line_idx] = Line::from(new_spans);
+    }
+
+    result
 }
 
 /// Pre-wrap styled lines so each `Line` fits within `width` columns.
@@ -1888,6 +1965,62 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
         app.render_cache.insert(cache_key, wrapped.clone());
         wrapped
     };
+
+    // Keep a plain-text snapshot of rendered lines so `get_selected_text()
+    // can resolve selection coordinates (which live in rendered-line space).
+    // Strip gutter indentation so selection doesn't include it.
+    app.rendered_line_texts = result
+        .iter()
+        .map(|line| {
+            let full_text: String = line.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect();
+            // Strip leading gutter patterns:
+            // - Normal chat: TUI_GUTTER + "  " or "› "
+            // - Diff: "     123 " (line numbers) or "  123 " or "       "
+            let text = full_text
+                .trim_start_matches(TUI_GUTTER)
+                .trim_start_matches("  ")
+                .trim_start_matches("› ");
+            
+            // Strip diff line number patterns (5 chars for unified, variable for sbs)
+            // Unified: "  123 " or "     123 "
+            // Side-by-side: "  123 " or "     " or " 123 "
+            let text = text
+                .trim_start_matches("       ")  // 7 spaces (deleted lines in unified)
+                .trim_start_matches("      ")   // 6 spaces (empty in sbs)
+                .trim_start_matches("     ")    // 5 spaces (line number width)
+                .trim_start_matches("  ")
+                .trim_start_matches(" ");
+            
+            // Remove remaining line numbers (digits followed by space)
+            let text = if text.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                // Skip leading digits and following space
+                let digits_end = text
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .count();
+                if digits_end > 0 && text.get(digits_end..=digits_end) == Some(" ") {
+                    text[digits_end + 1..].to_string()
+                } else {
+                    text.to_string()
+                }
+            } else {
+                text.to_string()
+            };
+            
+            text
+        })
+        .collect();
+
+    // Create position map for selection
+    // Maps screen row to (chatline_index, start_char, end_char)
+    app.line_position_map = result
+        .iter()
+        .enumerate()
+        .map(|(idx, _)| (idx, 0, 0))
+        .collect();
 
     // Apply selection highlighting to visible lines
     if app.selection.active {

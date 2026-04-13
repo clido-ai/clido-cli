@@ -17,53 +17,81 @@ use super::commands::{execute_slash, is_known_slash_cmd, parse_per_turn_model};
 use super::copy::info as copy_info;
 use super::render::build_plan_from_assistant_text;
 use super::state::*;
+use super::state::{LinePositionMap, LinePosition};
+
 /// Text selection for in-app copy.
-/// Simple ChatLine-based selection: tracks which message indices are selected.
+/// Tracks anchor (start) and focus (end) positions in (row, col) format.
 #[derive(Debug, Clone, Default)]
 pub(super) struct Selection {
-    pub start_msg_idx: usize, // Index in app.messages
-    pub end_msg_idx: usize,   // Index in app.messages
-    pub active: bool,         // whether selection is currently active
+    pub anchor: (usize, usize), // (row, col) - start of selection
+    pub focus: (usize, usize),  // (row, col) - end of selection
+    pub active: bool,           // whether selection is currently active
 }
 
+#[allow(dead_code)]
 impl Selection {
     /// Clear the selection.
     pub fn clear(&mut self) {
         self.active = false;
-        self.start_msg_idx = 0;
-        self.end_msg_idx = 0;
+        self.anchor = (0, 0);
+        self.focus = (0, 0);
     }
 
-    /// Start selection at a message index.
-    pub fn start(&mut self, msg_idx: usize) {
-        self.start_msg_idx = msg_idx;
-        self.end_msg_idx = msg_idx;
+    /// Set anchor point and start selection.
+    pub fn start(&mut self, row: usize, col: usize) {
+        self.anchor = (row, col);
+        self.focus = (row, col);
         self.active = true;
     }
 
-    /// Update selection end during drag.
-    pub fn update(&mut self, msg_idx: usize) {
-        self.end_msg_idx = msg_idx;
+    /// Update focus point (during drag).
+    pub fn update(&mut self, row: usize, col: usize) {
+        self.focus = (row, col);
     }
 
-    /// Get ordered selection bounds (start_idx, end_idx).
-    pub fn bounds(&self) -> (usize, usize) {
-        if self.start_msg_idx <= self.end_msg_idx {
-            (self.start_msg_idx, self.end_msg_idx)
+    /// Get ordered selection bounds (start_row, start_col, end_row, end_col).
+    pub fn bounds(&self) -> (usize, usize, usize, usize) {
+        let (ar, ac) = self.anchor;
+        let (fr, fc) = self.focus;
+
+        if ar < fr || (ar == fr && ac < fc) {
+            (ar, ac, fr, fc)
         } else {
-            (self.end_msg_idx, self.start_msg_idx)
+            (fr, fc, ar, ac)
         }
     }
 
-    /// Check if a message index is within the selection.
-    #[allow(dead_code)]
-    pub fn contains(&self, msg_idx: usize) -> bool {
+    /// Check if a cell is within the selection.
+    pub fn contains(&self, row: usize, col: usize) -> bool {
         if !self.active {
             return false;
         }
-        let (start, end) = self.bounds();
-        msg_idx >= start && msg_idx <= end
+        let (sr, sc, er, ec) = self.bounds();
+        row >= sr && row <= er && (row > sr || col >= sc) && (row < er || col <= ec)
     }
+}
+
+// ── Selection column helpers ──────────────────────────────────────────────────
+
+/// Display-cell column (terminal position) → character index in `line`.
+/// Each wide character advances the display position by its Unicode width.
+fn display_col_to_char_idx(line: &str, target_col: usize) -> usize {
+    let mut display_col = 0usize;
+    for (i, ch) in line.char_indices() {
+        if display_col >= target_col {
+            return i;
+        }
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        display_col += w;
+    }
+    line.len()
+}
+
+/// Total display width of a line in terminal cells.
+fn line_display_width(line: &str) -> usize {
+    line.chars()
+        .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+        .sum()
 }
 
 /// High-level agent activity (complements `busy` for IDE-like status awareness).
@@ -306,6 +334,8 @@ pub(super) struct App {
     /// Hash of the messages Vec at the time the cache was last populated.
     /// Used to detect when messages change and stale entries should be evicted.
     pub(super) render_cache_msg_count: usize,
+    pub(super) line_position_map: Vec<(usize, usize, usize)>, // (chatline_idx, start_char, end_char) per screen row
+    pub(super) rendered_line_texts: Vec<String>,
     /// Non-blocking toast notifications (auto-dismiss).
     pub(super) toasts: Vec<Toast>,
     /// Last time we showed a "agent seems stuck" warning to avoid spamming.
@@ -435,6 +465,8 @@ impl App {
             models_loading: false,
             render_cache: std::collections::HashMap::new(),
             render_cache_msg_count: 0,
+            line_position_map: Vec::new(),
+            rendered_line_texts: Vec::new(),
             toasts: Vec::new(),
             last_stall_warning: None,
             selection_mode: false,
@@ -933,36 +965,44 @@ impl App {
     }
 
     // ── Selection Methods ────────────────────────────────────────────────────
-    /// Start selection at the given message index.
-    pub(super) fn start_selection(&mut self, msg_idx: usize) {
-        self.selection.start(msg_idx);
+    #[allow(dead_code)]
+    /// Start selection at the given screen coordinates.
+    pub(super) fn start_selection(&mut self, row: u16, col: u16) {
+        self.selection.start(row as usize, col as usize);
     }
 
-    /// Update selection end while dragging.
-    pub(super) fn update_selection(&mut self, msg_idx: usize) {
-        self.selection.update(msg_idx);
+    /// Update selection focus while dragging.
+    #[allow(dead_code)]
+    #[allow(dead_code)]
+    pub(super) fn update_selection(&mut self, row: u16, col: u16) {
+        self.selection.update(row as usize, col as usize);
     }
 
     /// End selection (mouse release).
+    #[allow(dead_code)]
     pub(super) fn end_selection(&mut self) {
         self.selection_mode = false;
     }
 
     /// Clear selection entirely.
+    #[allow(dead_code)]
     pub(super) fn clear_selection(&mut self) {
         self.selection.clear();
     }
 
-    /// Get the selection bounds (start_idx, end_idx).
-    pub(super) fn get_selection_bounds(&self) -> Option<(usize, usize)> {
+    /// Get the normalized selection bounds (start_row, start_col, end_row, end_col).
+    #[allow(dead_code)]
+    pub(super) fn get_selection_bounds(&self) -> Option<(u16, u16, u16, u16)> {
         if !self.selection.active {
             return None;
         }
-        Some(self.selection.bounds())
+        let (sr, sc, er, ec) = self.selection.bounds();
+        Some((sr as u16, sc as u16, er as u16, ec as u16))
     }
 
     /// Copy selected text to clipboard.
     /// Returns true if something was copied.
+    #[allow(dead_code)]
     pub(super) fn copy_selection(&mut self) -> bool {
         let text = self.get_selected_text();
         if text.is_empty() {
@@ -986,29 +1026,44 @@ impl App {
     /// Get selected text from the rendered line snapshot.
     ///
     /// Selection coordinates live in rendered-line space (the same indices
-    /// Get selected text from the selected ChatLines.
-    /// Returns concatenated text from all selected messages.
+    /// used by `apply_selection_highlight`), so we read directly from
+    /// `rendered_line_texts` which is populated each render tick.
     pub(super) fn get_selected_text(&self) -> String {
         if !self.selection.active {
             return String::new();
         }
 
-        let (start_idx, end_idx) = self.selection.bounds();
+        let (sr, sc, er, ec) = self.selection.bounds();
         let mut result = String::new();
 
-        for idx in start_idx..=end_idx {
-            if let Some(chatline) = self.messages.get(idx) {
-                let text = match chatline {
-                    ChatLine::User(t) | ChatLine::Assistant(t) | ChatLine::Thinking(t) => t.as_str(),
-                    ChatLine::Info(t) => t.as_str(),
-                    ChatLine::ToolCall { detail, .. } => detail.as_str(),
-                    _ => continue,
-                };
+        for row in sr..=er {
+            if row >= self.rendered_line_texts.len() {
+                break;
+            }
 
-                if !result.is_empty() {
-                    result.push('\n');
+            let line = &self.rendered_line_texts[row];
+            if line.is_empty() {
+                continue;
+            }
+
+            // Calculate which characters to extract from this row
+            let start_col = if row == sr { sc } else { 0 };
+            let end_col = if row == er { ec.saturating_add(1) } else { line.len() };
+            
+            // Clamp to valid range
+            let start_col = start_col.min(line.len());
+            let end_col = end_col.min(line.len());
+
+            // Extract characters
+            for char_offset in start_col..end_col {
+                if let Some(ch) = line.chars().nth(char_offset) {
+                    result.push(ch);
                 }
-                result.push_str(text);
+            }
+
+            // Add newline between rows (but not after the last row)
+            if row < er {
+                result.push('\n');
             }
         }
 

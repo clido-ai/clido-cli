@@ -2806,7 +2806,7 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
     }
     
     // Show empty output warning if present
-    if let Some(warning) = empty_output_warning {
+    if let Some(ref warning) = empty_output_warning {
         app.push(ChatLine::Info(format!("  ⚠ {warning}")));
     }
     
@@ -2830,10 +2830,33 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
             "  🚨 CRITICAL: Output files could not be saved. Workflow may fail in subsequent steps.".into()
         ));
         
+        // Store save failures in workflow context so next step can see them
+        {
+            let wf = app.active_workflow.as_mut().unwrap();
+            wf.context.set_step_output(&step_id, "_save_failed", failed_saves.join("; "));
+        }
+        
+        // Add system message to inform the agent about the save failure
+        let failure_details = failed_saves.join("\n");
+        app.push(ChatLine::Info(format!(
+            "  📋 [System] The following output files could not be saved:\n{}",
+            failure_details
+        )));
+        
         if on_error == OnErrorPolicy::Fail {
             handle_workflow_step_error(app, failed_saves.join("; "));
             return;
         }
+    } else {
+        // Store success status
+        let wf = app.active_workflow.as_mut().unwrap();
+        wf.context.set_step_output(&step_id, "_save_status", "success".to_string());
+    }
+    
+    // Also track empty output warning if present
+    if let Some(warning) = empty_output_warning {
+        let wf = app.active_workflow.as_mut().unwrap();
+        wf.context.set_step_output(&step_id, "_save_warning", warning);
     }
 
     // Restore model.

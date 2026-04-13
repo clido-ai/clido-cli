@@ -421,8 +421,11 @@ pub(super) fn cmd_note(app: &mut App, cmd: &str) {
         ));
         return;
     }
-    // Add to chat history immediately.
-    app.push(ChatLine::User(format!("[Note] {}", text)));
+    // Add to chat history immediately with slash command formatting.
+    app.push(ChatLine::SlashCommand {
+        cmd: "/note".to_string(),
+        text: Some(text.to_string()),
+    });
     // Send via note channel — this interrupts current agent execution.
     let _ = app.channels.note_tx.send(text.to_string());
 }
@@ -715,6 +718,25 @@ pub(super) fn cmd_cost(app: &mut App) {
 }
 
 pub(super) fn cmd_tokens(app: &mut App) {
+    let is_subscription = clido_providers::is_subscription_provider(&app.provider);
+
+    if is_subscription {
+        // For subscriptions, only show turns - token counts may be unreliable
+        app.push(ChatLine::Info(
+            "  ── Session Statistics ──────────────────────".into(),
+        ));
+        if app.stats.session_turn_count > 0 {
+            app.push(ChatLine::Info(format!(
+                "  Turns completed: {}",
+                app.stats.session_turn_count
+            )));
+        } else {
+            app.push(ChatLine::Info("  No turns completed yet".into()));
+        }
+        return;
+    }
+
+    // On-demand providers: show full token statistics
     let total = app.stats.session_total_input_tokens + app.stats.session_total_output_tokens;
     let total_str = if total >= 1000 {
         format!("{:.1}k", total as f64 / 1000.0)
@@ -743,13 +765,10 @@ pub(super) fn cmd_tokens(app: &mut App) {
         app.stats.session_total_output_tokens
     )));
     app.push(ChatLine::Info(format!("  Total tokens:   {}", total_str)));
-    let is_subscription = clido_providers::is_subscription_provider(&app.provider);
-    if !is_subscription {
-        app.push(ChatLine::Info(format!(
-            "  Estimated cost: ${:.6}",
-            app.stats.session_total_cost_usd
-        )));
-    }
+    app.push(ChatLine::Info(format!(
+        "  Estimated cost: ${:.6}",
+        app.stats.session_total_cost_usd
+    )));
     if let Some(budget) = app.max_budget_usd {
         let remaining = (budget - app.stats.session_total_cost_usd).max(0.0);
         let pct = (app.stats.session_total_cost_usd / budget * 100.0).min(100.0);
@@ -1278,8 +1297,11 @@ pub(super) fn cmd_plan(app: &mut App, cmd: &str) {
         task => {
             // /plan <task> — ask the agent to plan first, then wait for confirmation
             let task = task.to_string();
-            // Echo the user's /plan command to the chat like a normal prompt
-            app.push(ChatLine::User(format!("/plan {task}")));
+            // Echo the user's /plan command to the chat with highlighted formatting
+            app.push(ChatLine::SlashCommand {
+                cmd: "/plan".to_string(),
+                text: Some(task.clone()),
+            });
             app.plan.awaiting_plan_response = true;
             let prompt = format!(
                 "Create a plan for the following task using **exactly** these sections (in order):\n\

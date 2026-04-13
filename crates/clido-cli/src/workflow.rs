@@ -210,8 +210,13 @@ fn resolve_workflow_path(workflow: &str) -> anyhow::Result<std::path::PathBuf> {
         return Ok(p.to_path_buf());
     }
 
-    let global_dir = default_workflows_directory();
-    let global_base = Path::new(&global_dir);
+    // Load config to get the workflows directory (respects [workflows].directory override)
+    let cwd = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let workflows_dir = match load_config(&cwd) {
+        Ok(loaded) => loaded.workflows.directory,
+        Err(_) => default_workflows_directory(),
+    };
+    let global_base = Path::new(&workflows_dir);
     for candidate in [
         workflow,
         &format!("{}.yaml", workflow),
@@ -226,7 +231,7 @@ fn resolve_workflow_path(workflow: &str) -> anyhow::Result<std::path::PathBuf> {
     Err(anyhow::anyhow!(
         "Workflow not found: {} (tried {}, current path)",
         workflow,
-        global_dir
+        workflows_dir
     ))
 }
 
@@ -248,9 +253,14 @@ async fn run_workflow_inspect(path: &Path) -> Result<(), anyhow::Error> {
 }
 
 async fn run_workflow_list() -> Result<(), anyhow::Error> {
-    let global_dir = default_workflows_directory();
+    // Load config to get the workflows directory (respects [workflows].directory override)
+    let cwd = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let workflows_dir = match load_config(&cwd) {
+        Ok(loaded) => loaded.workflows.directory,
+        Err(_) => default_workflows_directory(),
+    };
     let mut found = Vec::new();
-    collect_yaml_files(Path::new(&global_dir), &mut found);
+    collect_yaml_files(Path::new(&workflows_dir), &mut found);
     for path in found {
         if let Ok(def) = load_workflow(&path) {
             println!("  {}  {}", def.name, path.display());

@@ -218,14 +218,14 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let is_subscription = clido_providers::is_subscription_provider(&app.provider);
 
         if is_subscription {
-            // Subscription providers: show tokens + turns, no dollar cost
+            // Subscription providers: only show turns (token counts may be unreliable)
             let turn_str = if app.stats.session_turn_count > 0 {
                 format!("{TUI_SEP}{} turns", app.stats.session_turn_count)
             } else {
                 String::new()
             };
             hline2.push(Span::styled(
-                format!("{TUI_SEP}session: {}{}{}", tok_str, turn_str, ctx_str),
+                format!("{TUI_SEP}session: {}{}", turn_str, ctx_str),
                 dim,
             ));
         } else {
@@ -1044,12 +1044,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             };
             let name_trunc: String = name_part.chars().take(name_w).collect();
             let marker = if selected { "▶ " } else { "  " };
+            // Only show turns, not cost - we can't reliably determine if this session
+            // used subscription or on-demand pricing, and stored costs may be inaccurate
             content.push(Line::from(vec![Span::styled(
                 format!(
-                    "{}{id_cell}  {:>3}t  ${:>6.2}  {:<w$}  {}",
+                    "{}{id_cell}  {:>3}t  {:<w$}  {}",
                     marker,
                     s.num_turns,
-                    s.total_cost_usd,
                     when_str,
                     name_trunc,
                     w = WHEN_W,
@@ -2209,6 +2210,33 @@ pub(super) fn build_lines_w_uncached(app: &App, width: usize) -> Vec<Line<'stati
             ChatLine::WelcomeBrand | ChatLine::WelcomeSplash => {
                 // Skipped — no longer displayed
             }
+            ChatLine::SlashCommand { cmd, text } => {
+                // Highlighted slash command on its own line
+                out.push(Line::from(vec![
+                    Span::styled(TUI_GUTTER.to_string(), Style::default()),
+                    Span::styled(
+                        cmd.clone(),
+                        Style::default()
+                            .fg(TUI_SOFT_ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                // Optional text argument on the next line(s)
+                if let Some(t) = text {
+                    if !t.is_empty() {
+                        for line in render_markdown(t, width) {
+                            let indented = Line::from(vec![Span::raw(TUI_GUTTER), Span::raw("  ")]);
+                            let mut new_line = indented;
+                            new_line.spans.extend(line.spans);
+                            out.push(new_line);
+                        }
+                    }
+                }
+                // Only add blank line if last line is not already blank
+                if !out.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
+                    out.push(Line::raw(""));
+                }
+            }
         }
     }
     out
@@ -2242,10 +2270,10 @@ pub(super) fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
 /// horizontal rules, task-list checkboxes, and hard/soft breaks.
 pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
     use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Tag};
-    // Content width: match transcript gutter (2) + body inset (2) + 5 char safety margin
+    // Content width: match transcript gutter (2) + body inset (2) + 8 char safety margin
     // + 8 char for max list indentation (4 levels deep).
     let content_w = width
-        .saturating_sub(super::TUI_GUTTER.len() * 2 + 5 + 8)
+        .saturating_sub(super::TUI_GUTTER.len() * 2 + 8 + 8)
         .max(20);
 
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;

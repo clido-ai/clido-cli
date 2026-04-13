@@ -1163,6 +1163,11 @@ pub(crate) enum ChatLine {
     WelcomeBrand,
     /// Full startup splash: centered panel widget (rendered directly, not as chat lines).
     WelcomeSplash,
+    /// Slash command with optional text argument - displayed with command highlighted
+    SlashCommand {
+        cmd: String,
+        text: Option<String>,
+    },
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────

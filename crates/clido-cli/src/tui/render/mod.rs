@@ -6,6 +6,9 @@ mod surfaces;
 mod welcome;
 mod widgets;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) use plan::*;
 pub(super) use profile::*;
 pub(super) use status_panel::{STATUS_RAIL_MIN_TERM_WIDTH, STATUS_RAIL_MIN_TERM_WIDTH_ON};

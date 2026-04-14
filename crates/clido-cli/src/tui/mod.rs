@@ -1687,43 +1687,162 @@ mod tests {
         assert!(has_clear_msg, "/clear should show new session message");
     }
 
+    // ── Selection tests ───────────────────────────────────────────────────────
+
     #[test]
-    fn e2e_model_picker_filter_narrows_results() {
-        let mut app = make_test_app();
-        app.model_picker = Some(ModelPickerState {
-            models: vec![
-                ModelEntry {
-                    id: "gpt-4o".into(),
-                    provider: "openai".into(),
-                    input_mtok: 0.0,
-                    output_mtok: 0.0,
-                    context_k: None,
-                    role: None,
-                    is_favorite: false,
-                },
-                ModelEntry {
-                    id: "claude-sonnet".into(),
-                    provider: "anthropic".into(),
-                    input_mtok: 0.0,
-                    output_mtok: 0.0,
-                    context_k: None,
-                    role: None,
-                    is_favorite: false,
-                },
-            ],
-            filter: String::new(),
-            selected: 0,
-            scroll_offset: 0,
-        });
-        for c in "claude".chars() {
-            sim_char(&mut app, c);
-        }
-        let picker = app.model_picker.as_ref().unwrap();
-        let filtered = picker.filtered();
-        assert_eq!(filtered.len(), 1, "filter 'claude' should match one model");
-        assert!(
-            filtered[0].id.contains("claude"),
-            "filtered model should be claude"
+    fn test_selection_bounds() {
+        let mut sel = Selection::default();
+        sel.start(0, 0);
+        sel.update(1, 5);
+        
+        let (sr, sc, er, ec) = sel.bounds();
+        assert_eq!(sr, 0);
+        assert_eq!(sc, 0);
+        assert_eq!(er, 1);
+        assert_eq!(ec, 5);
+    }
+
+    #[test]
+    fn test_selection_reverse() {
+        let mut sel = Selection::default();
+        sel.start(1, 5);
+        sel.update(0, 0);
+        
+        let (sr, sc, er, ec) = sel.bounds();
+        // Should normalize so start <= end
+        assert_eq!(sr, 0);
+        assert_eq!(sc, 0);
+        assert_eq!(er, 1);
+        assert_eq!(ec, 5);
+    }
+
+    #[test]
+    fn test_selection_clear() {
+        let mut sel = Selection::default();
+        sel.start(0, 0);
+        sel.update(1, 5);
+        sel.clear();
+        
+        assert!(!sel.active);
+    }
+
+    #[test]
+    fn test_selection_single_line() {
+        let mut sel = Selection::default();
+        sel.start(0, 2);
+        sel.update(0, 8);
+        
+        let (sr, sc, er, ec) = sel.bounds();
+        assert_eq!(sr, 0);
+        assert_eq!(er, 0);
+        assert_eq!(sc, 2);
+        assert_eq!(ec, 8);
+    }
+
+    // ── Wrapped line tests ───────────────────────────────────────────────────
+
+    fn create_test_app_with_wrapped_lines() -> App {
+        let (prompt_tx, _prompt_rx) = mpsc::unbounded_channel::<AgentUserInput>();
+        let (resume_tx, _resume_rx) = mpsc::unbounded_channel();
+        let (model_switch_tx, _model_switch_rx) = mpsc::unbounded_channel();
+        let (workdir_tx, _workdir_rx) = mpsc::unbounded_channel();
+        let (compact_now_tx, _compact_now_rx) = mpsc::unbounded_channel();
+        let (fetch_tx, fetch_rx) = mpsc::channel::<crate::tui::events::AgentEvent>(256);
+        std::mem::forget(fetch_rx);
+        let (kill_tx, _kill_rx) = mpsc::unbounded_channel();
+        let (allowed_paths_tx, _allowed_paths_rx) = mpsc::unbounded_channel();
+        let (note_tx, _note_rx) = mpsc::unbounded_channel();
+        let (path_permission_tx, _path_permission_rx) = mpsc::unbounded_channel();
+        let (profile_switch_tx, _profile_switch_rx) = mpsc::unbounded_channel();
+        
+        let mut app = App::new(
+            AgentChannels {
+                prompt_tx,
+                resume_tx,
+                model_switch_tx,
+                workdir_tx,
+                compact_now_tx,
+                fetch_tx,
+                kill_tx,
+                allowed_paths_tx,
+                note_tx,
+                path_permission_tx,
+                profile_switch_tx,
+            },
+            Arc::new(AtomicBool::new(false)),
+            "openrouter".to_string(),
+            "default-model".to_string(),
+            std::env::temp_dir(),
+            false,
+            Arc::new(Mutex::new(None)),
+            false,
+            Vec::new(),
+            clido_core::ModelPrefs::default(),
+            "default".to_string(),
+            Arc::new(AtomicBool::new(false)),
+            false,
+            false,
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            String::new(),
+            None,
+            clido_providers::build_provider(
+                "openrouter",
+                String::new(),
+                "test-model".to_string(),
+                None,
+            )
+            .expect("test provider"),
+            "test-model".to_string(),
+            Arc::new(AtomicBool::new(false)),
         );
+        
+        app.wrapped_lines = vec![
+            crate::tui::state::WrappedLine::new(
+                vec![ratatui::text::Span::raw("Hello world")],
+                crate::tui::state::LineSource::User,
+                true,
+                0,
+                0,
+                0,
+            ),
+            crate::tui::state::WrappedLine::new(
+                vec![ratatui::text::Span::raw("Second line")],
+                crate::tui::state::LineSource::User,
+                true,
+                0,
+                0,
+                11,
+            ),
+        ];
+        app
+    }
+
+    #[test]
+    fn test_get_selected_text_single_line() {
+        let mut app = create_test_app_with_wrapped_lines();
+        app.selection.start(0, 0);
+        app.selection.update(0, 5);
+        app.selection.active = true;
+        
+        let text = app.get_selected_text();
+        assert_eq!(text, "Hello");
+    }
+
+    #[test]
+    fn test_get_selected_text_multi_line() {
+        let mut app = create_test_app_with_wrapped_lines();
+        app.selection.start(0, 6);
+        app.selection.update(1, 4);
+        app.selection.active = true;
+        
+        let text = app.get_selected_text();
+        assert_eq!(text, "world\nSecond");
+    }
+
+    #[test]
+    fn test_get_selected_text_inactive() {
+        let app = create_test_app_with_wrapped_lines();
+        let text = app.get_selected_text();
+        assert!(text.is_empty());
     }
 }

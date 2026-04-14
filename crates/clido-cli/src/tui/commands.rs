@@ -3006,26 +3006,38 @@ pub(super) fn abort_workflow(app: &mut App) {
 
 /// Resolve workflow directories: platform-specific global dir and project-local `.clido/workflows/`.
 /// Returns (global_dirs, local_dir, info_strings) tuple.
-/// On macOS, checks both ~/Library/Application Support/clido/workflows/ (standard) 
+/// On macOS, checks both ~/Library/Application Support/clido/workflows/ (standard)
 /// and ~/.config/clido/workflows/ (legacy/compatibility).
-fn workflow_dirs_with_info(workspace_root: &std::path::Path) -> (Vec<std::path::PathBuf>, Option<std::path::PathBuf>, Vec<String>) {
+fn workflow_dirs_with_info(
+    workspace_root: &std::path::Path,
+) -> (
+    Vec<std::path::PathBuf>,
+    Option<std::path::PathBuf>,
+    Vec<String>,
+) {
     let mut global_dirs = Vec::new();
     let mut info = Vec::new();
-    
+
     // Platform-specific global config directory (standard location)
     if let Some(global) = clido_core::global_config_dir() {
         let workflows_dir = global.join("workflows");
         global_dirs.push(workflows_dir.clone());
-        
+
         // Create user-friendly path description
         let home = std::env::var("HOME").unwrap_or_default();
         let display_path = if workflows_dir.to_string_lossy().starts_with(&home) {
-            format!("~/{}", workflows_dir.strip_prefix(&home).unwrap_or(&workflows_dir).display())
+            format!(
+                "~/{}",
+                workflows_dir
+                    .strip_prefix(&home)
+                    .unwrap_or(&workflows_dir)
+                    .display()
+            )
         } else {
             workflows_dir.display().to_string()
         };
         info.push(format!("global: {}", display_path));
-        
+
         // On macOS, also check legacy ~/.config/clido/workflows/ for compatibility
         #[cfg(target_os = "macos")]
         {
@@ -3036,12 +3048,12 @@ fn workflow_dirs_with_info(workspace_root: &std::path::Path) -> (Vec<std::path::
             }
         }
     }
-    
+
     // Project-local workflows
     let local_dir = workspace_root.join(".clido").join("workflows");
     let local_display = ".clido/workflows/".to_string();
     info.push(format!("local: {}", local_display));
-    
+
     (global_dirs, Some(local_dir), info)
 }
 
@@ -3051,7 +3063,7 @@ fn list_workflows(
 ) -> Vec<(String, std::path::PathBuf, String, usize)> {
     let mut results = Vec::new();
     let (global_dirs, local_dir, _) = workflow_dirs_with_info(workspace_root);
-    
+
     // Check all global directories
     for dir in global_dirs {
         if !dir.is_dir() {
@@ -3065,7 +3077,8 @@ fn list_workflows(
                     continue;
                 }
                 if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Ok(def) = serde_yaml::from_str::<clido_workflows::WorkflowDef>(&content) {
+                    if let Ok(def) = serde_yaml::from_str::<clido_workflows::WorkflowDef>(&content)
+                    {
                         let name = def.name.clone();
                         let desc = if def.description.is_empty() {
                             "(no description)".to_string()
@@ -3079,7 +3092,7 @@ fn list_workflows(
             }
         }
     }
-    
+
     // Check local directory
     if let Some(dir) = local_dir {
         if dir.is_dir() {
@@ -3091,7 +3104,9 @@ fn list_workflows(
                         continue;
                     }
                     if let Ok(content) = std::fs::read_to_string(&path) {
-                        if let Ok(def) = serde_yaml::from_str::<clido_workflows::WorkflowDef>(&content) {
+                        if let Ok(def) =
+                            serde_yaml::from_str::<clido_workflows::WorkflowDef>(&content)
+                        {
                             let name = def.name.clone();
                             let desc = if def.description.is_empty() {
                                 "(no description)".to_string()
@@ -3106,7 +3121,7 @@ fn list_workflows(
             }
         }
     }
-    
+
     results.sort_by(|a, b| a.0.cmp(&b.0));
     results
 }
@@ -3114,7 +3129,7 @@ fn list_workflows(
 /// Find a workflow by name from the workflow directories.
 fn find_workflow(workspace_root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
     let (global_dirs, local_dir, _) = workflow_dirs_with_info(workspace_root);
-    
+
     // Helper closure to check a directory
     let check_dir = |dir: &std::path::Path| -> Option<std::path::PathBuf> {
         if !dir.is_dir() {
@@ -3147,21 +3162,21 @@ fn find_workflow(workspace_root: &std::path::Path, name: &str) -> Option<std::pa
         }
         None
     };
-    
+
     // Check all global directories first
     for dir in global_dirs {
         if let Some(path) = check_dir(&dir) {
             return Some(path);
         }
     }
-    
+
     // Check local directory
     if let Some(dir) = local_dir {
         if let Some(path) = check_dir(&dir) {
             return Some(path);
         }
     }
-    
+
     None
 }
 
@@ -3316,23 +3331,26 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
             // List workflows with directory info
             let (_global_dirs, _local_dir, info) = workflow_dirs_with_info(&app.workspace_root);
             let workflows = list_workflows(&app.workspace_root);
-            
+
             app.push(ChatLine::Info("".into()));
             app.push(ChatLine::Section("Workflows".into()));
-            
+
             // Show search paths
             app.push(ChatLine::Info("  Search paths:".into()));
             for path_info in &info {
                 app.push(ChatLine::Info(format!("    • {}", path_info)));
             }
             app.push(ChatLine::Info("".into()));
-            
+
             if workflows.is_empty() {
                 app.push(ChatLine::Info(
                     "  No workflows found. Use /workflow new <description> to create one.".into(),
                 ));
             } else {
-                app.push(ChatLine::Info(format!("  Found {} workflow(s):", workflows.len())));
+                app.push(ChatLine::Info(format!(
+                    "  Found {} workflow(s):",
+                    workflows.len()
+                )));
                 app.push(ChatLine::Info("".into()));
                 for (name, path, desc, steps) in &workflows {
                     let loc = if path.starts_with(&app.workspace_root) {

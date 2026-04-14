@@ -6,7 +6,6 @@ use std::sync::Arc;
 use clido_core::PermissionMode;
 use ratatui::style::Color;
 use ratatui::text::Line;
-use unicode_width::UnicodeWidthStr;
 
 use crate::git_context::GitContext;
 use crate::image_input::ImageAttachment;
@@ -1035,7 +1034,7 @@ impl App {
 
             let line = &self.wrapped_lines[row];
             let line_text = line.plain_text();
-            
+
             if !line.selectable || line_text.is_empty() {
                 continue;
             }

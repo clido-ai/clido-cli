@@ -1205,7 +1205,12 @@ pub(crate) enum LineSource {
 
 impl ContentLine {
     /// Create a new content line
-    pub fn new(spans: Vec<Span<'static>>, source: LineSource, selectable: bool, msg_idx: usize) -> Self {
+    pub fn new(
+        spans: Vec<Span<'static>>,
+        source: LineSource,
+        selectable: bool,
+        msg_idx: usize,
+    ) -> Self {
         Self {
             spans,
             source,

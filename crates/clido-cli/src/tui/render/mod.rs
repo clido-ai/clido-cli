@@ -12,9 +12,6 @@ pub(super) use status_panel::{STATUS_RAIL_MIN_TERM_WIDTH, STATUS_RAIL_MIN_TERM_W
 pub(super) use welcome::*;
 pub(super) use widgets::*;
 
-use std::hash::{Hash, Hasher};
-use std::sync::atomic::Ordering;
-
 use pulldown_cmark::Parser;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -1952,19 +1949,22 @@ fn take_cols(s: &str, max_cols: usize) -> (&str, usize) {
 pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
     // Use unified renderer to generate ContentLines
     let content_lines = render_chat_to_content_lines(&app.messages, width, &app.model);
-    
+
     // Store content lines for reference
     app.content_lines = content_lines.clone();
-    
+
     // Wrap content lines to screen width and create wrapped lines
     let wrapped_lines = wrap_content_lines(&content_lines, width);
     app.wrapped_lines = wrapped_lines.clone();
-    
+
     // Update rendered_line_texts for backward compatibility
     app.rendered_line_texts = wrapped_lines.iter().map(|wl| wl.plain_text()).collect();
-    
+
     // Convert wrapped lines to ratatui Lines for display
-    wrapped_lines.iter().map(|wl| Line::from(wl.spans.clone())).collect()
+    wrapped_lines
+        .iter()
+        .map(|wl| Line::from(wl.spans.clone()))
+        .collect()
 }
 
 /// Wrap content lines to fit screen width, tracking original positions.
@@ -1973,7 +1973,7 @@ fn wrap_content_lines(
     width: usize,
 ) -> Vec<crate::tui::state::WrappedLine> {
     let mut wrapped_lines = Vec::new();
-    
+
     for (content_idx, line) in content_lines.iter().enumerate() {
         let mut char_offset = 0usize;
         let mut chars_on_segment = 0usize;
@@ -2007,7 +2007,7 @@ fn wrap_content_lines(
                     current_spans = Vec::new();
                     current_col = 0;
                 }
-                
+
                 // Add character to current span
                 if let Some(last_span) = current_spans.last_mut() {
                     if last_span.style == span.style {
@@ -2023,7 +2023,7 @@ fn wrap_content_lines(
                 current_col += ch_width;
             }
         }
-        
+
         // Always emit at least one WrappedLine per ContentLine.
         // Empty ContentLines (blank separators between messages) must produce a
         // blank row so that visual spacing and row-index arithmetic stay consistent.
@@ -2038,7 +2038,7 @@ fn wrap_content_lines(
             char_offset,
         ));
     }
-    
+
     wrapped_lines
 }
 
@@ -2512,10 +2512,7 @@ pub(super) fn render_chat_to_content_lines(
 
                 // Content lines
                 for line in render_markdown(text, width) {
-                    let spans = vec![
-                        Span::raw(TUI_GUTTER),
-                        Span::raw("  "),
-                    ];
+                    let spans = vec![Span::raw(TUI_GUTTER), Span::raw("  ")];
                     let mut content_line = ContentLine::new(
                         spans,
                         LineSource::User,
@@ -2527,12 +2524,7 @@ pub(super) fn render_chat_to_content_lines(
                 }
 
                 // Blank line separator
-                out.push(ContentLine::new(
-                    vec![],
-                    LineSource::User,
-                    false,
-                    msg_idx,
-                ));
+                out.push(ContentLine::new(vec![], LineSource::User, false, msg_idx));
             }
 
             ChatLine::Assistant(text) => {
@@ -2563,16 +2555,9 @@ pub(super) fn render_chat_to_content_lines(
 
                 // Content lines
                 for line in render_markdown(text, width) {
-                    let spans = vec![
-                        Span::raw(TUI_GUTTER),
-                        Span::raw("  "),
-                    ];
-                    let mut content_line = ContentLine::new(
-                        spans,
-                        LineSource::Assistant,
-                        true,
-                        msg_idx,
-                    );
+                    let spans = vec![Span::raw(TUI_GUTTER), Span::raw("  ")];
+                    let mut content_line =
+                        ContentLine::new(spans, LineSource::Assistant, true, msg_idx);
                     content_line.spans.extend(line.spans);
                     out.push(content_line);
                 }
@@ -2596,12 +2581,8 @@ pub(super) fn render_chat_to_content_lines(
                         ),
                         Span::raw("  "),
                     ];
-                    let mut content_line = ContentLine::new(
-                        spans,
-                        LineSource::Thinking,
-                        true,
-                        msg_idx,
-                    );
+                    let mut content_line =
+                        ContentLine::new(spans, LineSource::Thinking, true, msg_idx);
                     // Dim all spans
                     for span in line.spans {
                         content_line.spans.push(Span::styled(
@@ -2622,12 +2603,7 @@ pub(super) fn render_chat_to_content_lines(
                         msg_idx,
                     ));
                 }
-                out.push(ContentLine::new(
-                    vec![],
-                    LineSource::Info,
-                    false,
-                    msg_idx,
-                ));
+                out.push(ContentLine::new(vec![], LineSource::Info, false, msg_idx));
             }
 
             ChatLine::Section(text) => {
@@ -2676,10 +2652,7 @@ pub(super) fn render_chat_to_content_lines(
                         vec![
                             Span::raw(TUI_GUTTER),
                             Span::raw("  "),
-                            Span::styled(
-                                line.to_string(),
-                                Style::default().fg(TUI_MUTED),
-                            ),
+                            Span::styled(line.to_string(), Style::default().fg(TUI_MUTED)),
                         ],
                         LineSource::ToolCall,
                         true,
@@ -2727,12 +2700,7 @@ pub(super) fn render_chat_to_content_lines(
                     ));
                 }
 
-                out.push(ContentLine::new(
-                    vec![],
-                    LineSource::Diff,
-                    false,
-                    msg_idx,
-                ));
+                out.push(ContentLine::new(vec![], LineSource::Diff, false, msg_idx));
             }
 
             ChatLine::SlashCommand { cmd, text } => {
@@ -2756,28 +2724,16 @@ pub(super) fn render_chat_to_content_lines(
                 if let Some(t) = text {
                     if !t.is_empty() {
                         for line in render_markdown(t, width) {
-                            let spans = vec![
-                                Span::raw(TUI_GUTTER),
-                                Span::raw("  "),
-                            ];
-                            let mut content_line = ContentLine::new(
-                                spans,
-                                LineSource::User,
-                                true,
-                                msg_idx,
-                            );
+                            let spans = vec![Span::raw(TUI_GUTTER), Span::raw("  ")];
+                            let mut content_line =
+                                ContentLine::new(spans, LineSource::User, true, msg_idx);
                             content_line.spans.extend(line.spans);
                             out.push(content_line);
                         }
                     }
                 }
 
-                out.push(ContentLine::new(
-                    vec![],
-                    LineSource::User,
-                    false,
-                    msg_idx,
-                ));
+                out.push(ContentLine::new(vec![], LineSource::User, false, msg_idx));
             }
 
             _ => {
@@ -2789,17 +2745,4 @@ pub(super) fn render_chat_to_content_lines(
     }
 
     out
-}
-
-/// Convert ContentLines to ratatui Lines for display
-pub(super) fn content_lines_to_ratatui(lines: &[ContentLine]) -> Vec<Line<'static>> {
-    lines
-        .iter()
-        .map(|cl| Line::from(cl.spans.clone()))
-        .collect()
-}
-
-/// Extract plain text from ContentLines for selection/copy
-pub(super) fn content_lines_to_plain_text(lines: &[ContentLine]) -> Vec<String> {
-    lines.iter().map(|cl| cl.plain_text()).collect()
 }

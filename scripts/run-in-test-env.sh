@@ -17,10 +17,13 @@
 # Override workdir:   CLIDO_WORKDIR=/your/project  ./scripts/run-in-test-env.sh tui
 
 set -e
+# Save the original working directory (where the script was started from)
+ORIGINAL_PWD="$(pwd)"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-export CLIDO_WORKDIR="${CLIDO_WORKDIR:-$REPO_ROOT}"
+# Use the original PWD as workdir, not the repo root
+export CLIDO_WORKDIR="${CLIDO_WORKDIR:-$ORIGINAL_PWD}"
 
 TEST_DIR="${CLIDO_TEST_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/clido-test-env}"
 

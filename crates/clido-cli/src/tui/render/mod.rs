@@ -1942,14 +1942,88 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
     // Use unified renderer to generate ContentLines
     let content_lines = render_chat_to_content_lines(&app.messages, width, &app.model);
     
-    // Store for selection and other operations
+    // Store content lines for reference
     app.content_lines = content_lines.clone();
     
-    // Also update rendered_line_texts for backward compatibility during transition
-    app.rendered_line_texts = content_lines_to_plain_text(&content_lines);
+    // Wrap content lines to screen width and create wrapped lines
+    let wrapped_lines = wrap_content_lines(&content_lines, width);
+    app.wrapped_lines = wrapped_lines.clone();
     
-    // Convert to ratatui Lines for display
-    content_lines_to_ratatui(&content_lines)
+    // Update rendered_line_texts for backward compatibility
+    app.rendered_line_texts = wrapped_lines.iter().map(|wl| wl.plain_text()).collect();
+    
+    // Convert wrapped lines to ratatui Lines for display
+    wrapped_lines.iter().map(|wl| Line::from(wl.spans.clone())).collect()
+}
+
+/// Wrap content lines to fit screen width, tracking original positions.
+fn wrap_content_lines(
+    content_lines: &[crate::tui::state::ContentLine],
+    width: usize,
+) -> Vec<crate::tui::state::WrappedLine> {
+    let mut wrapped_lines = Vec::new();
+    
+    for (content_idx, line) in content_lines.iter().enumerate() {
+        let line_text = line.plain_text();
+        let mut char_offset = 0usize;
+        
+        // Split the line into chunks that fit within width
+        let mut current_col = 0usize;
+        let mut current_spans: Vec<Span<'static>> = Vec::new();
+        
+        for span in &line.spans {
+            let span_text = span.content.as_ref();
+            let mut span_chars = span_text.chars().peekable();
+            
+            while let Some(ch) = span_chars.next() {
+                let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                
+                if current_col + ch_width > width && current_col > 0 {
+                    // Finish current wrapped line
+                    wrapped_lines.push(crate::tui::state::WrappedLine::new(
+                        current_spans.clone(),
+                        line.source,
+                        line.selectable,
+                        line.msg_idx,
+                        content_idx,
+                        char_offset,
+                    ));
+                    
+                    // Start new wrapped line
+                    current_spans = Vec::new();
+                    current_col = 0;
+                    char_offset += current_col;
+                }
+                
+                // Add character to current span
+                if let Some(last_span) = current_spans.last_mut() {
+                    if last_span.style == span.style {
+                        last_span.content = format!("{}{}", last_span.content, ch).into();
+                    } else {
+                        current_spans.push(Span::styled(ch.to_string(), span.style));
+                    }
+                } else {
+                    current_spans.push(Span::styled(ch.to_string(), span.style));
+                }
+                
+                current_col += ch_width;
+            }
+        }
+        
+        // Don't forget the last wrapped segment
+        if !current_spans.is_empty() {
+            wrapped_lines.push(crate::tui::state::WrappedLine::new(
+                current_spans,
+                line.source,
+                line.selectable,
+                line.msg_idx,
+                content_idx,
+                char_offset,
+            ));
+        }
+    }
+    
+    wrapped_lines
 }
 
 /// Parse `@@ -old_start[,len] +new_start[,len] @@` → (old_start, new_start).

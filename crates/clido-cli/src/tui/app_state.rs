@@ -315,6 +315,8 @@ pub(super) struct App {
     pub(super) rendered_line_texts: Vec<String>,
     /// Unified content lines - single source of truth for display and selection
     pub(super) content_lines: Vec<crate::tui::state::ContentLine>,
+    /// Wrapped lines - what the user actually sees on screen (after text wrapping)
+    pub(super) wrapped_lines: Vec<crate::tui::state::WrappedLine>,
     /// Non-blocking toast notifications (auto-dismiss).
     pub(super) toasts: Vec<Toast>,
     /// Last time we showed a "agent seems stuck" warning to avoid spamming.
@@ -447,6 +449,7 @@ impl App {
             line_position_map: Vec::new(),
             rendered_line_texts: Vec::new(),
             content_lines: Vec::new(),
+            wrapped_lines: Vec::new(),
             toasts: Vec::new(),
             last_stall_warning: None,
             selection_mode: false,
@@ -1026,28 +1029,21 @@ impl App {
         let mut result = String::new();
 
         for row in sr..=er {
-            if row >= self.content_lines.len() {
+            if row >= self.wrapped_lines.len() {
                 break;
             }
 
-            let line = &self.content_lines[row];
+            let line = &self.wrapped_lines[row];
             let line_text = line.plain_text();
             
             if !line.selectable || line_text.is_empty() {
                 continue;
             }
 
-            // Calculate gutter width for this line
-            let gutter_width = line.spans.iter()
-                .take_while(|s| s.content.as_ref().chars().all(|c| c.is_whitespace()))
-                .map(|s| s.content.width())
-                .sum::<usize>();
-
             // Calculate which characters to extract from this row
-            // Subtract gutter width from column coordinates
-            let start_col = if row == sr { sc.saturating_sub(gutter_width) } else { 0 };
+            let start_col = if row == sr { sc } else { 0 };
             let end_col = if row == er {
-                ec.saturating_add(1).saturating_sub(gutter_width)
+                ec.saturating_add(1)
             } else {
                 line_text.len()
             };

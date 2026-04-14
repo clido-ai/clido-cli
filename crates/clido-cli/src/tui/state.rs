@@ -1225,6 +1225,57 @@ impl ContentLine {
     }
 }
 
+// ── Wrapped Content Lines ────────────────────────────────────────────────────
+
+/// A wrapped line represents one visible screen line after text wrapping.
+/// This is what the user sees and interacts with (scroll, select, copy).
+#[derive(Debug, Clone)]
+pub(crate) struct WrappedLine {
+    /// The text content with styles for this wrapped segment
+    pub spans: Vec<Span<'static>>,
+    /// Source of this line
+    pub source: LineSource,
+    /// Whether this line can be selected
+    pub selectable: bool,
+    /// Original message index
+    pub msg_idx: usize,
+    /// Which content line this wrapped segment came from
+    pub content_line_idx: usize,
+    /// Character offset within the original content line
+    pub char_offset: usize,
+}
+
+impl WrappedLine {
+    /// Create a new wrapped line
+    pub fn new(
+        spans: Vec<Span<'static>>,
+        source: LineSource,
+        selectable: bool,
+        msg_idx: usize,
+        content_line_idx: usize,
+        char_offset: usize,
+    ) -> Self {
+        Self {
+            spans,
+            source,
+            selectable,
+            msg_idx,
+            content_line_idx,
+            char_offset,
+        }
+    }
+
+    /// Get plain text content
+    pub fn plain_text(&self) -> String {
+        self.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    /// Get display width
+    pub fn width(&self) -> usize {
+        self.spans.iter().map(|s| s.content.width()).sum()
+    }
+}
+
 // ── App state ─────────────────────────────────────────────────────────────────
 
 pub(crate) struct PendingPerm {

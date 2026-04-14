@@ -8,7 +8,17 @@ use tera::{Context, Tera};
 use crate::context::WorkflowContext;
 use clido_core::{ClidoError, Result};
 
-/// Build Tera context from WorkflowContext (inputs, step_outputs, date, datetime, cwd).
+/// Get the current working directory, preferring CLIDO_WORKDIR env var.
+fn get_cwd() -> String {
+    std::env::var("CLIDO_WORKDIR")
+        .ok()
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| ".".to_string())
+}
 pub fn build_tera_context(ctx: &WorkflowContext) -> Result<Context> {
     let mut tera_ctx = Context::new();
     tera_ctx.insert("inputs", &ctx.inputs);
@@ -29,24 +39,17 @@ pub fn build_tera_context(ctx: &WorkflowContext) -> Result<Context> {
     tera_ctx.insert("steps", &step_map);
     tera_ctx.insert("date", &Utc::now().format("%Y-%m-%d").to_string());
     tera_ctx.insert("datetime", &Utc::now().to_rfc3339());
-    let cwd = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .to_string_lossy()
-        .to_string();
+    let cwd = get_cwd();
     tera_ctx.insert("cwd", &cwd);
     Ok(tera_ctx)
 }
-
 /// Render a string default value that may contain template expressions.
 /// Only `{{ cwd }}`, `{{ date }}`, and `{{ datetime }}` are available at this stage
 /// (no inputs or step outputs yet).
 pub fn render_default(template_str: &str) -> String {
     let normalized = normalize_template(template_str);
     let mut tera_ctx = Context::new();
-    let cwd = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .to_string_lossy()
-        .to_string();
+    let cwd = get_cwd();
     tera_ctx.insert("cwd", &cwd);
     tera_ctx.insert("date", &Utc::now().format("%Y-%m-%d").to_string());
     tera_ctx.insert("datetime", &Utc::now().to_rfc3339());

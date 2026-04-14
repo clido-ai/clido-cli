@@ -6,6 +6,7 @@ use std::sync::Arc;
 use clido_core::PermissionMode;
 use ratatui::style::Color;
 use ratatui::text::Line;
+use unicode_width::UnicodeWidthStr;
 
 use crate::git_context::GitContext;
 use crate::image_input::ImageAttachment;
@@ -1036,10 +1037,17 @@ impl App {
                 continue;
             }
 
+            // Calculate gutter width for this line
+            let gutter_width = line.spans.iter()
+                .take_while(|s| s.content.as_ref().chars().all(|c| c.is_whitespace()))
+                .map(|s| s.content.width())
+                .sum::<usize>();
+
             // Calculate which characters to extract from this row
-            let start_col = if row == sr { sc } else { 0 };
+            // Subtract gutter width from column coordinates
+            let start_col = if row == sr { sc.saturating_sub(gutter_width) } else { 0 };
             let end_col = if row == er {
-                ec.saturating_add(1)
+                ec.saturating_add(1).saturating_sub(gutter_width)
             } else {
                 line_text.len()
             };

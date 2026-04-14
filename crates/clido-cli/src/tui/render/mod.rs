@@ -826,7 +826,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         }
         // Scroll position indicator when not following.
         if app.layout.max_scroll > 0 && !app.following {
-            let pct = (app.scroll * 100 / app.layout.max_scroll).min(100);
+            let pct = ((app.scroll as u64 * 100) / app.layout.max_scroll as u64).min(100) as u32;
             hint_spans.push(Span::styled(
                 format!("{TUI_GUTTER}↑ {pct}%"),
                 Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),

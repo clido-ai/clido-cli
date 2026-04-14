@@ -435,20 +435,15 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         if is_welcome_only(app) {
             render_welcome(frame, app, chat_inner);
         } else {
-            // Use ratatui's own line_count() so the scroll calculation matches actual rendering.
+            // Build pre-wrapped lines. wrap_content_lines guarantees every line
+            // fits within inner_w columns, so we must NOT use Paragraph::wrap() —
+            // that would apply a second, different wrapping pass whose line count
+            // could diverge from wrapped_lines.len(), breaking scroll/selection math.
             let inner_w = chat_inner.width as usize;
             let lines = build_lines_w(app, inner_w);
-            
-            // Apply selection highlighting if active
-            let lines = if app.selection.active {
-                let visible_height = chat_inner.height as usize;
-                apply_selection_highlight(&lines, &app.selection, app.scroll as usize, visible_height)
-            } else {
-                lines
-            };
-            
-            let para = Paragraph::new(lines).wrap(Wrap { trim: false });
-            let total_height = para.line_count(chat_inner.width) as u32;
+
+            // Total height is exactly our wrapped line count — no ratatui recount.
+            let total_height = app.wrapped_lines.len() as u32;
             let max_scroll = total_height.saturating_sub(chat_inner.height as u32);
             // Store for use in handle_key (Up/PageUp need the current max_scroll).
             app.layout.max_scroll = max_scroll;
@@ -462,7 +457,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 app.suppress_next_chat_scroll_up = true;
             }
             // When not following and new content was added (max_scroll increased),
-            // adjust scroll position so user stays at same relative position
+            // adjust scroll position so user stays at same relative position.
             if !app.following && prev_max > 0 && max_scroll > prev_max {
                 let scroll_diff = max_scroll - prev_max;
                 app.scroll = app.scroll.saturating_add(scroll_diff).min(max_scroll);
@@ -472,6 +467,22 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             } else {
                 app.scroll.min(max_scroll)
             };
+            // Keep app.scroll in [0, max_scroll] so that mouse-selection row
+            // calculations (content_row = chat_row + app.scroll) and
+            // apply_selection_highlight always get a valid offset.
+            app.scroll = scroll;
+
+            // Apply selection highlighting using the already-clamped scroll offset
+            // so the highlight window is never out of sync with what's displayed.
+            let lines = if app.selection.active {
+                let visible_height = chat_inner.height as usize;
+                apply_selection_highlight(&lines, &app.selection, scroll as usize, visible_height)
+            } else {
+                lines
+            };
+
+            // Render without Paragraph::wrap() — lines are already width-bounded.
+            let para = Paragraph::new(lines);
             // ratatui's scroll() takes (u16, u16); clamp to u16::MAX before casting.
             frame.render_widget(
                 para.scroll((scroll.min(u16::MAX as u32) as u16, 0)),
@@ -1964,20 +1975,20 @@ fn wrap_content_lines(
     let mut wrapped_lines = Vec::new();
     
     for (content_idx, line) in content_lines.iter().enumerate() {
-        let line_text = line.plain_text();
         let mut char_offset = 0usize;
-        
+        let mut chars_on_segment = 0usize;
+
         // Split the line into chunks that fit within width
         let mut current_col = 0usize;
         let mut current_spans: Vec<Span<'static>> = Vec::new();
-        
+
         for span in &line.spans {
             let span_text = span.content.as_ref();
             let mut span_chars = span_text.chars().peekable();
-            
+
             while let Some(ch) = span_chars.next() {
                 let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-                
+
                 if current_col + ch_width > width && current_col > 0 {
                     // Finish current wrapped line
                     wrapped_lines.push(crate::tui::state::WrappedLine::new(
@@ -1988,11 +1999,13 @@ fn wrap_content_lines(
                         content_idx,
                         char_offset,
                     ));
-                    
-                    // Start new wrapped line
+
+                    // Advance char_offset by the number of chars emitted so far,
+                    // then reset for the next segment.
+                    char_offset += chars_on_segment;
+                    chars_on_segment = 0;
                     current_spans = Vec::new();
                     current_col = 0;
-                    char_offset += current_col;
                 }
                 
                 // Add character to current span
@@ -2005,22 +2018,25 @@ fn wrap_content_lines(
                 } else {
                     current_spans.push(Span::styled(ch.to_string(), span.style));
                 }
-                
+
+                chars_on_segment += 1;
                 current_col += ch_width;
             }
         }
         
-        // Don't forget the last wrapped segment
-        if !current_spans.is_empty() {
-            wrapped_lines.push(crate::tui::state::WrappedLine::new(
-                current_spans,
-                line.source,
-                line.selectable,
-                line.msg_idx,
-                content_idx,
-                char_offset,
-            ));
-        }
+        // Always emit at least one WrappedLine per ContentLine.
+        // Empty ContentLines (blank separators between messages) must produce a
+        // blank row so that visual spacing and row-index arithmetic stay consistent.
+        // Blank rows are never selectable — no content to copy.
+        let is_blank = current_spans.is_empty();
+        wrapped_lines.push(crate::tui::state::WrappedLine::new(
+            current_spans,
+            line.source,
+            line.selectable && !is_blank,
+            line.msg_idx,
+            content_idx,
+            char_offset,
+        ));
     }
     
     wrapped_lines

@@ -1040,22 +1040,25 @@ impl App {
                 continue;
             }
 
-            // Calculate which characters to extract from this row
+            // Extract characters in the display-column range [start_col, end_col).
+            // sc/ec are display columns (from mouse coordinates), not byte or char
+            // indices, so we must walk the string tracking display width.
             let start_col = if row == sr { sc } else { 0 };
             let end_col = if row == er {
                 ec.saturating_add(1)
             } else {
-                line_text.len()
+                usize::MAX
             };
 
-            // Clamp to valid range
-            let start_col = start_col.min(line_text.len());
-            let end_col = end_col.min(line_text.len());
-
-            // Extract characters
-            for char_offset in start_col..end_col {
-                if let Some(ch) = line_text.chars().nth(char_offset) {
+            let mut col = 0usize;
+            for ch in line_text.chars() {
+                let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                if col >= start_col && col < end_col {
                     result.push(ch);
+                }
+                col += cw;
+                if col >= end_col {
+                    break;
                 }
             }
 

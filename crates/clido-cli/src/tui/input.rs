@@ -13,27 +13,19 @@ pub(super) fn scroll_up(app: &mut App, lines: u32) {
         app.suppress_next_chat_scroll_up = false;
         return;
     }
-    // When following, use a high value that will be clamped to max_scroll
-    // by the renderer. This avoids using stale max_scroll values.
-    if app.following {
-        app.scroll = u32::MAX; // Will be clamped to actual max_scroll on render
-    }
+    // app.scroll is always kept in [0, max_scroll] by the render loop, so
+    // plain saturating_sub is correct in all cases (including following mode).
     app.scroll = app.scroll.saturating_sub(lines);
     app.following = false;
 }
 
 pub(super) fn scroll_down(app: &mut App, lines: u32) {
     app.suppress_next_chat_scroll_up = false;
-    // When following, use a high value that will be clamped to max_scroll
-    // by the renderer. This avoids using stale max_scroll values.
-    let current_scroll = if app.following {
-        u32::MAX // Will be clamped to actual max_scroll on render
-    } else {
-        app.scroll
-    };
-    let new_scroll = current_scroll.saturating_add(lines);
+    // app.scroll is always kept in [0, max_scroll] by the render loop, so
+    // a plain saturating_add and comparison is correct in all cases.
+    let new_scroll = app.scroll.saturating_add(lines);
     if new_scroll >= app.layout.max_scroll {
-        app.scroll = u32::MAX; // Will be clamped on render
+        app.scroll = app.layout.max_scroll;
         app.following = true;
     } else {
         app.scroll = new_scroll;

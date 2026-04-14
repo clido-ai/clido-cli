@@ -438,6 +438,15 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             // Use ratatui's own line_count() so the scroll calculation matches actual rendering.
             let inner_w = chat_inner.width as usize;
             let lines = build_lines_w(app, inner_w);
+            
+            // Apply selection highlighting if active
+            let lines = if app.selection.active {
+                let visible_height = chat_inner.height as usize;
+                apply_selection_highlight(&lines, &app.selection, app.scroll as usize, visible_height)
+            } else {
+                lines
+            };
+            
             let para = Paragraph::new(lines).wrap(Wrap { trim: false });
             let total_height = para.line_count(chat_inner.width) as u32;
             let max_scroll = total_height.saturating_sub(chat_inner.height as u32);

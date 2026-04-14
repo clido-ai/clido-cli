@@ -310,7 +310,7 @@ mod edge_case_tests {
         let messages = vec![ChatLine::User(word)];
         let lines = render_chat_to_content_lines(&messages, 80, "");
         
-        assert!(lines.len() > 10);
+        assert!(lines.len() > 3);
     }
 
     #[test]

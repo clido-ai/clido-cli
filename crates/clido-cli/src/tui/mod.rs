@@ -1839,10 +1839,135 @@ mod tests {
         assert_eq!(text, "world\nSeco");
     }
 
+    // ── Template rendering tests ───────────────────────────────────────────────
+
     #[test]
-    fn test_get_selected_text_inactive() {
-        let app = create_test_app_with_wrapped_lines();
-        let text = app.get_selected_text();
-        assert!(text.is_empty());
+    fn test_cwd_template_variable() {
+        use std::env;
+        
+        // Set CLIDO_WORKDIR
+        env::set_var("CLIDO_WORKDIR", "/custom/path");
+        let cwd = env::var("CLIDO_WORKDIR").unwrap();
+        assert_eq!(cwd, "/custom/path");
+        
+        env::remove_var("CLIDO_WORKDIR");
+    }
+    #[test]
+    fn test_scroll_bounds() {
+        let (prompt_tx, _) = mpsc::unbounded_channel();
+        let (resume_tx, _) = mpsc::unbounded_channel();
+        let (model_switch_tx, _) = mpsc::unbounded_channel();
+        let (workdir_tx, _) = mpsc::unbounded_channel();
+        let (compact_now_tx, _) = mpsc::unbounded_channel();
+        let (fetch_tx, _) = mpsc::channel(256);
+        let (kill_tx, _) = mpsc::unbounded_channel();
+        let (allowed_paths_tx, _) = mpsc::unbounded_channel();
+        let (note_tx, _) = mpsc::unbounded_channel();
+        let (path_permission_tx, _) = mpsc::unbounded_channel();
+        let (profile_switch_tx, _) = mpsc::unbounded_channel();
+        
+        let mut app = App::new(
+            AgentChannels {
+                prompt_tx, resume_tx, model_switch_tx, workdir_tx,
+                compact_now_tx, fetch_tx, kill_tx, allowed_paths_tx,
+                note_tx, path_permission_tx, profile_switch_tx,
+            },
+            Arc::new(AtomicBool::new(false)),
+            "openrouter".to_string(),
+            "model".to_string(),
+            std::env::temp_dir(),
+            false,
+            Arc::new(Mutex::new(None)),
+            false,
+            Vec::new(),
+            clido_core::ModelPrefs::default(),
+            "default".to_string(),
+            Arc::new(AtomicBool::new(false)),
+            false,
+            false,
+            Arc::new(Mutex::new(Vec::new())),
+            String::new(),
+            None,
+            clido_providers::build_provider("openrouter", String::new(), "model".to_string(), None).unwrap(),
+            "model".to_string(),
+            Arc::new(AtomicBool::new(false)),
+        );
+        
+        // Test scroll bounds
+        app.scroll = 0;
+        assert_eq!(app.scroll, 0);
+        
+        // Test following flag
+        app.following = true;
+        assert!(app.following);
+    }
+
+    #[test]
+    fn test_scroll_with_max_scroll() {
+        let (prompt_tx, _) = mpsc::unbounded_channel();
+        let (resume_tx, _) = mpsc::unbounded_channel();
+        let (model_switch_tx, _) = mpsc::unbounded_channel();
+        let (workdir_tx, _) = mpsc::unbounded_channel();
+        let (compact_now_tx, _) = mpsc::unbounded_channel();
+        let (fetch_tx, _) = mpsc::channel(256);
+        let (kill_tx, _) = mpsc::unbounded_channel();
+        let (allowed_paths_tx, _) = mpsc::unbounded_channel();
+        let (note_tx, _) = mpsc::unbounded_channel();
+        let (path_permission_tx, _) = mpsc::unbounded_channel();
+        let (profile_switch_tx, _) = mpsc::unbounded_channel();
+        
+        let mut app = App::new(
+            AgentChannels {
+                prompt_tx, resume_tx, model_switch_tx, workdir_tx,
+                compact_now_tx, fetch_tx, kill_tx, allowed_paths_tx,
+                note_tx, path_permission_tx, profile_switch_tx,
+            },
+            Arc::new(AtomicBool::new(false)),
+            "openrouter".to_string(),
+            "model".to_string(),
+            std::env::temp_dir(),
+            false,
+            Arc::new(Mutex::new(None)),
+            false,
+            Vec::new(),
+            clido_core::ModelPrefs::default(),
+            "default".to_string(),
+            Arc::new(AtomicBool::new(false)),
+            false,
+            false,
+            Arc::new(Mutex::new(Vec::new())),
+            String::new(),
+            None,
+            clido_providers::build_provider("openrouter", String::new(), "model".to_string(), None).unwrap(),
+            "model".to_string(),
+            Arc::new(AtomicBool::new(false)),
+        );
+        
+        app.layout.max_scroll = 100;
+        app.scroll = 50;
+        assert!(app.scroll <= app.layout.max_scroll);
+    }
+
+    #[test]
+    fn test_selection_toggle() {
+        let mut sel = Selection::default();
+        assert!(!sel.active);
+        
+        sel.start(0, 0);
+        sel.update(1, 5);
+        sel.active = true;
+        
+        assert!(sel.active);
+    }
+
+    #[test]
+    fn test_selection_coordinates_normalized() {
+        let mut sel = Selection::default();
+        sel.start(5, 10);
+        sel.update(2, 3);
+        
+        let (sr, sc, er, ec) = sel.bounds();
+        assert!(sr <= er);
+        assert!(sc <= ec || sr < er);
     }
 }

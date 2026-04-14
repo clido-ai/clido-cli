@@ -2183,7 +2183,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             (Km::NONE, Down) => {
                 let (row, col) = app.selection.focus;
-                let max_row = app.rendered_line_texts.len().saturating_sub(1);
+                let max_row = app.content_lines.len().saturating_sub(1);
                 app.selection.update((row + 1).min(max_row), col);
                 return;
             }
@@ -2196,12 +2196,12 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             (Km::NONE, Right) => {
                 let (row, col) = app.selection.focus;
-                let max_row = app.rendered_line_texts.len().saturating_sub(1);
+                let max_row = app.content_lines.len().saturating_sub(1);
                 let line = app
-                    .rendered_line_texts
+                    .content_lines
                     .get(row.min(max_row))
-                    .map(|l| l.as_str())
-                    .unwrap_or("");
+                    .map(|l| l.plain_text())
+                    .unwrap_or_default();
                 let max_col = line.chars().count().saturating_sub(1);
                 if col < max_col {
                     app.selection.update(row.min(max_row), col + 1);
@@ -2212,7 +2212,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             (Km::NONE, Char(' ')) => {
                 let (row, col) = app.selection.focus;
-                let max_row = app.rendered_line_texts.len().saturating_sub(1);
+                let max_row = app.content_lines.len().saturating_sub(1);
                 app.selection.start(row.min(max_row), col);
                 return;
             }
@@ -2285,7 +2285,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             app.selection_mode = !app.selection_mode;
             if app.selection_mode {
                 app.selection.clear();
-                let max_row = app.rendered_line_texts.len().saturating_sub(1);
+                let max_row = app.content_lines.len().saturating_sub(1);
                 let start_row = (app.scroll as usize).min(max_row);
                 app.selection.start(start_row, 0);
                 app.push_toast(

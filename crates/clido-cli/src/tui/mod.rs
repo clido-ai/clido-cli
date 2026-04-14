@@ -1821,7 +1821,7 @@ mod tests {
     fn test_get_selected_text_single_line() {
         let mut app = create_test_app_with_wrapped_lines();
         app.selection.start(0, 0);
-        app.selection.update(0, 5);
+        app.selection.update(0, 4); // Select columns 0-4 (5 chars: "Hello")
         app.selection.active = true;
         
         let text = app.get_selected_text();
@@ -1832,11 +1832,11 @@ mod tests {
     fn test_get_selected_text_multi_line() {
         let mut app = create_test_app_with_wrapped_lines();
         app.selection.start(0, 6);
-        app.selection.update(1, 4);
+        app.selection.update(1, 3); // Select "world\nSeco"
         app.selection.active = true;
         
         let text = app.get_selected_text();
-        assert_eq!(text, "world\nSecond");
+        assert_eq!(text, "world\nSeco");
     }
 
     #[test]

@@ -70,18 +70,22 @@ pub async fn invoke_model_completion(
                 return Ok(response);
             }
             Err(e) => {
-                let error_str = e.to_string().to_lowercase();
-                // Check if error is retryable
-                let is_retryable = error_str.contains("rate limit")
-                    || error_str.contains("timeout")
-                    || error_str.contains("connection")
-                    || error_str.contains("network")
-                    || error_str.contains("json format")
-                    || error_str.contains("invalid request")
-                    || error_str.contains("server error")
-                    || error_str.contains("503")
-                    || error_str.contains("502")
-                    || error_str.contains("504");
+                // Check if error is retryable (but NOT RateLimited - that has special handling)
+                let is_retryable = match &e {
+                    clido_core::ClidoError::RateLimited { .. } => false,
+                    _ => {
+                        let error_str = e.to_string().to_lowercase();
+                        error_str.contains("timeout")
+                            || error_str.contains("connection")
+                            || error_str.contains("network")
+                            || error_str.contains("json format")
+                            || error_str.contains("invalid request")
+                            || error_str.contains("server error")
+                            || error_str.contains("503")
+                            || error_str.contains("502")
+                            || error_str.contains("504")
+                    }
+                };
                 
                 if !is_retryable {
                     return Err(e);

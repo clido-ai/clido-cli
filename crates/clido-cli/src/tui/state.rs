@@ -365,6 +365,8 @@ impl PickerItem for (String, String) {
 
 pub(crate) struct SessionPickerState {
     pub(crate) picker: ListPicker<clido_storage::SessionSummary>,
+    /// Multi-selected session IDs for bulk delete.
+    pub(crate) selected: std::collections::HashSet<String>,
 }
 
 // ── Profile picker popup state ─────────────────────────────────────────────────

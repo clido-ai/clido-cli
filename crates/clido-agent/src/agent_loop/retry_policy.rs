@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn backoff_delay_respects_cap_and_jitter() {
         let d = backoff_delay_ms(100, 0, 500, 10);
-        assert!(d >= 1 && d <= 500);
+        assert!((1..=500).contains(&d));
         let d2 = backoff_delay_ms(10_000, 7, 50, 50);
         assert_eq!(d2, 50);
     }

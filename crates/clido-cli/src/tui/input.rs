@@ -1815,18 +1815,36 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         if event.modifiers == Km::CONTROL {
             if let KeyCode::Char('d') | KeyCode::Char('D') = event.code {
                 if let Some(picker) = &mut app.session_picker {
-                    if let Some(orig_idx) = picker.picker.selected_original_index() {
-                        let sid = picker.picker.items()[orig_idx].session_id.clone();
-                        if app.current_session_id.as_deref() == Some(&sid) {
-                            app.push(ChatLine::Info("  Cannot delete the active session".into()));
-                        } else if clido_storage::delete_session(&app.workspace_root, &sid).is_ok() {
-                            picker.picker.items_mut().remove(orig_idx);
-                            picker.picker.apply_filter();
-                            if picker.picker.items().is_empty() {
-                                app.session_picker = None;
-                            }
+                    // If no multi-selection, select the current item
+                    if picker.selected.is_empty() {
+                        if let Some(s) = picker.picker.selected_item() {
+                            picker.selected.insert(s.session_id.clone());
                         }
                     }
+                    // Delete selected sessions
+                    let to_delete: Vec<String> = picker.selected.iter().cloned().collect();
+                    let mut deleted = 0;
+                    let mut skipped = 0;
+                    for sid in to_delete {
+                        if app.current_session_id.as_deref() == Some(&sid) {
+                            skipped += 1;
+                            continue; // Skip active session
+                        }
+                        if clido_storage::delete_session(&app.workspace_root, &sid).is_ok() {
+                            deleted += 1;
+                        }
+                    }
+                    if deleted > 0 {
+                        app.push(ChatLine::Info(format!("  Deleted {} sessions", deleted)));
+                    }
+                    if skipped > 0 {
+                        app.push(ChatLine::Info(format!(
+                            "  Skipped {} active session(s)",
+                            skipped
+                        )));
+                    }
+                    // Refresh the picker
+                    crate::tui::commands::cmd_sessions(app);
                 }
                 return;
             }
@@ -1850,6 +1868,25 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.session_picker = None;
                 app.text_input.text.clear();
                 app.text_input.cursor = 0;
+            }
+            KeyCode::Char(' ') => {
+                // Toggle multi-selection
+                if let Some(picker) = &mut app.session_picker {
+                    if let Some(s) = picker.picker.selected_item() {
+                        let sid = s.session_id.clone();
+                        if picker.selected.contains(&sid) {
+                            picker.selected.remove(&sid);
+                        } else {
+                            picker.selected.insert(sid);
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('c') | KeyCode::Char('C') => {
+                // Clear selection
+                if let Some(picker) = &mut app.session_picker {
+                    picker.selected.clear();
+                }
             }
             _ => {
                 if let Some(picker) = &mut app.session_picker {

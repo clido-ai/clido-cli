@@ -406,7 +406,10 @@ pub(super) fn cmd_sessions(app: &mut App) {
             // Interactive picker: resume with Enter, filter by id/title/preview, same as /model.
             let mut picker = ListPicker::new(sessions, 12);
             picker.apply_filter();
-            app.session_picker = Some(SessionPickerState { picker });
+            app.session_picker = Some(SessionPickerState {
+                picker,
+                selected: std::collections::HashSet::new(),
+            });
         }
     }
 }
@@ -3143,7 +3146,7 @@ fn find_workflow(workspace_root: &std::path::Path, name: &str) -> Option<std::pa
             }
         }
         // Try matching by workflow name field
-        if let Ok(entries) = std::fs::read_dir(&dir) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");

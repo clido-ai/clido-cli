@@ -483,8 +483,7 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
                             .and_then(|m| m.modified())
                             .ok()
                             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0))
-                            .flatten()
+                            .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0))
                             .map(|dt| dt.to_rfc3339())
                             .unwrap_or_else(|| start_time.clone());
                         // Use the filename (stem) as the session ID, not the meta session_id.

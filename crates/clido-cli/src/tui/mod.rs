@@ -1486,6 +1486,7 @@ mod tests {
                 }],
                 12,
             ),
+            selected: std::collections::HashSet::new(),
         });
         let mut terminal = test_terminal();
         terminal.draw(|f| render(f, &mut app)).unwrap();
@@ -1627,6 +1628,7 @@ mod tests {
                 ],
                 12,
             ),
+            selected: std::collections::HashSet::new(),
         });
         sim_key(&mut app, KeyCode::Down);
         assert_eq!(app.session_picker.as_ref().unwrap().picker.selected, 1);
@@ -1700,7 +1702,7 @@ mod tests {
         let mut sel = Selection::default();
         sel.start(0, 0);
         sel.update(1, 5);
-        
+
         let (sr, sc, er, ec) = sel.bounds();
         assert_eq!(sr, 0);
         assert_eq!(sc, 0);
@@ -1713,7 +1715,7 @@ mod tests {
         let mut sel = Selection::default();
         sel.start(1, 5);
         sel.update(0, 0);
-        
+
         let (sr, sc, er, ec) = sel.bounds();
         // Should normalize so start <= end
         assert_eq!(sr, 0);
@@ -1728,7 +1730,7 @@ mod tests {
         sel.start(0, 0);
         sel.update(1, 5);
         sel.clear();
-        
+
         assert!(!sel.active);
     }
 
@@ -1737,7 +1739,7 @@ mod tests {
         let mut sel = Selection::default();
         sel.start(0, 2);
         sel.update(0, 8);
-        
+
         let (sr, sc, er, ec) = sel.bounds();
         assert_eq!(sr, 0);
         assert_eq!(er, 0);
@@ -1760,7 +1762,7 @@ mod tests {
         let (note_tx, _note_rx) = mpsc::unbounded_channel();
         let (path_permission_tx, _path_permission_rx) = mpsc::unbounded_channel();
         let (profile_switch_tx, _profile_switch_rx) = mpsc::unbounded_channel();
-        
+
         let mut app = App::new(
             AgentChannels {
                 prompt_tx,
@@ -1801,7 +1803,7 @@ mod tests {
             "test-model".to_string(),
             Arc::new(AtomicBool::new(false)),
         );
-        
+
         app.wrapped_lines = vec![
             crate::tui::state::WrappedLine::new(
                 vec![ratatui::text::Span::raw("Hello world")],
@@ -1829,7 +1831,7 @@ mod tests {
         app.selection.start(0, 0);
         app.selection.update(0, 4); // Select columns 0-4 (5 chars: "Hello")
         app.selection.active = true;
-        
+
         let text = app.get_selected_text();
         assert_eq!(text, "Hello");
     }
@@ -1840,7 +1842,7 @@ mod tests {
         app.selection.start(0, 6);
         app.selection.update(1, 3); // Select "world\nSeco"
         app.selection.active = true;
-        
+
         let text = app.get_selected_text();
         assert_eq!(text, "world\nSeco");
     }
@@ -1850,12 +1852,12 @@ mod tests {
     #[test]
     fn test_cwd_template_variable() {
         use std::env;
-        
+
         // Set CLIDO_WORKDIR
         env::set_var("CLIDO_WORKDIR", "/custom/path");
         let cwd = env::var("CLIDO_WORKDIR").unwrap();
         assert_eq!(cwd, "/custom/path");
-        
+
         env::remove_var("CLIDO_WORKDIR");
     }
     #[test]
@@ -1871,12 +1873,20 @@ mod tests {
         let (note_tx, _) = mpsc::unbounded_channel();
         let (path_permission_tx, _) = mpsc::unbounded_channel();
         let (profile_switch_tx, _) = mpsc::unbounded_channel();
-        
+
         let mut app = App::new(
             AgentChannels {
-                prompt_tx, resume_tx, model_switch_tx, workdir_tx,
-                compact_now_tx, fetch_tx, kill_tx, allowed_paths_tx,
-                note_tx, path_permission_tx, profile_switch_tx,
+                prompt_tx,
+                resume_tx,
+                model_switch_tx,
+                workdir_tx,
+                compact_now_tx,
+                fetch_tx,
+                kill_tx,
+                allowed_paths_tx,
+                note_tx,
+                path_permission_tx,
+                profile_switch_tx,
             },
             Arc::new(AtomicBool::new(false)),
             "openrouter".to_string(),
@@ -1894,15 +1904,16 @@ mod tests {
             Arc::new(Mutex::new(Vec::new())),
             String::new(),
             None,
-            clido_providers::build_provider("openrouter", String::new(), "model".to_string(), None).unwrap(),
+            clido_providers::build_provider("openrouter", String::new(), "model".to_string(), None)
+                .unwrap(),
             "model".to_string(),
             Arc::new(AtomicBool::new(false)),
         );
-        
+
         // Test scroll bounds
         app.scroll = 0;
         assert_eq!(app.scroll, 0);
-        
+
         // Test following flag
         app.following = true;
         assert!(app.following);
@@ -1921,12 +1932,20 @@ mod tests {
         let (note_tx, _) = mpsc::unbounded_channel();
         let (path_permission_tx, _) = mpsc::unbounded_channel();
         let (profile_switch_tx, _) = mpsc::unbounded_channel();
-        
+
         let mut app = App::new(
             AgentChannels {
-                prompt_tx, resume_tx, model_switch_tx, workdir_tx,
-                compact_now_tx, fetch_tx, kill_tx, allowed_paths_tx,
-                note_tx, path_permission_tx, profile_switch_tx,
+                prompt_tx,
+                resume_tx,
+                model_switch_tx,
+                workdir_tx,
+                compact_now_tx,
+                fetch_tx,
+                kill_tx,
+                allowed_paths_tx,
+                note_tx,
+                path_permission_tx,
+                profile_switch_tx,
             },
             Arc::new(AtomicBool::new(false)),
             "openrouter".to_string(),
@@ -1944,11 +1963,12 @@ mod tests {
             Arc::new(Mutex::new(Vec::new())),
             String::new(),
             None,
-            clido_providers::build_provider("openrouter", String::new(), "model".to_string(), None).unwrap(),
+            clido_providers::build_provider("openrouter", String::new(), "model".to_string(), None)
+                .unwrap(),
             "model".to_string(),
             Arc::new(AtomicBool::new(false)),
         );
-        
+
         app.layout.max_scroll = 100;
         app.scroll = 50;
         assert!(app.scroll <= app.layout.max_scroll);
@@ -1958,11 +1978,11 @@ mod tests {
     fn test_selection_toggle() {
         let mut sel = Selection::default();
         assert!(!sel.active);
-        
+
         sel.start(0, 0);
         sel.update(1, 5);
         sel.active = true;
-        
+
         assert!(sel.active);
     }
 
@@ -1971,7 +1991,7 @@ mod tests {
         let mut sel = Selection::default();
         sel.start(5, 10);
         sel.update(2, 3);
-        
+
         let (sr, sc, er, ec) = sel.bounds();
         assert!(sr <= er);
         assert!(sc <= ec || sr < er);

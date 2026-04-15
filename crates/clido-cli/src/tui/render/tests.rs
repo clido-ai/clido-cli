@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod unified_renderer_tests {
-    use crate::tui::render::{render_chat_to_content_lines, wrap_content_lines};
-    use crate::tui::state::{ChatLine, ContentLine, LineSource};
+    use crate::tui::render::render_chat_to_content_lines;
+    use crate::tui::state::{ChatLine, LineSource};
 
     #[test]
     fn test_render_user_message() {
         let messages = vec![ChatLine::User("Hello world".to_string())];
         let lines = render_chat_to_content_lines(&messages, 80, "test-model");
-        
+
         assert!(lines.len() >= 3);
         assert_eq!(lines[0].source, LineSource::User);
         assert!(!lines[0].selectable);
@@ -18,7 +18,7 @@ mod unified_renderer_tests {
     fn test_render_assistant_message() {
         let messages = vec![ChatLine::Assistant("Response text".to_string())];
         let lines = render_chat_to_content_lines(&messages, 80, "claude");
-        
+
         assert!(lines.len() >= 3);
         assert_eq!(lines[0].source, LineSource::Assistant);
     }
@@ -27,7 +27,7 @@ mod unified_renderer_tests {
     fn test_render_thinking_message() {
         let messages = vec![ChatLine::Thinking("Thinking...".to_string())];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(!lines.is_empty());
         assert_eq!(lines[0].source, LineSource::Thinking);
     }
@@ -36,7 +36,7 @@ mod unified_renderer_tests {
     fn test_render_info_message() {
         let messages = vec![ChatLine::Info("Info text".to_string())];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(!lines.is_empty());
         assert_eq!(lines[0].source, LineSource::Info);
     }
@@ -45,7 +45,7 @@ mod unified_renderer_tests {
     fn test_render_section_message() {
         let messages = vec![ChatLine::Section("Section Header".to_string())];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(!lines.is_empty());
         assert_eq!(lines[0].source, LineSource::Section);
     }
@@ -60,7 +60,7 @@ mod unified_renderer_tests {
             is_error: false,
         }];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(!lines.is_empty());
         assert_eq!(lines[0].source, LineSource::ToolCall);
     }
@@ -70,7 +70,7 @@ mod unified_renderer_tests {
         let diff_text = "+ added line\n- removed line".to_string();
         let messages = vec![ChatLine::Diff(diff_text)];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(lines.len() >= 3);
         assert_eq!(lines[0].source, LineSource::Diff);
     }
@@ -82,7 +82,7 @@ mod unified_renderer_tests {
             text: Some("Do something".to_string()),
         }];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(!lines.is_empty());
         assert_eq!(lines[0].source, LineSource::User);
     }
@@ -91,7 +91,7 @@ mod unified_renderer_tests {
     fn test_render_empty_messages() {
         let messages: Vec<ChatLine> = vec![];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(lines.is_empty());
     }
 
@@ -103,7 +103,7 @@ mod unified_renderer_tests {
             ChatLine::Info("Note".to_string()),
         ];
         let lines = render_chat_to_content_lines(&messages, 80, "model");
-        
+
         assert!(lines.len() > 6);
     }
 
@@ -112,7 +112,7 @@ mod unified_renderer_tests {
         let long_text = "a".repeat(200);
         let messages = vec![ChatLine::User(long_text)];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         // Should create multiple content lines due to wrapping
         assert!(lines.len() > 3);
     }
@@ -122,7 +122,7 @@ mod unified_renderer_tests {
         let md_text = "# Heading\n\n**bold** and *italic*".to_string();
         let messages = vec![ChatLine::Assistant(md_text)];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(lines.len() > 3);
     }
 
@@ -131,7 +131,7 @@ mod unified_renderer_tests {
         let code = "```rust\nfn main() {}\n```".to_string();
         let messages = vec![ChatLine::Assistant(code)];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(lines.len() >= 3);
     }
 
@@ -140,7 +140,7 @@ mod unified_renderer_tests {
         let list = "- Item 1\n- Item 2\n- Item 3".to_string();
         let messages = vec![ChatLine::Assistant(list)];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(lines.len() >= 4);
     }
 
@@ -149,7 +149,7 @@ mod unified_renderer_tests {
         let table = "| Col1 | Col2 |\n|------|------|\n| A    | B    |".to_string();
         let messages = vec![ChatLine::Assistant(table)];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(!lines.is_empty());
     }
 }
@@ -168,7 +168,7 @@ mod wrapped_line_tests {
             true,
             0,
         )];
-        
+
         let wrapped = wrap_content_lines(&content_lines, 80);
         assert_eq!(wrapped.len(), 1);
     }
@@ -182,7 +182,7 @@ mod wrapped_line_tests {
             true,
             0,
         )];
-        
+
         let wrapped = wrap_content_lines(&content_lines, 40);
         assert!(wrapped.len() > 1);
     }
@@ -196,7 +196,7 @@ mod wrapped_line_tests {
             true,
             0,
         )];
-        
+
         let wrapped = wrap_content_lines(&content_lines, 80);
         assert_eq!(wrapped.len(), 1);
     }
@@ -209,7 +209,7 @@ mod wrapped_line_tests {
             true,
             0,
         )];
-        
+
         let wrapped = wrap_content_lines(&content_lines, 80);
         assert_eq!(wrapped[0].source, LineSource::Assistant);
         assert!(wrapped[0].selectable);
@@ -222,7 +222,7 @@ mod wrapped_line_tests {
             ContentLine::new(vec![Span::raw("Line 1")], LineSource::User, true, 0),
             ContentLine::new(vec![Span::raw("Line 2")], LineSource::Assistant, true, 1),
         ];
-        
+
         let wrapped = wrap_content_lines(&content_lines, 80);
         assert!(wrapped.len() >= 2);
     }
@@ -236,20 +236,15 @@ mod wrapped_line_tests {
             true,
             0,
         )];
-        
+
         let wrapped = wrap_content_lines(&content_lines, 10);
         assert!(!wrapped.is_empty());
     }
 
     #[test]
     fn test_wrap_empty_line() {
-        let content_lines = vec![ContentLine::new(
-            vec![],
-            LineSource::User,
-            true,
-            0,
-        )];
-        
+        let content_lines = vec![ContentLine::new(vec![], LineSource::User, true, 0)];
+
         let wrapped = wrap_content_lines(&content_lines, 80);
         // Empty lines might be skipped or produce empty wrapped line
         assert!(wrapped.is_empty() || wrapped[0].plain_text().is_empty());
@@ -264,7 +259,7 @@ mod wrapped_line_tests {
             true,
             0,
         )];
-        
+
         let wrapped = wrap_content_lines(&content_lines, 10);
         assert!(wrapped.len() > 1);
         // Each wrapped line should have increasing char_offset
@@ -283,7 +278,7 @@ mod edge_case_tests {
     fn test_render_empty_string() {
         let messages = vec![ChatLine::User("".to_string())];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         // Should still have header and blank line
         assert!(!lines.is_empty());
     }
@@ -292,7 +287,7 @@ mod edge_case_tests {
     fn test_render_whitespace_only() {
         let messages = vec![ChatLine::User("   ".to_string())];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(!lines.is_empty());
     }
 
@@ -300,7 +295,7 @@ mod edge_case_tests {
     fn test_render_newlines_only() {
         let messages = vec![ChatLine::User("\n\n\n".to_string())];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(!lines.is_empty());
     }
 
@@ -309,7 +304,7 @@ mod edge_case_tests {
         let word = "a".repeat(1000);
         let messages = vec![ChatLine::User(word)];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(lines.len() > 3);
     }
 
@@ -318,7 +313,7 @@ mod edge_case_tests {
         let special = "<>&\"'\n\t\r".to_string();
         let messages = vec![ChatLine::User(special)];
         let lines = render_chat_to_content_lines(&messages, 80, "");
-        
+
         assert!(!lines.is_empty());
     }
 
@@ -326,7 +321,7 @@ mod edge_case_tests {
     fn test_render_zero_width() {
         let messages = vec![ChatLine::User("test".to_string())];
         let lines = render_chat_to_content_lines(&messages, 0, "");
-        
+
         // Should handle gracefully
         assert!(!lines.is_empty());
     }

@@ -1022,8 +1022,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]));
         content.push(Line::from(vec![Span::styled(
-            "  ────────  ────  ──────────────────────────  ────────────────────"
-                .to_string(),
+            "  ────────  ────  ──────────────────────────  ────────────────────".to_string(),
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]));
 
@@ -1032,14 +1031,15 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             .iter()
             .enumerate()
         {
-            let selected = picker.picker.scroll_offset + di == picker.picker.selected;
-            let bg = if selected {
+            let cursor_selected = picker.picker.scroll_offset + di == picker.picker.selected;
+            let is_multi_selected = picker.selected.contains(&s.session_id);
+            let bg = if cursor_selected {
                 TUI_SELECTION_BG
             } else {
                 Color::Reset
             };
             let base_style = Style::default().bg(bg);
-            let row_style = if selected {
+            let row_style = if cursor_selected {
                 base_style.fg(TUI_TEXT).add_modifier(Modifier::BOLD)
             } else {
                 base_style.fg(TUI_TEXT).add_modifier(Modifier::DIM)
@@ -1064,13 +1064,15 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 _ => s.preview.clone(),
             };
             let name_trunc: String = name_part.chars().take(name_w).collect();
-            let marker = if selected { "▶ " } else { "  " };
+            let check = if is_multi_selected { "☑ " } else { "☐ " };
+            let marker = if cursor_selected { "▶ " } else { "  " };
             // Only show turns, not cost - we can't reliably determine if this session
             // used subscription or on-demand pricing, and stored costs may be inaccurate
             content.push(Line::from(vec![Span::styled(
                 format!(
-                    "{}{id_cell}  {:>3}t  {:<w$}  {}",
+                    "{}{}{id_cell}  {:>3}t  {:<w$}  {}",
                     marker,
+                    check,
                     s.num_turns,
                     when_str,
                     name_trunc,
@@ -1090,8 +1092,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         }
 
         let total = filtered.len();
-        let picker_title = format!(" Sessions — {} total ", total);
-        let hint = " ↑↓ navigate · Enter resume · Ctrl+D delete · type to filter (id, title, preview) · Esc close ";
+        let selected_count = picker.selected.len();
+        let picker_title = if selected_count > 0 {
+            format!(" Sessions — {} total, {} selected ", total, selected_count)
+        } else {
+            format!(" Sessions — {} total ", total)
+        };
+        let hint = " ↑↓ navigate · Enter resume · Space toggle · Ctrl+D delete selected · c clear · type to filter · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block_with_hint(
@@ -1987,9 +1994,9 @@ fn wrap_content_lines(
 
         for span in &line.spans {
             let span_text = span.content.as_ref();
-            let mut span_chars = span_text.chars().peekable();
+            let span_chars = span_text.chars().peekable();
 
-            while let Some(ch) = span_chars.next() {
+            for ch in span_chars {
                 let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
 
                 if current_col + ch_width > width && current_col > 0 {

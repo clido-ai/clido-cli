@@ -22,31 +22,86 @@ pub async fn invoke_model_completion(
     throttle::throttle_before_complete(last_complete_end, config.provider_min_request_interval_ms)
         .await;
 
-    let response = if config.stream_model_completion {
-        let stream = provider.complete_stream(messages, tools, config).await?;
-        let r = stream_aggregate::collect_stream_to_model_response(
-            stream,
-            config.model.clone(),
-            emit,
-            cancel,
-        )
-        .await?;
-        throttle::mark_complete_finished(last_complete_end);
-        r
-    } else {
-        if cancel
-            .as_ref()
-            .map(|c| c.load(Ordering::Relaxed))
-            .unwrap_or(false)
-        {
-            return Err(clido_core::ClidoError::Interrupted);
+    const MAX_RETRIES: u32 = 3;
+    let mut last_error = None;
+    
+    for attempt in 0..MAX_RETRIES {
+        if attempt > 0 {
+            // Exponential backoff: 1s, 2s, 4s
+            let delay_ms = 1000 * (1 << attempt);
+            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+            
+            if let Some(ref e) = emit {
+                e.on_assistant_text(&format!("[Provider error, retrying {}/{}...]", attempt, MAX_RETRIES)).await;
+            }
         }
-        let r = provider.complete(messages, tools, config).await?;
-        throttle::mark_complete_finished(last_complete_end);
-        r
-    };
 
-    Ok(response)
+        let result = if config.stream_model_completion {
+            let stream = provider.complete_stream(messages, tools, config).await;
+            match stream {
+                Ok(s) => {
+                    let r = stream_aggregate::collect_stream_to_model_response(
+                        s,
+                        config.model.clone(),
+                        emit.clone(),
+                        cancel.clone(),
+                    ).await;
+                    match r {
+                        Ok(resp) => Ok(resp),
+                        Err(e) => Err(e),
+                    }
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            if cancel
+                .as_ref()
+                .map(|c| c.load(Ordering::Relaxed))
+                .unwrap_or(false)
+            {
+                return Err(clido_core::ClidoError::Interrupted);
+            }
+            provider.complete(messages, tools, config).await
+        };
+
+        match result {
+            Ok(response) => {
+                throttle::mark_complete_finished(last_complete_end);
+                return Ok(response);
+            }
+            Err(e) => {
+                let error_str = e.to_string().to_lowercase();
+                // Check if error is retryable
+                let is_retryable = error_str.contains("rate limit")
+                    || error_str.contains("timeout")
+                    || error_str.contains("connection")
+                    || error_str.contains("network")
+                    || error_str.contains("json format")
+                    || error_str.contains("invalid request")
+                    || error_str.contains("server error")
+                    || error_str.contains("503")
+                    || error_str.contains("502")
+                    || error_str.contains("504");
+                
+                if !is_retryable {
+                    return Err(e);
+                }
+                
+                last_error = Some(e);
+            }
+        }
+    }
+
+    // All retries exhausted
+    if let Some(e) = last_error {
+        Err(clido_core::ClidoError::Provider(
+            format!("Failed after {} retries: {}", MAX_RETRIES, e),
+        ))
+    } else {
+        Err(clido_core::ClidoError::Provider(
+            "Failed after retries".to_string(),
+        ))
+    }
 }
 
 #[cfg(test)]

@@ -3490,13 +3490,14 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
                             WORKFLOW NAME: {name}\n\n\
                             USER'S REQUEST: {description}\n\n\
                             CURRENT WORKFLOW YAML:\n```yaml\n{content}\n```\n\n\
-                            IMPORTANT INSTRUCTIONS:\n\
-                            1. Your ONLY task is to edit this specific workflow based on the user's request.\n\
-                            2. Do NOT do anything else - do not modify other files, do not run tools, do not ask questions.\n\
-                            3. Return ONLY the complete updated workflow YAML.\n\
-                            4. Preserve the workflow structure and ensure the YAML is valid.\n\
-                            5. Wrap the YAML in a ```yaml code block.\n\
-                            6. Do not add explanations or commentary outside the code block.",
+                            CRITICAL CONSTRAINTS:\n\
+                            1. Your ONLY task is to edit THIS workflow file.\n\
+                            2. Do NOT read, write, or modify ANY other files in the project.\n\
+                            3. Do NOT explore the codebase or analyze project structure.\n\
+                            4. Do NOT run any tools like Read, Write, Edit, Bash, etc.\n\
+                            5. Work ONLY with the workflow YAML provided above.\n\
+                            6. Return ONLY the complete updated workflow YAML in a ```yaml code block.\n\
+                            7. No explanations, no commentary, no questions.",
                             name = name,
                             description = description,
                             content = content

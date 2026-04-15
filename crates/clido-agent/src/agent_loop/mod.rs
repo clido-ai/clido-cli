@@ -1720,14 +1720,20 @@ impl AgentLoop {
                         let tool_names: Vec<&str> =
                             tool_uses.iter().map(|(_, n, _)| n.as_str()).collect();
                         let tool_list = tool_names.join(", ");
-                        return Err(ClidoError::StallDetected {
-                            reason: format!(
-                                "tool stall score {} reached threshold {} (repeated batches or all-error rounds). Tools: {}. Try /stop and rephrase your request, or use /note to guide the agent.",
+                        
+                        // Send warning to user but continue
+                        if let Some(ref e) = self.emit {
+                            let warning = format!(
+                                "⚠️ Agent appears stalled (score {}/{}). Tools: {}. Continuing anyway - use /stop if you want to intervene.",
                                 self.stall.score(),
                                 self.config.stall_threshold,
                                 tool_list
-                            ),
-                        });
+                            );
+                            e.on_assistant_text(&warning).await;
+                        }
+                        
+                        // Reset stall score to allow continuation
+                        self.stall.reset();
                     }
 
                     let mut tool_results = Vec::new();

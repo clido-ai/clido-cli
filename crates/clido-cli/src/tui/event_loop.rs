@@ -2783,6 +2783,24 @@ pub(super) async fn event_loop(
                     }) => {
                         last_agent_activity = std::time::Instant::now();
                         app.turn_tool_tally.record(&name);
+                        
+                        // Update current_step if not set, based on tool name
+                        if app.current_step.is_none() {
+                            let tool_desc = match name.as_str() {
+                                "Read" => "Reading files",
+                                "Write" => "Writing files",
+                                "Edit" => "Editing files",
+                                "Bash" => "Running commands",
+                                "WebSearch" => "Searching web",
+                                "WebFetch" => "Fetching web content",
+                                "SpawnReviewer" => "Reviewing code",
+                                "ListDir" => "Listing directory",
+                                "Grep" => "Searching code",
+                                _ => &name,
+                            };
+                            app.current_step = Some(format!("{}...", tool_desc));
+                        }
+                        
                         // Format detail from JSON to human-readable
                         let detail_formatted = format_tool_detail(&name, &detail);
                         app.push_status(

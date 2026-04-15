@@ -169,7 +169,7 @@ pub(crate) fn gather_plan_panel_steps(app: &App) -> Vec<PlanPanelStep> {
         // Fallback: show that agent is working even if no step was extracted
         return vec![PlanPanelStep {
             status: PlanPanelStepStatus::Active,
-            text: "Analyzing and planning...".to_string(),
+            text: "Working...".to_string(),
         }];
     }
 

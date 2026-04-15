@@ -5,6 +5,8 @@
 //! on the right. Below the threshold, falls back to the standard inline unified
 //! diff view.
 
+#![allow(dead_code)]
+
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},

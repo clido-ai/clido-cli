@@ -1241,14 +1241,18 @@ pub(crate) struct WrappedLine {
     /// The text content with styles for this wrapped segment
     pub spans: Vec<Span<'static>>,
     /// Source of this line
+    #[allow(dead_code)]
     pub source: LineSource,
     /// Whether this line can be selected
     pub selectable: bool,
     /// Original message index
+    #[allow(dead_code)]
     pub msg_idx: usize,
     /// Which content line this wrapped segment came from
+    #[allow(dead_code)]
     pub content_line_idx: usize,
     /// Character offset within the original content line
+    #[allow(dead_code)]
     pub char_offset: usize,
 }
 
@@ -1273,11 +1277,13 @@ impl WrappedLine {
     }
 
     /// Get plain text content
+    #[allow(dead_code)]
     pub fn plain_text(&self) -> String {
         self.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
     /// Get display width
+    #[allow(dead_code)]
     pub fn width(&self) -> usize {
         self.spans.iter().map(|s| s.content.width()).sum()
     }

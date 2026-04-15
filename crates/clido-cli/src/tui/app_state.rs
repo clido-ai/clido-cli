@@ -277,6 +277,8 @@ pub(super) struct App {
     pub(super) workflow_editor_path: Option<std::path::PathBuf>,
     /// State for a workflow currently running in the background.
     pub(super) active_workflow: Option<ActiveWorkflow>,
+    /// Pending agent-driven workflow edit — stores the path to save to after agent responds.
+    pub(super) pending_workflow_agent_edit: Option<std::path::PathBuf>,
 
     /// Rate-limit auto-resume: when the agent hits a rate limit with a known
     /// retry_after, we set a timer. When it expires the agent is automatically
@@ -433,6 +435,7 @@ impl App {
             max_budget_usd: budget,
             workflow_editor: None,
             workflow_editor_path: None,
+            pending_workflow_agent_edit: None,
             active_workflow: None,
             rate_limit_resume_at: None,
             rate_limit_cancelled: false,

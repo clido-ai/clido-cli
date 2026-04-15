@@ -3181,7 +3181,7 @@ fn find_workflow(workspace_root: &std::path::Path, name: &str) -> Option<std::pa
 }
 
 /// Extract the last YAML code block from assistant messages in the chat.
-fn extract_last_yaml_from_chat(messages: &[ChatLine]) -> Option<String> {
+pub(super) fn extract_last_yaml_from_chat(messages: &[ChatLine]) -> Option<String> {
     for msg in messages.iter().rev() {
         let text = match msg {
             ChatLine::Assistant(t) => t,
@@ -3387,6 +3387,9 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
                 "  /workflow edit [name]  open in text editor".into(),
             ));
             app.push(ChatLine::Info(
+                "  /workflow agent-edit <name> <desc>  edit with AI assistance".into(),
+            ));
+            app.push(ChatLine::Info(
                 "  /workflow save [name]  save last YAML from chat".into(),
             ));
             app.push(ChatLine::Info(
@@ -3436,6 +3439,71 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
                     app.push(ChatLine::Info(format!(
                         "  ✗ Workflow '{name}' not found. Use /workflow list to see available workflows."
                     )));
+                }
+            }
+        }
+        _ if sub.starts_with("agent-edit") => {
+            // Agent-driven workflow editing
+            let rest = sub.trim_start_matches("agent-edit").trim();
+            if rest.is_empty() {
+                app.push(ChatLine::Info(
+                    "  Usage: /workflow agent-edit <name> <description of changes>".into(),
+                ));
+                return;
+            }
+
+            // Parse: first token = workflow name, rest = description
+            let mut tokens = rest.splitn(2, ' ');
+            let name = tokens.next().unwrap_or("").trim();
+            let description = tokens.next().unwrap_or("").trim();
+
+            if name.is_empty() {
+                app.push(ChatLine::Info(
+                    "  Usage: /workflow agent-edit <name> <description of changes>".into(),
+                ));
+                return;
+            }
+
+            if description.is_empty() {
+                app.push(ChatLine::Info(
+                    "  Usage: /workflow agent-edit <name> <description of changes>".into(),
+                ));
+                app.push(ChatLine::Info(
+                    "  Example: /workflow agent-edit sa2 'Add a step to run tests before deployment'".into(),
+                ));
+                return;
+            }
+
+            // Find the workflow
+            match find_workflow(&app.workspace_root, name) {
+                Some(path) => match std::fs::read_to_string(&path) {
+                    Ok(content) => {
+                        // Store the path for later saving (after agent responds)
+                        app.pending_workflow_agent_edit = Some(path.clone());
+
+                        // Send to agent for editing
+                        let prompt = format!(
+                            "Edit the following workflow based on the user's request.\n\n\
+                            User's request: {description}\n\n\
+                            Current workflow YAML:\n```yaml\n{content}\n```\n\n\
+                            Please provide the complete updated workflow YAML. \
+                            Make the requested changes while preserving the workflow structure and validity. \
+                            Return ONLY the YAML content in a ```yaml code block, no explanations.",
+                            description = description,
+                            content = content
+                        );
+
+                        app.push(ChatLine::Info(format!(
+                            "  ✦ Editing workflow '{name}' with AI…"
+                        )));
+                        app.send_now(prompt);
+                    }
+                    Err(e) => {
+                        app.push(ChatLine::Info(format!("  ✗ Failed to read: {e}")));
+                    }
+                },
+                None => {
+                    app.push(ChatLine::Info(format!("  ✗ Workflow '{name}' not found.")));
                 }
             }
         }

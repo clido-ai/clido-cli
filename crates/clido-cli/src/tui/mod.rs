@@ -20,8 +20,8 @@ pub(crate) use event_loop::run_tui;
 // Re-export submodule items so they are accessible via `use super::*;` in sibling modules.
 #[allow(unused_imports)]
 use commands::{
-    execute_slash, is_known_slash_cmd, parse_per_turn_model, slash_completion_rows,
-    slash_completions, CompletionRow,
+    execute_slash, extract_last_yaml_from_chat, is_known_slash_cmd, parse_per_turn_model,
+    slash_completion_rows, slash_completions, CompletionRow,
 };
 #[allow(unused_imports)]
 use event_loop::{

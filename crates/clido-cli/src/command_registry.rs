@@ -503,6 +503,14 @@ pub static COMMANDS: &[SlashCommand] = &[
         requires_idle: false,
     },
     SlashCommand {
+        name: "/workflow agent-edit",
+        section: "Workflow",
+        description: "edit a workflow using AI - describe changes in natural language",
+        usage: Some("/workflow agent-edit <name> <description of changes>"),
+        takes_args: true,
+        requires_idle: false,
+    },
+    SlashCommand {
         name: "/workflow save",
         section: "Workflow",
         description: "save the last workflow YAML from chat to .clido/workflows/",

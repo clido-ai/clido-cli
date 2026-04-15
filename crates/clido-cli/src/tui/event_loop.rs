@@ -2866,6 +2866,42 @@ pub(super) async fn event_loop(
                             // Continue to show the response as Assistant message
                         }
 
+                        // Check if we're waiting for agent-driven workflow edit
+                        if let Some(workflow_path) = app.pending_workflow_agent_edit.take() {
+                            // Try to extract YAML from the response
+                            if let Some(yaml) = extract_last_yaml_from_chat(&[ChatLine::Assistant(text.clone())]) {
+                                // Validate the YAML
+                                match serde_yaml::from_str::<clido_workflows::WorkflowDef>(&yaml) {
+                                    Ok(def) => {
+                                        // Ask user for confirmation before saving
+                                        app.push(ChatLine::Info(format!(
+                                            "  ✓ Agent has edited workflow '{}'. Review the changes above.",
+                                            def.name
+                                        )));
+                                        app.push(ChatLine::Info(
+                                            "  Type '/workflow save' to save the changes, or edit further with '/workflow edit'.".into()
+                                        ));
+                                        // Store the edited YAML in the editor for review
+                                        app.workflow_editor = Some(crate::tui::state::PlanTextEditor::from_raw(&yaml));
+                                        app.workflow_editor_path = Some(workflow_path);
+                                    }
+                                    Err(e) => {
+                                        app.push(ChatLine::Info(format!(
+                                            "  ✗ Agent returned invalid workflow YAML: {}",
+                                            e
+                                        )));
+                                        app.push(ChatLine::Info(
+                                            "  The edited workflow is shown above. You can manually fix it with '/workflow edit'.".into()
+                                        ));
+                                    }
+                                }
+                            } else {
+                                app.push(ChatLine::Info(
+                                    "  ✗ Could not extract YAML from agent response. Showing response for manual review.".into()
+                                ));
+                            }
+                        }
+
                         if let Some((num, step)) = extract_current_step_full(&text) {
                             app.current_step = Some(step);
                             app.last_executed_step_num = Some(num);

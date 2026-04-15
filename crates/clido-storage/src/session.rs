@@ -147,6 +147,8 @@ pub struct SessionSummary {
     pub session_id: String,
     pub project_path: String,
     pub start_time: String,
+    pub created_at: String,
+    pub last_edited: String,
     pub num_turns: u32,
     pub total_cost_usd: f64,
     pub preview: String,
@@ -447,7 +449,7 @@ pub fn delete_empty_sessions(project_path: &Path) -> anyhow::Result<usize> {
     Ok(deleted)
 }
 
-/// List sessions for a project (newest first). Reads session dir and parses first line for meta.
+/// List sessions for a project (last edited first). Reads session dir and parses first line for meta.
 pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>> {
     let dir = paths::session_dir_for_project(project_path)?;
     if !dir.exists() {
@@ -475,12 +477,24 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
                         if num_turns == 0 {
                             continue;
                         }
+                        // Get last modified time from filesystem as last_edited
+                        let last_edited = path
+                            .metadata()
+                            .and_then(|m| m.modified())
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0))
+                            .flatten()
+                            .map(|dt| dt.to_rfc3339())
+                            .unwrap_or_else(|| start_time.clone());
                         // Use the filename (stem) as the session ID, not the meta session_id.
                         // This ensures consistency when resuming sessions.
                         summaries.push(SessionSummary {
                             session_id: stem.to_string(),
                             project_path: proj.clone(),
                             start_time: start_time.clone(),
+                            created_at: start_time.clone(),
+                            last_edited: last_edited.clone(),
                             num_turns,
                             total_cost_usd,
                             preview,
@@ -491,7 +505,8 @@ pub fn list_sessions(project_path: &Path) -> anyhow::Result<Vec<SessionSummary>>
             }
         }
     }
-    summaries.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+    // Sort by last_edited (most recent first)
+    summaries.sort_by(|a, b| b.last_edited.cmp(&a.last_edited));
     Ok(summaries)
 }
 

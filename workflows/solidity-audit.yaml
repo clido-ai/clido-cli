@@ -1687,147 +1687,265 @@ steps:
       }
 
   # ───────────────────────────────────────────────────────────────────────────
-  # STAGE 6 · Proof of Concept
-  # For each confirmed finding (main + gap), write a Foundry test that proves
-  # exploitability. Runs `forge test`. Reports pass/fail per PoC.
+  # STAGE 6 · Proof of Concept Chain
+  # Multi-agent retry chain per finding: sonnet (3x) → haiku (3x) → opus (1x)
+  # Each finding gets multiple attempts before moving to next.
   # ───────────────────────────────────────────────────────────────────────────
-  - id: poc
-    name: "Stage 6 · Proof of Concept"
-    profile: opus
-    tools: ["read", "glob", "bash"]
-    max_turns: 50
+
+  # Phase 6a: Scaffold generation (creates base test structure)
+  - id: poc_scaffold
+    name: "Stage 6a · PoC Scaffold"
+    profile: sonnet
+    tools: ["read", "glob", "bash", "write"]
+    max_turns: 30
     on_error: continue
     system_prompt: |
-      You are a Solidity exploit developer writing proof-of-concept test contracts.
-      You write real, runnable Foundry tests. You read the actual source contracts
-      before writing any test. You always include the full import path. You run
-      `forge test` to check compilation and correctness, and iterate to fix errors.
+      You are a Solidity test scaffold generator. You create the base test file structure
+      for each finding. You do NOT write the full exploit - just the scaffolding:
+      imports, setUp(), helper contracts, and empty test functions.
+      This scaffold will be used by subsequent agents to write the actual exploit.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/poc-scaffolds.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+
+      Read confirmed findings: {{ inputs.repo_path }}/.clido-audit/findings.json
+      Read gap findings: {{ inputs.repo_path }}/.clido-audit/gap_findings.json
+
+      For each confirmed finding (confirmed: true), create a scaffold test file.
+
+      SCAFFOLD STRUCTURE (save to test/audit/Audit_<FindingId>.t.sol):
+      ```solidity
+      // SPDX-License-Identifier: MIT
+      pragma solidity ^0.8.x;
+
+      import "forge-std/Test.sol";
+      import "forge-std/console.sol";
+      // TODO: Add target contract imports based on finding.entry_point
+
+      contract Audit_<FindingId>_PoC is Test {
+          // TODO: Protocol contracts (to be filled by exploit writer)
+          // TODO: Attacker contract (if needed)
+
+          address alice = makeAddr("alice");
+          address bob = makeAddr("bob");
+
+          function setUp() public {
+              // TODO: Deploy protocol, fund accounts
+          }
+
+          function test_exploit_<findingId>() public {
+              // TODO: Implement exploit (to be written by subsequent agent)
+          }
+      }
+      ```
+
+      For each finding, output:
+      - finding_id
+      - scaffold_file path
+      - target_contracts to import
+      - entry_point function
+
+      OUTPUT: JSON array of scaffold entries.
+
+  # Phase 6b: PoC Write - Attempt 1 (Sonnet, 3 retries)
+  - id: poc_write_1
+    name: "Stage 6b · PoC Write (Sonnet)"
+    profile: sonnet
+    tools: ["read", "glob", "bash", "write", "edit"]
+    max_turns: 50
+    on_error: retry
+    retry:
+      max_attempts: 3
+      backoff: linear
+    system_prompt: |
+      You are a Solidity exploit developer. You write proof-of-concept tests that prove
+      findings are exploitable. You read the scaffold, implement the exploit in the
+      test function, run forge test, and iterate until it passes.
+      CRITICAL: If test fails, read the error, fix the code, and retry. Do NOT give up.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/poc-attempt-1.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.rpc_url != "" %}RPC URL: {{ inputs.rpc_url }}{% endif %}
+
+      Read findings: {{ inputs.repo_path }}/.clido-audit/findings.json
+      Read gap_findings: {{ inputs.repo_path }}/.clido-audit/gap_findings.json
+      Read scaffolds: {{ inputs.repo_path }}/.clido-audit/poc-scaffolds.json
+
+      MISSION: For each confirmed finding, write a COMPLETE working PoC test.
+
+      PROCESS PER FINDING:
+      1. Read the scaffold file (test/audit/Audit_<FindingId>.t.sol)
+      2. Read the target contract source code
+      3. Implement the full exploit in test_exploit_<findingId>():
+         - Complete the setUp() function
+         - Write all attack steps based on finding.attack_path
+         - Add proper assertions that prove the exploit
+      4. Run: forge test --match-path "test/audit/Audit_<FindingId>.t.sol" -vvv
+      5. IF TEST FAILS:
+         - Read the error output carefully
+         - Fix the issue (imports, syntax, logic, assertions)
+         - Re-run the test
+         - Repeat up to 3 times per finding
+      6. IF TEST PASSES: Mark as "passed"
+
+      SUCCESS CRITERIA (must report for each finding):
+      - poc_written: true if file exists
+      - compiled: true if forge build succeeds
+      - test_passed: true if forge test passes
+      - attempts: number of iterations needed (1-3)
+
+      OUTPUT: JSON array with one entry per finding:
+      [
+        {
+          "finding_id": "F-01",
+          "attempt": 1,
+          "agent": "sonnet",
+          "poc_written": true,
+          "compiled": true,
+          "test_passed": true|false,
+          "attempts_needed": 1,
+          "error": "error message if failed"
+        }
+      ]
+
+  # Phase 6c: PoC Write - Attempt 2 (Haiku, 3 retries) - for failed PoCs from attempt 1
+  - id: poc_write_2
+    name: "Stage 6c · PoC Write (Haiku Retry)"
+    profile: haiku
+    tools: ["read", "glob", "bash", "write", "edit"]
+    max_turns: 50
+    on_error: retry
+    retry:
+      max_attempts: 3
+      backoff: linear
+    system_prompt: |
+      You are a Solidity exploit developer. Previous agents failed to create working PoCs.
+      Your job is to retry the FAILED findings with a fresh approach. Read the previous
+      errors, fix the issues, and make the tests pass. Do NOT skip any finding.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/poc-attempt-2.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.rpc_url != "" %}RPC URL: {{ inputs.rpc_url }}{% endif %}
+
+      Read previous attempt results: {{ inputs.repo_path }}/.clido-audit/poc-attempt-1.json
+      Read findings: {{ inputs.repo_path }}/.clido-audit/findings.json
+      Read gap_findings: {{ inputs.repo_path }}/.clido-audit/gap_findings.json
+
+      MISSION: Retry ONLY the findings that FAILED in attempt 1.
+
+      For each finding where test_passed: false (or not present):
+      1. Read the previous error message
+      2. Read the existing (broken) test file if it exists
+      3. Either fix it OR rewrite from scratch
+      4. Run forge test until it passes or you've tried 3 times
+
+      OUTPUT: JSON array with results for ALL findings (passed ones copy from attempt 1):
+      [
+        {
+          "finding_id": "F-01",
+          "attempt": 2,
+          "agent": "haiku",
+          "poc_written": true,
+          "compiled": true,
+          "test_passed": true|false,
+          "attempts_needed": 1,
+          "cumulative_attempts": 2,
+          "error": "error if still failing"
+        }
+      ]
+
+  # Phase 6d: PoC Write - Attempt 3 (Opus escalation, 1 retry) - final attempt for critical findings
+  - id: poc_write_3
+    name: "Stage 6d · PoC Write (Opus Escalation)"
+    profile: opus
+    tools: ["read", "glob", "bash", "write", "edit"]
+    max_turns: 60
+    on_error: retry
+    retry:
+      max_attempts: 2
+      backoff: linear
+    system_prompt: |
+      You are a senior Solidity security expert. This is the FINAL escalation attempt.
+      Previous agents (sonnet, haiku) failed to create working PoCs. Use your superior
+      reasoning to diagnose why they failed and create working exploits.
+      Focus on High and Medium severity findings first.
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/poc-attempt-3.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+      {% if inputs.rpc_url != "" %}RPC URL: {{ inputs.rpc_url }}{% endif %}
+
+      Read attempt 1: {{ inputs.repo_path }}/.clido-audit/poc-attempt-1.json
+      Read attempt 2: {{ inputs.repo_path }}/.clido-audit/poc-attempt-2.json
+      Read findings: {{ inputs.repo_path }}/.clido-audit/findings.json
+      Read gap_findings: {{ inputs.repo_path }}/.clido-audit/gap_findings.json
+
+      MISSION: Final escalation attempt for findings that still fail.
+
+      PRIORITY ORDER (focus on these first):
+      1. High severity findings with test_passed: false
+      2. Medium severity findings with test_passed: false
+      3. Low severity findings (if time permits)
+
+      For each failing finding:
+      1. Analyze WHY previous agents failed (read their errors)
+      2. Read the target contract carefully
+      3. Write a CORRECT exploit from first principles
+      4. Iterate until test passes (up to 2 attempts)
+
+      OUTPUT: JSON array with final results:
+      [
+        {
+          "finding_id": "F-01",
+          "attempt": 3,
+          "agent": "opus",
+          "poc_written": true,
+          "compiled": true,
+          "test_passed": true|false,
+          "final_status": "passed|failed",
+          "cumulative_attempts": 4,
+          "notes": "why it was hard or how it was fixed"
+        }
+      ]
+
+  # Phase 6e: Final PoC Results Aggregation
+  - id: poc_aggregate
+    name: "Stage 6e · PoC Results Aggregation"
+    profile: sonnet
+    tools: ["read"]
+    max_turns: 20
+    on_error: continue
+    system_prompt: |
+      You aggregate PoC results from multiple attempts into a final summary.
+      You read all attempt JSON files and produce the final poc-results.json.
     outputs:
       - name: output
         type: text
         save_to: "{{ inputs.repo_path }}/.clido-audit/poc-results.json"
     prompt: |
-      Repository: {{ inputs.repo_path }}
-      {% if inputs.rpc_url != "" %}RPC URL for fork tests: {{ inputs.rpc_url }}{% endif %}
+      Read and aggregate:
+      - Attempt 1: {{ inputs.repo_path }}/.clido-audit/poc-attempt-1.json
+      - Attempt 2: {{ inputs.repo_path }}/.clido-audit/poc-attempt-2.json
+      - Attempt 3: {{ inputs.repo_path }}/.clido-audit/poc-attempt-3.json
+      - Findings: {{ inputs.repo_path }}/.clido-audit/findings.json
 
-      Read confirmed findings: {{ inputs.repo_path }}/.clido-audit/findings.json
-      Read gap findings: {{ inputs.repo_path }}/.clido-audit/gap_findings.json
+      Create FINAL aggregated results:
+      - For each finding, take the BEST result across all attempts
+      - If any attempt has test_passed: true, the finding is "pass"
+      - Report cumulative attempts across the chain
 
-      Write Foundry proof-of-concept tests for each confirmed finding from BOTH files.
-      For gap_findings.json, only write PoC for entries with confirmed: true.
-      Skip findings with confirmed: false.
-
-      METHODOLOGY:
-
-      1. Read the target contract source file(s) for each finding before writing any test.
-
-      2. Check what test framework the repo uses:
-         - Look for foundry.toml / forge.toml (Foundry)
-         - Look for existing test/ or tests/ files to understand conventions and setUp patterns
-
-      3. For each confirmed finding, write a Foundry test file:
-
-         Location: {{ inputs.repo_path }}/test/audit/Audit_<FindingId>.t.sol
-
-         Test contract structure:
-         ```solidity
-         // SPDX-License-Identifier: MIT
-         pragma solidity ^0.8.x; // match target contract version
-
-         import "forge-std/Test.sol";
-         import "forge-std/console.sol";
-         import {TargetContract} from "../../src/TargetContract.sol";
-         // ... other imports
-
-         contract Audit_<FindingId>_PoC is Test {
-             // Protocol contracts
-             TargetContract target;
-             // Attacker contract (if needed — define inline or as separate contract)
-             AttackerContract attacker;
-
-             // Addresses
-             address alice = makeAddr("alice");  // victim
-             address bob = makeAddr("bob");      // attacker
-
-             function setUp() public {
-                 // Fork mainnet if rpc_url provided, otherwise deploy fresh
-                 {% if inputs.rpc_url != "" %}
-                 vm.createSelectFork("{{ inputs.rpc_url }}");
-                 {% endif %}
-                 // Deploy protocol
-                 target = new TargetContract(/* constructor args */);
-                 // Fund accounts
-                 deal(address(token), alice, 1000e18);
-                 deal(address(token), bob, 1e18);
-             }
-
-             /// @notice Proof of concept for: <finding title>
-             /// @dev Demonstrates: <root cause one-line>
-             function test_exploit_<findingId>() public {
-                 // === SETUP ===
-                 // Establish victim position
-                 vm.startPrank(alice);
-                 token.approve(address(target), 1000e18);
-                 target.deposit(1000e18, alice);
-                 vm.stopPrank();
-
-                 uint256 attackerBalanceBefore = token.balanceOf(bob);
-
-                 // === ATTACK ===
-                 vm.startPrank(bob);
-                 // ... execute the attack steps from the finding
-                 vm.stopPrank();
-
-                 // === ASSERT ===
-                 uint256 attackerBalanceAfter = token.balanceOf(bob);
-                 uint256 profit = attackerBalanceAfter - attackerBalanceBefore;
-
-                 console.log("Attacker profit:", profit);
-                 assertGt(profit, 0, "Attacker should profit");
-             }
-         }
-
-         // Attacker contract (if needed for callbacks / flash loans)
-         contract AttackerContract {
-             TargetContract target;
-             address owner;
-
-             constructor(address _target) {
-                 target = TargetContract(_target);
-                 owner = msg.sender;
-             }
-
-             function attack() external { }
-
-             function onFlashLoan(
-                 address initiator,
-                 address token,
-                 uint256 amount,
-                 uint256 fee,
-                 bytes calldata data
-             ) external returns (bytes32) {
-                 // Attack inside callback
-                 IERC20(token).approve(msg.sender, amount + fee);
-                 return keccak256("ERC3156FlashBorrower.onFlashLoan");
-             }
-         }
-         ```
-
-      4. After writing each test file, run it:
-         ```bash
-         cd {{ inputs.repo_path }} && forge test --match-path "test/audit/Audit_<FindingId>.t.sol" -vvv 2>&1
-         ```
-
-      5. If the test fails to compile or the assertion fails:
-         - Read the error carefully
-         - Fix import paths, constructor arguments, function signatures
-         - Iterate up to 3 times per test
-         - Report final status: pass / compile_error / assertion_failed / skipped
-
-      6. If forge is not installed, write the test files but mark status as "no_forge".
-
-      OUTPUT: Valid JSON array only. One entry per finding.
-
+      OUTPUT: Final poc-results.json array:
       [
         {
           "finding_id": "F-01",
@@ -1836,10 +1954,10 @@ steps:
           "poc_file": "test/audit/Audit_F01.t.sol",
           "poc_written": true,
           "forge_available": true,
-          "test_result": "pass|fail_compile|fail_assertion|no_forge|skipped",
-          "test_output": "relevant snippet from forge test output",
-          "iterations": 1,
-          "notes": "any relevant notes"
+          "test_result": "pass|fail_compile|fail_assertion",
+          "attempts": 2,
+          "agents_used": ["sonnet", "haiku"],
+          "notes": "Passed on haiku retry after sonnet failed with import error"
         }
       ]
 

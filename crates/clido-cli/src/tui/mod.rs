@@ -1477,6 +1477,8 @@ mod tests {
                     session_id: "abc123".into(),
                     project_path: "/home/user/proj".into(),
                     start_time: "2025-01-01T00:00:00Z".into(),
+                    created_at: "2025-01-01T00:00:00Z".into(),
+                    last_edited: "2025-01-01T00:00:00Z".into(),
                     num_turns: 5,
                     total_cost_usd: 0.42,
                     preview: "hello world".into(),
@@ -1494,7 +1496,7 @@ mod tests {
             text
         );
         assert!(
-            text.contains("started (local · rel)") || text.contains("2025-01-01"),
+            text.contains("last edited (local · rel)") || text.contains("2025-01-01"),
             "session picker should show explicit date column, got:\n{}",
             text
         );
@@ -1604,6 +1606,8 @@ mod tests {
                         session_id: "aaa".into(),
                         project_path: "/tmp".into(),
                         start_time: "2025-01-01T00:00:00Z".into(),
+                        created_at: "2025-01-01T00:00:00Z".into(),
+                        last_edited: "2025-01-01T00:00:00Z".into(),
                         num_turns: 1,
                         total_cost_usd: 0.0,
                         preview: "first".into(),
@@ -1613,6 +1617,8 @@ mod tests {
                         session_id: "bbb".into(),
                         project_path: "/tmp".into(),
                         start_time: "2025-01-02T00:00:00Z".into(),
+                        created_at: "2025-01-02T00:00:00Z".into(),
+                        last_edited: "2025-01-02T00:00:00Z".into(),
                         num_turns: 2,
                         total_cost_usd: 0.1,
                         preview: "second".into(),

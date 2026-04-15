@@ -1,0 +1,1294 @@
+name: sa2
+version: "2.0"
+description: "Faultline-based Solidity security audit: project detection, invariants, multi-step exploits, stateful interaction graph, narrative deduplication, feasibility filters, investigation, adversarial challenge, judge, PoC, report"
+
+inputs:
+  - name: repo_path
+    description: "Path to the Solidity repository to audit"
+    required: false
+    default: "{{ cwd }}"
+  - name: scope
+    description: "Optional comma-separated files/directories in scope"
+    required: false
+    default: ""
+  - name: context
+    description: "Optional protocol description"
+    required: false
+    default: ""
+  - name: rpc_url
+    description: "Optional RPC URL for PoC fork tests"
+    required: false
+    default: ""
+
+prerequisites:
+  commands:
+    - forge
+
+steps:
+  # ============================================================================
+  # PHASE 01: PROJECT DETECTION
+  # ============================================================================
+  - id: project-detection
+    name: "Phase 01: Project Detection"
+    tools: ["Read", "Glob", "Bash"]
+    max_turns: 20
+    timeout: 1200
+    on_error: continue
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/audit/meta/project.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+
+      Perform project detection and build verification:
+
+      1. Find all build config directories:
+         - Look for foundry.toml, hardhat.config.ts, hardhat.config.js
+         - Skip node_modules, lib, .git
+         - Sort by path depth (deepest first)
+
+      2. Detect build system:
+         - Check for foundry.toml → "foundry"
+         - Check for hardhat.config.* → "hardhat"
+         - Otherwise → "none"
+
+      3. Set primaryBuildRoot:
+         - If build configs found: deepest directory with build config
+         - Otherwise: repoRoot
+
+      4. Check if project builds:
+         - cd primaryBuildRoot && forge build 2>&1
+         - Check exit code and output
+         - Set buildClean = true if no errors
+
+      5. Check baseline tests:
+         - Look for existing test files (test/*.t.sol, test/*.sol)
+         - Try: forge test --match-test "test_" 2>&1 | head -20
+         - Set testBaselineClean if tests pass
+
+      6. Extract language options:
+         - For Foundry: testDir, remappings, forgeStdTestImport
+         - Read foundry.toml if present
+
+      Output valid JSON:
+      {
+        "languages": ["solidity"],
+        "monorepo": true|false,
+        "repoRoot": "{{ inputs.repo_path }}",
+        "primaryBuildRoot": "<deepest build config dir or repoRoot>",
+        "buildSystem": "foundry|hardhat|none",
+        "buildClean": true|false,
+        "buildError": "error message if buildClean=false",
+        "testBaselineClean": true|false,
+        "languageOptions": {
+          "foundry": {
+            "testDir": "test",
+            "remappings": [],
+            "forgeStdTestImport": "forge-std/Test.sol"
+          }
+        }
+      }
+
+  # ============================================================================
+  # PHASE 15b: INVARIANT DISCOVERY
+  # ============================================================================
+  - id: invariant-discovery
+    name: "Phase 15b: Invariant Discovery"
+    tools: ["Read", "Glob"]
+    max_turns: 30
+    timeout: 1200
+    depends_on: [project-detection]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/understanding/invariants.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+      Read project: {{ inputs.repo_path }}/.clido-audit/audit/meta/project.json
+
+      Discover critical protocol invariants:
+
+      1. Read all production .sol files (skip tests, mocks)
+      2. Identify mathematical relationships that MUST hold:
+         - totalSupply relationships
+         - totalAssets vs totalDebt
+         - balance consistency
+         - share price calculations
+         - collateral ratios
+         - reward accrual formulas
+
+      3. For each invariant:
+         - Define the invariant expression
+         - Identify functions that could break it
+         - Assess exploitability if broken
+
+      4. Look for:
+         - Accounting invariants (assets = liabilities + equity)
+         - Ratio invariants (collateralization ratio >= threshold)
+         - Supply invariants (minted <= maxSupply)
+         - Time-based invariants (rewards <= allocated)
+
+      Output valid JSON:
+      {
+        "invariants": [
+          {
+            "id": "INV-001",
+            "expression": "totalAssets >= totalDebt",
+            "description": "Protocol must remain solvent",
+            "criticalFunctions": ["borrow", "withdraw", "liquidate"],
+            "brokenBy": ["oracle manipulation", "flash loan attack"],
+            "severity": "critical"
+          }
+        ]
+      }
+
+  # ============================================================================
+  # PHASE 15c: STATEFUL INTERACTION GRAPH
+  # ============================================================================
+  - id: interaction-graph
+    name: "Phase 15c: Stateful Interaction Graph"
+    tools: ["Read", "Glob"]
+    max_turns: 40
+    timeout: 1200
+    depends_on: [invariant-discovery]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+      Read invariants: {{ inputs.repo_path }}/.clido-audit/understanding/invariants.json
+
+      Build stateful interaction graph:
+
+      1. For each public/external function:
+         - Identify entry point (contract.function)
+         - List state variables READ
+         - List state variables WRITTEN
+         - List external calls made
+         - List events emitted
+         - Identify preconditions
+         - Identify postconditions
+
+      2. Identify callback hooks:
+         - Flash loan callbacks
+         - ERC777/ERC721 hooks
+         - Governance callbacks
+         - Any reentrancy entry points
+
+      3. Identify external dependencies:
+         - Oracles (Price feeds)
+         - AMMs (Liquidity sources)
+         - Lending protocols
+         - Bridge contracts
+         - Governance contracts
+
+      4. Model state transitions:
+         - How state flows between contracts
+         - Which functions update shared state
+         - Cross-contract call chains
+
+      5. Identify epoch/time mechanics:
+         - Reward distribution epochs
+         - Vesting schedules
+         - Governance timelocks
+         - Oracle heartbeat periods
+
+      Output valid JSON:
+      {
+        "entryPoints": [
+          {
+            "id": "fn:Vault.deposit",
+            "contract": "Vault",
+            "function": "deposit",
+            "visibility": "external",
+            "stateReads": ["totalAssets", "shares"],
+            "stateWrites": ["totalAssets", "shares"],
+            "externalCalls": ["ERC20.transferFrom"],
+            "emitsEvents": ["Deposit"],
+            "preconditions": ["amount > 0"],
+            "postconditions": ["shares increased proportionally"]
+          }
+        ],
+        "callbackHooks": [
+          {
+            "trigger": "FlashLoanProvider.flashLoan",
+            "callback": "IFlashLoanReceiver.onFlashLoan",
+            "reentrancyWindow": "callback executes before repayment"
+          }
+        ],
+        "externalDependencies": [
+          {
+            "contract": "PriceOracle",
+            "function": "getPrice",
+            "manipulable": true,
+            "manipulationVector": "spot price via large swap"
+          }
+        ],
+        "epochMechanics": [
+          {
+            "contract": "RewardDistributor",
+            "epochFunction": "advanceEpoch",
+            "exploitableWindow": "stake before snapshot"
+          }
+        ]
+      }
+
+  # ============================================================================
+  # PHASE 16: INVARIANT BREAKING ATTEMPT
+  # ============================================================================
+  - id: invariant-breaking
+    name: "Phase 16: Invariant Breaking Attempt"
+    tools: ["Read"]
+    max_turns: 25
+    timeout: 1200
+    depends_on: [interaction-graph]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/understanding/invariant-breaks.json"
+    prompt: |
+      Repository: {{ inputs.repo_path }}
+      Read invariants: {{ inputs.repo_path }}/.clido-audit/understanding/invariants.json
+      Read interaction-graph: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+
+      For each invariant identified, attempt to find ways to break it:
+
+      1. Analyze the invariant expression
+      2. Identify all functions that modify variables in the expression
+      3. Look for edge cases that could violate the invariant:
+         - Integer overflow/underflow
+         - Division by zero
+         - Rounding errors
+         - Reentrancy during state updates
+         - Oracle manipulation
+         - Flash loan attacks
+      4. Check if any function combinations could break the invariant
+      5. Assess if the break is exploitable for profit
+
+      Output valid JSON:
+      {
+        "breakAttempts": [
+          {
+            "invariantId": "INV-001",
+            "invariantExpression": "totalAssets >= totalDebt",
+            "breakMethod": "Flash loan oracle manipulation",
+            "attackVector": "Borrow against inflated collateral value",
+            "functionsInvolved": ["borrow", "getPrice"],
+            "exploitable": true|false,
+            "severity": "high|medium|low"
+          }
+        ]
+      }
+
+  # ============================================================================
+  # PHASE 17-20: UNDERSTANDING BLOCK (Parallel)
+  # ============================================================================
+  - id: economic-model
+    name: "Phase 17: Economic Model"
+    parallel: true
+    tools: ["Read"]
+    max_turns: 20
+    timeout: 1200
+    depends_on: [interaction-graph]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/understanding/economic-model.json"
+    prompt: |
+      Read interaction-graph: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      Repository: {{ inputs.repo_path }}
+
+      Analyze economic model:
+      - Tokenomics (supply, demand, inflation)
+      - Fee structures
+      - Reward mechanisms
+      - Incentive alignments
+      - Value at risk
+
+      Output valid JSON with actors, incentiveMisalignments, valueAtRisk.
+
+  - id: ecosystem-mapping
+    name: "Phase 18: Ecosystem Mapping"
+    parallel: true
+    tools: ["Read"]
+    max_turns: 20
+    timeout: 1200
+    depends_on: [interaction-graph]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/understanding/ecosystem.json"
+    prompt: |
+      Read interaction-graph: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      Repository: {{ inputs.repo_path }}
+
+      Map ecosystem:
+      - External protocols integrated
+      - Oracle providers
+      - Bridge connections
+      - Governance systems
+      - Dependencies and risks
+
+      Output valid JSON.
+
+  - id: deployment-risks
+    name: "Phase 19: Deployment Risks"
+    parallel: true
+    tools: ["Read"]
+    max_turns: 20
+    timeout: 1200
+    depends_on: [interaction-graph]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/understanding/deployment-risks.json"
+    prompt: |
+      Read interaction-graph: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      Repository: {{ inputs.repo_path }}
+
+      Analyze deployment risks:
+      - Initialization parameters
+      - Proxy patterns
+      - Upgrade mechanisms
+      - Constructor risks
+      - Initial state vulnerabilities
+
+      Output valid JSON.
+
+  - id: upgrade-risks
+    name: "Phase 20: Upgrade Risks"
+    parallel: true
+    tools: ["Read"]
+    max_turns: 20
+    timeout: 1200
+    depends_on: [interaction-graph]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/understanding/upgrade-risks.json"
+    prompt: |
+      Read interaction-graph: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      Repository: {{ inputs.repo_path }}
+
+      Analyze upgrade risks:
+      - Timelock mechanisms
+      - Governance upgrade paths
+      - Storage collision risks
+      - Implementation switch risks
+      - Emergency pause functionality
+
+      Output valid JSON.
+
+  # ============================================================================
+  # STAGE 2: IMAGINATION (Parallel Attack Angles)
+  # ============================================================================
+  - id: imagine-capital
+    name: "Stage 2a: Flash Loan & Capital Attacks"
+    parallel: true
+    tools: ["Read"]
+    max_turns: 15
+    timeout: 1200
+    depends_on: [economic-model, ecosystem-mapping, deployment-risks, upgrade-risks]
+    on_error: continue
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/capital.json"
+    prompt: |
+      Read intel: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      Read invariants: {{ inputs.repo_path }}/.clido-audit/understanding/invariants.json
+      Repository: {{ inputs.repo_path }}
+
+      Generate TRANSIENT CAPITAL attack narratives. Attacker: unprivileged EOA with flash loans.
+
+      Focus on:
+      1. Flash loan price oracle manipulation
+      2. Flash loan collateral inflation
+      3. Donation/inflation attacks on vaults
+      4. First-depositor attacks
+      5. Share/price manipulation
+      6. ERC4626 rounding direction issues
+      7. JIT liquidity attacks
+      8. Same-block leverage loops
+
+      Read relevant code before including. Verify entry point is callable by unprivileged actor.
+
+      Output valid JSON array. Empty [] if nothing plausible.
+      [{"id": "CAP-01", "title": "", "entry_point": "", "steps": [], "root_cause": "", "estimated_profit": "small|medium|large"}]
+
+  - id: imagine-access
+    name: "Stage 2b: Access Control Attacks"
+    parallel: true
+    tools: ["Read"]
+    max_turns: 15
+    timeout: 1200
+    depends_on: [economic-model, ecosystem-mapping, deployment-risks, upgrade-risks]
+    on_error: continue
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/access.json"
+    prompt: |
+      Read intel: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      Repository: {{ inputs.repo_path }}
+
+      Generate ACCESS CONTROL attack narratives. Attacker: unprivileged EOA.
+
+      Focus on:
+      1. Missing modifier on state-changing function
+      2. Incorrect role check
+      3. Unguarded initializer
+      4. Implementation callable directly
+      5. Privilege escalation
+      6. ERC2771 forwarder spoofing
+      7. Diamond proxy selector clashes
+
+      Read EVERY modifier before claiming a function is unprotected.
+
+      Output valid JSON array. Empty [] if nothing plausible.
+      [{"id": "ACC-01", "title": "", "entry_point": "", "root_cause": "", "severity": "high|medium|low"}]
+
+  - id: imagine-reentrancy
+    name: "Stage 2c: Reentrancy & External Call Attacks"
+    parallel: true
+    tools: ["Read"]
+    max_turns: 15
+    timeout: 1200
+    depends_on: [economic-model, ecosystem-mapping, deployment-risks, upgrade-risks]
+    on_error: continue
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/reentrancy.json"
+    prompt: |
+      Read intel: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      Repository: {{ inputs.repo_path }}
+
+      Generate REENTRANCY attack narratives. Attacker: malicious contract.
+
+      Focus on:
+      1. Classic reentrancy (state after external call)
+      2. Cross-function reentrancy
+      3. Read-only reentrancy
+      4. ERC777/ERC721 callback reentrancy
+      5. Spot price manipulation
+      6. Fee-on-transfer token issues
+
+      CRITICAL: Verify nonReentrant is ABSENT before claiming reentrancy.
+
+      Output valid JSON array. Empty [] if nothing plausible.
+      [{"id": "RE-01", "title": "", "entry_point": "", "root_cause": ""}]
+
+  - id: imagine-oracle
+    name: "Stage 2d: Oracle & Price Manipulation"
+    parallel: true
+    tools: ["Read"]
+    max_turns: 15
+    timeout: 1200
+    depends_on: [economic-model, ecosystem-mapping, deployment-risks, upgrade-risks]
+    on_error: continue
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/oracle.json"
+    prompt: |
+      Read intel: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      Repository: {{ inputs.repo_path }}
+
+      Generate ORACLE attack narratives.
+
+      Focus on:
+      1. Chainlink staleness (updatedAt check)
+      2. Chainlink circuit breaker (min/maxAnswer)
+      3. L2 Sequencer uptime check
+      4. Spot price reads (slot0, getReserves)
+      5. TWAP manipulation
+      6. Oracle update front-running
+
+      Output valid JSON array. Empty [] if nothing plausible.
+      [{"id": "ORC-01", "title": "", "entry_point": "", "root_cause": ""}]
+
+  - id: imagine-logic
+    name: "Stage 2e: Logic & State Manipulation"
+    parallel: true
+    tools: ["Read"]
+    max_turns: 15
+    timeout: 1200
+    depends_on: [economic-model, ecosystem-mapping, deployment-risks, upgrade-risks]
+    on_error: continue
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/logic.json"
+    prompt: |
+      Read intel: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      Repository: {{ inputs.repo_path }}
+
+      Generate LOGIC attack narratives.
+
+      Focus on:
+      1. Integer overflow/underflow (pre-Solidity 0.8)
+      2. Precision loss in calculations
+      3. Rounding errors
+      4. Incorrect comparison operators
+      5. Off-by-one errors
+      6. State variable shadowing
+      7. Storage collision in proxies
+
+      Output valid JSON array. Empty [] if nothing plausible.
+      [{"id": "LOG-01", "title": "", "entry_point": "", "root_cause": ""}]
+
+  - id: imagine-governance
+    name: "Stage 2f: Governance & Economic Attacks"
+    parallel: true
+    tools: ["Read"]
+    max_turns: 15
+    timeout: 1200
+    depends_on: [economic-model, ecosystem-mapping, deployment-risks, upgrade-risks]
+    on_error: continue
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/governance.json"
+    prompt: |
+      Read intel: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      Repository: {{ inputs.repo_path }}
+
+      Generate GOVERNANCE attack narratives.
+
+      Focus on:
+      1. Flash loan governance manipulation
+      2. Proposal front-running
+      3. Vote buying
+      4. Timelock bypass attempts
+      5. Emergency pause abuse
+      6. Reward manipulation
+
+      Output valid JSON array. Empty [] if nothing plausible.
+      [{"id": "GOV-01", "title": "", "entry_point": "", "root_cause": ""}]
+
+  - id: multi-step-sequencer
+    name: "Stage 2g: Multi-Step Exploit Sequencer"
+    tools: ["Read"]
+    max_turns: 30
+    timeout: 1200
+    depends_on: [economic-model, ecosystem-mapping, deployment-risks, upgrade-risks]
+    on_error: continue
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/narratives/multi-step-sequences.json"
+    prompt: |
+      Read intel: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      Read invariants: {{ inputs.repo_path }}/.clido-audit/understanding/invariants.json
+      Repository: {{ inputs.repo_path }}
+
+      Generate MULTI-STEP attack sequences. These require multiple transactions or state changes over time.
+
+      CRITICAL: Only generate sequences that CANNOT be executed in a single transaction.
+      Minimum 2 steps with persistent state between them.
+
+      Attack categories:
+      1. Flash loan composition (flash loan → price manipulation → borrow → repay)
+      2. Oracle manipulation chains (move spot price → borrow at wrong valuation → restore price)
+      3. Epoch-based reward extraction (stake → wait for epoch → claim → unstake)
+      4. Rounding accumulation (repeated operations to accumulate rounding errors)
+      5. Cross-contract callback reentrancy (state manipulation across callbacks)
+      6. Governance timing (parameter change → race to exploit)
+
+      For each sequence:
+      - Minimum 2 steps, ideally 3-5
+      - Each step must leave protocol in modified state
+      - State must persist across transaction boundaries
+      - Final step must extract value or break invariant
+
+      Output valid JSON:
+      {
+        "sequences": [
+          {
+            "sequenceId": "SEQ-001",
+            "title": "Flash loan oracle manipulation",
+            "attackCategory": "flash-loan-composition",
+            "capitalRequired": "1,000,000 USDC (flash loan)",
+            "estimatedProfit": "~50,000 USDC",
+            "steps": [
+              {
+                "stepIndex": 0,
+                "actor": "attacker",
+                "entryPoint": "FlashLoanProvider.flashLoan",
+                "stateChangeBefore": "attacker.USDC = 0",
+                "stateChangeAfter": "attacker.USDC = 1,000,000",
+                "rationale": "Obtain flash loan"
+              }
+            ],
+            "invariantsViolated": ["INV-001"],
+            "preconditions": ["Oracle uses spot price"],
+            "feasibilityNotes": "Requires large liquidity in target pool"
+          }
+        ]
+      }
+
+  # ============================================================================
+  # PHASE 33: NARRATIVE DEDUPLICATION
+  # ============================================================================
+  - id: narrative-deduplication
+    name: "Phase 33: Narrative Deduplication"
+    tools: ["Read"]
+    max_turns: 20
+    timeout: 1200
+    depends_on: [imagine-capital, imagine-access, imagine-reentrancy, imagine-oracle, imagine-logic, imagine-governance]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/investigation/narrative-clusters.json"
+    prompt: |
+      Read all narrative outputs:
+      - {{ inputs.repo_path }}/.clido-audit/narratives/capital.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/access.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/reentrancy.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/oracle.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/logic.json
+      - {{ inputs.repo_path }}/.clido-audit/narratives/governance.json
+
+      Deduplicate narratives by:
+      1. Grouping by similar root cause
+      2. Merging narratives with same entry point and attack vector
+      3. Keeping the most detailed version of each unique attack
+
+      Assign cluster IDs: CLU-001, CLU-002, etc.
+
+      Output valid JSON:
+      {
+        "clusters": [
+          {
+            "clusterId": "CLU-001",
+            "narrativeIds": ["CAP-01"],
+            "title": "",
+            "category": "capital|access|reentrancy|oracle|logic|governance",
+            "rootCause": "",
+            "severity": "high|medium|low"
+          }
+        ]
+      }
+
+  # ============================================================================
+  # PHASE 33b: SEQUENCE CLUSTERING
+  # ============================================================================
+  - id: sequence-clustering
+    name: "Phase 33b: Sequence Clustering"
+    tools: ["Read"]
+    max_turns: 20
+    timeout: 1200
+    depends_on: [multi-step-sequencer]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/investigation/sequence-clusters.json"
+    prompt: |
+      Read multi-step sequences: {{ inputs.repo_path }}/.clido-audit/narratives/multi-step-sequences.json
+
+      Cluster sequences by attack category and target contracts.
+      Assign sequence IDs: SEQ-001, SEQ-002, etc.
+
+      Output valid JSON:
+      {
+        "clusters": [
+          {
+            "clusterId": "SEQ-001",
+            "sequenceIds": ["SEQ-001"],
+            "title": "",
+            "attackCategory": "flash-loan-composition|oracle-manipulation|epoch-reward|rounding-accumulation|cross-contract-reentrancy|governance-timing",
+            "severity": "high|medium|low"
+          }
+        ]
+      }
+
+  # ============================================================================
+  # PHASE 34: PLAUSIBILITY FILTER
+  # ============================================================================
+  - id: plausibility-filter
+    name: "Phase 34: Plausibility Filter"
+    tools: ["Read"]
+    max_turns: 20
+    timeout: 1200
+    depends_on: [narrative-deduplication]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/investigation/plausibility.json"
+    prompt: |
+      Read narrative clusters: {{ inputs.repo_path }}/.clido-audit/investigation/narrative-clusters.json
+      Read interaction graph: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+
+      For each cluster, assess plausibility:
+      1. Is the entry point callable by unprivileged actor?
+      2. Are preconditions reachable?
+      3. Is the attack economically viable?
+      4. Are there guards that prevent the attack?
+
+      Output valid JSON:
+      {
+        "assessments": [
+          {
+            "clusterId": "CLU-001",
+            "plausible": true|false,
+            "reason": ""
+          }
+        ]
+      }
+
+  # ============================================================================
+  # PHASE 34b: SEQUENCE FEASIBILITY FILTER
+  # ============================================================================
+  - id: sequence-feasibility
+    name: "Phase 34b: Sequence Feasibility Filter"
+    tools: ["Read"]
+    max_turns: 25
+    timeout: 1200
+    depends_on: [sequence-clustering]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/investigation/sequence-feasibility.json"
+    prompt: |
+      Read sequence clusters: {{ inputs.repo_path }}/.clido-audit/investigation/sequence-clusters.json
+      Read interaction graph: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+
+      For each sequence, assess feasibility:
+
+      1. Capital feasibility: Can attacker obtain required capital? Is flash loan available?
+      2. Oracle type: Does target use spot price (manipulable) vs TWAP (resistant)?
+      3. Step atomic feasibility: Can all steps execute in claimed order?
+      4. Profit math: Profit > gas + flash loan fees + slippage?
+      5. Privilege gate: Does any step require privileged role?
+      6. Block-level constraints: Any sequencing constraints?
+
+      Output verdict: plausible | borderline | infeasible
+
+      Output valid JSON:
+      {
+        "assessments": [
+          {
+            "clusterId": "SEQ-001",
+            "feasibility": "plausible|borderline|infeasible",
+            "reason": "",
+            "capitalRequired": "",
+            "estimatedProfit": "",
+            "riskFactors": []
+          }
+        ]
+      }
+
+  # ============================================================================
+  # PHASE 35: DEEP INVESTIGATION
+  # ============================================================================
+  - id: deep-investigation
+    name: "Phase 35: Deep Investigation"
+    tools: ["Read", "Glob"]
+    max_turns: 50
+    timeout: 1200
+    depends_on: [plausibility-filter, sequence-feasibility]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/investigation/deep-findings.json"
+    prompt: |
+      Read all understanding artifacts:
+      - {{ inputs.repo_path }}/.clido-audit/understanding/invariants.json
+      - {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+      - {{ inputs.repo_path }}/.clido-audit/understanding/invariant-breaks.json
+      - {{ inputs.repo_path }}/.clido-audit/understanding/economic-model.json
+      - {{ inputs.repo_path }}/.clido-audit/understanding/ecosystem.json
+
+      Read plausibility assessments:
+      - {{ inputs.repo_path }}/.clido-audit/investigation/plausibility.json
+      - {{ inputs.repo_path }}/.clido-audit/investigation/sequence-feasibility.json
+
+      Read all narrative clusters:
+      - {{ inputs.repo_path }}/.clido-audit/investigation/narrative-clusters.json
+      - {{ inputs.repo_path }}/.clido-audit/investigation/sequence-clusters.json
+
+      For each plausible cluster/sequence:
+
+      1. READ the target code (file:lines cited)
+      2. READ all modifiers on the entry point
+      3. Verify preconditions are reachable
+      4. Trace attack steps
+      5. Check for guards that prevent the attack
+
+      STRICT RULES:
+      - Attacker must be unprivileged
+      - Preconditions must be reachable via normal use
+      - Attack must be deterministic
+      - Must cause real financial damage
+
+      For multi-step sequences, verify:
+      - Each step is actually callable in sequence
+      - State persists between steps
+      - No atomic revert that would undo the attack
+
+      Output valid JSON array with verdict for each cluster:
+      [{"clusterId": "CLU-001", "verdict": "exploitable|implausible", "verdict_reason": "", "severity": "high|medium|low"}]
+
+  # ============================================================================
+  # PHASE 36b: SEQUENCE STEP VERIFICATION
+  # ============================================================================
+  - id: sequence-step-verify
+    name: "Phase 36b: Sequence Step Verification"
+    tools: ["Read"]
+    max_turns: 30
+    timeout: 1200
+    depends_on: [deep-investigation]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/investigation/sequence-verification.json"
+    prompt: |
+      Read deep findings: {{ inputs.repo_path }}/.clido-audit/investigation/deep-findings.json
+      Read sequence clusters: {{ inputs.repo_path }}/.clido-audit/investigation/sequence-clusters.json
+      Read interaction graph: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+
+      For each exploitable sequence (SEQ-xxx), verify each step:
+
+      1. Source-level confirmation:
+         - Function exists and is callable
+         - Arguments are valid
+         - No hidden revert conditions
+
+      2. State transition verification:
+         - State changes as described
+         - No unexpected side effects
+         - Intermediate state is valid
+
+      3. Cross-step validation:
+         - State from step N is usable in step N+1
+         - No state reset between steps
+         - Timing constraints are satisfiable
+
+      Output per-step confidence score (0.0-1.0).
+
+      Output valid JSON:
+      {
+        "verifications": [
+          {
+            "clusterId": "SEQ-001",
+            "steps": [
+              {
+                "stepIndex": 0,
+                "verified": true|false,
+                "confidence": 0.95,
+                "issues": []
+              }
+            ],
+            "overallConfidence": 0.9
+          }
+        ]
+      }
+
+  # ============================================================================
+  # PHASE 37: COUNTERARGUMENT
+  # ============================================================================
+  - id: counterargument
+    name: "Phase 37: Counterargument"
+    tools: ["Read"]
+    max_turns: 25
+    timeout: 1200
+    depends_on: [deep-investigation, sequence-step-verify]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/investigation/counterarguments.json"
+    prompt: |
+      Read deep findings: {{ inputs.repo_path }}/.clido-audit/investigation/deep-findings.json
+      Read sequence verification: {{ inputs.repo_path }}/.clido-audit/investigation/sequence-verification.json
+      Read interaction graph: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+
+      For each exploitable finding, generate counterarguments:
+      1. Why might this attack fail in practice?
+      2. What guards could prevent it?
+      3. Are there economic disincentives?
+      4. Could front-running prevent it?
+
+      Output valid JSON:
+      {
+        "counterarguments": [
+          {
+            "clusterId": "CLU-001",
+            "counterarguments": [""],
+            "mitigationStrength": "strong|moderate|weak"
+          }
+        ]
+      }
+
+  # ============================================================================
+  # PHASE 38: ADVERSARIAL EXCHANGE
+  # ============================================================================
+  - id: adversarial
+    name: "Phase 38: Adversarial Challenge"
+    tools: ["Read"]
+    max_turns: 30
+    timeout: 1200
+    depends_on: [counterargument]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/investigation/adversarial.json"
+    prompt: |
+      Read deep findings: {{ inputs.repo_path }}/.clido-audit/investigation/deep-findings.json
+      Read counterarguments: {{ inputs.repo_path }}/.clido-audit/investigation/counterarguments.json
+      Read interaction graph: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+
+      Challenge every "exploitable" finding aggressively:
+
+      1. Challenge the ENTRY POINT: Can unprivileged actor ACTUALLY call this?
+      2. Challenge PRECONDITIONS: Are they reachable without admin action?
+      3. Challenge each ATTACK STEP: Does calling it produce claimed effect?
+      4. Challenge PROFIT: Is there a circuit breaker or fee that limits impact?
+      5. Is this a DESIGN CHOICE per documentation?
+
+      Use `read` to verify EVERY challenge claim.
+
+      Output valid JSON:
+      [{"clusterId": "", "survived": true|false, "challenges": [], "canonical_attack": ""}]
+
+  # ============================================================================
+  # PHASE 39: ADJUDICATION
+  # ============================================================================
+  - id: adjudication
+    name: "Phase 39: Adjudication"
+    tools: ["Read"]
+    max_turns: 25
+    timeout: 1200
+    depends_on: [adversarial]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/investigation/adjudication.json"
+    prompt: |
+      Read adversarial: {{ inputs.repo_path }}/.clido-audit/investigation/adversarial.json
+      Read deep findings: {{ inputs.repo_path }}/.clido-audit/investigation/deep-findings.json
+
+      For each challenged finding, adjudicate:
+      1. Did the finding survive all challenges?
+      2. Is the attack path still valid?
+      3. What is the final confidence level?
+
+      Output valid JSON:
+      {
+        "adjudications": [
+          {
+            "clusterId": "",
+            "verdict": "confirmed|rejected|uncertain",
+            "confidence": 0.9,
+            "reasoning": ""
+          }
+        ]
+      }
+
+  # ============================================================================
+  # PHASE 40: JUDGE REVIEW
+  # ============================================================================
+  - id: judge
+    name: "Phase 40: Judge Review"
+    tools: ["Read"]
+    max_turns: 30
+    timeout: 1200
+    depends_on: [adjudication]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/confirmed/findings.json"
+    prompt: |
+      Read adjudication: {{ inputs.repo_path }}/.clido-audit/investigation/adjudication.json
+      Read deep findings: {{ inputs.repo_path }}/.clido-audit/investigation/deep-findings.json
+      Read interaction graph: {{ inputs.repo_path }}/.clido-audit/understanding/interaction-graph.json
+
+      Final validation for each confirmed finding:
+
+      CHECKLIST (ALL must pass):
+      - [ ] Attacker is completely unprivileged
+      - [ ] Preconditions reachable via normal use
+      - [ ] Attack is deterministic
+      - [ ] Real financial damage (theft, insolvency, unauthorized mint)
+      - [ ] Not a documented design choice
+      - [ ] No missed access control
+
+      SEVERITY:
+      High: Direct theft, permanent insolvency, unauthorized minting
+      Medium: Theft under specific conditions, permanent availability impact
+      Low: Dust-level exploitation, unlikely state required
+      Informational: No exploit path
+
+      Output valid JSON array of confirmed findings:
+      [{"id": "F-01", "clusterId": "", "confirmed": true, "severity": "high|medium|low", "title": "", "root_cause": "", "attack_path": {}, "code_refs": []}]
+
+  # ============================================================================
+  # PHASE 41: PROOF OF CONCEPT
+  # Agent retries each finding up to 10 times internally
+  # Continues to next finding if current one can't be solved
+  # ============================================================================
+  - id: poc
+    name: "Phase 41: Proof of Concept"
+    tools: ["Read", "Bash", "Write", "Edit"]
+    max_turns: 100
+    timeout: 2400
+    depends_on: [judge]
+    on_error: continue
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/proofs/poc-results.json"
+    prompt: |
+      Read findings: {{ inputs.repo_path }}/.clido-audit/confirmed/findings.json
+      Read project: {{ inputs.repo_path }}/.clido-audit/audit/meta/project.json
+      Repository: {{ inputs.repo_path }}
+
+      For each confirmed HIGH or MEDIUM finding, write a working PoC test.
+
+      PROCESS PER FINDING (repeat for each finding):
+
+      1. Read the target contract source
+      2. Determine primaryBuildRoot from project.json
+      3. Write Foundry test to: {primaryBuildRoot}/test/faultline/Audit_<FindingId>.t.sol
+
+      4. RETRY LOOP (up to 10 attempts per finding):
+         - Compile: cd {primaryBuildRoot} && forge build --match-path test/faultline/Audit_<FindingId>.t.sol
+         - Run: cd {primaryBuildRoot} && forge test --match-path test/faultline/Audit_<FindingId>.t.sol -vvv
+         - IF PASSES: Mark as success, move to next finding
+         - IF FAILS: Read error, fix the code, retry (increment attempt counter)
+
+      5. DECISION: After each failure, ask yourself:
+         - Is this a simple fix (import error, syntax, typo)? → Retry
+         - Is this a fundamental issue (wrong attack vector, contract misunderstanding)? → Consider rewriting
+         - Have I tried 10 times without progress? → Mark as failed, move to next finding
+
+      6. CONTINUE: Always move to the next finding, even if current one fails
+
+      CRITICAL RULES:
+      - Retry up to 10 times per finding
+      - YOU decide if progress is being made
+      - If stuck after 5+ attempts with no improvement, move on
+      - Never skip the remaining findings because one is hard
+
+      Test structure:
+      - setUp(): Deploy protocol, fund accounts
+      - test_exploit_<id>(): Execute attack, assert profit > 0
+
+      For multi-step sequences:
+      - Execute all steps in order
+      - Assert state changes between steps
+      - Assert final economic outcome
+
+      Output valid JSON:
+      [
+        {
+          "finding_id": "F-01",
+          "poc_written": true,
+          "test_result": "pass|fail_compile|fail_assertion",
+          "attempts": 3,
+          "gave_up": false,
+          "notes": "Passed on 3rd attempt after fixing import path"
+        }
+      ]
+
+  # ============================================================================
+  # PHASE 42-50: CANONICAL FINDINGS & COMPOSITION
+  # ============================================================================
+  - id: canonical-findings
+    name: "Phase 42: Canonical Findings"
+    tools: ["Read"]
+    max_turns: 20
+    timeout: 1200
+    depends_on: [poc]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/synthesis/canonical-findings.json"
+    prompt: |
+      Read findings: {{ inputs.repo_path }}/.clido-audit/confirmed/findings.json
+      Read poc results: {{ inputs.repo_path }}/.clido-audit/proofs/poc-results.json
+
+      Compute canonical findings:
+      1. Group by normalized title
+      2. Merge by overlapping references
+      3. Pick representative per group
+      4. Include PoC status
+
+      Output valid JSON:
+      {
+        "canonicalFindings": [
+          {
+            "id": "F-01",
+            "representativeClusterId": "CLU-001",
+            "mergedClusterIds": ["CLU-001", "CLU-002"],
+            "title": "",
+            "severity": "high|medium|low",
+            "pocPassed": true|false
+          }
+        ],
+        "representativeClusterIds": ["CLU-001"]
+      }
+
+  - id: severity-review
+    name: "Phase 43: Severity Review"
+    tools: ["Read"]
+    max_turns: 20
+    timeout: 1200
+    depends_on: [canonical-findings]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/synthesis/severity-review.json"
+    prompt: |
+      Read canonical findings: {{ inputs.repo_path }}/.clido-audit/synthesis/canonical-findings.json
+
+      Review severity assignments:
+      - High: Direct theft, permanent insolvency
+      - Medium: Theft under conditions, availability impact
+      - Low: Dust-level, unlikely state
+
+      Output valid JSON with severity justification.
+
+  - id: composition
+    name: "Phase 44: Finding Composition"
+    tools: ["Read"]
+    max_turns: 20
+    timeout: 1200
+    depends_on: [severity-review]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/synthesis/composition.json"
+    prompt: |
+      Read canonical findings: {{ inputs.repo_path }}/.clido-audit/synthesis/canonical-findings.json
+      Read severity review: {{ inputs.repo_path }}/.clido-audit/synthesis/severity-review.json
+
+      Compose final finding descriptions:
+      - Title
+      - Root cause
+      - Impact
+      - Attack scenario
+      - Recommendation
+
+      Output valid JSON.
+
+  # ============================================================================
+  # PHASE 51-54: REPORT GENERATION
+  # ============================================================================
+  - id: finding-report
+    name: "Phase 51: Finding Report"
+    tools: ["Read"]
+    max_turns: 25
+    timeout: 1200
+    depends_on: [composition]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/report/finding-report.json"
+    prompt: |
+      Read canonical findings: {{ inputs.repo_path }}/.clido-audit/synthesis/canonical-findings.json
+      Read poc results: {{ inputs.repo_path }}/.clido-audit/proofs/poc-results.json
+      Read composition: {{ inputs.repo_path }}/.clido-audit/synthesis/composition.json
+
+      Build finding report JSON with all metadata.
+
+      Output valid JSON.
+
+  - id: evidence-package
+    name: "Phase 52: Evidence Package"
+    tools: ["Read"]
+    max_turns: 20
+    timeout: 1200
+    depends_on: [finding-report]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/report/evidence-package.json"
+    prompt: |
+      Read all artifacts and compile evidence package.
+
+      Include:
+      - Code references
+      - PoC test files
+      - Screenshots (if any)
+      - Transaction traces
+
+      Output valid JSON.
+
+  - id: kb-update
+    name: "Phase 53: Knowledge Base Update"
+    tools: ["Read"]
+    max_turns: 15
+    timeout: 1200
+    depends_on: [evidence-package]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/report/kb-update.json"
+    prompt: |
+      Read findings and update knowledge base patterns.
+
+      Output valid JSON with new patterns learned.
+
+  - id: final-report
+    name: "Phase 54: Final Audit Report"
+    tools: ["Read"]
+    max_turns: 30
+    timeout: 1200
+    depends_on: [kb-update]
+    outputs:
+      - name: output
+        type: text
+        save_to: "{{ inputs.repo_path }}/.clido-audit/report/audit-report.md"
+    prompt: |
+      Read finding report: {{ inputs.repo_path }}/.clido-audit/report/finding-report.json
+      Read evidence: {{ inputs.repo_path }}/.clido-audit/report/evidence-package.json
+      Read invariants: {{ inputs.repo_path }}/.clido-audit/understanding/invariants.json
+      Read sequences: {{ inputs.repo_path }}/.clido-audit/narratives/multi-step-sequences.json
+
+      Produce professional Markdown audit report:
+
+      # Smart Contract Security Audit
+
+      **Repository**: {{ inputs.repo_path }}
+      **Date**: {{ date }}
+      **Methodology**: Project Detection → Invariants → Interaction Graph → Invariant Breaking → Economic Model → Multi-Step Exploits → Narrative Deduplication → Sequence Feasibility → Deep Investigation → Step Verification → Counterargument → Adversarial → Adjudication → Judge → PoC
+
+      ## Executive Summary
+      [2-3 paragraphs with total finding count by severity, overall assessment]
+
+      ## Invariants Identified
+      [List critical protocol invariants]
+
+      ## Invariant Break Attempts
+      [Summary of attempted invariant breaks]
+
+      ## Multi-Step Exploit Sequences
+      [Summary of sequence-based attacks investigated]
+
+      ## Finding Summary
+      | ID | Title | Severity | PoC |
+      |----|-------|----------|-----|
+      | F-01 | ... | High | ✓ Pass |
+
+      ## Findings
+      For each confirmed finding:
+      ### [F-XX] Title
+      **Severity**: ...
+      **Root Cause**: One sentence with code location
+      **Impact**: Precise description
+      **Attack Scenario**: Steps
+      **Proof of Concept**: Code snippet
+      **Recommendation**: Specific fix
+
+      ## Coverage Analysis
+      [Summary of attack surfaces investigated]
+
+      ## Appendix: Understanding Artifacts
+      - Interaction Graph
+      - Economic Model
+      - Ecosystem Map
+
+      Output complete Markdown report.

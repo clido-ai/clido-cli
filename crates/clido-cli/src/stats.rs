@@ -46,7 +46,9 @@ pub fn run_stats(session_id: Option<&str>, json: bool) -> Result<(), anyhow::Err
                 vec![SessionSummary {
                     session_id: id.to_string(),
                     project_path: workspace_root.display().to_string(),
-                    start_time,
+                    start_time: start_time.clone(),
+                    created_at: start_time.clone(),
+                    last_edited: start_time,
                     num_turns: msgs,
                     total_cost_usd: cost,
                     preview,

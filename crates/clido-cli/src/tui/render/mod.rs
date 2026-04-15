@@ -1016,13 +1016,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         }
         content.push(Line::from(vec![Span::styled(
             format!(
-                "  {:<8}  {:>4}  {:>8}  {:<26}  {}",
-                "id", "turns", "cost", "started (local · rel)", "name / preview"
+                "  {:<8}  {:>4}  {:<26}  {}",
+                "id", "turns", "last edited (local · rel)", "name / preview"
             ),
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]));
         content.push(Line::from(vec![Span::styled(
-            "  ────────  ────  ────────  ──────────────────────────  ────────────────────"
+            "  ────────  ────  ──────────────────────────  ────────────────────"
                 .to_string(),
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]));
@@ -1051,8 +1051,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             } else {
                 format!("{id_raw:<8}")
             };
-            let wall = session_wall_clock(&s.start_time);
-            let rel = relative_time(&s.start_time);
+            let wall = session_wall_clock(&s.last_edited);
+            let rel = relative_time(&s.last_edited);
             let mut when_str = format!("{wall} · {rel}");
             if when_str.chars().count() > WHEN_W {
                 when_str = wall.chars().take(WHEN_W).collect::<String>();

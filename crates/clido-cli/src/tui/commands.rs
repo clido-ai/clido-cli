@@ -3483,12 +3483,18 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
 
                         // Send to agent for editing
                         let prompt = format!(
-                            "Edit the following workflow based on the user's request.\n\n\
-                            User's request: {description}\n\n\
-                            Current workflow YAML:\n```yaml\n{content}\n```\n\n\
-                            Please provide the complete updated workflow YAML. \
-                            Make the requested changes while preserving the workflow structure and validity. \
-                            Return ONLY the YAML content in a ```yaml code block, no explanations.",
+                            "TASK: Edit the following workflow YAML file.\n\n\
+                            WORKFLOW NAME: {name}\n\n\
+                            USER'S REQUEST: {description}\n\n\
+                            CURRENT WORKFLOW YAML:\n```yaml\n{content}\n```\n\n\
+                            IMPORTANT INSTRUCTIONS:\n\
+                            1. Your ONLY task is to edit this specific workflow based on the user's request.\n\
+                            2. Do NOT do anything else - do not modify other files, do not run tools, do not ask questions.\n\
+                            3. Return ONLY the complete updated workflow YAML.\n\
+                            4. Preserve the workflow structure and ensure the YAML is valid.\n\
+                            5. Wrap the YAML in a ```yaml code block.\n\
+                            6. Do not add explanations or commentary outside the code block.",
+                            name = name,
                             description = description,
                             content = content
                         );

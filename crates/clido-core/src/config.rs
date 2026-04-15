@@ -251,7 +251,7 @@ fn default_max_tool_calls_per_turn() -> u32 {
 }
 
 fn default_stall_threshold() -> u32 {
-    12
+    150
 }
 
 fn default_doom_consecutive() -> usize {

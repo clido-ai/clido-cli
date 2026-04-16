@@ -318,6 +318,95 @@ pub enum Subcommand {
         /// Session ID to display.
         id: String,
     },
+
+    /// Clear the terminal screen.
+    Clear,
+
+    /// Search conversation history in a session.
+    Search {
+        /// Search query.
+        query: String,
+        /// Session ID (defaults to current session).
+        #[arg(long)]
+        session: Option<String>,
+    },
+
+    /// Export a session to markdown.
+    Export {
+        /// Session ID (defaults to current session).
+        #[arg(long)]
+        session: Option<String>,
+        /// Output file path.
+        #[arg(long, short = 'o')]
+        output: Option<PathBuf>,
+    },
+
+    /// Send a note/hint to the agent (injects into next context).
+    Note {
+        /// Note text.
+        text: Vec<String>,
+    },
+
+    /// Compact the session context immediately.
+    Compact {
+        /// Session ID (defaults to current session).
+        #[arg(long)]
+        session: Option<String>,
+    },
+
+    /// Copy session messages to clipboard.
+    Copy {
+        /// Copy all messages (default: only last assistant message).
+        #[arg(long)]
+        all: bool,
+        /// Session ID (defaults to current session).
+        #[arg(long)]
+        session: Option<String>,
+    },
+
+    /// Toggle desktop notifications.
+    Notify {
+        /// Enable or disable notifications.
+        #[arg(value_name = "STATE")]
+        state: Option<String>,
+    },
+
+    /// Show the agent's current todo list.
+    Todo {
+        /// Session ID (defaults to current session).
+        #[arg(long)]
+        session: Option<String>,
+    },
+
+    /// Show or set the working directory.
+    Workdir {
+        /// New working directory (omit to show current).
+        path: Option<PathBuf>,
+    },
+
+    /// Run diagnostics on the current project.
+    Check,
+
+    /// Show active project rules files.
+    Rules,
+
+    /// Attach an image to the next message.
+    Image {
+        /// Path to image file.
+        path: PathBuf,
+    },
+
+    /// Allow one-off access outside the workspace.
+    AllowPath {
+        /// Path to allow.
+        path: PathBuf,
+    },
+
+    /// List paths allowed for this session.
+    AllowedPaths,
+
+    /// Check for updates and install the latest version.
+    Update,
 }
 
 #[derive(clap::Subcommand, Debug, Clone)]

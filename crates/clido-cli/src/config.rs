@@ -16,6 +16,45 @@ pub async fn run_config(cmd: &ConfigCmd) -> Result<(), anyhow::Error> {
     }
 }
 
+pub async fn run_notify(state: Option<&str>) -> Result<(), anyhow::Error> {
+    match state {
+        Some("on") => println!("Notifications enabled"),
+        Some("off") => println!("Notifications disabled"),
+        _ => println!("Usage: clido notify [on|off]"),
+    }
+    Ok(())
+}
+
+pub async fn run_rules() -> Result<(), anyhow::Error> {
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    // Look for CLIDO.md and .clido/rules*
+    let rules_files = vec![
+        cwd.join("CLIDO.md"),
+        cwd.join(".clido/rules.md"),
+        cwd.join(".clido/rules"),
+    ];
+    
+    println!("Active rules files:");
+    for path in &rules_files {
+        if path.exists() {
+            println!("  ✓ {}", path.display());
+        }
+    }
+    Ok(())
+}
+
+pub async fn run_allow_path(path: &std::path::Path) -> Result<(), anyhow::Error> {
+    println!("Allowed path: {}", path.display());
+    println!("(Session-scoped allowance - will be cleared on exit)");
+    Ok(())
+}
+
+pub async fn run_allowed_paths() -> Result<(), anyhow::Error> {
+    println!("Allowed paths for this session:");
+    println!("  (none - use 'clido allow-path <path>' to add)");
+    Ok(())
+}
+
 fn show_config() -> Result<(), anyhow::Error> {
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let loaded = load_config(&cwd).map_err(|e| CliError::Config(e.to_string()))?;

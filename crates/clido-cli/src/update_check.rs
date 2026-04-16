@@ -228,3 +228,41 @@ fn platform_artifact() -> Option<&'static str> {
         None
     }
 }
+
+pub async fn run_update() -> Result<(), anyhow::Error> {
+    println!("Checking for updates...");
+    
+    let Some(latest) = fetch_latest_version().await else {
+        return Err(anyhow::anyhow!("Could not reach github.com — check your connection."));
+    };
+    
+    if !remote_is_newer(&latest, CURRENT_VERSION) {
+        println!("✓ Already on the latest version ({}).", CURRENT_VERSION);
+        return Ok(());
+    }
+    
+    println!("New version available: {}", latest);
+    println!("Current version: {}", CURRENT_VERSION);
+    
+    let Some(artifact) = platform_artifact() else {
+        return Err(anyhow::anyhow!("Unsupported platform — self-update not available here."));
+    };
+    
+    let url = format!(
+        "https://github.com/{}/releases/download/{}/{}",
+        GITHUB_REPO, latest, artifact
+    );
+    
+    println!("Downloading {} ...", latest);
+    
+    match download_and_replace(&url).await {
+        Ok(()) => {
+            println!("✓ Updated to {}. Restart clido to apply.", latest);
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("Update failed: {}", e));
+        }
+    }
+    
+    Ok(())
+}

@@ -331,6 +331,63 @@ async fn dispatch(cli: cli::Cli) -> Result<(), anyhow::Error> {
             run_cli.prompt = prompt.clone();
             return run::run_agent(run_cli).await;
         }
+        Some(cli::Subcommand::Clear) => {
+            // Clear screen using ANSI escape codes
+            print!("\x1B[2J\x1B[1;1H");
+            return Ok(());
+        }
+        Some(cli::Subcommand::Search { query, session }) => {
+            return sessions::run_search(query, session.as_deref()).await;
+        }
+        Some(cli::Subcommand::Export { session, output }) => {
+            return sessions::run_export(session.as_deref(), output.as_deref()).await;
+        }
+        Some(cli::Subcommand::Note { text }) => {
+            let note = text.join(" ");
+            if note.is_empty() {
+                return Err(CliError::Usage("Note text required".into()).into());
+            }
+            return run::run_with_note(&cli, &note).await;
+        }
+        Some(cli::Subcommand::Compact { session }) => {
+            return sessions::run_compact(session.as_deref()).await;
+        }
+        Some(cli::Subcommand::Copy { all, session }) => {
+            return sessions::run_copy(*all, session.as_deref()).await;
+        }
+        Some(cli::Subcommand::Notify { state }) => {
+            return config::run_notify(state.as_deref()).await;
+        }
+        Some(cli::Subcommand::Todo { session }) => {
+            return sessions::run_todo(session.as_deref()).await;
+        }
+        Some(cli::Subcommand::Workdir { path }) => {
+            if let Some(new_path) = path {
+                std::env::set_current_dir(new_path)?;
+                println!("Working directory changed to: {}", std::env::current_dir()?.display());
+            } else {
+                println!("Current working directory: {}", std::env::current_dir()?.display());
+            }
+            return Ok(());
+        }
+        Some(cli::Subcommand::Check) => {
+            return doctor::run_check().await;
+        }
+        Some(cli::Subcommand::Rules) => {
+            return config::run_rules().await;
+        }
+        Some(cli::Subcommand::Image { path }) => {
+            return run::run_with_image(&cli, path).await;
+        }
+        Some(cli::Subcommand::AllowPath { path }) => {
+            return config::run_allow_path(path).await;
+        }
+        Some(cli::Subcommand::AllowedPaths) => {
+            return config::run_allowed_paths().await;
+        }
+        Some(cli::Subcommand::Update) => {
+            return update_check::run_update().await;
+        }
         None => {}
     }
 

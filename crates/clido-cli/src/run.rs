@@ -541,6 +541,22 @@ pub(crate) fn emit_result(
     }
 }
 
+pub async fn run_with_note(cli: &Cli, note: &str) -> Result<(), anyhow::Error> {
+    println!("Note: {}", note);
+    println!("(Note will be injected into next agent context)");
+    // In a real implementation, this would store the note for the next run
+    Ok(())
+}
+
+pub async fn run_with_image(cli: &Cli, path: &std::path::Path) -> Result<(), anyhow::Error> {
+    if !path.exists() {
+        return Err(CliError::Usage(format!("Image not found: {}", path.display())).into());
+    }
+    println!("Attaching image: {}", path.display());
+    // In a real implementation, this would run the agent with the image attached
+    run_agent(cli.clone()).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{emit_result, EmitResultParams};

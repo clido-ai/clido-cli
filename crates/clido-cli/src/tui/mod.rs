@@ -152,15 +152,15 @@ pub(super) const TUI_SURFACE_ENHANCE_BG: Color = Color::Rgb(26, 36, 48);
 /// Primary left margin for chat rows, info lines, and chrome that aligns with transcript text.
 /// Gutter label for agent replies in the transcript (product name). Kept separate from
 /// [`ChatLine::Assistant`] / API `Role::Assistant`, which describe message kind, not branding.
-pub(super) const TUI_CHAT_AGENT_LABEL: &str = "clido";
+pub(super) const TUI_CHAT_AGENT_LABEL: &str = "cli;do";
 
 pub(super) const TUI_GUTTER: &str = "  ";
 /// Secondary indent (subsections, queue headers, welcome panel labels).
 pub(super) const TUI_GUTTER_SUB: &str = "    ";
 /// Tertiary indent (numbered lists, tool detail wrap, nested queue items).
 pub(super) const TUI_GUTTER_DEEP: &str = "      ";
-/// Clause separator in titles and hints (`  ·  `) — use everywhere instead of ad-hoc spacing.
-pub(super) const TUI_SEP: &str = "  ·  ";
+/// Clause separator in titles and hints (` · `) — use everywhere instead of ad-hoc spacing.
+pub(super) const TUI_SEP: &str = " · ";
 pub(super) const TUI_CODE_BORDER: Color = Color::Rgb(58, 66, 88);
 pub(super) const TUI_CODE_LANG: Color = Color::Rgb(190, 165, 235);
 /// Inline `code` in markdown — cool tint, never “warning yellow”.

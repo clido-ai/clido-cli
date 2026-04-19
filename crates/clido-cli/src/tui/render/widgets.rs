@@ -53,7 +53,16 @@ pub(crate) fn relative_time(ts: &str) -> String {
     let delta = now.signed_duration_since(dt);
     let secs = delta.num_seconds();
     if secs < 0 {
-        return "just now".to_string();
+        let abs = secs.unsigned_abs();
+        if abs < 60 {
+            return format!("in {}s", abs);
+        }
+        let mins = abs / 60;
+        if mins < 60 {
+            return format!("in {}m", mins);
+        }
+        let hours = mins / 60;
+        return format!("in {}h", hours);
     }
     let mins = secs / 60;
     let hours = mins / 60;
@@ -191,7 +200,11 @@ pub(crate) fn modal_border_default() -> Color {
 }
 
 pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let count = s.chars().count();
+    if count <= max_chars {
         s.to_string()
     } else {
         format!(
@@ -203,20 +216,26 @@ pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> String {
     }
 }
 
-/// Word-wrap `text` to lines of at most `width` characters.
+/// Word-wrap `text` to lines of at most `width` display columns.
 pub(crate) fn word_wrap(text: &str, width: usize) -> Vec<String> {
+    use unicode_width::UnicodeWidthStr;
     let mut lines = Vec::new();
     for paragraph in text.lines() {
         let mut cur = String::new();
+        let mut cur_width = 0;
         for word in paragraph.split_whitespace() {
+            let word_width = word.width();
             if cur.is_empty() {
                 cur = word.to_string();
-            } else if cur.len() + 1 + word.len() <= width {
+                cur_width = word_width;
+            } else if cur_width + 1 + word_width <= width {
                 cur.push(' ');
                 cur.push_str(word);
+                cur_width += 1 + word_width;
             } else {
                 lines.push(cur);
                 cur = word.to_string();
+                cur_width = word_width;
             }
         }
         if !cur.is_empty() {

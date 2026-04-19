@@ -18,6 +18,15 @@ pub enum ClidoError {
         is_subscription_limit: bool,
     },
 
+    /// Transient network error (timeout, connection refused, DNS failure).
+    /// These are safe to retry automatically.
+    #[error("network error: {0}")]
+    NetworkError(String),
+
+    /// Server-side HTTP error (5xx). Safe to retry.
+    #[error("server error (HTTP {status}): {message}")]
+    ServerError { status: u16, message: String },
+
     #[error("tool error: {tool_name}: {message}")]
     Tool { tool_name: String, message: String },
 
@@ -123,7 +132,9 @@ impl ClidoError {
             ClidoError::RateLimited { .. }
             | ClidoError::ContextLimit { .. }
             | ClidoError::SessionPersistence { .. }
-            | ClidoError::SessionLoadInvalid { .. } => false,
+            | ClidoError::SessionLoadInvalid { .. }
+            | ClidoError::NetworkError(_)
+            | ClidoError::ServerError { .. } => false,
             ClidoError::MaxTurnsExceeded
             | ClidoError::BudgetExceeded
             | ClidoError::PerTurnBudgetExceeded { .. }

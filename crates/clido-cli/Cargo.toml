@@ -13,6 +13,7 @@ harness = false
 
 [dev-dependencies]
 criterion = { workspace = true }
+proptest = "1"
 tempfile = "3"
 async-trait = { workspace = true }
 serde_json = { workspace = true }

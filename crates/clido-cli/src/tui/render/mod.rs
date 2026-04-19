@@ -8,6 +8,8 @@ mod widgets;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod proptests;
 
 pub(super) use plan::*;
 pub(super) use profile::*;
@@ -1647,6 +1649,108 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             );
         }
     }
+}
+
+// ── Render helper sub-functions ────────────────────────────────────────────────
+
+/// Render the header bar (brand, version, model, profile, session info).
+/// Takes the pre-built line spans and renders them into `header_area`.
+fn render_header_bar(
+    frame: &mut Frame,
+    hb: ratatui::widgets::Block<'static>,
+    header_para: Paragraph<'static>,
+    header_area: Rect,
+) {
+    let h_inner = hb.inner(header_area);
+    frame.render_widget(hb, header_area);
+    frame.render_widget(header_para, h_inner);
+}
+
+/// Render the scroll-down hint indicator when new messages are below the viewport.
+fn render_scroll_indicator(frame: &mut Frame, app: &App, chat_area: Rect) {
+    if !app.following && app.layout.max_scroll > app.scroll {
+        let unread_hint = Span::styled(
+            format!("{TUI_GUTTER}↓ new{TUI_SEP}PgDn"),
+            Style::default().fg(TUI_MARK).add_modifier(Modifier::BOLD),
+        );
+        let hint_line = Line::from(vec![unread_hint]);
+        let hint_para = Paragraph::new(hint_line);
+        let hint_rect = Rect {
+            x: chat_area.x + chat_area.width.saturating_sub(20),
+            y: chat_area.y + chat_area.height.saturating_sub(1),
+            width: 20,
+            height: 1,
+        };
+        frame.render_widget(hint_para, hint_rect);
+    }
+}
+
+/// Render toast notifications (auto-dismiss pop-ups) over the given area.
+fn render_toasts(frame: &mut Frame, app: &mut App, area: Rect) {
+    app.expire_toasts();
+    if app.toasts.is_empty() {
+        return;
+    }
+    let max_w = area.width.saturating_sub(4).min(50) as usize;
+    let mut fallback_slot = 0u16;
+    let toast_bg = TUI_TOAST_BG;
+    for toast in app.toasts.iter().take(3) {
+        let msg: String = toast.message.chars().take(max_w).collect();
+        let msg_display_w: u16 = msg
+            .chars()
+            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0) as u16)
+            .sum();
+        let w = (msg_display_w + 2).min(area.width);
+
+        let toast_rect = if let Some((px, py)) = toast.position {
+            let ty = if py >= area.y + 2 { py - 1 } else { py + 1 };
+            let tx = if px + w <= area.x + area.width {
+                px
+            } else {
+                (area.x + area.width).saturating_sub(w)
+            };
+            Rect {
+                x: tx,
+                y: ty,
+                width: w,
+                height: 1,
+            }
+        } else {
+            let tx = area.x + area.width.saturating_sub(w + 1);
+            let ty = area.y + area.height.saturating_sub(3 + fallback_slot);
+            fallback_slot += 1;
+            Rect {
+                x: tx,
+                y: ty,
+                width: w,
+                height: 1,
+            }
+        };
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                format!(" {msg} "),
+                Style::default().fg(toast.style),
+            )]))
+            .style(Style::default().bg(toast_bg)),
+            toast_rect,
+        );
+    }
+}
+
+/// Render the status line (hint bar) at the bottom of the chat area.
+fn render_status_line(
+    frame: &mut Frame,
+    sb: ratatui::widgets::Block<'static>,
+    slines: Vec<Line<'static>>,
+    status_area: Rect,
+) {
+    if status_area.width == 0 || status_area.height == 0 {
+        return;
+    }
+    let s_inner = sb.inner(status_area);
+    frame.render_widget(sb, status_area);
+    frame.render_widget(Paragraph::new(slines), s_inner);
 }
 
 /// Width-aware version; call this from render paths where chat_area.width is known.

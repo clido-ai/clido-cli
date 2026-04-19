@@ -3,6 +3,49 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[derive(Debug)]
+enum ToolDisplay {
+    Ls,
+    Read,
+    Write,
+    Edit,
+    Bash,
+    Glob,
+    Grep,
+    SemanticSearch,
+    WebSearch,
+    WebFetch,
+    TodoWrite,
+    SpawnWorker,
+    SpawnReviewer,
+    ApplyPatch,
+    MultiEdit,
+    Other,
+}
+
+impl ToolDisplay {
+    fn from_name(name: &str) -> Self {
+        match name.to_ascii_lowercase().as_str() {
+            "ls" => ToolDisplay::Ls,
+            "read" => ToolDisplay::Read,
+            "write" => ToolDisplay::Write,
+            "edit" => ToolDisplay::Edit,
+            "bash" | "shell" => ToolDisplay::Bash,
+            "glob" => ToolDisplay::Glob,
+            "grep" => ToolDisplay::Grep,
+            "semanticsearch" | "semantic_search" => ToolDisplay::SemanticSearch,
+            "websearch" | "web_search" => ToolDisplay::WebSearch,
+            "webfetch" | "web_fetch" => ToolDisplay::WebFetch,
+            "todowrite" | "todo_write" => ToolDisplay::TodoWrite,
+            "spawnworker" | "spawn_worker" => ToolDisplay::SpawnWorker,
+            "spawnreviewer" | "spawn_reviewer" => ToolDisplay::SpawnReviewer,
+            "applypatch" | "apply_patch" => ToolDisplay::ApplyPatch,
+            "multiedit" | "multi_edit" => ToolDisplay::MultiEdit,
+            _ => ToolDisplay::Other,
+        }
+    }
+}
+
 fn trunc_tool_detail(s: &str, max_chars: usize) -> String {
     let t = s.trim();
     if t.chars().count() <= max_chars {
@@ -21,8 +64,8 @@ fn trunc_tool_detail(s: &str, max_chars: usize) -> String {
 fn format_tool_detail(name: &str, input: &str) -> String {
     // Try to parse as JSON for better formatting
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(input) {
-        match name {
-            "Ls" | "ls" => {
+        match ToolDisplay::from_name(name) {
+            ToolDisplay::Ls => {
                 let path = json.get("path").and_then(|v| v.as_str()).unwrap_or(".");
                 let depth = json.get("depth").and_then(|v| v.as_u64());
                 let hidden = json
@@ -39,12 +82,12 @@ fn format_tool_detail(name: &str, input: &str) -> String {
                     path.to_string()
                 }
             }
-            "Read" | "read" => json
+            ToolDisplay::Read => json
                 .get("path")
                 .and_then(|v| v.as_str())
                 .unwrap_or(input)
                 .to_string(),
-            "Write" | "write" => {
+            ToolDisplay::Write => {
                 let path = json
                     .get("file_path")
                     .or(json.get("path"))
@@ -52,27 +95,27 @@ fn format_tool_detail(name: &str, input: &str) -> String {
                     .unwrap_or(input);
                 path.to_string()
             }
-            "Edit" | "edit" => json
+            ToolDisplay::Edit => json
                 .get("file_path")
                 .and_then(|v| v.as_str())
                 .unwrap_or(input)
                 .to_string(),
-            "Bash" | "bash" | "Shell" | "shell" => json
+            ToolDisplay::Bash => json
                 .get("command")
                 .and_then(|v| v.as_str())
                 .unwrap_or(input)
                 .to_string(),
-            "Glob" | "glob" => json
+            ToolDisplay::Glob => json
                 .get("pattern")
                 .and_then(|v| v.as_str())
                 .unwrap_or(input)
                 .to_string(),
-            "Grep" | "grep" => {
+            ToolDisplay::Grep => {
                 let pattern = json.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
                 let path = json.get("path").and_then(|v| v.as_str()).unwrap_or(".");
                 format!("{} in {}", pattern, path)
             }
-            "SemanticSearch" | "semantic_search" => {
+            ToolDisplay::SemanticSearch => {
                 let q = json
                     .get("query")
                     .and_then(|v| v.as_str())
@@ -89,17 +132,17 @@ fn format_tool_detail(name: &str, input: &str) -> String {
                 }
                 s
             }
-            "WebSearch" | "web_search" => json
+            ToolDisplay::WebSearch => json
                 .get("query")
                 .and_then(|v| v.as_str())
                 .map(|q| trunc_tool_detail(q, 80))
                 .unwrap_or_else(|| input.chars().take(60).collect()),
-            "WebFetch" | "web_fetch" => json
+            ToolDisplay::WebFetch => json
                 .get("url")
                 .and_then(|v| v.as_str())
                 .map(|u| trunc_tool_detail(u, 96))
                 .unwrap_or_else(|| input.chars().take(60).collect()),
-            "TodoWrite" | "todo_write" => {
+            ToolDisplay::TodoWrite => {
                 let n = json
                     .get("todos")
                     .and_then(|v| v.as_array())
@@ -121,17 +164,17 @@ fn format_tool_detail(name: &str, input: &str) -> String {
                     }
                 }
             }
-            "SpawnWorker" | "spawn_worker" => json
+            ToolDisplay::SpawnWorker => json
                 .get("task")
                 .and_then(|v| v.as_str())
                 .map(|t| trunc_tool_detail(t, 88))
                 .unwrap_or_else(|| "worker task".into()),
-            "SpawnReviewer" | "spawn_reviewer" => json
+            ToolDisplay::SpawnReviewer => json
                 .get("criteria")
                 .and_then(|v| v.as_str())
                 .map(|c| trunc_tool_detail(c, 88))
                 .unwrap_or_else(|| "review".into()),
-            "ApplyPatch" | "apply_patch" => {
+            ToolDisplay::ApplyPatch => {
                 let patch = json.get("patch").and_then(|v| v.as_str()).unwrap_or("");
                 let lines = patch.lines().count();
                 let file_hint = patch
@@ -144,7 +187,7 @@ fn format_tool_detail(name: &str, input: &str) -> String {
                     None => format!("unified diff  ·  {lines} lines"),
                 }
             }
-            "MultiEdit" | "multi_edit" => {
+            ToolDisplay::MultiEdit => {
                 let edits = json.get("edits").and_then(|v| v.as_array());
                 let n = edits.map(|a| a.len()).unwrap_or(0);
                 if n == 0 {
@@ -162,7 +205,7 @@ fn format_tool_detail(name: &str, input: &str) -> String {
                     }
                 }
             }
-            _ => {
+            ToolDisplay::Other => {
                 // For unknown tools, show first string value or truncate JSON
                 if let Some(obj) = json.as_object() {
                     if let Some((_, v)) = obj.iter().find(|(_, v)| v.is_string()) {

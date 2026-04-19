@@ -73,18 +73,10 @@ pub async fn invoke_model_completion(
                 // Check if error is retryable (but NOT RateLimited - that has special handling)
                 let is_retryable = match &e {
                     clido_core::ClidoError::RateLimited { .. } => false,
-                    _ => {
-                        let error_str = e.to_string().to_lowercase();
-                        error_str.contains("timeout")
-                            || error_str.contains("connection")
-                            || error_str.contains("network")
-                            || error_str.contains("json format")
-                            || error_str.contains("invalid request")
-                            || error_str.contains("server error")
-                            || error_str.contains("503")
-                            || error_str.contains("502")
-                            || error_str.contains("504")
-                    }
+                    clido_core::ClidoError::NetworkError(_) => true,
+                    clido_core::ClidoError::ServerError { .. } => true,
+                    clido_core::ClidoError::MalformedModelOutput { .. } => true,
+                    _ => false,
                 };
                 
                 if !is_retryable {

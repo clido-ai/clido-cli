@@ -12,6 +12,7 @@ tracing = "0.1"
 directories = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tiktoken-rs = "0.5"
 
 [dev-dependencies]
 tempfile = "3"

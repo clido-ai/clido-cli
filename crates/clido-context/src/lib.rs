@@ -44,10 +44,17 @@ pub const DEFAULT_COMPACTION_THRESHOLD: f64 = 0.58;
 const COMPACTED_PLACEHOLDER: &str =
     "[Compacted history] Earlier messages were omitted to fit context.";
 
-/// Estimate token count for a string (chars/4 heuristic).
+fn get_tokenizer() -> &'static tiktoken_rs::CoreBPE {
+    static TOKENIZER: std::sync::OnceLock<tiktoken_rs::CoreBPE> = std::sync::OnceLock::new();
+    TOKENIZER.get_or_init(|| {
+        tiktoken_rs::cl100k_base().expect("failed to load cl100k_base tokenizer")
+    })
+}
+
+/// Estimate token count for a string using cl100k_base BPE tokenizer.
 #[inline]
 pub fn estimate_tokens_str(s: &str) -> u32 {
-    (s.chars().count() as u32).div_ceil(4)
+    get_tokenizer().encode_with_special_tokens(s).len() as u32
 }
 
 /// Estimate token count for a single message.
@@ -88,50 +95,29 @@ pub fn estimate_tokens_messages(messages: &[Message]) -> u32 {
 /// with the same path and content). If the same path appears multiple times with identical
 /// content, only the most recent occurrence is kept.
 pub fn dedup_file_reads(messages: &[Message]) -> Vec<Message> {
-    use std::collections::HashMap;
+    use std::collections::HashSet;
 
-    // First pass: for each tool_use_id in ToolResult blocks, check if it's a read result
-    // We track (tool_use_id → content) for ToolResult blocks, then find duplicates.
-    // Strategy: collect all (index, tool_use_id, content) for ToolResult blocks in User messages.
-    // If content is identical to a later occurrence, remove the earlier one.
-
-    // Collect ToolResult positions: (msg_index, block_index, tool_use_id, content)
-    let mut result_positions: Vec<(usize, usize, String, String)> = Vec::new();
+    // Collect (msg_index, block_index, content) for all ToolResult blocks.
+    let mut positions: Vec<(usize, usize, String)> = Vec::new();
     for (mi, msg) in messages.iter().enumerate() {
         for (bi, block) in msg.content.iter().enumerate() {
-            if let ContentBlock::ToolResult {
-                tool_use_id,
-                content,
-                ..
-            } = block
-            {
-                result_positions.push((mi, bi, tool_use_id.clone(), content.clone()));
+            if let ContentBlock::ToolResult { content, .. } = block {
+                positions.push((mi, bi, content.clone()));
             }
         }
     }
 
-    // Find duplicate content: same content appearing in multiple ToolResult blocks.
-    // Keep only the last occurrence of each content value.
-    // Use a map from content → last position index.
-    let mut content_last_seen: HashMap<String, usize> = HashMap::new();
-    for (pos_idx, (_, _, _, content)) in result_positions.iter().enumerate() {
-        content_last_seen.insert(content.clone(), pos_idx);
+    if positions.is_empty() {
+        return messages.to_vec();
     }
 
-    // Build set of (msg_index, block_index) to remove (earlier duplicates)
-    let mut to_remove: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
-    let mut content_seen_at: HashMap<String, usize> = HashMap::new();
-    for (pos_idx, (mi, bi, _, content)) in result_positions.iter().enumerate() {
-        let last = content_last_seen[content];
-        if last != pos_idx {
-            // This is not the last occurrence — remove it
+    // Single pass from the end: the LAST occurrence of each content is kept;
+    // earlier duplicates are removed.
+    let mut seen_content: HashSet<String> = HashSet::new();
+    let mut to_remove: HashSet<(usize, usize)> = HashSet::new();
+    for (mi, bi, content) in positions.iter().rev() {
+        if !seen_content.insert(content.clone()) {
             to_remove.insert((*mi, *bi));
-        } else if content_seen_at.contains_key(content) {
-            // This is the last occurrence but we've seen it before — remove earlier ones
-            // (already handled above)
-            let _ = content_seen_at.insert(content.clone(), pos_idx);
-        } else {
-            content_seen_at.insert(content.clone(), pos_idx);
         }
     }
 
@@ -139,7 +125,7 @@ pub fn dedup_file_reads(messages: &[Message]) -> Vec<Message> {
         return messages.to_vec();
     }
 
-    // Rebuild messages without removed blocks; drop empty user messages
+    // Rebuild messages without removed blocks; drop empty user messages.
     let mut out = Vec::new();
     for (mi, msg) in messages.iter().enumerate() {
         let new_content: Vec<ContentBlock> = msg
@@ -150,7 +136,6 @@ pub fn dedup_file_reads(messages: &[Message]) -> Vec<Message> {
             .map(|(_, b)| b.clone())
             .collect();
         if new_content.is_empty() && msg.role == clido_core::Role::User {
-            // Drop empty user messages (they only contained deduplicated ToolResult blocks)
             continue;
         }
         out.push(Message {
@@ -656,14 +641,13 @@ mod tests {
         assert_eq!(results.len(), 1);
     }
 
-    /// Lines 35-36: estimate_tokens_str is a public function.
+    /// estimate_tokens_str uses BPE tokenizer; verify basic properties.
     #[test]
     fn estimate_tokens_str_basic() {
-        // 8 chars → div_ceil(8/4) = 2
-        assert_eq!(estimate_tokens_str("hello!!!"), 2);
-        // 1 char → div_ceil(1/4) = 1
-        assert_eq!(estimate_tokens_str("a"), 1);
-        // empty
+        // BPE tokenizer: exact counts differ from chars/4 but must be > 0 for non-empty strings.
+        assert!(estimate_tokens_str("hello!!!") > 0);
+        assert!(estimate_tokens_str("a") > 0);
+        // empty string → 0 tokens
         assert_eq!(estimate_tokens_str(""), 0);
     }
 

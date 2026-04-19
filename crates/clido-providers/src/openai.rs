@@ -283,7 +283,7 @@ impl OpenAICompatProvider {
                             // No delay for timeouts - just retry immediately
                             continue;
                         }
-                        return Err(ClidoError::Provider(format!(
+                        return Err(ClidoError::NetworkError(format!(
                             "Request timed out after {} attempts ({}s each). The API may be experiencing issues.",
                             MAX_TIMEOUT_ATTEMPTS, 420
                         )));
@@ -299,7 +299,7 @@ impl OpenAICompatProvider {
                         tokio::time::sleep(Duration::from_secs(delay)).await;
                         continue;
                     }
-                    return Err(ClidoError::Provider(format!(
+                    return Err(ClidoError::NetworkError(format!(
                         "Connection failed after {} attempts: {}",
                         MAX_NETWORK_ATTEMPTS,
                         if e.is_connect() {
@@ -414,11 +414,13 @@ impl OpenAICompatProvider {
                     tokio::time::sleep(Duration::from_secs(delay)).await;
                     continue;
                 }
-                return Err(ClidoError::Provider(format!(
-                    "API server error ({}) after {} attempts. Please try again later.",
-                    status.as_u16(),
-                    MAX_SERVER_ERROR_ATTEMPTS
-                )));
+                return Err(ClidoError::ServerError {
+                    status: status.as_u16(),
+                    message: format!(
+                        "API server error after {} attempts. Please try again later.",
+                        MAX_SERVER_ERROR_ATTEMPTS
+                    ),
+                });
             }
 
             if status.is_success() {

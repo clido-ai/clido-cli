@@ -33,7 +33,7 @@ pub async fn run_rules() -> Result<(), anyhow::Error> {
         cwd.join(".clido/rules.md"),
         cwd.join(".clido/rules"),
     ];
-    
+
     println!("Active rules files:");
     for path in &rules_files {
         if path.exists() {

@@ -1197,11 +1197,14 @@ pub(crate) enum LineSource {
     Assistant,
     Thinking,
     ToolCall,
+    #[allow(dead_code)]
     ToolOutput,
     Diff,
     Info,
     Section,
+    #[allow(dead_code)]
     WorkflowStep,
+    #[allow(dead_code)]
     WorkflowOutput,
 }
 
@@ -1222,11 +1225,13 @@ impl ContentLine {
     }
 
     /// Get plain text content (for selection/copy)
+    #[allow(dead_code)]
     pub fn plain_text(&self) -> String {
         self.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
     /// Get display width (respecting Unicode)
+    #[allow(dead_code)]
     pub fn width(&self) -> usize {
         self.spans.iter().map(|s| s.content.width()).sum()
     }
@@ -1385,7 +1390,10 @@ mod tests {
         st.commit_edit();
         assert!(matches!(st.mode, ProfileOverlayMode::Overview));
         assert_eq!(st.api_key, "new-api-key", "commit_edit should trim input");
-        assert!(st.input.is_empty(), "commit_edit should clear staging buffer");
+        assert!(
+            st.input.is_empty(),
+            "commit_edit should clear staging buffer"
+        );
     }
 
     #[test]
@@ -1437,7 +1445,10 @@ mod tests {
         st.cursor = 1; // ApiKey
         st.begin_edit(&[]);
         assert!(
-            matches!(st.mode, ProfileOverlayMode::EditField(ProfileEditField::ApiKey)),
+            matches!(
+                st.mode,
+                ProfileOverlayMode::EditField(ProfileEditField::ApiKey)
+            ),
             "expected EditField(ApiKey), got {:?}",
             st.mode
         );
@@ -1487,7 +1498,9 @@ mod tests {
             for_field: ProfileEditField::FastProvider,
         };
         // Select "ollama" which doesn't require a key
-        let ollama_pos = KNOWN_PROVIDERS.iter().position(|(id, _, _)| *id == "ollama");
+        let ollama_pos = KNOWN_PROVIDERS
+            .iter()
+            .position(|(id, _, _)| *id == "ollama");
         if let Some(pos) = ollama_pos {
             // Find the filtered index for ollama
             let filtered = st.provider_picker.filtered();
@@ -1513,7 +1526,9 @@ mod tests {
             for_field: ProfileEditField::Provider,
         };
         // Select "openai" which requires a key
-        let openai_pos = KNOWN_PROVIDERS.iter().position(|(id, _, _)| *id == "openai");
+        let openai_pos = KNOWN_PROVIDERS
+            .iter()
+            .position(|(id, _, _)| *id == "openai");
         if let Some(pos) = openai_pos {
             let filtered = st.provider_picker.filtered();
             if let Some(fi) = filtered.iter().position(|&i| i == pos) {
@@ -1619,7 +1634,10 @@ mod tests {
         let original_model = st.model.clone();
         st.commit_model_pick();
         assert!(matches!(st.mode, ProfileOverlayMode::Overview));
-        assert_eq!(st.model, original_model, "model should not change when picker is None");
+        assert_eq!(
+            st.model, original_model,
+            "model should not change when picker is None"
+        );
     }
 
     #[test]
@@ -1644,36 +1662,68 @@ mod tests {
     fn cursor_field_mapping_covers_all_positions() {
         let st = make_profile_state();
         assert_eq!(
-            ProfileOverlayState { cursor: 0, ..make_profile_state() }.cursor_field(),
+            ProfileOverlayState {
+                cursor: 0,
+                ..make_profile_state()
+            }
+            .cursor_field(),
             ProfileEditField::Provider
         );
         assert_eq!(
-            ProfileOverlayState { cursor: 1, ..make_profile_state() }.cursor_field(),
+            ProfileOverlayState {
+                cursor: 1,
+                ..make_profile_state()
+            }
+            .cursor_field(),
             ProfileEditField::ApiKey
         );
         assert_eq!(
-            ProfileOverlayState { cursor: 2, ..make_profile_state() }.cursor_field(),
+            ProfileOverlayState {
+                cursor: 2,
+                ..make_profile_state()
+            }
+            .cursor_field(),
             ProfileEditField::Model
         );
         assert_eq!(
-            ProfileOverlayState { cursor: 3, ..make_profile_state() }.cursor_field(),
+            ProfileOverlayState {
+                cursor: 3,
+                ..make_profile_state()
+            }
+            .cursor_field(),
             ProfileEditField::BaseUrl
         );
         assert_eq!(
-            ProfileOverlayState { cursor: 4, ..make_profile_state() }.cursor_field(),
+            ProfileOverlayState {
+                cursor: 4,
+                ..make_profile_state()
+            }
+            .cursor_field(),
             ProfileEditField::FastProvider
         );
         assert_eq!(
-            ProfileOverlayState { cursor: 5, ..make_profile_state() }.cursor_field(),
+            ProfileOverlayState {
+                cursor: 5,
+                ..make_profile_state()
+            }
+            .cursor_field(),
             ProfileEditField::FastApiKey
         );
         assert_eq!(
-            ProfileOverlayState { cursor: 6, ..make_profile_state() }.cursor_field(),
+            ProfileOverlayState {
+                cursor: 6,
+                ..make_profile_state()
+            }
+            .cursor_field(),
             ProfileEditField::FastModel
         );
         // Out-of-range → None
         assert_eq!(
-            ProfileOverlayState { cursor: 99, ..make_profile_state() }.cursor_field(),
+            ProfileOverlayState {
+                cursor: 99,
+                ..make_profile_state()
+            }
+            .cursor_field(),
             ProfileEditField::None
         );
         let _ = st; // suppress unused warning
@@ -1699,7 +1749,10 @@ mod tests {
         assert_eq!(st.field_value(&ProfileEditField::Provider), "openai");
         assert_eq!(st.field_value(&ProfileEditField::ApiKey), "key-abc");
         assert_eq!(st.field_value(&ProfileEditField::Model), "gpt-4o");
-        assert_eq!(st.field_value(&ProfileEditField::BaseUrl), "https://api.example.com");
+        assert_eq!(
+            st.field_value(&ProfileEditField::BaseUrl),
+            "https://api.example.com"
+        );
         assert_eq!(st.field_value(&ProfileEditField::FastProvider), "groq");
         assert_eq!(st.field_value(&ProfileEditField::FastApiKey), "fast-key");
         assert_eq!(st.field_value(&ProfileEditField::FastModel), "llama-3");

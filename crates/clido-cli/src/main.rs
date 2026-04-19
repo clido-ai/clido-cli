@@ -364,9 +364,15 @@ async fn dispatch(cli: cli::Cli) -> Result<(), anyhow::Error> {
         Some(cli::Subcommand::Workdir { path }) => {
             if let Some(new_path) = path {
                 std::env::set_current_dir(new_path)?;
-                println!("Working directory changed to: {}", std::env::current_dir()?.display());
+                println!(
+                    "Working directory changed to: {}",
+                    std::env::current_dir()?.display()
+                );
             } else {
-                println!("Current working directory: {}", std::env::current_dir()?.display());
+                println!(
+                    "Current working directory: {}",
+                    std::env::current_dir()?.display()
+                );
             }
             return Ok(());
         }

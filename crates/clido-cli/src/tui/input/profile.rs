@@ -254,7 +254,9 @@ pub fn handle_profile_overlay_key(app: &mut App, event: crossterm::event::KeyEve
                                 st.input.clear();
                                 st.input_cursor = 0;
                                 st.mode = ProfileOverlayMode::Overview;
-                                let Some(st) = app.profile_overlay.as_mut() else { return; };
+                                let Some(st) = app.profile_overlay.as_mut() else {
+                                    return;
+                                };
                                 st.save();
                                 let name = st.name.clone();
                                 let msg = st
@@ -528,7 +530,8 @@ pub fn handle_profile_overlay_key(app: &mut App, event: crossterm::event::KeyEve
                             .map(|(_, h)| (h as usize).saturating_sub(12).max(3))
                             .unwrap_or(20);
                         if st.provider_picker.selected >= st.provider_picker.scroll_offset + vis {
-                            st.provider_picker.scroll_offset = st.provider_picker.selected + 1 - vis;
+                            st.provider_picker.scroll_offset =
+                                st.provider_picker.selected + 1 - vis;
                         }
                     }
                 }
@@ -736,7 +739,9 @@ pub fn handle_profile_overlay_key(app: &mut App, event: crossterm::event::KeyEve
                     }
                 }
                 crossterm::event::KeyCode::Char('s') if event.modifiers.contains(Km::CONTROL) => {
-                    let Some(st) = app.profile_overlay.as_mut() else { return; };
+                    let Some(st) = app.profile_overlay.as_mut() else {
+                        return;
+                    };
                     st.save();
                     // Update live app state if it's the active profile
                     let name = st.name.clone();
@@ -774,7 +779,9 @@ pub fn handle_profile_overlay_key(app: &mut App, event: crossterm::event::KeyEve
                     }
                 }
                 Enter => {
-                    let Some(st) = app.profile_overlay.as_mut() else { return; };
+                    let Some(st) = app.profile_overlay.as_mut() else {
+                        return;
+                    };
                     st.commit_edit();
                     // Auto-save on field commit
                     st.save();

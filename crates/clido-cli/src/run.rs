@@ -541,7 +541,7 @@ pub(crate) fn emit_result(
     }
 }
 
-pub async fn run_with_note(cli: &Cli, note: &str) -> Result<(), anyhow::Error> {
+pub async fn run_with_note(_cli: &Cli, note: &str) -> Result<(), anyhow::Error> {
     println!("Note: {}", note);
     println!("(Note will be injected into next agent context)");
     // In a real implementation, this would store the note for the next run

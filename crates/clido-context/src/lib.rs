@@ -46,9 +46,8 @@ const COMPACTED_PLACEHOLDER: &str =
 
 fn get_tokenizer() -> &'static tiktoken_rs::CoreBPE {
     static TOKENIZER: std::sync::OnceLock<tiktoken_rs::CoreBPE> = std::sync::OnceLock::new();
-    TOKENIZER.get_or_init(|| {
-        tiktoken_rs::cl100k_base().expect("failed to load cl100k_base tokenizer")
-    })
+    TOKENIZER
+        .get_or_init(|| tiktoken_rs::cl100k_base().expect("failed to load cl100k_base tokenizer"))
 }
 
 /// Estimate token count for a string using cl100k_base BPE tokenizer.

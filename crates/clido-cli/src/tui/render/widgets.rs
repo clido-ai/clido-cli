@@ -337,6 +337,7 @@ pub(crate) fn fit_spans(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Span
 }
 
 /// Tool rows in the transcript: bold status + name, then wrapped detail for scanability.
+#[allow(dead_code)]
 pub(crate) fn tool_event_lines(
     width: usize,
     name: &str,
@@ -400,6 +401,7 @@ pub(crate) fn tool_event_lines(
 }
 
 /// Return the semantic color for a tool call based on its type and state.
+#[allow(dead_code)]
 pub(crate) fn tool_color(name: &str, done: bool, is_error: bool) -> Color {
     if is_error {
         return TUI_STATE_ERR;

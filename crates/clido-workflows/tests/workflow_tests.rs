@@ -12,13 +12,13 @@ use std::sync::Mutex;
 static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
 use async_trait::async_trait;
+use clido_workflows::executor::StepRunResult;
 use clido_workflows::{
     check_prerequisites, load, preflight, render, render_default, render_save_to, validate,
-    BackoffKind, InputDef, OnErrorPolicy, OutputDef, PrereqEntry, PrerequisitesDef,
-    PreflightStatus, RetryConfig, StepDef, WorkflowContext, WorkflowDef,
-    WorkflowStepRunner, StepRunRequest,
+    BackoffKind, InputDef, OnErrorPolicy, OutputDef, PreflightStatus, PrereqEntry,
+    PrerequisitesDef, RetryConfig, StepDef, StepRunRequest, WorkflowContext, WorkflowDef,
+    WorkflowStepRunner,
 };
-use clido_workflows::executor::StepRunResult;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -42,7 +42,12 @@ fn two_step_def() -> WorkflowDef {
         inputs: vec![],
         steps: vec![
             make_step("s1", "First step", OnErrorPolicy::Fail, false),
-            make_step("s2", "Second step: {{ steps.s1.output }}", OnErrorPolicy::Fail, false),
+            make_step(
+                "s2",
+                "Second step: {{ steps.s1.output }}",
+                OnErrorPolicy::Fail,
+                false,
+            ),
         ],
         output: None,
         prerequisites: None,
@@ -159,7 +164,11 @@ output:
     assert_eq!(def.inputs.len(), 2);
     assert!(def.inputs[0].required);
     assert!(!def.inputs[1].required);
-    assert!(def.output.as_ref().map(|o| o.print_summary).unwrap_or(false));
+    assert!(def
+        .output
+        .as_ref()
+        .map(|o| o.print_summary)
+        .unwrap_or(false));
     assert_eq!(def.steps[0].outputs[0].name, "output");
 }
 
@@ -179,7 +188,10 @@ steps:
     prompt: "hello"
 "#;
     let result: Result<WorkflowDef, _> = serde_yaml::from_str(yaml);
-    assert!(result.is_err(), "missing `name` field must return a parse error");
+    assert!(
+        result.is_err(),
+        "missing `name` field must return a parse error"
+    );
 }
 
 #[test]
@@ -187,7 +199,10 @@ fn yaml_missing_steps_field_returns_error() {
     // `steps` has no default either.
     let yaml = r#"name: no_steps"#;
     let result: Result<WorkflowDef, _> = serde_yaml::from_str(yaml);
-    assert!(result.is_err(), "missing `steps` field must return a parse error");
+    assert!(
+        result.is_err(),
+        "missing `steps` field must return a parse error"
+    );
 }
 
 #[test]
@@ -228,8 +243,7 @@ fn load_valid_yaml_file() {
 
 #[test]
 fn load_nonexistent_file_returns_workflow_error() {
-    let err = load(std::path::Path::new("/tmp/__nonexistent_clido_test__.yaml"))
-        .unwrap_err();
+    let err = load(std::path::Path::new("/tmp/__nonexistent_clido_test__.yaml")).unwrap_err();
     assert!(
         err.to_string().contains("Failed to read"),
         "error message should mention 'Failed to read'"
@@ -283,7 +297,10 @@ fn validate_duplicate_step_ids_fails() {
 #[test]
 fn validate_retry_without_on_error_retry_fails() {
     let mut step = make_step("s", "prompt", OnErrorPolicy::Fail, false);
-    step.retry = Some(RetryConfig { max_attempts: 3, backoff: BackoffKind::None });
+    step.retry = Some(RetryConfig {
+        max_attempts: 3,
+        backoff: BackoffKind::None,
+    });
     let def = WorkflowDef {
         name: "bad_retry".into(),
         version: "1".into(),
@@ -294,7 +311,9 @@ fn validate_retry_without_on_error_retry_fails() {
         prerequisites: None,
     };
     let err = validate(&def).unwrap_err();
-    assert!(err.to_string().contains("retry config only allowed when on_error: retry"));
+    assert!(err
+        .to_string()
+        .contains("retry config only allowed when on_error: retry"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -305,7 +324,10 @@ fn validate_retry_without_on_error_retry_fails() {
 fn preflight_passes_for_valid_workflow_no_profiles_no_tools() {
     let def = two_step_def();
     let result = preflight(&def, &[], &[]);
-    assert!(result.is_ok(), "valid workflow with no profiles/tools should pass preflight");
+    assert!(
+        result.is_ok(),
+        "valid workflow with no profiles/tools should pass preflight"
+    );
 }
 
 #[test]
@@ -325,7 +347,10 @@ fn preflight_fails_for_invalid_workflow() {
     };
     let result = preflight(&def, &[], &[]);
     assert!(!result.is_ok());
-    assert!(result.checks.iter().any(|c| matches!(c.status, PreflightStatus::Fail(_))));
+    assert!(result
+        .checks
+        .iter()
+        .any(|c| matches!(c.status, PreflightStatus::Fail(_))));
 }
 
 #[test]
@@ -342,8 +367,14 @@ fn preflight_warns_for_unknown_tool_but_still_passes() {
         prerequisites: None,
     };
     let result = preflight(&def, &[], &["KnownTool"]);
-    assert!(result.is_ok(), "unknown tool produces a warning but not a failure");
-    assert!(result.checks.iter().any(|c| matches!(c.status, PreflightStatus::Warn(_))));
+    assert!(
+        result.is_ok(),
+        "unknown tool produces a warning but not a failure"
+    );
+    assert!(result
+        .checks
+        .iter()
+        .any(|c| matches!(c.status, PreflightStatus::Warn(_))));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -362,7 +393,10 @@ fn context_new_starts_empty() {
 fn context_set_and_get_step_output() {
     let mut ctx = WorkflowContext::new(HashMap::new());
     ctx.set_step_output("gather", "output", "the gathered data");
-    assert_eq!(ctx.get_step_output("gather", "output"), Some("the gathered data"));
+    assert_eq!(
+        ctx.get_step_output("gather", "output"),
+        Some("the gathered data")
+    );
     assert_eq!(ctx.get_step_output("gather", "missing"), None);
 }
 
@@ -554,7 +588,10 @@ fn render_default_resolves_cwd_placeholder() {
 #[test]
 fn render_default_resolves_date_placeholder() {
     let out = render_default("report-{{ date }}.txt");
-    assert!(out.starts_with("report-20"), "date placeholder should expand to a year");
+    assert!(
+        out.starts_with("report-20"),
+        "date placeholder should expand to a year"
+    );
     assert!(out.ends_with(".txt"));
 }
 
@@ -652,9 +689,19 @@ async fn run_workflow_on_error_continue_runs_remaining_steps() {
     impl WorkflowStepRunner for SelectiveFail {
         async fn run_step(&self, req: StepRunRequest) -> clido_core::Result<StepRunResult> {
             if req.step_id == "bad_middle" {
-                Ok(StepRunResult { output_text: String::new(), cost_usd: 0.0, duration_ms: 0, error: Some("oops".into()) })
+                Ok(StepRunResult {
+                    output_text: String::new(),
+                    cost_usd: 0.0,
+                    duration_ms: 0,
+                    error: Some("oops".into()),
+                })
             } else {
-                Ok(StepRunResult { output_text: format!("out_{}", req.step_id), cost_usd: 0.0, duration_ms: 0, error: None })
+                Ok(StepRunResult {
+                    output_text: format!("out_{}", req.step_id),
+                    cost_usd: 0.0,
+                    duration_ms: 0,
+                    error: None,
+                })
             }
         }
     }
@@ -665,7 +712,10 @@ async fn run_workflow_on_error_continue_runs_remaining_steps() {
 
     // All three steps ran; ok_last produced output.
     assert_eq!(ctx.step_results.len(), 3);
-    assert_eq!(ctx.get_step_output("ok_last", "output"), Some("out_ok_last"));
+    assert_eq!(
+        ctx.get_step_output("ok_last", "output"),
+        Some("out_ok_last")
+    );
     // Workflow-level success=false because a step had an error.
     assert!(!summary.success);
 }
@@ -673,9 +723,18 @@ async fn run_workflow_on_error_continue_runs_remaining_steps() {
 #[tokio::test]
 async fn run_workflow_output_chaining_across_steps() {
     // Step 2's prompt references step 1's output via template.
-    let mut step2 = make_step("step2", "Input was: {{ steps.step1.output }}", OnErrorPolicy::Fail, false);
+    let mut step2 = make_step(
+        "step2",
+        "Input was: {{ steps.step1.output }}",
+        OnErrorPolicy::Fail,
+        false,
+    );
     // Add a named output so we can verify the rendered prompt was used.
-    step2.outputs = vec![OutputDef { name: "output".into(), r#type: "text".into(), save_to: None }];
+    step2.outputs = vec![OutputDef {
+        name: "output".into(),
+        r#type: "text".into(),
+        save_to: None,
+    }];
 
     let def = WorkflowDef {
         name: "chain".into(),
@@ -711,7 +770,12 @@ async fn run_workflow_with_inputs_passed_to_template() {
             required: true,
             default: None,
         }],
-        steps: vec![make_step("s1", "Review {{ inputs.lang }} code", OnErrorPolicy::Fail, false)],
+        steps: vec![make_step(
+            "s1",
+            "Review {{ inputs.lang }} code",
+            OnErrorPolicy::Fail,
+            false,
+        )],
         output: None,
         prerequisites: None,
     };
@@ -788,11 +852,15 @@ fn check_prerequisites_missing_required_env_fails() {
         output: None,
         prerequisites: Some(PrerequisitesDef {
             commands: vec![],
-            env: vec![PrereqEntry::Required("__CLIDO_INTEGRATION_TEST_NOT_SET__".into())],
+            env: vec![PrereqEntry::Required(
+                "__CLIDO_INTEGRATION_TEST_NOT_SET__".into(),
+            )],
         }),
     };
     let err = check_prerequisites(&def).unwrap_err();
-    assert!(err.to_string().contains("Missing required environment variable"));
+    assert!(err
+        .to_string()
+        .contains("Missing required environment variable"));
 }
 
 #[test]
@@ -872,5 +940,8 @@ steps:
     assert!(summary.success);
     assert_eq!(summary.step_count, 2);
     assert_eq!(ctx.get_step_output("greet", "output"), Some("out_greet"));
-    assert_eq!(ctx.get_step_output("farewell", "output"), Some("out_farewell"));
+    assert_eq!(
+        ctx.get_step_output("farewell", "output"),
+        Some("out_farewell")
+    );
 }

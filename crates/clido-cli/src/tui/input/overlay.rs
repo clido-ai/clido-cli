@@ -1,6 +1,5 @@
 use super::*;
 
-
 /// Process app-level actions returned by overlays.
 pub fn handle_app_action(app: &mut App, action: AppAction) {
     match action {

@@ -312,6 +312,7 @@ pub(super) struct App {
     /// Hash of the messages Vec at the time the cache was last populated.
     /// Used to detect when messages change and stale entries should be evicted.
     pub(super) render_cache_msg_count: usize,
+    #[allow(dead_code)]
     pub(super) line_position_map: Vec<(usize, usize, usize)>, // (chatline_idx, start_char, end_char) per screen row
     pub(super) rendered_line_texts: Vec<String>,
     /// Unified content lines - single source of truth for display and selection

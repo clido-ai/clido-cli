@@ -121,6 +121,7 @@ pub(super) const TUI_CODE_BG: Color = Color::Rgb(22, 24, 32);
 pub(super) const TUI_CODE_FG: Color = Color::Rgb(212, 220, 235);
 
 /// Elevated / inset surface (tool error strip, code-adjacent panels) — same family as code bg.
+#[allow(dead_code)]
 pub(super) const TUI_SURFACE_INSET: Color = TUI_CODE_BG;
 
 // ── Zoned layout surfaces (L0–L3) — obvious separation between regions ─────

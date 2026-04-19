@@ -7,9 +7,9 @@ mod welcome;
 mod widgets;
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod proptests;
+#[cfg(test)]
+mod tests;
 
 pub(super) use plan::*;
 pub(super) use profile::*;
@@ -387,7 +387,12 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let l2 = fit_spans(hline2, w);
         Paragraph::new(vec![Line::from(l1), Line::from(l2)])
     };
-    render_header_bar(frame, surfaces::header_zone_block(), header_para, header_area);
+    render_header_bar(
+        frame,
+        surfaces::header_zone_block(),
+        header_para,
+        header_area,
+    );
 
     // ── Prompt banner ──
     // Shows the active prompt (max 2 lines) below the header while the agent is busy.
@@ -2524,9 +2529,8 @@ pub(super) fn render_chat_to_content_lines(
     model: &str,
 ) -> Vec<ContentLine> {
     let mut out = Vec::new();
-    let mut msg_idx = 0;
 
-    for msg in messages {
+    for (msg_idx, msg) in messages.iter().enumerate() {
         match msg {
             ChatLine::User(text) => {
                 // Header line
@@ -2770,8 +2774,6 @@ pub(super) fn render_chat_to_content_lines(
                 // Skip WelcomeBrand and WelcomeSplash
             }
         }
-
-        msg_idx += 1;
     }
 
     out

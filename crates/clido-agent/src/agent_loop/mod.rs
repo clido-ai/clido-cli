@@ -1720,7 +1720,7 @@ impl AgentLoop {
                         let tool_names: Vec<&str> =
                             tool_uses.iter().map(|(_, n, _)| n.as_str()).collect();
                         let tool_list = tool_names.join(", ");
-                        
+
                         // Send warning to user but continue
                         if let Some(ref e) = self.emit {
                             let warning = format!(
@@ -1731,7 +1731,7 @@ impl AgentLoop {
                             );
                             e.on_assistant_text(&warning).await;
                         }
-                        
+
                         // Reset stall score to allow continuation
                         self.stall.reset();
                     }

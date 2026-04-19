@@ -24,15 +24,19 @@ pub async fn invoke_model_completion(
 
     const MAX_RETRIES: u32 = 3;
     let mut last_error = None;
-    
+
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
             // Exponential backoff: 1s, 2s, 4s
             let delay_ms = 1000 * (1 << attempt);
             tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-            
+
             if let Some(ref e) = emit {
-                e.on_assistant_text(&format!("[Provider error, retrying {}/{}...]", attempt, MAX_RETRIES)).await;
+                e.on_assistant_text(&format!(
+                    "[Provider error, retrying {}/{}...]",
+                    attempt, MAX_RETRIES
+                ))
+                .await;
             }
         }
 
@@ -45,7 +49,8 @@ pub async fn invoke_model_completion(
                         config.model.clone(),
                         emit.clone(),
                         cancel.clone(),
-                    ).await;
+                    )
+                    .await;
                     match r {
                         Ok(resp) => Ok(resp),
                         Err(e) => Err(e),
@@ -78,11 +83,11 @@ pub async fn invoke_model_completion(
                     clido_core::ClidoError::MalformedModelOutput { .. } => true,
                     _ => false,
                 };
-                
+
                 if !is_retryable {
                     return Err(e);
                 }
-                
+
                 last_error = Some(e);
             }
         }
@@ -90,9 +95,10 @@ pub async fn invoke_model_completion(
 
     // All retries exhausted
     if let Some(e) = last_error {
-        Err(clido_core::ClidoError::Provider(
-            format!("Failed after {} retries: {}", MAX_RETRIES, e),
-        ))
+        Err(clido_core::ClidoError::Provider(format!(
+            "Failed after {} retries: {}",
+            MAX_RETRIES, e
+        )))
     } else {
         Err(clido_core::ClidoError::Provider(
             "Failed after retries".to_string(),

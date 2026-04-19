@@ -317,10 +317,10 @@ fn print_info(use_color: bool, msg: &str) {
 pub async fn run_check() -> Result<(), anyhow::Error> {
     // Quick project diagnostics
     let cwd = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    
+
     println!("Project diagnostics for: {}", cwd.display());
     println!();
-    
+
     // Check for common project files
     let files_to_check = vec![
         ("Cargo.toml", "Rust project"),
@@ -335,7 +335,7 @@ pub async fn run_check() -> Result<(), anyhow::Error> {
         ("Makefile", "Make-based project"),
         ("Dockerfile", "Docker project"),
     ];
-    
+
     let mut found_project = false;
     for (file, project_type) in &files_to_check {
         if cwd.join(file).exists() {
@@ -343,25 +343,25 @@ pub async fn run_check() -> Result<(), anyhow::Error> {
             found_project = true;
         }
     }
-    
+
     if !found_project {
         println!("⚠ No recognizable project files found");
     }
-    
+
     // Check for .git
     if cwd.join(".git").exists() {
         println!("✓ Git repository detected");
     } else {
         println!("⚠ Not a git repository");
     }
-    
+
     // Check for CLIDO.md
     if cwd.join("CLIDO.md").exists() {
         println!("✓ CLIDO.md rules file present");
     } else {
         println!("ℹ No CLIDO.md found (optional)");
     }
-    
+
     Ok(())
 }
 

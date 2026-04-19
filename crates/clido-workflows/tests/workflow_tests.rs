@@ -462,6 +462,7 @@ fn context_cwd_is_set_from_current_dir() {
 }
 
 #[test]
+#[serial_test::serial]
 fn context_cwd_uses_clido_workdir_env_var() {
     let _guard = ENV_MUTEX.lock().unwrap();
     let old = std::env::var("CLIDO_WORKDIR").ok();

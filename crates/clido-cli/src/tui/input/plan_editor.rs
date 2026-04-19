@@ -254,16 +254,22 @@ pub fn handle_plan_editor_key(app: &mut App, event: crossterm::event::KeyEvent) 
             }
         }
         Char('d') => {
-            // Delete selected task.
+            // Delete selected task with confirmation.
             if let Some(ref mut editor) = app.plan.editor {
                 if let Some(task) = editor.plan.tasks.get(app.plan.selected_task) {
                     let id = task.id.clone();
+                    let desc = task.description.clone();
                     if editor.delete_task(&id).is_ok()
                         && app.plan.selected_task >= editor.plan.tasks.len()
                         && app.plan.selected_task > 0
                     {
                         app.plan.selected_task -= 1;
                     }
+                    app.push_toast(
+                        format!("Deleted: {}", desc),
+                        TUI_STATE_OK,
+                        std::time::Duration::from_secs(2),
+                    );
                 }
             }
         }

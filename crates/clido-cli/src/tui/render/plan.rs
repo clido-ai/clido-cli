@@ -491,8 +491,9 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         )]));
     } else {
         // Task list with selection highlight
-        let scroll_start = if app.plan.selected_task >= task_area.height as usize {
-            app.plan.selected_task - task_area.height as usize + 1
+        let task_h = task_area.height.max(1) as usize;
+        let scroll_start = if app.plan.selected_task >= task_h {
+            app.plan.selected_task - task_h + 1
         } else {
             0
         };
@@ -558,6 +559,16 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
             progress,
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]));
+
+        // Scroll indicator when tasks exceed visible area
+        let visible_tasks = task_area.height.saturating_sub(2) as usize; // minus edit form lines
+        if task_count > visible_tasks {
+            let above = scroll_start;
+            let below = task_count.saturating_sub(scroll_start + visible_tasks);
+            if let Some(indicator) = scroll_indicator_line(above, below) {
+                task_lines.push(indicator);
+            }
+        }
     }
 
     frame.render_widget(

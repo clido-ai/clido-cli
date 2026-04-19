@@ -387,12 +387,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let l2 = fit_spans(hline2, w);
         Paragraph::new(vec![Line::from(l1), Line::from(l2)])
     };
-    {
-        let hb = surfaces::header_zone_block();
-        let h_inner = hb.inner(header_area);
-        frame.render_widget(hb, header_area);
-        frame.render_widget(header_para, h_inner);
-    }
+    render_header_bar(frame, surfaces::header_zone_block(), header_para, header_area);
 
     // ── Prompt banner ──
     // Shows the active prompt (max 2 lines) below the header while the agent is busy.
@@ -863,21 +858,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // ── "↓ new messages" scroll indicator ──
-    if !app.following && app.layout.max_scroll > app.scroll {
-        let unread_hint = Span::styled(
-            format!("{TUI_GUTTER}↓ new{TUI_SEP}PgDn"),
-            Style::default().fg(TUI_MARK).add_modifier(Modifier::BOLD),
-        );
-        let hint_line = Line::from(vec![unread_hint]);
-        let hint_para = Paragraph::new(hint_line);
-        let hint_rect = Rect {
-            x: chat_area.x + chat_area.width.saturating_sub(20),
-            y: chat_area.y + chat_area.height.saturating_sub(1),
-            width: 20,
-            height: 1,
-        };
-        frame.render_widget(hint_para, hint_rect);
-    }
+    render_scroll_indicator(frame, app, chat_area);
 
     // ── Overlay modals (all rendered above the input field, same structure) ──
     //
@@ -1685,74 +1666,6 @@ fn render_scroll_indicator(frame: &mut Frame, app: &App, chat_area: Rect) {
     }
 }
 
-/// Render toast notifications (auto-dismiss pop-ups) over the given area.
-fn render_toasts(frame: &mut Frame, app: &mut App, area: Rect) {
-    app.expire_toasts();
-    if app.toasts.is_empty() {
-        return;
-    }
-    let max_w = area.width.saturating_sub(4).min(50) as usize;
-    let mut fallback_slot = 0u16;
-    let toast_bg = TUI_TOAST_BG;
-    for toast in app.toasts.iter().take(3) {
-        let msg: String = toast.message.chars().take(max_w).collect();
-        let msg_display_w: u16 = msg
-            .chars()
-            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0) as u16)
-            .sum();
-        let w = (msg_display_w + 2).min(area.width);
-
-        let toast_rect = if let Some((px, py)) = toast.position {
-            let ty = if py >= area.y + 2 { py - 1 } else { py + 1 };
-            let tx = if px + w <= area.x + area.width {
-                px
-            } else {
-                (area.x + area.width).saturating_sub(w)
-            };
-            Rect {
-                x: tx,
-                y: ty,
-                width: w,
-                height: 1,
-            }
-        } else {
-            let tx = area.x + area.width.saturating_sub(w + 1);
-            let ty = area.y + area.height.saturating_sub(3 + fallback_slot);
-            fallback_slot += 1;
-            Rect {
-                x: tx,
-                y: ty,
-                width: w,
-                height: 1,
-            }
-        };
-
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![Span::styled(
-                format!(" {msg} "),
-                Style::default().fg(toast.style),
-            )]))
-            .style(Style::default().bg(toast_bg)),
-            toast_rect,
-        );
-    }
-}
-
-/// Render the status line (hint bar) at the bottom of the chat area.
-fn render_status_line(
-    frame: &mut Frame,
-    sb: ratatui::widgets::Block<'static>,
-    slines: Vec<Line<'static>>,
-    status_area: Rect,
-) {
-    if status_area.width == 0 || status_area.height == 0 {
-        return;
-    }
-    let s_inner = sb.inner(status_area);
-    frame.render_widget(sb, status_area);
-    frame.render_widget(Paragraph::new(slines), s_inner);
-}
-
 /// Width-aware version; call this from render paths where chat_area.width is known.
 /// Uses a per-width render cache keyed by message content hash to avoid re-rendering
 /// unchanged messages on every tick.
@@ -1847,6 +1760,8 @@ fn apply_selection_highlight(
 }
 
 /// Pre-wrap styled lines so each `Line` fits within `width` columns.
+/// Kept for potential future use; current render path uses `wrap_content_lines` instead.
+#[allow(dead_code)]
 ///
 /// After this, `Vec<Line>` index == visual row, which means mouse
 /// coordinates (post-wrap) map 1:1 to vector indices. This is critical
@@ -2038,6 +1953,7 @@ fn wrap_styled_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'stati
 }
 
 /// Display width of a string (number of terminal columns).
+#[allow(dead_code)]
 fn unicode_display_width(s: &str) -> usize {
     // Use the same logic ratatui uses internally.
     s.chars()

@@ -1312,6 +1312,400 @@ pub(crate) struct Toast {
 mod tests {
     use super::*;
 
+    // ── ProfileOverlayState ──────────────────────────────────────────────────
+
+    fn make_profile_state() -> ProfileOverlayState {
+        ProfileOverlayState {
+            name: "test-profile".to_string(),
+            provider: "anthropic".to_string(),
+            api_key: "sk-test".to_string(),
+            model: "claude-3-5-sonnet".to_string(),
+            base_url: String::new(),
+            fast_provider: String::new(),
+            fast_api_key: String::new(),
+            fast_model: String::new(),
+            cursor: 0,
+            mode: ProfileOverlayMode::Overview,
+            input: String::new(),
+            input_cursor: 0,
+            status: None,
+            config_path: std::path::PathBuf::from("/tmp/test-config.toml"),
+            is_new: false,
+            provider_picker: ProviderPickerState::new(),
+            profile_model_picker: None,
+            saved_keys: vec![],
+            profile_create_name_choice: ProfileCreateNameChoice::AutoGenerate,
+        }
+    }
+
+    #[test]
+    fn cancel_edit_from_edit_field_returns_to_overview() {
+        let mut st = make_profile_state();
+        st.mode = ProfileOverlayMode::EditField(ProfileEditField::Provider);
+        st.input = "some-value".to_string();
+        st.input_cursor = 10;
+        st.cancel_edit();
+        assert!(
+            matches!(st.mode, ProfileOverlayMode::Overview),
+            "expected Overview, got {:?}",
+            st.mode
+        );
+        assert!(st.input.is_empty(), "cancel_edit should clear input");
+        assert_eq!(st.input_cursor, 0);
+    }
+
+    #[test]
+    fn cancel_edit_from_picking_provider_returns_to_overview() {
+        let mut st = make_profile_state();
+        st.mode = ProfileOverlayMode::PickingProvider {
+            for_field: ProfileEditField::Provider,
+        };
+        st.cancel_edit();
+        assert!(matches!(st.mode, ProfileOverlayMode::Overview));
+    }
+
+    #[test]
+    fn cancel_edit_from_picking_model_returns_to_overview() {
+        let mut st = make_profile_state();
+        st.mode = ProfileOverlayMode::PickingModel {
+            for_field: ProfileEditField::Model,
+        };
+        st.cancel_edit();
+        assert!(matches!(st.mode, ProfileOverlayMode::Overview));
+    }
+
+    #[test]
+    fn commit_edit_api_key_updates_field_and_returns_to_overview() {
+        let mut st = make_profile_state();
+        // cursor 1 = ApiKey
+        st.cursor = 1;
+        st.mode = ProfileOverlayMode::EditField(ProfileEditField::ApiKey);
+        st.input = "  new-api-key  ".to_string();
+        st.input_cursor = st.input.chars().count();
+        st.commit_edit();
+        assert!(matches!(st.mode, ProfileOverlayMode::Overview));
+        assert_eq!(st.api_key, "new-api-key", "commit_edit should trim input");
+        assert!(st.input.is_empty(), "commit_edit should clear staging buffer");
+    }
+
+    #[test]
+    fn commit_edit_model_field_updates_model() {
+        let mut st = make_profile_state();
+        st.cursor = 2;
+        st.mode = ProfileOverlayMode::EditField(ProfileEditField::Model);
+        st.input = "claude-opus-4".to_string();
+        st.input_cursor = st.input.chars().count();
+        st.commit_edit();
+        assert!(matches!(st.mode, ProfileOverlayMode::Overview));
+        assert_eq!(st.model, "claude-opus-4");
+    }
+
+    #[test]
+    fn commit_edit_base_url_field_updates_base_url() {
+        let mut st = make_profile_state();
+        st.cursor = 3;
+        st.mode = ProfileOverlayMode::EditField(ProfileEditField::BaseUrl);
+        st.input = "https://my-endpoint.example.com".to_string();
+        st.input_cursor = st.input.chars().count();
+        st.commit_edit();
+        assert!(matches!(st.mode, ProfileOverlayMode::Overview));
+        assert_eq!(st.base_url, "https://my-endpoint.example.com");
+    }
+
+    #[test]
+    fn commit_edit_fast_api_key_updates_fast_api_key() {
+        let mut st = make_profile_state();
+        st.mode = ProfileOverlayMode::EditField(ProfileEditField::FastApiKey);
+        st.input = "fast-key-xyz".to_string();
+        st.input_cursor = st.input.chars().count();
+        st.commit_edit();
+        assert!(matches!(st.mode, ProfileOverlayMode::Overview));
+        assert_eq!(st.fast_api_key, "fast-key-xyz");
+    }
+
+    #[test]
+    fn commit_edit_noop_when_not_in_edit_mode() {
+        let mut st = make_profile_state();
+        // mode is Overview — commit_edit should not crash and should stay Overview
+        st.commit_edit();
+        assert!(matches!(st.mode, ProfileOverlayMode::Overview));
+    }
+
+    #[test]
+    fn begin_edit_on_api_key_cursor_enters_edit_field_mode() {
+        let mut st = make_profile_state();
+        st.cursor = 1; // ApiKey
+        st.begin_edit(&[]);
+        assert!(
+            matches!(st.mode, ProfileOverlayMode::EditField(ProfileEditField::ApiKey)),
+            "expected EditField(ApiKey), got {:?}",
+            st.mode
+        );
+        // staging buffer should be pre-filled with current value
+        assert_eq!(st.input, "sk-test");
+    }
+
+    #[test]
+    fn begin_edit_on_provider_cursor_enters_picking_provider_mode() {
+        let mut st = make_profile_state();
+        st.cursor = 0; // Provider
+        st.begin_edit(&[]);
+        assert!(
+            matches!(
+                st.mode,
+                ProfileOverlayMode::PickingProvider {
+                    for_field: ProfileEditField::Provider
+                }
+            ),
+            "expected PickingProvider, got {:?}",
+            st.mode
+        );
+    }
+
+    #[test]
+    fn begin_edit_on_model_cursor_enters_picking_model_mode() {
+        let mut st = make_profile_state();
+        st.cursor = 2; // Model
+        st.begin_edit(&[]);
+        assert!(
+            matches!(
+                st.mode,
+                ProfileOverlayMode::PickingModel {
+                    for_field: ProfileEditField::Model
+                }
+            ),
+            "expected PickingModel, got {:?}",
+            st.mode
+        );
+    }
+
+    #[test]
+    fn commit_provider_pick_with_no_key_required_returns_to_overview() {
+        let mut st = make_profile_state();
+        // Set up picking provider for FastProvider (ollama doesn't need a key)
+        st.mode = ProfileOverlayMode::PickingProvider {
+            for_field: ProfileEditField::FastProvider,
+        };
+        // Select "ollama" which doesn't require a key
+        let ollama_pos = KNOWN_PROVIDERS.iter().position(|(id, _, _)| *id == "ollama");
+        if let Some(pos) = ollama_pos {
+            // Find the filtered index for ollama
+            let filtered = st.provider_picker.filtered();
+            if let Some(fi) = filtered.iter().position(|&i| i == pos) {
+                st.provider_picker.selected = fi;
+            }
+        }
+        st.commit_provider_pick();
+        assert!(
+            matches!(st.mode, ProfileOverlayMode::Overview),
+            "expected Overview after picking provider that doesn't need key, got {:?}",
+            st.mode
+        );
+        assert_eq!(st.fast_provider, "ollama");
+    }
+
+    #[test]
+    fn commit_provider_pick_with_key_required_and_no_key_enters_edit_field() {
+        let mut st = make_profile_state();
+        // Clear out the api_key so the logic triggers prompt-for-key
+        st.api_key = String::new();
+        st.mode = ProfileOverlayMode::PickingProvider {
+            for_field: ProfileEditField::Provider,
+        };
+        // Select "openai" which requires a key
+        let openai_pos = KNOWN_PROVIDERS.iter().position(|(id, _, _)| *id == "openai");
+        if let Some(pos) = openai_pos {
+            let filtered = st.provider_picker.filtered();
+            if let Some(fi) = filtered.iter().position(|&i| i == pos) {
+                st.provider_picker.selected = fi;
+            }
+        }
+        st.commit_provider_pick();
+        // Should enter EditField(ApiKey) to prompt user for the key
+        assert!(
+            matches!(
+                st.mode,
+                ProfileOverlayMode::EditField(ProfileEditField::ApiKey)
+            ),
+            "expected EditField(ApiKey) when key is required and missing, got {:?}",
+            st.mode
+        );
+    }
+
+    #[test]
+    fn commit_provider_pick_with_existing_key_returns_to_overview() {
+        let mut st = make_profile_state();
+        // api_key is already set ("sk-test")
+        st.mode = ProfileOverlayMode::PickingProvider {
+            for_field: ProfileEditField::Provider,
+        };
+        // Select "anthropic"
+        let pos = KNOWN_PROVIDERS
+            .iter()
+            .position(|(id, _, _)| *id == "anthropic");
+        if let Some(pos) = pos {
+            let filtered = st.provider_picker.filtered();
+            if let Some(fi) = filtered.iter().position(|&i| i == pos) {
+                st.provider_picker.selected = fi;
+            }
+        }
+        st.commit_provider_pick();
+        assert!(
+            matches!(st.mode, ProfileOverlayMode::Overview),
+            "expected Overview when key already present, got {:?}",
+            st.mode
+        );
+        assert_eq!(st.provider, "anthropic");
+    }
+
+    #[test]
+    fn commit_model_pick_with_selection_updates_model_and_returns_to_overview() {
+        let mut st = make_profile_state();
+        st.mode = ProfileOverlayMode::PickingModel {
+            for_field: ProfileEditField::Model,
+        };
+        st.profile_model_picker = Some(ModelPickerState {
+            models: vec![ModelEntry {
+                id: "claude-opus-4".to_string(),
+                provider: "anthropic".to_string(),
+                input_mtok: 0.0,
+                output_mtok: 0.0,
+                context_k: None,
+                role: None,
+                is_favorite: false,
+            }],
+            filter: String::new(),
+            selected: 0,
+            scroll_offset: 0,
+        });
+        st.commit_model_pick();
+        assert!(matches!(st.mode, ProfileOverlayMode::Overview));
+        assert_eq!(st.model, "claude-opus-4");
+        assert!(st.profile_model_picker.is_none());
+    }
+
+    #[test]
+    fn commit_model_pick_for_fast_model_updates_fast_model() {
+        let mut st = make_profile_state();
+        st.mode = ProfileOverlayMode::PickingModel {
+            for_field: ProfileEditField::FastModel,
+        };
+        st.profile_model_picker = Some(ModelPickerState {
+            models: vec![ModelEntry {
+                id: "claude-haiku-3-5".to_string(),
+                provider: "anthropic".to_string(),
+                input_mtok: 0.0,
+                output_mtok: 0.0,
+                context_k: None,
+                role: None,
+                is_favorite: false,
+            }],
+            filter: String::new(),
+            selected: 0,
+            scroll_offset: 0,
+        });
+        st.commit_model_pick();
+        assert!(matches!(st.mode, ProfileOverlayMode::Overview));
+        assert_eq!(st.fast_model, "claude-haiku-3-5");
+    }
+
+    #[test]
+    fn commit_model_pick_with_no_picker_returns_to_overview() {
+        let mut st = make_profile_state();
+        st.mode = ProfileOverlayMode::PickingModel {
+            for_field: ProfileEditField::Model,
+        };
+        st.profile_model_picker = None;
+        let original_model = st.model.clone();
+        st.commit_model_pick();
+        assert!(matches!(st.mode, ProfileOverlayMode::Overview));
+        assert_eq!(st.model, original_model, "model should not change when picker is None");
+    }
+
+    #[test]
+    fn for_create_starts_in_creating_name_step_when_no_env_detected() {
+        // Unset any provider env vars that might be present in test environment
+        // We can't guarantee env is clean, so just verify shape when provider is empty.
+        // Call for_create with an empty profiles map.
+        let path = std::path::PathBuf::from("/tmp/test-config.toml");
+        let profiles = std::collections::HashMap::new();
+        let st = ProfileOverlayState::for_create(path, &profiles);
+        assert!(st.is_new);
+        // Mode is either Creating{Name} (no env) or Creating{Model} (env detected)
+        // Both are valid; just assert it's a Creating variant.
+        assert!(
+            matches!(st.mode, ProfileOverlayMode::Creating { .. }),
+            "expected Creating variant, got {:?}",
+            st.mode
+        );
+    }
+
+    #[test]
+    fn cursor_field_mapping_covers_all_positions() {
+        let st = make_profile_state();
+        assert_eq!(
+            ProfileOverlayState { cursor: 0, ..make_profile_state() }.cursor_field(),
+            ProfileEditField::Provider
+        );
+        assert_eq!(
+            ProfileOverlayState { cursor: 1, ..make_profile_state() }.cursor_field(),
+            ProfileEditField::ApiKey
+        );
+        assert_eq!(
+            ProfileOverlayState { cursor: 2, ..make_profile_state() }.cursor_field(),
+            ProfileEditField::Model
+        );
+        assert_eq!(
+            ProfileOverlayState { cursor: 3, ..make_profile_state() }.cursor_field(),
+            ProfileEditField::BaseUrl
+        );
+        assert_eq!(
+            ProfileOverlayState { cursor: 4, ..make_profile_state() }.cursor_field(),
+            ProfileEditField::FastProvider
+        );
+        assert_eq!(
+            ProfileOverlayState { cursor: 5, ..make_profile_state() }.cursor_field(),
+            ProfileEditField::FastApiKey
+        );
+        assert_eq!(
+            ProfileOverlayState { cursor: 6, ..make_profile_state() }.cursor_field(),
+            ProfileEditField::FastModel
+        );
+        // Out-of-range → None
+        assert_eq!(
+            ProfileOverlayState { cursor: 99, ..make_profile_state() }.cursor_field(),
+            ProfileEditField::None
+        );
+        let _ = st; // suppress unused warning
+    }
+
+    #[test]
+    fn field_count_is_seven() {
+        assert_eq!(ProfileOverlayState::field_count(), 7);
+    }
+
+    #[test]
+    fn field_value_returns_correct_value_for_each_field() {
+        let st = ProfileOverlayState {
+            provider: "openai".to_string(),
+            api_key: "key-abc".to_string(),
+            model: "gpt-4o".to_string(),
+            base_url: "https://api.example.com".to_string(),
+            fast_provider: "groq".to_string(),
+            fast_api_key: "fast-key".to_string(),
+            fast_model: "llama-3".to_string(),
+            ..make_profile_state()
+        };
+        assert_eq!(st.field_value(&ProfileEditField::Provider), "openai");
+        assert_eq!(st.field_value(&ProfileEditField::ApiKey), "key-abc");
+        assert_eq!(st.field_value(&ProfileEditField::Model), "gpt-4o");
+        assert_eq!(st.field_value(&ProfileEditField::BaseUrl), "https://api.example.com");
+        assert_eq!(st.field_value(&ProfileEditField::FastProvider), "groq");
+        assert_eq!(st.field_value(&ProfileEditField::FastApiKey), "fast-key");
+        assert_eq!(st.field_value(&ProfileEditField::FastModel), "llama-3");
+        assert_eq!(st.field_value(&ProfileEditField::None), "");
+    }
+
     // ── SessionStats ─────────────────────────────────────────────────────────
 
     #[test]

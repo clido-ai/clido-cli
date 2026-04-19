@@ -32,6 +32,9 @@ pub struct McpServerConfig {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub transport: McpTransport,
+    /// Per-call timeout override in seconds (default: 300).
+    #[serde(default)]
+    pub tool_timeout_secs: Option<u64>,
 }
 
 /// MCP config file format.
@@ -112,6 +115,8 @@ pub struct McpClient {
     reader: Mutex<BufReader<ChildStdout>>,
     next_id: Mutex<u64>,
     pub config: McpServerConfig,
+    /// Per-tool-call timeout in seconds. Defaults to 300.
+    tool_timeout_secs: u64,
 }
 
 impl McpClient {
@@ -140,12 +145,14 @@ impl McpClient {
             .stdout
             .take()
             .ok_or_else(|| anyhow::anyhow!("MCP server '{}' stdout not available", config.name))?;
+        let tool_timeout_secs = config.tool_timeout_secs.unwrap_or(300);
         Ok(Self {
             _child: child,
             stdin: Mutex::new(stdin),
             reader: Mutex::new(BufReader::new(stdout)),
             next_id: Mutex::new(1),
             config,
+            tool_timeout_secs,
         })
     }
 
@@ -271,19 +278,62 @@ impl McpClient {
     }
 
     /// Call a tool by name with the given arguments.
+    ///
+    /// # Policy notes
+    /// - Retries up to 3 times on transient I/O failures with exponential backoff.
+    /// - Times out after `tool_timeout_secs` seconds (default 300).
+    /// - Permission gating (plan/accept-all mode): MCP tools are currently invoked
+    ///   unconditionally. Per-tool permission prompting is planned for V3 when the
+    ///   permission system is extended to support external tool registries.
+    /// - Credential isolation: API keys are already stripped from the subprocess
+    ///   environment via `BLOCKED_MCP_ENV_VARS` before the server is spawned.
     pub async fn call_tool(
         &self,
         name: &str,
         arguments: serde_json::Value,
     ) -> anyhow::Result<serde_json::Value> {
-        self.send_request(
-            "tools/call",
-            serde_json::json!({
-                "name": name,
-                "arguments": arguments
-            }),
-        )
-        .await
+        const MAX_RETRIES: u32 = 3;
+        let mut last_err = None;
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                let delay_ms = 1000u64 * (1 << attempt);
+                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+            }
+            match tokio::time::timeout(
+                tokio::time::Duration::from_secs(self.tool_timeout_secs),
+                self.send_request(
+                    "tools/call",
+                    serde_json::json!({ "name": name, "arguments": arguments }),
+                ),
+            )
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "MCP tool call '{}' timed out after {}s",
+                    name,
+                    self.tool_timeout_secs
+                )
+            }) {
+                Err(e) => {
+                    // Timeout errors are transient — retry them.
+                    last_err = Some(e);
+                }
+                Ok(Err(e)) => {
+                    // Only retry on I/O / transport errors, not MCP protocol errors.
+                    let msg = e.to_string().to_lowercase();
+                    let is_transient = msg.contains("broken pipe")
+                        || msg.contains("connection reset")
+                        || msg.contains("timed out")
+                        || msg.contains("io error");
+                    if !is_transient {
+                        return Err(e);
+                    }
+                    last_err = Some(e);
+                }
+                Ok(Ok(v)) => return Ok(v),
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("MCP call_tool failed after retries")))
     }
 }
 
@@ -430,34 +480,70 @@ impl McpHttpClient {
     }
 
     /// Call a tool by name with the given arguments via HTTP.
+    ///
+    /// # Policy notes
+    /// - Retries up to 3 times on transient I/O failures with exponential backoff.
+    /// - Times out after `tool_timeout_secs` seconds (default 300).
+    /// - Permission gating (plan/accept-all mode): MCP tools are currently invoked
+    ///   unconditionally. Per-tool permission prompting is planned for V3 when the
+    ///   permission system is extended to support external tool registries.
+    /// - Credential isolation: API keys are already stripped from the subprocess
+    ///   environment via `BLOCKED_MCP_ENV_VARS` before the server is spawned.
     pub async fn call_tool(
         &self,
         name: &str,
         arguments: serde_json::Value,
     ) -> anyhow::Result<serde_json::Value> {
-        let result = self
-            .send_request(
-                "tools/call",
-                serde_json::json!({ "name": name, "arguments": arguments }),
-            )
-            .await?;
-        // Extract text content from MCP response if present
-        if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
-            let text: Vec<String> = content
-                .iter()
-                .filter_map(|item| {
-                    if item.get("type").and_then(|t| t.as_str()) == Some("text") {
-                        item.get("text").and_then(|t| t.as_str()).map(String::from)
-                    } else {
-                        None
+        const MAX_RETRIES: u32 = 3;
+        let mut last_err = None;
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                let delay_ms = 1000u64 * (1 << attempt);
+                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+            }
+            match self
+                .send_request(
+                    "tools/call",
+                    serde_json::json!({ "name": name, "arguments": arguments }),
+                )
+                .await
+            {
+                Ok(result) => {
+                    // Extract text content from MCP response if present.
+                    if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
+                        let text: Vec<String> = content
+                            .iter()
+                            .filter_map(|item| {
+                                if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                    item.get("text").and_then(|t| t.as_str()).map(String::from)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                        if !text.is_empty() {
+                            return Ok(serde_json::Value::String(text.join("\n")));
+                        }
                     }
-                })
-                .collect();
-            if !text.is_empty() {
-                return Ok(serde_json::Value::String(text.join("\n")));
+                    return Ok(result);
+                }
+                Err(e) => {
+                    // Only retry on I/O / transport errors, not MCP protocol errors.
+                    let msg = e.to_string().to_lowercase();
+                    let is_transient = msg.contains("broken pipe")
+                        || msg.contains("connection reset")
+                        || msg.contains("timed out")
+                        || msg.contains("io error")
+                        || msg.contains("error sending request")
+                        || msg.contains("connection refused");
+                    if !is_transient {
+                        return Err(e);
+                    }
+                    last_err = Some(e);
+                }
             }
         }
-        Ok(result)
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("MCP call_tool failed after retries")))
     }
 }
 
@@ -601,6 +687,7 @@ mod tests {
             args: vec![],
             env: HashMap::new(),
             transport: McpTransport::default(),
+            tool_timeout_secs: None,
         };
         let result = McpClient::spawn(cfg);
         if let Ok(client) = result {

@@ -331,7 +331,8 @@ impl LoadedConfig {
         })
     }
 
-    /// Validate provider name.
+    /// Validate provider name against known provider IDs.
+    /// This list mirrors PROVIDER_REGISTRY in clido-providers (avoiding circular deps).
     pub fn validate_provider(provider: &str) -> Result<()> {
         let valid = [
             "anthropic",
@@ -342,7 +343,6 @@ impl LoadedConfig {
             "kimi",
             "kimi-code",
             "local",
-            "ollama",
             "alibabacloud",
             "alibabacloud-code",
             "deepseek",

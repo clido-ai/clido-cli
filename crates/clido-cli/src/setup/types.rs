@@ -4,7 +4,7 @@ use crate::list_picker::{ListPicker, PickerItem};
 use crate::text_input::TextInput;
 
 use clido_providers::registry::PROVIDER_REGISTRY;
-use clido_providers::ModelEntry;
+use clido_providers::{ModelEntry, ModelMetadata};
 
 /// Current config values passed to the setup wizard when re-running from TUI (/init).
 /// Each field is optional — empty string = nothing known.
@@ -15,7 +15,7 @@ pub struct SetupPreFill {
     pub api_key: String,
     /// Current model ID (pre-selected in list).
     pub model: String,
-    /// Profile name (used in profile-create / profile-edit flows).
+    /// Profile name (Used in profile-create / profile-edit flows).
     pub profile_name: String,
     /// True when creating a brand-new named profile (shows ProfileName step first).
     pub is_new_profile: bool,
@@ -96,20 +96,73 @@ impl PickerItem for ProviderEntry {
     }
 }
 
-/// A model-picker item: either a fetched model or the "Custom…" sentinel.
+/// A model-picker item: either a fetched model with metadata or the "Custom…" sentinel.
 #[derive(Debug, Clone)]
 pub(super) enum ModelOption {
-    Entry(ModelEntry),
+    Metadata(ModelMetadata),
     Custom,
+}
+
+impl ModelOption {
+    /// Backward compat: create from a simple ModelEntry.
+    pub fn from_entry(entry: ModelEntry) -> Self {
+        Self::Metadata(ModelMetadata {
+            id: entry.id,
+            name: None,
+            context_window: None,
+            pricing: None,
+            capabilities: clido_providers::ModelCapabilities::default(),
+            status: clido_providers::ModelStatus::Active,
+            release_date: None,
+            available: entry.available,
+        })
+    }
 }
 
 impl PickerItem for ModelOption {
     fn filter_text(&self) -> String {
         match self {
-            ModelOption::Entry(m) => m.id.clone(),
+            ModelOption::Metadata(m) => m.name.clone().unwrap_or_else(|| m.id.clone()),
             ModelOption::Custom => "Custom\u{2026}".to_string(),
         }
     }
+    fn filter_text_secondary(&self) -> Option<String> {
+        match self {
+            ModelOption::Metadata(m) => {
+                let mut parts = Vec::new();
+                if m.name.is_some() {
+                    parts.push(m.id.clone());
+                }
+                if let Some(ctx) = m.context_window {
+                    parts.push(format_context(ctx));
+                }
+                if let Some(ref pricing) = m.pricing {
+                    parts.push(format_pricing(pricing));
+                }
+                if m.capabilities.reasoning {
+                    parts.push("🧠".to_string());
+                }
+                if !parts.is_empty() {
+                    Some(parts.join("  "))
+                } else {
+                    None
+                }
+            }
+            ModelOption::Custom => None,
+        }
+    }
+}
+
+fn format_context(tokens: u32) -> String {
+    if tokens >= 1000 {
+        format!("{}K", tokens / 1000)
+    } else {
+        format!("{} tokens", tokens)
+    }
+}
+
+fn format_pricing(p: &clido_providers::ModelPricing) -> String {
+    format!("${:.2}/${:.2}", p.input_per_mtok, p.output_per_mtok)
 }
 
 pub(super) fn make_provider_picker() -> ListPicker<ProviderEntry> {
@@ -123,11 +176,11 @@ pub(super) fn make_provider_picker_at(selected: usize) -> ListPicker<ProviderEnt
     picker
 }
 
-pub(super) fn make_model_picker(models: &[ModelEntry]) -> ListPicker<ModelOption> {
+pub(super) fn make_model_picker(models: &[ModelMetadata]) -> ListPicker<ModelOption> {
     let items: Vec<ModelOption> = models
         .iter()
         .cloned()
-        .map(ModelOption::Entry)
+        .map(ModelOption::Metadata)
         .chain(std::iter::once(ModelOption::Custom))
         .collect();
     ListPicker::new(items, 10)
@@ -165,7 +218,7 @@ pub(super) struct SetupState {
     pub credential: String,
     pub model: String,
     pub text_input: TextInput,
-    pub fetched_models: Vec<ModelEntry>,
+    pub fetched_models: Vec<ModelMetadata>,
     // ── Fast provider configuration ───────────────────────────
     pub fast_intro_cursor: usize,
     pub configure_fast: bool,
@@ -173,7 +226,7 @@ pub(super) struct SetupState {
     pub fast_provider_picker: ListPicker<ProviderEntry>,
     pub fast_credential: String,
     pub fast_model: String,
-    pub fast_fetched_models: Vec<ModelEntry>,
+    pub fast_fetched_models: Vec<ModelMetadata>,
     pub fast_model_picker: ListPicker<ModelOption>,
     pub fast_custom_model: bool,
     pub fast_needs_fetch: bool,

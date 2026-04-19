@@ -1441,7 +1441,7 @@ impl AgentLoop {
             }
 
             let turn_cost = pricing
-                .map(|t| compute_cost_usd(&response.usage, &self.config.model, t))
+                .map(|_t| compute_cost_usd(&response.usage, None))
                 .unwrap_or_else(|| {
                     (response.usage.input_tokens as f64 * DEFAULT_INPUT_USD_PER_1M
                         + response.usage.output_tokens as f64 * DEFAULT_OUTPUT_USD_PER_1M)

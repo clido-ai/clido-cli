@@ -1,6 +1,6 @@
 //! `clido doctor`: health checks for API key, session dir, pricing.
 
-use clido_core::{load_config, load_pricing};
+use clido_core::load_config;
 use clido_storage::session_dir_for_project;
 use std::env;
 
@@ -24,7 +24,7 @@ pub async fn run_doctor() -> Result<(), anyhow::Error> {
     check_api_key_format(profile, profile_name, use_color, &mut warnings);
     check_config_permissions(use_color, &mut warnings);
     check_session_dir(&cwd, use_color, &mut mandatory);
-    check_pricing(use_color, &mut warnings);
+    check_models_cache(use_color, &mut warnings);
     check_rules_files(&cwd, use_color, &mut warnings);
     check_fast_provider(&loaded, use_color, &mut warnings);
 
@@ -130,29 +130,25 @@ fn check_session_dir(cwd: &std::path::Path, use_color: bool, mandatory: &mut Vec
     }
 }
 
-fn check_pricing(use_color: bool, warnings: &mut Vec<String>) {
-    let (pricing_table, pricing_path) = load_pricing();
-    if let Some(path) = &pricing_path {
+fn check_models_cache(use_color: bool, warnings: &mut Vec<String>) {
+    let config_dir = clido_core::global_config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".clido"));
+    let cache_path = config_dir.join("models.json");
+    if cache_path.exists() {
         print_ok(
             use_color,
-            &format!("pricing.toml present: {}", path.display()),
+            &format!("Models cache present: {}", cache_path.display()),
         );
-        if pricing_table.models.is_empty() {
-            warnings.push(
-                "pricing.toml is empty or invalid; using default cost estimates.".to_string(),
-            );
-        }
-        if let Ok(meta) = std::fs::metadata(path) {
+        if let Ok(meta) = std::fs::metadata(&cache_path) {
             if let Ok(modified) = meta.modified() {
-                if let (Ok(now), Ok(mod_dur)) = (
-                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH),
-                    modified.duration_since(std::time::UNIX_EPOCH),
-                ) {
-                    let age_secs = now.as_secs().saturating_sub(mod_dur.as_secs());
-                    if age_secs > 90 * 86400 {
+                if let Ok(age) = modified.elapsed() {
+                    let mins = age.as_secs() / 60;
+                    if mins > 120 {
                         warnings.push(
-                            "pricing.toml is older than 90 days; consider updating.".to_string(),
+                            format!("Models cache is {} minutes old; run 'clido refresh-models' to update.", mins),
                         );
+                    } else {
+                        print_info(use_color, &format!("Models cache is {} minutes old.", mins));
                     }
                 }
             }
@@ -160,7 +156,7 @@ fn check_pricing(use_color: bool, warnings: &mut Vec<String>) {
     } else {
         print_info(
             use_color,
-            "pricing.toml not found; using default cost estimates.",
+            "No models cache found; run 'clido refresh-models' to fetch model metadata.",
         );
     }
 }
@@ -501,13 +497,13 @@ mod tests {
         // Either creates dir successfully or raises error depending on env — just no panic
     }
 
-    // ── check_pricing ──────────────────────────────────────────────────────
+    // ── check_models_cache ──────────────────────────────────────────────────────
 
     #[test]
-    fn check_pricing_does_not_panic() {
+    fn check_models_cache_does_not_panic() {
         let mut warnings = Vec::new();
-        check_pricing(false, &mut warnings);
-        // Either finds a pricing.toml or doesn't — no panic
+        check_models_cache(false, &mut warnings);
+        // Either finds a cache or doesn't — no panic
     }
 
     // ── check_rules_files ──────────────────────────────────────────────────
@@ -570,12 +566,12 @@ mod tests {
         // Result may vary but should not panic
     }
 
-    // ── check_pricing: color output path ─────────────────────────────────
+    // ── check_models_cache: color output path ─────────────────────────────────
 
     #[test]
-    fn check_pricing_with_color_does_not_panic() {
+    fn check_models_cache_with_color_does_not_panic() {
         let mut warnings = Vec::new();
-        check_pricing(true, &mut warnings);
+        check_models_cache(true, &mut warnings);
         // No panic with color=true
     }
 

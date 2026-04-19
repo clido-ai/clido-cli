@@ -3,6 +3,9 @@
 //! Adding a new OpenAI-compatible provider requires only a single `ProviderDef`
 //! entry in [`PROVIDER_REGISTRY`]. All other parts of the codebase derive their
 //! information (env-var names, base URLs, display names, etc.) from this slice.
+//!
+//! Model lists are fetched dynamically from provider APIs and models.dev —
+//! no hardcoded fallbacks are maintained here.
 
 /// Metadata for a single AI model provider.
 pub struct ProviderDef {
@@ -18,8 +21,6 @@ pub struct ProviderDef {
     /// Conventional environment variable that holds the API key. Empty string
     /// for local providers that don't need a key.
     pub api_key_env: &'static str,
-    /// Sensible default model ID for first-run setup.
-    pub default_model: &'static str,
     /// Extra HTTP headers required by this provider (e.g. OpenRouter referrer).
     pub extra_headers: &'static [(&'static str, &'static str)],
     /// True for providers that run locally and need no API key (e.g. Ollama).
@@ -30,13 +31,6 @@ pub struct ProviderDef {
     /// True for providers billed via a flat subscription rather than per-token.
     /// Budget tracking is not applicable for these providers.
     pub is_subscription: bool,
-    /// Hardcoded fallback model IDs shown in the picker when the live API
-    /// fetch returns no models (e.g. plan-specific base URL not yet set).
-    pub fallback_models: &'static [&'static str],
-    /// Context window sizes (in thousands of tokens) for a subset of fallback
-    /// models where the value is known. Entries not listed here get `context_k: None`.
-    /// Format: `&[("model-id", context_k_u32)]`.
-    pub fallback_model_context_k: &'static [(&'static str, u32)],
     /// Whether this provider requires a custom base URL that varies per user/plan.
     /// When true, the creation wizard prompts for base_url before the model fetch.
     pub needs_base_url: bool,
@@ -63,7 +57,6 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "access any model — openrouter.ai",
         base_url: "https://openrouter.ai/api/v1",
         api_key_env: "OPENROUTER_API_KEY",
-        default_model: "anthropic/claude-sonnet-4-5",
         extra_headers: &[
             ("HTTP-Referer", "https://github.com/clido-ai/clido-cli"),
             ("X-Title", "Clido"),
@@ -71,8 +64,6 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &[],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -81,17 +72,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Claude models — console.anthropic.com",
         base_url: "https://api.anthropic.com",
         api_key_env: "ANTHROPIC_API_KEY",
-        default_model: "claude-sonnet-4-6",
         extra_headers: &[],
         is_local: false,
         is_anthropic: true,
         is_subscription: false,
-        fallback_models: &[
-            "claude-opus-4-6",
-            "claude-sonnet-4-6",
-            "claude-haiku-4-5-20251001",
-        ],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -100,13 +84,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "GPT & o-series — platform.openai.com",
         base_url: "https://api.openai.com/v1",
         api_key_env: "OPENAI_API_KEY",
-        default_model: "gpt-4o",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -115,17 +96,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Mistral models — console.mistral.ai",
         base_url: "https://api.mistral.ai/v1",
         api_key_env: "MISTRAL_API_KEY",
-        default_model: "mistral-large-latest",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &[
-            "mistral-large-latest",
-            "mistral-small-latest",
-            "codestral-latest",
-        ],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -134,13 +108,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "MiniMax models — minimax.io",
         base_url: "https://api.minimax.io/v1",
         api_key_env: "MINIMAX_API_KEY",
-        default_model: "MiniMax-M1",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &["MiniMax-M1", "MiniMax-Text-01"],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -149,13 +120,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Moonshot AI models — platform.moonshot.ai",
         base_url: "https://api.moonshot.ai/v1",
         api_key_env: "MOONSHOT_API_KEY",
-        default_model: "moonshot-v1-8k",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -164,13 +132,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "coding model — api.kimi.com",
         base_url: "https://api.kimi.com/coding/v1",
         api_key_env: "KIMI_CODE_API_KEY",
-        default_model: "kimi-for-coding",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: true,
-        fallback_models: &["kimi-for-coding"],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -179,20 +144,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Qwen models — dashscope.aliyuncs.com",
         base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key_env: "DASHSCOPE_API_KEY",
-        default_model: "qwen-max",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &[
-            "qwen-max",
-            "qwen-plus",
-            "qwen-turbo",
-            "qwen2.5-72b-instruct",
-            "qwen2.5-coder-32b-instruct",
-            "qwq-32b",
-        ],
-        fallback_model_context_k: &[],
         needs_base_url: true,
     },
     ProviderDef {
@@ -201,35 +156,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Multi-vendor coding models — coding-intl.dashscope.aliyuncs.com",
         base_url: "https://coding-intl.dashscope.aliyuncs.com/v1",
         api_key_env: "DASHSCOPE_CODE_API_KEY",
-        default_model: "qwen3.6-plus",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: true,
-        fallback_models: &[
-            "qwen3.6-plus",
-            "qwen3.5-plus",
-            "qwen3-max-2026-01-23",
-            "qwen3-coder-next",
-            "qwen3-coder-plus",
-            "glm-5",
-            "glm-5.1",
-            "glm-4.7",
-            "kimi-k2.5",
-            "MiniMax-M2.5",
-        ],
-        fallback_model_context_k: &[
-            ("qwen3.6-plus", 1000),
-            ("qwen3.5-plus", 1000),
-            ("qwen3-max-2026-01-23", 262),
-            ("qwen3-coder-next", 256),
-            ("qwen3-coder-plus", 256),
-            ("glm-5", 204),
-            ("glm-5.1", 200),
-            ("glm-4.7", 200),
-            ("kimi-k2.5", 256),
-            ("MiniMax-M2.5", 200),
-        ],
         needs_base_url: false,
     },
     ProviderDef {
@@ -238,13 +168,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "DeepSeek models — api.deepseek.com",
         base_url: "https://api.deepseek.com/v1",
         api_key_env: "DEEPSEEK_API_KEY",
-        default_model: "deepseek-chat",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &["deepseek-chat", "deepseek-reasoner"],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -253,18 +180,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Fast inference — groq.com",
         base_url: "https://api.groq.com/openai/v1",
         api_key_env: "GROQ_API_KEY",
-        default_model: "llama-3.3-70b-versatile",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &[
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "gemma2-9b-it",
-            "mixtral-8x7b-32768",
-        ],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -273,13 +192,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Fast inference — cerebras.ai",
         base_url: "https://api.cerebras.ai/v1",
         api_key_env: "CEREBRAS_API_KEY",
-        default_model: "llama3.1-70b",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &["llama3.1-70b", "llama3.1-8b"],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -288,17 +204,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Open models — together.xyz",
         base_url: "https://api.together.xyz/v1",
         api_key_env: "TOGETHER_API_KEY",
-        default_model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &[
-            "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-            "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
-            "deepseek-ai/DeepSeek-R1",
-        ],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -307,16 +216,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Fast open models — fireworks.ai",
         base_url: "https://api.fireworks.ai/inference/v1",
         api_key_env: "FIREWORKS_API_KEY",
-        default_model: "accounts/fireworks/models/llama-v3p3-70b-instruct",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &[
-            "accounts/fireworks/models/llama-v3p3-70b-instruct",
-            "accounts/fireworks/models/deepseek-r1",
-        ],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -325,13 +228,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Grok models — x.ai",
         base_url: "https://api.x.ai/v1",
         api_key_env: "XAI_API_KEY",
-        default_model: "grok-3-beta",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &["grok-3-beta", "grok-3-mini-beta", "grok-2-1212"],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -340,13 +240,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Sonar models — perplexity.ai",
         base_url: "https://api.perplexity.ai",
         api_key_env: "PERPLEXITY_API_KEY",
-        default_model: "sonar-pro",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &["sonar-pro", "sonar", "sonar-reasoning-pro"],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -355,17 +252,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "Gemini models — gemini.google.com",
         base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
         api_key_env: "GEMINI_API_KEY",
-        default_model: "gemini-2.5-flash",
         extra_headers: &[],
         is_local: false,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &[
-            "gemini-2.5-pro-preview-06-05",
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-        ],
-        fallback_model_context_k: &[],
         needs_base_url: false,
     },
     ProviderDef {
@@ -374,13 +264,10 @@ pub static PROVIDER_REGISTRY: &[ProviderDef] = &[
         description: "no key needed, runs on your machine",
         base_url: "http://localhost:11434/v1",
         api_key_env: "",
-        default_model: "llama3.2",
         extra_headers: &[],
         is_local: true,
         is_anthropic: false,
         is_subscription: false,
-        fallback_models: &[],
-        fallback_model_context_k: &[],
         needs_base_url: true,
     },
 ];
@@ -425,17 +312,6 @@ mod tests {
             assert!(
                 !p.base_url.is_empty(),
                 "base_url must not be empty for {}",
-                p.id
-            );
-        }
-    }
-
-    #[test]
-    fn all_providers_have_non_empty_default_model() {
-        for p in PROVIDER_REGISTRY {
-            assert!(
-                !p.default_model.is_empty(),
-                "default_model must not be empty for {}",
                 p.id
             );
         }

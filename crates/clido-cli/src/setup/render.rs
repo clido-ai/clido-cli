@@ -478,33 +478,47 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
                         ])
                     });
                 }
-                ModelOption::Entry(entry) if entry.available => {
-                    lines.push(if selected {
-                        Line::from(vec![
-                            Span::styled(
-                                " ▶ ",
-                                Style::default()
-                                    .fg(Color::Yellow)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(
-                                entry.id.clone(),
-                                Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
-                            ),
-                        ])
-                    } else {
-                        Line::from(vec![
-                            Span::raw("   "),
-                            Span::styled(entry.id.clone(), Style::default().fg(Color::DarkGray)),
-                        ])
-                    });
+                ModelOption::Metadata(m) if m.available => {
+                    let display_name = m.name.as_deref().unwrap_or(&m.id);
+                    let mut spans = vec![
+                        Span::styled(
+                            " ▶ ",
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            display_name.to_string(),
+                            Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
+                        ),
+                    ];
+                    if m.name.is_some() {
+                        spans.push(Span::styled(
+                            format!(" ({})", m.id),
+                            Style::default().fg(Color::DarkGray),
+                        ));
+                    }
+                    if let Some(ctx) = m.context_window {
+                        spans.push(Span::styled(
+                            format!(" {}K", ctx / 1000),
+                            Style::default().fg(Color::Cyan),
+                        ));
+                    }
+                    if let Some(ref p) = m.pricing {
+                        spans.push(Span::styled(
+                            format!(" ${:.2}/${:.2}", p.input_per_mtok, p.output_per_mtok),
+                            Style::default().fg(Color::Green),
+                        ));
+                    }
+                    lines.push(Line::from(spans));
                 }
-                ModelOption::Entry(entry) => {
+                ModelOption::Metadata(m) => {
                     // Unavailable model — greyed out with a "no endpoints" marker
+                    let display_name = m.name.as_deref().unwrap_or(&m.id);
                     lines.push(if selected {
                         Line::from(vec![
                             Span::styled(" ▶ ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(entry.id.clone(), Style::default().fg(Color::DarkGray)),
+                            Span::styled(display_name.to_string(), Style::default().fg(Color::DarkGray)),
                             Span::styled(
                                 "  no endpoints",
                                 Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
@@ -514,7 +528,7 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
                         Line::from(vec![
                             Span::raw("   "),
                             Span::styled(
-                                format!("{}  no endpoints", entry.id),
+                                format!("{}  no endpoints", display_name),
                                 Style::default()
                                     .fg(Color::DarkGray)
                                     .add_modifier(Modifier::DIM),
@@ -530,13 +544,13 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
         let filtered_model_count = s
             .model_picker
             .filtered_items()
-            .filter(|(_, o)| matches!(o, ModelOption::Entry(_)))
+            .filter(|(_, o)| matches!(o, ModelOption::Metadata(_)))
             .count();
         let avail_count = s
             .model_picker
             .filtered_items()
             .filter_map(|(_, o)| match o {
-                ModelOption::Entry(m) => Some(m),
+                ModelOption::Metadata(m) => Some(m),
                 _ => None,
             })
             .filter(|m| m.available)
@@ -900,32 +914,46 @@ fn draw_fast_model(f: &mut Frame, area: Rect, s: &SetupState) {
                         ])
                     });
                 }
-                ModelOption::Entry(e) if e.available => {
-                    lines.push(if selected {
-                        Line::from(vec![
-                            Span::styled(
-                                " ▶ ",
-                                Style::default()
-                                    .fg(Color::Yellow)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(
-                                e.id.clone(),
-                                Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
-                            ),
-                        ])
-                    } else {
-                        Line::from(vec![
-                            Span::raw("   "),
-                            Span::styled(e.id.clone(), Style::default().fg(Color::DarkGray)),
-                        ])
-                    });
+                ModelOption::Metadata(m) if m.available => {
+                    let display_name = m.name.as_deref().unwrap_or(&m.id);
+                    let mut spans = vec![
+                        Span::styled(
+                            " ▶ ",
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            display_name.to_string(),
+                            Style::default().fg(TUI_TEXT).add_modifier(Modifier::BOLD),
+                        ),
+                    ];
+                    if m.name.is_some() {
+                        spans.push(Span::styled(
+                            format!(" ({})", m.id),
+                            Style::default().fg(Color::DarkGray),
+                        ));
+                    }
+                    if let Some(ctx) = m.context_window {
+                        spans.push(Span::styled(
+                            format!(" {}K", ctx / 1000),
+                            Style::default().fg(Color::Cyan),
+                        ));
+                    }
+                    if let Some(ref p) = m.pricing {
+                        spans.push(Span::styled(
+                            format!(" ${:.2}/${:.2}", p.input_per_mtok, p.output_per_mtok),
+                            Style::default().fg(Color::Green),
+                        ));
+                    }
+                    lines.push(Line::from(spans));
                 }
-                ModelOption::Entry(e) => {
+                ModelOption::Metadata(m) => {
+                    let display_name = m.name.as_deref().unwrap_or(&m.id);
                     lines.push(if selected {
                         Line::from(vec![
                             Span::styled(" ▶ ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(e.id.clone(), Style::default().fg(Color::DarkGray)),
+                            Span::styled(display_name.to_string(), Style::default().fg(Color::DarkGray)),
                             Span::styled(
                                 "  no endpoints",
                                 Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
@@ -935,7 +963,7 @@ fn draw_fast_model(f: &mut Frame, area: Rect, s: &SetupState) {
                         Line::from(vec![
                             Span::raw("   "),
                             Span::styled(
-                                format!("{}  no endpoints", e.id),
+                                format!("{}  no endpoints", display_name),
                                 Style::default()
                                     .fg(Color::DarkGray)
                                     .add_modifier(Modifier::DIM),

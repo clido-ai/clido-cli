@@ -193,6 +193,9 @@ pub enum Subcommand {
         json: bool,
     },
 
+    /// Refresh cached model metadata from models.dev.
+    RefreshModels,
+
     /// Update model pricing data from remote (shows current file path and age).
     UpdatePricing,
 

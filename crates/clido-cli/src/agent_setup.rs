@@ -3,8 +3,8 @@
 
 use clido_agent::AskUser;
 use clido_core::{
-    agent_config_from_loaded, load_config, load_pricing, AgentConfig, LoadedConfig, PermissionMode,
-    PricingTable, ProfileEntry,
+    agent_config_from_loaded, load_config, AgentConfig, LoadedConfig, PermissionMode,
+    ProfileEntry,
 };
 use clido_providers::RetryProvider;
 use clido_tools::{default_registry_with_todo_store, McpTool, TodoItem, ToolRegistry};
@@ -23,7 +23,7 @@ type TodoStore = std::sync::Arc<std::sync::Mutex<Vec<TodoItem>>>;
 
 /// Detect context window size from model name.
 /// Falls back to safe defaults when model is not recognized.
-fn detect_context_window(model: &str) -> u32 {
+pub fn detect_context_window(model: &str) -> u32 {
     let model_lower = model.to_lowercase();
 
     // kimi (Moonshot AI) models
@@ -147,8 +147,9 @@ pub struct AgentSetup {
     pub registry: ToolRegistry,
     pub config: AgentConfig,
     pub ask_user: Option<Arc<dyn AskUser>>,
-    pub pricing_table: PricingTable,
-    /// Shared todo list written by the agent's TodoWrite tool.
+    /// Stub pricing table — pricing.toml has been removed.
+    /// Kept for backward compatibility with agent loop signatures.
+    pub pricing_table: clido_core::PricingTable,
     /// Shared todo list written by the agent's TodoWrite tool.
     #[allow(dead_code)]
     pub todo_store: TodoStore,
@@ -160,24 +161,17 @@ pub struct AgentSetup {
 }
 
 impl AgentSetup {
-    /// Build from caller-supplied config and pricing table, avoiding redundant disk reads.
-    /// This is the canonical implementation; `build()` is a thin wrapper for callers that
-    /// don't have pre-loaded data.
-    ///
-    /// `reviewer_enabled` is a shared flag the TUI uses to pause/resume the reviewer at runtime
-    /// without restarting the agent.  Pass `Arc::new(AtomicBool::new(true))` when not needed.
+    /// Build from caller-supplied config, avoiding redundant disk reads.
     pub fn build_with_preloaded(
         cli: &Cli,
         workspace_root: &Path,
         loaded: LoadedConfig,
-        pricing_table: PricingTable,
         reviewer_enabled: Arc<AtomicBool>,
     ) -> Result<Self, anyhow::Error> {
         Self::build_with_preloaded_and_store(
             cli,
             workspace_root,
             loaded,
-            pricing_table,
             reviewer_enabled,
             None,
             &[],
@@ -188,7 +182,6 @@ impl AgentSetup {
         cli: &Cli,
         workspace_root: &Path,
         loaded: LoadedConfig,
-        pricing_table: PricingTable,
         reviewer_enabled: Arc<AtomicBool>,
         external_todo_store: Option<TodoStore>,
         allowed_external_paths: &[std::path::PathBuf],
@@ -257,16 +250,8 @@ impl AgentSetup {
         // every user turn, reflecting the current branch/status/log.
 
         if config.max_context_tokens.is_none() {
-            // Try to get context window from pricing table
-            if let Some(entry) = pricing_table.models.get(&config.model) {
-                if let Some(cw) = entry.context_window {
-                    config.max_context_tokens = Some(cw);
-                }
-            }
-            // If still not set, try to detect from model name patterns
-            if config.max_context_tokens.is_none() {
-                config.max_context_tokens = Some(detect_context_window(&config.model));
-            }
+            // Try to detect from model name patterns
+            config.max_context_tokens = Some(detect_context_window(&config.model));
         }
 
         let ask_user: Option<Arc<dyn AskUser>> =
@@ -285,30 +270,26 @@ impl AgentSetup {
             registry,
             config,
             ask_user,
-            pricing_table,
+            pricing_table: clido_core::PricingTable::default(),
             todo_store,
             fast_provider,
             fast_config,
         })
     }
 
-    /// Convenience wrapper that loads config and pricing from disk.
-    /// Prefer `build_with_preloaded` when the caller already has these.
+    /// Convenience wrapper that loads config from disk.
     pub fn build(cli: &Cli, workspace_root: &Path) -> Result<Self, anyhow::Error> {
         let loaded = load_config(workspace_root)
             .map_err(|e| CliError::Usage(format!("load config: {e}")))?;
-        let (pricing_table, _) = load_pricing();
         Self::build_with_preloaded(
             cli,
             workspace_root,
             loaded,
-            pricing_table,
             Arc::new(AtomicBool::new(true)),
         )
     }
 
     /// Load config for `workspace_root` and build setup with optional external paths and shared todo store.
-    /// Used for TUI workdir switches so MCP, sub-agents, filters, and allowed paths stay consistent.
     pub fn build_for_workspace_session(
         cli: &Cli,
         workspace_root: &Path,
@@ -318,12 +299,10 @@ impl AgentSetup {
     ) -> Result<Self, anyhow::Error> {
         let loaded = load_config(workspace_root)
             .map_err(|e| CliError::Usage(format!("load config: {e}")))?;
-        let (pricing_table, _) = load_pricing();
         Self::build_with_preloaded_and_store(
             cli,
             workspace_root,
             loaded,
-            pricing_table,
             reviewer_enabled,
             Some(external_todo_store),
             allowed_external_paths,

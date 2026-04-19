@@ -238,8 +238,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                             drop(filtered);
                             app.model_prefs.toggle_favorite(&model_id);
                             app.model_prefs.save();
-                            let (pricing, _) = clido_core::load_pricing();
-                            app.known_models = build_model_list(&pricing, &app.model_prefs);
+                            app.known_models = build_model_list(&[], &app.model_prefs);
                             picker.models = app.known_models.clone();
                             picker.clamp();
                         }

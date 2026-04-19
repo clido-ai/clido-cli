@@ -17,7 +17,7 @@ use crate::backoff::{
 };
 use tracing::{debug, warn};
 
-use crate::provider::{ModelProvider, StreamEvent};
+use crate::provider::{ModelCapabilities, ModelEntry, ModelMetadata, ModelPricing, ModelProvider, ModelStatus, StreamEvent};
 
 /// Anthropic Messages API provider.
 pub struct AnthropicProvider {
@@ -683,6 +683,13 @@ impl ModelProvider for AnthropicProvider {
     }
 
     async fn list_models(&self) -> std::result::Result<Vec<crate::provider::ModelEntry>, String> {
+        let metadata = self.list_models_metadata().await?;
+        Ok(metadata.into_iter().map(|m| m.into()).collect())
+    }
+
+    async fn list_models_metadata(
+        &self,
+    ) -> std::result::Result<Vec<crate::provider::ModelMetadata>, String> {
         let resp = match self
             .client
             .get("https://api.anthropic.com/v1/models")
@@ -705,11 +712,38 @@ impl ModelProvider for AnthropicProvider {
             Ok(j) => j,
             Err(e) => return Err(format!("Failed to parse response: {}", e)),
         };
-        let mut models: Vec<crate::provider::ModelEntry> = json["data"]
+        let mut models: Vec<ModelMetadata> = json["data"]
             .as_array()
             .unwrap_or(&vec![])
             .iter()
-            .filter_map(|m| m["id"].as_str().map(crate::provider::ModelEntry::available))
+            .filter_map(|m| {
+                let id = m["id"].as_str()?.to_string();
+                let name = m["display_name"].as_str().map(String::from);
+                let context_window = m["context_length"]
+                    .as_u64()
+                    .map(|v| v as u32)
+                    .or_else(|| m["max_context_length"].as_u64().map(|v| v as u32));
+
+                let capabilities = ModelCapabilities {
+                    reasoning: id.to_lowercase().contains("opus")
+                        || id.to_lowercase().contains("sonnet")
+                        || id.to_lowercase().contains("claude"),
+                    tool_call: true,
+                    vision: true, // All Claude models support vision
+                    temperature: true,
+                };
+
+                Some(ModelMetadata {
+                    id,
+                    name,
+                    context_window,
+                    pricing: None, // Anthropic doesn't return pricing in /models
+                    capabilities,
+                    status: ModelStatus::Active,
+                    release_date: None,
+                    available: true,
+                })
+            })
             .collect();
         models.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(models)

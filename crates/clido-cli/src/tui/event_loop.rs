@@ -476,7 +476,6 @@ pub(super) async fn agent_task(
     mut cli: Cli,
     mut workspace_root: std::path::PathBuf,
     preloaded_config: Option<clido_core::LoadedConfig>,
-    preloaded_pricing: clido_core::PricingTable,
     prompt_tx: mpsc::UnboundedSender<AgentUserInput>,
     mut prompt_rx: mpsc::UnboundedReceiver<AgentUserInput>,
     mut resume_rx: mpsc::UnboundedReceiver<String>,
@@ -504,7 +503,6 @@ pub(super) async fn agent_task(
             &cli,
             &workspace_root,
             loaded,
-            preloaded_pricing,
             reviewer_enabled.clone(),
             Some(todo_store.clone()),
             &allowed_external_paths,
@@ -1031,7 +1029,6 @@ pub(super) async fn agent_task(
                     &try_cli,
                     &workspace_root,
                     loaded,
-                    setup.pricing_table.clone(),
                     reviewer_enabled.clone(),
                     Some(todo_store.clone()),
                     &allowed_external_paths,
@@ -1039,7 +1036,6 @@ pub(super) async fn agent_task(
                     Ok(new_setup) => {
                         cli.profile = Some(profile_name.clone());
                         setup.provider_name = new_setup.provider_name.clone();
-                        setup.pricing_table = new_setup.pricing_table.clone();
                         setup.fast_provider = new_setup.fast_provider.clone();
                         setup.fast_config = new_setup.fast_config.clone();
                         setup.config = new_setup.config.clone();
@@ -1114,11 +1110,7 @@ pub(super) async fn agent_task(
                     if let Ok((plan_text, plan_usage)) =
                         agent.complete_simple_with_usage(&planning_prompt).await
                     {
-                        let plan_cost = clido_core::pricing::compute_cost_usd(
-                            &plan_usage,
-                            agent.current_model(),
-                            &setup.pricing_table,
-                        );
+                        let plan_cost = clido_core::compute_cost_usd(&plan_usage, None);
                         if event_tx
                             .send(AgentEvent::TokenUsage {
                                 input_tokens: plan_usage.input_tokens,
@@ -1777,10 +1769,10 @@ pub(super) async fn agent_task(
 
 // ── Model list builder ────────────────────────────────────────────────────────
 
-/// Build the full sorted model list from the pricing table and user prefs.
+/// Build the full sorted model list from cached models and user prefs.
 /// Order: favorites → recent → rest (alphabetical by id within each group).
 pub(super) fn build_model_list(
-    pricing: &clido_core::PricingTable,
+    models: &[clido_providers::ModelMetadata],
     prefs: &clido_core::ModelPrefs,
 ) -> Vec<ModelEntry> {
     use std::collections::HashMap;
@@ -1793,18 +1785,17 @@ pub(super) fn build_model_list(
             .or_insert_with(|| role.clone());
     }
 
-    // Build all entries from the pricing table.
-    let mut all: Vec<ModelEntry> = pricing
-        .models
-        .values()
-        .map(|e| ModelEntry {
-            id: e.name.clone(),
-            provider: e.provider.clone(),
-            input_mtok: e.input_per_mtok,
-            output_mtok: e.output_per_mtok,
-            context_k: e.context_window.map(|w| w / 1000),
-            role: model_to_role.get(&e.name).cloned(),
-            is_favorite: prefs.is_favorite(&e.name),
+    // Build all entries from the models list.
+    let mut all: Vec<ModelEntry> = models
+        .iter()
+        .map(|m| ModelEntry {
+            id: m.name.clone().unwrap_or_else(|| m.id.clone()),
+            provider: String::new(),
+            input_mtok: m.pricing.as_ref().map(|p| p.input_per_mtok).unwrap_or(0.0),
+            output_mtok: m.pricing.as_ref().map(|p| p.output_per_mtok).unwrap_or(0.0),
+            context_k: m.context_window.map(|w| w / 1000),
+            role: model_to_role.get(&m.id).cloned(),
+            is_favorite: prefs.is_favorite(&m.id),
         })
         .collect();
 
@@ -1934,7 +1925,6 @@ pub(super) fn start_agent_runtime(
     cli: Cli,
     workspace_root: std::path::PathBuf,
     preloaded_config: Option<clido_core::LoadedConfig>,
-    preloaded_pricing: clido_core::PricingTable,
     cancel: Arc<AtomicBool>,
     image_state: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>>,
     reviewer_enabled: Arc<AtomicBool>,
@@ -1961,7 +1951,6 @@ pub(super) fn start_agent_runtime(
         cli,
         workspace_root,
         preloaded_config,
-        preloaded_pricing,
         prompt_tx.clone(),
         prompt_rx,
         resume_rx,
@@ -2067,16 +2056,13 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         });
     }
 
-    // Load config, pricing table, and model prefs concurrently to minimise startup latency.
+    // Load config and model prefs concurrently to minimise startup latency.
     let wr = workspace_root.clone();
-    let (config_res, pricing_res, prefs_res) = tokio::join!(
+    let (config_res, prefs_res) = tokio::join!(
         tokio::task::spawn_blocking(move || clido_core::load_config(&wr)),
-        tokio::task::spawn_blocking(clido_core::load_pricing),
         tokio::task::spawn_blocking(clido_core::ModelPrefs::load),
     );
     let loaded_config: Option<clido_core::LoadedConfig> = config_res.ok().and_then(|r| r.ok());
-    let (pricing_table, _) =
-        pricing_res.unwrap_or_else(|_| (clido_core::PricingTable::default(), None));
     let model_prefs = prefs_res.unwrap_or_else(|_| clido_core::ModelPrefs::default());
 
     // Derive provider + model from the loaded config (mirrors read_provider_model logic).
@@ -2169,7 +2155,6 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
         cli.clone(),
         workspace_root.clone(),
         loaded_config.clone(),
-        pricing_table.clone(),
         cancel.clone(),
         image_state.clone(),
         reviewer_enabled.clone(),
@@ -2240,14 +2225,15 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
 
     let plan_dry_run = cli.plan_dry_run;
 
-    // Build model list from already-loaded config + pricing (no extra disk I/O needed).
+    // Build model list from user prefs (favorites, recent).
+    // Full model metadata is fetched on-demand from provider APIs.
     let (known_models, current_profile) = {
         let profile = cli
             .profile
             .clone()
             .or_else(|| loaded_config.as_ref().map(|c| c.default_profile.clone()))
             .unwrap_or_else(|| "default".to_string());
-        let models = build_model_list(&pricing_table, &model_prefs);
+        let models = build_model_list(&[], &model_prefs);
         (models, profile)
     };
 
@@ -2339,7 +2325,6 @@ pub(super) async fn run_tui_inner(cli: Cli) -> Result<(), anyhow::Error> {
                     recovery_cli,
                     workspace_root.clone(),
                     loaded_config.clone(),
-                    pricing_table.clone(),
                     app.cancel.clone(),
                     app.image_state.clone(),
                     app.reviewer_enabled.clone(),
@@ -3386,22 +3371,8 @@ pub(super) async fn event_loop(
                     }
                     Some(AgentEvent::ModelsLoaded { mut ids, provider }) => {
                         app.models_loading = false;
-                        // If the provider returned 0 models, fall back to the hardcoded list.
-                        let mut fallback_ctx: std::collections::HashMap<&str, u32> =
-                            std::collections::HashMap::new();
-                        if ids.is_empty() {
-                            if let Some(def) = clido_providers::PROVIDER_REGISTRY
-                                .iter()
-                                .find(|d| d.id == provider.as_str())
-                            {
-                                if !def.fallback_models.is_empty() {
-                                    ids = def.fallback_models.iter().map(|s| s.to_string()).collect();
-                                    for &(id, ctx_k) in def.fallback_model_context_k {
-                                        fallback_ctx.insert(id, ctx_k);
-                                    }
-                                }
-                            }
-                        }
+                        // No hardcoded fallbacks — models are fetched dynamically.
+                        let _ = provider;
                         // 15-minute rate-limit pings use model-list fetch; when it succeeds, resume the agent.
                         if app.rate_limit_pinging && !app.rate_limit_cancelled && !ids.is_empty() {
                             app.rate_limit_pinging = false;
@@ -3415,121 +3386,26 @@ pub(super) async fn event_loop(
                             }
                         }
                         if !ids.is_empty() {
-                            // Merge API-fetched model IDs with existing pricing data.
-                            // Keep existing entries (which may have cost metadata) for known IDs,
-                            // and add stub entries for newly-discovered ones.
-                            let existing: std::collections::HashSet<String> =
-                                app.known_models.iter().map(|m| m.id.clone()).collect();
-                            for id in &ids {
-                                if !existing.contains(id) {
-                                    app.known_models.push(ModelEntry {
-                                        id: id.clone(),
-                                        provider: provider.clone(),
-                                        input_mtok: 0.0,
-                                        output_mtok: 0.0,
-                                        context_k: fallback_ctx.get(id.as_str()).copied(),
-                                        role: None,
-                                        is_favorite: false,
-                                    });
-                                }
-                            }
-                            // If model picker is open, refresh its list to show the new models.
-                            if let Some(picker) = &mut app.model_picker {
-                                let all: Vec<String> =
-                                    app.known_models.iter().map(|m| m.id.clone()).collect();
-                                picker.refresh_models(all);
-                            }
-                            // Also refresh the profile overlay model picker if active,
-                            // filtering by the overlay's selected provider.
-                            if let Some(overlay) = &mut app.profile_overlay {
-                                if let Some(picker) = &mut overlay.profile_model_picker {
-                                    let prov = overlay.provider.clone();
-                                    picker.models = app
-                                        .known_models
-                                        .iter()
-                                        .filter(|m| {
-                                            prov.is_empty()
-                                                || m.provider.eq_ignore_ascii_case(&prov)
-                                        })
-                                        .cloned()
-                                        .collect();
-                                    picker.clamp();
-                                }
-                            }
-                            // Set success status after releasing the picker borrow.
-                            if let Some(overlay) = &mut app.profile_overlay {
-                                let n = overlay
-                                    .profile_model_picker
-                                    .as_ref()
-                                    .map(|p| p.models.len())
-                                    .unwrap_or(0);
-                                overlay.status = Some(format!(
-                                    "  ✓ Key valid — {} model{} available",
-                                    n,
-                                    if n == 1 { "" } else { "s" }
-                                ));
-                            }
+                            // Models were fetched dynamically.
+                            let n = ids.len();
+                            app.push(ChatLine::Info(format!(
+                                "  ✓ Key valid — {} model{} available",
+                                n,
+                                if n == 1 { "" } else { "s" }
+                            )));
                         }
                     }
                     Some(AgentEvent::ModelsFetchFailed { provider, error }) => {
                         app.models_loading = false;
-                        // Try to populate the picker with fallback models even on failure.
-                        let (fallback, fallback_ctx): (Vec<String>, std::collections::HashMap<&str, u32>) =
-                            clido_providers::PROVIDER_REGISTRY
-                                .iter()
-                                .find(|d| d.id == provider.as_str())
-                                .map(|d| {
-                                    let ids = d.fallback_models.iter().map(|s| s.to_string()).collect();
-                                    let ctx = d.fallback_model_context_k.iter().copied().collect();
-                                    (ids, ctx)
-                                })
-                                .unwrap_or_default();
-                        if !fallback.is_empty() {
-                            // Merge into known_models.
-                            let existing: std::collections::HashSet<String> =
-                                app.known_models.iter().map(|m| m.id.clone()).collect();
-                            for id in &fallback {
-                                if !existing.contains(id) {
-                                    app.known_models.push(ModelEntry {
-                                        id: id.clone(),
-                                        provider: provider.clone(),
-                                        input_mtok: 0.0,
-                                        output_mtok: 0.0,
-                                        context_k: fallback_ctx.get(id.as_str()).copied(),
-                                        role: None,
-                                        is_favorite: false,
-                                    });
-                                }
-                            }
-                            if let Some(overlay) = &mut app.profile_overlay {
-                                if let Some(picker) = &mut overlay.profile_model_picker {
-                                    let prov = overlay.provider.clone();
-                                    picker.models = app
-                                        .known_models
-                                        .iter()
-                                        .filter(|m| {
-                                            prov.is_empty()
-                                                || m.provider.eq_ignore_ascii_case(&prov)
-                                        })
-                                        .cloned()
-                                        .collect();
-                                    picker.clamp();
-                                }
-                            }
-                            if let Some(overlay) = &mut app.profile_overlay {
-                                let n = overlay
-                                    .profile_model_picker
-                                    .as_ref()
-                                    .map(|p| p.models.len())
-                                    .unwrap_or(0);
-                                overlay.status = Some(format!(
-                                    "  ⚠ No models endpoint — showing {} known model{}",
-                                    n,
-                                    if n == 1 { "" } else { "s" }
-                                ));
-                            }
-                        } else if let Some(overlay) = &mut app.profile_overlay {
-                            overlay.status = Some(format!("  ✗ {}", error));
+                        // No hardcoded fallbacks — show error message.
+                        let _ = provider;
+                        if let Some(overlay) = &mut app.profile_overlay {
+                            overlay.status = Some(format!(
+                                "  ⚠ Failed to fetch models: {}",
+                                error
+                            ));
+                        } else {
+                            app.push(ChatLine::Info(format!("  ✗ {}", error)));
                         }
                     }
                     Some(AgentEvent::TitleGenerated(title)) => {

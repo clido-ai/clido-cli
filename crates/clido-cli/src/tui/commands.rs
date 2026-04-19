@@ -322,8 +322,7 @@ pub(super) fn cmd_fav(app: &mut App) {
     app.model_prefs.toggle_favorite(&model_id);
     app.model_prefs.save();
     // Rebuild model list with updated favorites.
-    let (pricing, _) = clido_core::load_pricing();
-    app.known_models = build_model_list(&pricing, &app.model_prefs);
+    app.known_models = build_model_list(&[], &app.model_prefs);
     let is_fav = app.model_prefs.is_favorite(&model_id);
     let icon = if is_fav { "★" } else { "☆" };
     app.push(ChatLine::Info(format!(
@@ -2252,14 +2251,14 @@ async fn run_isolated_step(
     context_snapshot: clido_workflows::WorkflowContext,
 ) -> (String, String, f64, u64) {
     use clido_agent::AgentLoop;
-    use clido_core::{agent_config_from_loaded, load_config, load_pricing, PermissionMode};
+    use clido_core::{agent_config_from_loaded, load_config, PermissionMode};
     use clido_storage::SessionWriter;
     use clido_tools::default_registry_with_options;
     use std::io::Write as _;
 
     let do_run = async {
         let loaded = load_config(&workspace_root)?;
-        let (pricing_table, _) = load_pricing();
+        let pricing_table = clido_core::PricingTable::default();
         let profile = loaded.get_profile(&profile_name)?;
         clido_core::LoadedConfig::validate_provider(&profile.provider)?;
         let provider = crate::provider::make_provider(&profile_name, profile, None, None)
@@ -2290,11 +2289,7 @@ async fn run_isolated_step(
             None,
         )?;
         if config.max_context_tokens.is_none() {
-            if let Some(entry) = pricing_table.models.get(&config.model) {
-                if let Some(cw) = entry.context_window {
-                    config.max_context_tokens = Some(cw);
-                }
-            }
+            config.max_context_tokens = Some(crate::agent_setup::detect_context_window(&config.model));
         }
         let session_id = format!("{run_id}_{step_id}");
         let mut writer = SessionWriter::create(&workspace_root, &session_id)?;

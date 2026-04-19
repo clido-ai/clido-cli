@@ -17,7 +17,7 @@ use crate::backoff::{
 };
 use tracing::warn;
 
-use crate::provider::{ModelProvider, StreamEvent};
+use crate::provider::{ModelCapabilities, ModelEntry, ModelMetadata, ModelPricing, ModelProvider, ModelStatus, StreamEvent};
 
 const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
@@ -830,6 +830,13 @@ impl ModelProvider for OpenAICompatProvider {
     }
 
     async fn list_models(&self) -> std::result::Result<Vec<crate::provider::ModelEntry>, String> {
+        let metadata = self.list_models_metadata().await?;
+        Ok(metadata.into_iter().map(|m| m.into()).collect())
+    }
+
+    async fn list_models_metadata(
+        &self,
+    ) -> std::result::Result<Vec<crate::provider::ModelMetadata>, String> {
         let base = self.base_url.trim_end_matches('/');
         let url = format!("{}/models", base);
         let mut req = self
@@ -860,7 +867,7 @@ impl ModelProvider for OpenAICompatProvider {
         };
         let is_openrouter = base.contains("openrouter.ai");
         let is_openai = base.contains("api.openai.com");
-        let mut models: Vec<crate::provider::ModelEntry> = json["data"]
+        let mut models: Vec<ModelMetadata> = json["data"]
             .as_array()
             .unwrap_or(&vec![])
             .iter()
@@ -874,7 +881,59 @@ impl ModelProvider for OpenAICompatProvider {
                 } else {
                     true
                 };
-                Some(crate::provider::ModelEntry { id, available })
+
+                // Parse metadata from the response when available
+                let name = m["name"].as_str().map(String::from);
+                let context_window = m["context_length"]
+                    .as_u64()
+                    .map(|v| v as u32)
+                    .or_else(|| m["max_context_length"].as_u64().map(|v| v as u32));
+
+                let pricing = if is_openrouter {
+                    m.get("pricing").map(|p| ModelPricing {
+                        input_per_mtok: p["prompt"]
+                            .as_f64()
+                            .map(|v| v * 1_000_000.0)
+                            .unwrap_or(0.0),
+                        output_per_mtok: p["completion"]
+                            .as_f64()
+                            .map(|v| v * 1_000_000.0)
+                            .unwrap_or(0.0),
+                        cache_read: None,
+                        cache_write: None,
+                    })
+                } else {
+                    None
+                };
+
+                let modality = m["architecture"]
+                    .get("modality")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let capabilities = ModelCapabilities {
+                    reasoning: id.to_lowercase().contains("r1")
+                        || id.to_lowercase().contains("reason")
+                        || id.to_lowercase().contains("thinking")
+                        || id.to_lowercase().contains("o1")
+                        || id.to_lowercase().contains("o3")
+                        || id.to_lowercase().contains("o4"),
+                    tool_call: true,
+                    vision: modality.contains("image")
+                        || id.to_lowercase().contains("vision")
+                        || id.to_lowercase().contains("4o"),
+                    temperature: true,
+                };
+
+                Some(ModelMetadata {
+                    id,
+                    name,
+                    context_window,
+                    pricing,
+                    capabilities,
+                    status: ModelStatus::Active,
+                    release_date: None,
+                    available,
+                })
             })
             .collect();
         models.sort_by(|a, b| a.id.cmp(&b.id));

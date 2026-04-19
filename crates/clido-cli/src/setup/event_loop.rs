@@ -34,13 +34,20 @@ pub(super) fn setup_event_loop(
                 (s.credential.as_str(), None)
             };
             let handle = tokio::runtime::Handle::current();
-            s.fetched_models = handle
-                .block_on(clido_providers::fetch_provider_models(
-                    provider_id,
-                    api_key,
-                    base_url,
-                ))
-                .unwrap_or_default();
+            let provider = clido_providers::build_provider(
+                provider_id,
+                api_key.to_string(),
+                "placeholder".to_string(),
+                base_url,
+            )
+            .ok();
+            s.fetched_models = if let Some(p) = provider {
+                handle
+                    .block_on(p.list_models_metadata())
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             s.model_picker = make_model_picker(&s.fetched_models);
             // If reinit, pre-select the current model in the list.
             if !s.current_model.is_empty() {
@@ -48,7 +55,7 @@ pub(super) fn setup_event_loop(
                     .model_picker
                     .items()
                     .iter()
-                    .position(|o| matches!(o, ModelOption::Entry(m) if m.id == s.current_model))
+                    .position(|o| matches!(o, ModelOption::Metadata(m) if m.id == s.current_model))
                 {
                     s.model_picker.selected = idx;
                     // Try to center it in the visible window (assume ~10 visible rows).
@@ -78,13 +85,20 @@ pub(super) fn setup_event_loop(
                 (key, None)
             };
             let handle = tokio::runtime::Handle::current();
-            s.fast_fetched_models = handle
-                .block_on(clido_providers::fetch_provider_models(
-                    provider_id,
-                    api_key,
-                    base_url,
-                ))
-                .unwrap_or_default();
+            let provider = clido_providers::build_provider(
+                provider_id,
+                api_key.to_string(),
+                "placeholder".to_string(),
+                base_url,
+            )
+            .ok();
+            s.fast_fetched_models = if let Some(p) = provider {
+                handle
+                    .block_on(p.list_models_metadata())
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             s.fast_custom_model = s.fast_fetched_models.is_empty();
             s.fast_model_picker = make_model_picker(&s.fast_fetched_models);
             s.clear_typed_input();
@@ -263,14 +277,14 @@ pub(super) fn setup_event_loop(
                                 s.custom_model = true;
                                 s.clear_typed_input();
                             }
-                            Some(ModelOption::Entry(entry)) => {
-                                if !entry.available {
+                            Some(ModelOption::Metadata(m)) => {
+                                if !m.available {
                                     s.error = Some(format!(
                                         "{} has no endpoints — pick a different model",
-                                        entry.id
+                                        m.id
                                     ));
                                 } else {
-                                    s.model = entry.id.clone();
+                                    s.model = m.id.clone();
                                     s.step = SetupStep::FastProviderIntro;
                                 }
                             }
@@ -455,14 +469,14 @@ pub(super) fn setup_event_loop(
                                 s.fast_custom_model = true;
                                 s.clear_typed_input();
                             }
-                            Some(ModelOption::Entry(entry)) => {
-                                if !entry.available {
+                            Some(ModelOption::Metadata(m)) => {
+                                if !m.available {
                                     s.error = Some(format!(
                                         "{} has no endpoints — pick a different model",
-                                        entry.id
+                                        m.id
                                     ));
                                 } else {
-                                    s.fast_model = entry.id.clone();
+                                    s.fast_model = m.id.clone();
                                     return Ok(SetupOutcome::Finished(Box::new(s)));
                                 }
                             }

@@ -6,6 +6,8 @@ pub mod anthropic;
 pub mod backoff;
 pub mod fallback;
 pub mod http_client;
+pub mod model_cache;
+pub mod model_fetcher;
 pub mod openai;
 pub mod provider;
 pub mod registry;
@@ -14,29 +16,21 @@ pub(crate) mod sse;
 
 pub use anthropic::AnthropicProvider;
 pub use fallback::FallbackProvider;
+pub use model_fetcher::{disable_models_fetch, models_dev_url, ModelFetcher};
 pub use openai::OpenAICompatProvider;
-pub use provider::{ModelEntry, ModelProvider, StreamEvent};
+pub use provider::{
+    ModelCapabilities, ModelEntry, ModelMetadata, ModelPricing, ModelProvider, ModelStatus,
+    ModelsSnapshot, ProviderModels, StreamEvent,
+};
 pub use registry::{is_subscription_provider, ProviderDef, PROVIDER_REGISTRY};
 pub use retry::RetryProvider;
 
 use clido_core::{ClidoError, Result};
 
-/// Resolve common model aliases to canonical model IDs.
-/// Returns the original string unchanged if no alias matches.
+/// Model aliases have been removed. Model IDs are now fetched dynamically
+/// from provider APIs and models.dev. Users should use full model IDs.
 pub fn resolve_model_alias(model: &str) -> &str {
-    match model {
-        "sonnet" => "claude-sonnet-4-5",
-        "opus" => "claude-opus-4-6",
-        "haiku" => "claude-haiku-4-5",
-        "4o" => "gpt-4o",
-        "4o-mini" => "gpt-4o-mini",
-        "flash" => "gemini-2.5-flash",
-        "deepseek" => "deepseek-chat",
-        "r1" => "deepseek-reasoner",
-        "grok" => "grok-3-beta",
-        "sonar" => "sonar-pro",
-        other => other,
-    }
+    model
 }
 
 /// Build a provider from profile name, API key, model, and optional base URL.
@@ -343,26 +337,12 @@ mod tests {
     }
 
     #[test]
-    fn resolve_model_alias_known() {
-        assert_eq!(resolve_model_alias("sonnet"), "claude-sonnet-4-5");
-        assert_eq!(resolve_model_alias("opus"), "claude-opus-4-6");
-        assert_eq!(resolve_model_alias("haiku"), "claude-haiku-4-5");
-        assert_eq!(resolve_model_alias("4o"), "gpt-4o");
-        assert_eq!(resolve_model_alias("4o-mini"), "gpt-4o-mini");
-        assert_eq!(resolve_model_alias("flash"), "gemini-2.5-flash");
-        assert_eq!(resolve_model_alias("deepseek"), "deepseek-chat");
-        assert_eq!(resolve_model_alias("r1"), "deepseek-reasoner");
-        assert_eq!(resolve_model_alias("grok"), "grok-3-beta");
-        assert_eq!(resolve_model_alias("sonar"), "sonar-pro");
-    }
-
-    #[test]
-    fn resolve_model_alias_passthrough() {
-        assert_eq!(
-            resolve_model_alias("gpt-4o-2024-11-20"),
-            "gpt-4o-2024-11-20"
-        );
-        assert_eq!(resolve_model_alias("claude-opus-4-6"), "claude-opus-4-6");
+    fn resolve_model_alias_is_passthrough() {
+        // Aliases have been removed; all inputs pass through unchanged
+        assert_eq!(resolve_model_alias("sonnet"), "sonnet");
+        assert_eq!(resolve_model_alias("opus"), "opus");
+        assert_eq!(resolve_model_alias("gpt-4o"), "gpt-4o");
+        assert_eq!(resolve_model_alias("claude-sonnet-4-6"), "claude-sonnet-4-6");
         assert_eq!(resolve_model_alias(""), "");
     }
 

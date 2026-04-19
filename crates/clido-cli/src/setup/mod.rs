@@ -558,7 +558,7 @@ async fn write_setup_config(
 mod tests {
     use super::*;
     use crate::text_input::TextInput;
-    use clido_providers::ModelEntry;
+    use clido_providers::ModelMetadata;
     use config::{build_toml, collect_credentials_from_state, write_credentials_file};
     use types::{SetupState, SetupStep};
 
@@ -726,7 +726,7 @@ mod tests {
     fn setup_state_model_list_mode() {
         let mut s = SetupState::new();
         assert!(!s.model_list_mode()); // no fetched models
-        s.fetched_models = vec![ModelEntry::available("gpt-4o")];
+        s.fetched_models = vec![ModelMetadata::available("gpt-4o")];
         assert!(s.model_list_mode()); // has models, not in custom mode
         s.custom_model = true;
         assert!(!s.model_list_mode()); // custom mode overrides

@@ -21,7 +21,7 @@ pub use config_loader::{
 };
 pub use error::{ClidoError, Result};
 pub use model_prefs::ModelPrefs;
-pub use pricing::{compute_cost_usd, load_pricing, ModelPricingEntry, PricingTable};
+pub use pricing::{compute_cost_usd, ModelPricingRef, PricingTable};
 pub use tool_failure::ToolFailureKind;
 pub use types::{ContentBlock, Message, ModelResponse, Role, StopReason, ToolSchema, Usage};
 

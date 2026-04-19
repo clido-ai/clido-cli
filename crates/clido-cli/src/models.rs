@@ -1,4 +1,4 @@
-//! `clido list-models` / `clido fetch-models`: fetch available models from the configured provider.
+//! `clido list-models` / `clido refresh-models`: fetch and display available models.
 
 use crate::provider::{default_api_key_env, make_provider};
 use clido_core::load_config;
@@ -29,10 +29,8 @@ pub async fn run_list_models(provider_filter: Option<&str>, json: bool) -> anyho
 
     // Resolve API key for the effective provider.
     let api_key = if profile.provider == effective_provider {
-        // Use the configured profile's key resolution.
         match make_provider(profile_name, profile, Some(effective_provider), None) {
             Ok(_) => {
-                // Key resolved — extract it properly.
                 if let Some(k) = &profile.api_key {
                     k.clone()
                 } else {
@@ -53,7 +51,6 @@ pub async fn run_list_models(provider_filter: Option<&str>, json: bool) -> anyho
             }
         }
     } else {
-        // Provider filter differs from config — try env var for that provider.
         let env_var = default_api_key_env(effective_provider);
         if env_var.is_empty() {
             String::new()
@@ -68,12 +65,29 @@ pub async fn run_list_models(provider_filter: Option<&str>, json: bool) -> anyho
         None
     };
 
-    let models = clido_providers::fetch_provider_models(effective_provider, &api_key, base_url)
-        .await
-        .unwrap_or_else(|e| {
+    let provider = match clido_providers::build_provider(
+        effective_provider,
+        api_key.clone(),
+        "placeholder".to_string(),
+        base_url,
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            if json {
+                println!("[]");
+            } else {
+                eprintln!("Cannot create provider: {}", e);
+            }
+            return Ok(());
+        }
+    };
+
+    let models = provider.list_models_metadata().await.unwrap_or_else(|e| {
+        if !json {
             eprintln!("Error fetching models: {}", e);
-            vec![]
-        });
+        }
+        vec![]
+    });
 
     if json {
         let arr: serde_json::Value =
@@ -86,8 +100,36 @@ pub async fn run_list_models(provider_filter: Option<&str>, json: bool) -> anyho
         );
     } else {
         for m in &models {
-            println!("{}", m);
+            let name = m.name.as_deref().unwrap_or(&m.id);
+            let mut line = name.to_string();
+            if m.name.is_some() {
+                line.push_str(&format!(" ({})", m.id));
+            }
+            if let Some(ctx) = m.context_window {
+                line.push_str(&format!("  {}K ctx", ctx / 1000));
+            }
+            if let Some(ref p) = m.pricing {
+                line.push_str(&format!("  ${:.2}/${:.2}", p.input_per_mtok, p.output_per_mtok));
+            }
+            if !m.available {
+                line.push_str("  [unavailable]");
+            }
+            println!("{}", line);
         }
     }
+    Ok(())
+}
+
+/// Refresh the local models cache from models.dev.
+pub async fn run_refresh_models() -> anyhow::Result<()> {
+    let config_dir = clido_core::global_config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".clido"));
+    let fetcher = clido_providers::ModelFetcher::new(&config_dir);
+    eprintln!("Fetching latest models from models.dev...");
+    fetcher.refresh().await;
+    let snapshot = fetcher.load().await;
+    let provider_count = snapshot.providers.len();
+    let model_count: usize = snapshot.providers.values().map(|p| p.models.len()).sum();
+    println!("Cached {} models across {} providers.", model_count, provider_count);
     Ok(())
 }

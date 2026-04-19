@@ -220,6 +220,9 @@ async fn dispatch(cli: cli::Cli) -> Result<(), anyhow::Error> {
         Some(cli::Subcommand::ListModels { provider, json }) => {
             return models::run_list_models(provider.as_deref(), *json).await;
         }
+        Some(cli::Subcommand::RefreshModels) => {
+            return models::run_refresh_models().await;
+        }
         Some(cli::Subcommand::UpdatePricing) => {
             pricing_cmd::run_update_pricing();
             return Ok(());

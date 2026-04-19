@@ -250,19 +250,31 @@ fn build_sbs_line(row: &SbsRow, half_w: usize) -> Line<'static> {
     ])
 }
 
-/// Pad string to exactly `w` chars, or truncate with `…` if too long.
+/// Pad string to exactly `w` display columns, or truncate with `…` if too long.
 fn pad_or_truncate(s: &str, w: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= w {
-        let mut out = s.to_string();
-        for _ in 0..(w - chars.len()) {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    let display_width = s.width();
+    if display_width <= w {
+        let mut out = String::with_capacity(w);
+        out.push_str(s);
+        for _ in 0..(w - display_width) {
             out.push(' ');
         }
         out
     } else if w > 1 {
-        let mut out: String = chars[..w - 1].iter().collect();
-        out.push('…');
-        out
+        // Truncate to fit with ellipsis
+        let mut result = String::with_capacity(w);
+        let mut current_width = 0;
+        for ch in s.chars() {
+            let ch_width = ch.width().unwrap_or(0);
+            if current_width + ch_width > w - 1 {
+                break;
+            }
+            result.push(ch);
+            current_width += ch_width;
+        }
+        result.push('…');
+        result
     } else {
         "…".to_string()
     }

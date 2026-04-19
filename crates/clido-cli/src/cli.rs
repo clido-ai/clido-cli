@@ -125,11 +125,11 @@ pub struct Cli {
     pub planner: bool,
 
     /// With --planner/--plan: generate the plan and show it but never execute.
-    #[arg(long)]
+    #[arg(long, alias = "planner-dry-run")]
     pub plan_dry_run: bool,
 
     /// With --planner/--plan: skip the interactive editor and execute immediately (CI-friendly).
-    #[arg(long)]
+    #[arg(long, alias = "planner-no-edit")]
     pub plan_no_edit: bool,
 
     /// Enable harness mode: `.clido/harness/` JSON tasks, progress log, `HarnessControl` tool, strict verify-before-pass protocol.

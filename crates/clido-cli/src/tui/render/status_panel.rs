@@ -19,9 +19,9 @@ use super::widgets::{status_strip_lines, truncate_chars};
 use super::SPINNER;
 
 /// Minimum terminal width (columns) to show the status rail beside the transcript (`/panel auto`).
-pub(crate) const STATUS_RAIL_MIN_TERM_WIDTH: u16 = 118;
-/// Lower threshold when `/panel on` — show the rail a bit earlier than auto.
-pub(crate) const STATUS_RAIL_MIN_TERM_WIDTH_ON: u16 = 108;
+pub(crate) const STATUS_RAIL_MIN_TERM_WIDTH: u16 = 90;
+/// Minimum terminal width to show the rail when explicitly enabled (On).
+pub(crate) const STATUS_RAIL_MIN_TERM_WIDTH_ON: u16 = 80;
 
 /// Whether the layout should allocate the right-hand status rail for this terminal width.
 pub(crate) fn status_rail_wanted(vis: StatusRailVisibility, term_width: u16) -> bool {

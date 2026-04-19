@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] - 2026-04-19
+
+### Added
+
+- **Unified chat output**: Complete rewrite of the TUI rendering pipeline with a unified `ContentLine` and `WrappedLine` system. All chat content (user messages, assistant text, tool calls, diffs, thinking, info) now flows through a single renderer with proper text wrapping, style preservation, and selection support.
+- **Workflow tests**: Comprehensive integration tests for the workflow engine covering execution, template rendering, inputs/outputs, save_to, prerequisites, and error handling (49 tests total).
+- **MCP timeout support**: Added configurable MCP timeout in workflow and agent configuration.
+
+### Changed
+
+- **Rendering architecture**: Extracted header and scroll indicator logic into dedicated functions. Streamlined rendering functions for better maintainability.
+- **Workflow context cwd**: Workflows now use `CLIDO_WORKDIR` env var for the `{{ cwd }}` template variable, ensuring correct working directory in all contexts.
+- **Tera template handling**: Improved template rendering with better error handling for workflow save_to paths.
+
+### Fixed
+
+- **Scroll behavior**: Fixed scroll position management with proper auto-follow re-engagement and trackpad suppression.
+- **Selection on wrapped lines**: Selection now correctly works on wrapped/screen coordinates instead of content coordinates.
+- **Header layout**: Fixed header height calculation and scroll indicator positioning.
+- **Clippy warnings**: Cleaned up all unused variables, dead code, and explicit counter loop warnings.
+
 ## [1.0.8] - 2026-04-14
 
 ### Fixed

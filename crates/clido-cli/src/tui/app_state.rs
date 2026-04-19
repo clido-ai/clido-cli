@@ -186,6 +186,8 @@ pub(super) struct App {
     pub(super) permission_mode_override: Option<PermissionMode>,
     /// Selected index in the slash-command popup (None = no popup).
     pub(super) selected_cmd: Option<usize>,
+    /// When true, suppress slash popup until user types another /
+    pub(super) slash_popup_dismissed: bool,
     pub(super) quit: bool,
     /// When true, the TUI exits and setup wizard re-runs to reconfigure.
     pub(super) wants_reinit: bool,
@@ -391,6 +393,7 @@ impl App {
             perm_feedback_input: None,
             permission_mode_override: None,
             selected_cmd: None,
+            slash_popup_dismissed: false,
             quit: false,
             wants_reinit: false,
             wants_profile_create: false,

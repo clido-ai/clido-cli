@@ -25,14 +25,19 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     use KeyCode::*;
     use KeyModifiers as Km;
 
-    // Ctrl+C always quits. Ctrl+D quits except in the session picker, where it deletes
-    // the selected session (plain `d` is reserved for the filter).
+    // Ctrl+C: interrupt agent when busy, quit when idle.
     if matches!((event.modifiers, event.code), (Km::CONTROL, Char('c'))) {
+        if app.busy || app.current_step.is_some() {
+            app.stop_only();
+            return;
+        }
         app.quit = true;
         return;
     }
+    // Ctrl+D: quit only when input is empty (prevents accidental quits)
     if matches!((event.modifiers, event.code), (Km::CONTROL, Char('d')))
         && app.session_picker.is_none()
+        && app.text_input.text.is_empty()
     {
         app.quit = true;
         return;
@@ -605,7 +610,11 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     }
 
     // ── Slash-command popup navigation ──────────────────────────────────────
-    let completions = slash_completions(&app.text_input.text);
+    let completions = if app.slash_popup_dismissed {
+        Vec::new()
+    } else {
+        slash_completions(&app.text_input.text)
+    };
     if !completions.is_empty() {
         // Clamp selection in case completions shrunk.
         if let Some(sel) = app.selected_cmd {
@@ -652,6 +661,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         // Populate input with the command + space so user can type the argument.
                         app.text_input.text = format!("{} ", cmd);
                         app.text_input.cursor = app.text_input.text.chars().count();
+                        // Dismiss popup until user types another /
+                        app.slash_popup_dismissed = true;
                     } else {
                         app.text_input.text.clear();
                         app.text_input.cursor = 0;
@@ -792,12 +803,17 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     );
                 }
             } else if app.editing_queued_item.is_some() {
-                // Discard the queue item being edited (don't put it back)
+                // Discard the queue item being edited
                 app.editing_queued_item = None;
                 app.queue_nav_idx = None;
                 app.text_input.text = app.text_input.history_draft.clone();
-                app.text_input.cursor = 0;
+                app.text_input.cursor = app.text_input.text.chars().count();
                 app.selected_cmd = None;
+                app.push_toast(
+                    "Queue edit discarded".to_string(),
+                    TUI_STATE_WARN,
+                    std::time::Duration::from_secs(2),
+                );
             } else {
                 app.text_input.text.clear();
                 app.text_input.cursor = 0;
@@ -917,10 +933,10 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     Some(i) => i - 1,         // Move to older item
                 };
 
-                // If we're already editing a queue item, put current input back in queue first
-                if app.editing_queued_item.is_some() {
+                // If we're already editing a queue item, save current text back to the same slot
+                if let Some(edit_idx) = app.queue_nav_idx {
                     if !app.text_input.text.trim().is_empty() {
-                        app.queued.push_back(app.text_input.text.clone());
+                        app.queued[edit_idx] = app.text_input.text.clone();
                     }
                 } else {
                     // Save current draft when first entering queue nav
@@ -932,7 +948,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 if let Some(item) = app.queued.remove(new_idx) {
                     app.editing_queued_item = Some(item.clone());
                     app.text_input.text = item;
-                    app.text_input.cursor = 0; // Reset cursor to start
+                    app.text_input.cursor = app.text_input.text.chars().count(); // Place cursor at end
                     app.selected_cmd = None;
                     return;
                 }
@@ -960,8 +976,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 };
                 app.text_input.history_idx = Some(new_idx);
                 app.text_input.text = app.text_input.history[new_idx].clone();
-                // Reset cursor to start of prompt for better UX
-                app.text_input.cursor = 0;
+                // Place cursor at end for easier editing
+                app.text_input.cursor = app.text_input.text.chars().count();
                 app.selected_cmd = None;
             }
         }
@@ -970,27 +986,26 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             if app.pending_perm.is_none() && slash_completions(&app.text_input.text).is_empty() =>
         {
             // Handle queue navigation (moving forward through queue)
-            // Put current input back in queue before moving
             if let Some(idx) = app.queue_nav_idx {
-                let queue_len = app.queued.len();
-                // Put current text back in queue (if not empty)
+                // Save current text back to the queue slot
                 if !app.text_input.text.trim().is_empty() {
-                    app.queued.push_back(app.text_input.text.clone());
+                    // Re-insert at the same position
+                    app.queued.insert(idx, app.text_input.text.clone());
                 }
                 app.editing_queued_item = None;
 
                 // Now move to next item
-                if idx >= queue_len {
+                if idx >= app.queued.len() {
                     // Exhausted queue, return to draft and switch to history
                     app.queue_nav_idx = None;
                     app.text_input.text = app.text_input.history_draft.clone();
-                    app.text_input.cursor = 0;
+                    app.text_input.cursor = app.text_input.text.chars().count();
                     app.selected_cmd = None;
                 } else if let Some(item) = app.queued.remove(idx) {
                     // Get next item from queue
                     app.editing_queued_item = Some(item.clone());
                     app.text_input.text = item;
-                    app.text_input.cursor = 0;
+                    app.text_input.cursor = app.text_input.text.chars().count();
                     app.selected_cmd = None;
                     // Keep same idx since we removed current and next shifted up
                 }
@@ -1010,13 +1025,13 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 if i + 1 >= app.text_input.history.len() {
                     app.text_input.history_idx = None;
                     app.text_input.text = app.text_input.history_draft.clone();
-                    app.text_input.cursor = 0;
+                    app.text_input.cursor = app.text_input.text.chars().count();
                     app.selected_cmd = None;
                 } else {
                     let new_idx = i + 1;
                     app.text_input.history_idx = Some(new_idx);
                     app.text_input.text = app.text_input.history[new_idx].clone();
-                    app.text_input.cursor = 0;
+                    app.text_input.cursor = app.text_input.text.chars().count();
                     app.selected_cmd = None;
                 }
             }
@@ -1041,7 +1056,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             app.text_input.text.clear();
             app.text_input.cursor = 0;
             app.selected_cmd = None;
-            app.text_input.history_idx = None;
+            // Don't clear history_idx — user may want to navigate back
         }
         // Ctrl+W: delete word backward (to previous word boundary).
         (Km::CONTROL, Char('w')) => {
@@ -1072,6 +1087,10 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             app.selected_cmd = None;
             // Any manual edit breaks out of history navigation.
             app.text_input.history_idx = None;
+            // Reset slash popup dismissed when user types /
+            if c == '/' {
+                app.slash_popup_dismissed = false;
+            }
         }
         _ => {}
     }

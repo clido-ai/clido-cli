@@ -656,9 +656,13 @@ mod tests {
     }
 
     #[test]
-    fn relative_time_future_timestamp_shows_just_now() {
+    fn relative_time_future_timestamp_shows_countdown() {
         let future = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
-        assert_eq!(relative_time(&future), "just now");
+        let result = relative_time(&future);
+        assert!(
+            result.starts_with("in "),
+            "expected countdown for future timestamp, got: {result}"
+        );
     }
 
     #[test]

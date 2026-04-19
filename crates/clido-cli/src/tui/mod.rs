@@ -1675,10 +1675,10 @@ mod tests {
         let mut app = make_test_app();
         execute_slash(&mut app, "/help");
         let has_help = app.messages.iter().any(|l| match l {
-            ChatLine::Section(s) => s.contains("Navigation"),
+            ChatLine::Section(s) => s.contains("Quick Help"),
             _ => false,
         });
-        assert!(has_help, "/help should show navigation section");
+        assert!(has_help, "/help should show quick help section");
     }
 
     #[test]

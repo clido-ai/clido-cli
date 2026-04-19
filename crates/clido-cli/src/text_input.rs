@@ -125,6 +125,7 @@ impl TextInput {
     // ── Word operations ───────────────────────────────────────────────
 
     /// Delete the word before the cursor (Ctrl+Backspace / Ctrl+W).
+    /// Punctuation is treated as a word boundary.
     pub fn delete_word_back(&mut self) {
         if self.cursor == 0 || self.text.is_empty() {
             return;
@@ -136,8 +137,8 @@ impl TextInput {
         while new_cursor > 0 && chars[new_cursor - 1].is_whitespace() {
             new_cursor -= 1;
         }
-        // Skip word chars
-        while new_cursor > 0 && !chars[new_cursor - 1].is_whitespace() {
+        // Skip word chars (alphanumeric only — punctuation is a boundary)
+        while new_cursor > 0 && chars[new_cursor - 1].is_alphanumeric() {
             new_cursor -= 1;
         }
 
@@ -149,6 +150,7 @@ impl TextInput {
     }
 
     /// Move cursor one word to the left (Alt+Left).
+    /// Punctuation is treated as a word boundary.
     pub fn word_left(&mut self) {
         if self.cursor == 0 {
             return;
@@ -159,14 +161,15 @@ impl TextInput {
         while pos > 0 && chars[pos - 1].is_whitespace() {
             pos -= 1;
         }
-        // Skip word chars
-        while pos > 0 && !chars[pos - 1].is_whitespace() {
+        // Skip word chars (alphanumeric only)
+        while pos > 0 && chars[pos - 1].is_alphanumeric() {
             pos -= 1;
         }
         self.cursor = pos;
     }
 
     /// Move cursor one word to the right (Alt+Right).
+    /// Punctuation is treated as a word boundary.
     pub fn word_right(&mut self) {
         let chars: Vec<char> = self.text.chars().collect();
         let len = chars.len();
@@ -174,8 +177,8 @@ impl TextInput {
             return;
         }
         let mut pos = self.cursor;
-        // Skip word chars
-        while pos < len && !chars[pos].is_whitespace() {
+        // Skip word chars (alphanumeric only)
+        while pos < len && chars[pos].is_alphanumeric() {
             pos += 1;
         }
         // Skip whitespace
@@ -293,13 +296,15 @@ impl TextInput {
         self.history_idx.is_some()
     }
 
-    /// Push a submitted value to history. Skips consecutive duplicates.
+    /// Push a submitted value to history. Deduplicates — if the value already exists,
+    /// the old entry is removed and the new one is appended (most recent wins).
     pub fn push_history(&mut self, value: &str) {
         if value.is_empty() {
             return;
         }
-        if self.history.last().map(|s| s.as_str()) == Some(value) {
-            return; // skip duplicate
+        // Remove any existing occurrence
+        if let Some(pos) = self.history.iter().position(|s| s.as_str() == value) {
+            self.history.remove(pos);
         }
         self.history.push(value.to_string());
         // Cap at 1000 entries
@@ -844,12 +849,15 @@ mod tests {
     }
 
     #[test]
-    fn push_history_allows_non_consecutive_duplicates() {
+    fn push_history_deduplicates_non_consecutive() {
         let mut ti = TextInput::new();
         ti.push_history("aaa");
         ti.push_history("bbb");
         ti.push_history("aaa");
-        assert_eq!(ti.history.len(), 3);
+        // "aaa" is deduplicated — old entry removed, new one appended
+        assert_eq!(ti.history.len(), 2);
+        assert_eq!(ti.history[0], "bbb");
+        assert_eq!(ti.history[1], "aaa");
     }
 
     #[test]
@@ -1279,13 +1287,19 @@ mod tests {
 
     #[test]
     fn emoji_word_navigation() {
+        // Emojis are not alphanumeric, so they act as word boundaries
         let mut ti = TextInput::new();
         ti.set_text("hello 😀🎉 world");
-        ti.end();
-        ti.word_left(); // before "world"
-        assert!(ti.cursor <= 10);
-        ti.word_left(); // before "😀🎉"
-        ti.word_left(); // before "hello"
+        ti.end(); // cursor at 14
+        ti.word_left(); // before "world" → 9
+        assert_eq!(ti.cursor, 9);
+        ti.word_left(); // space before world → 8
+        assert_eq!(ti.cursor, 8);
+        ti.word_left(); // emoji not alphanumeric, stays at 8
+        assert_eq!(ti.cursor, 8);
+        // Move past emoji manually
+        ti.cursor = 6; // before 😀
+        ti.word_left(); // before "hello" → 0
         assert_eq!(ti.cursor, 0);
     }
 }

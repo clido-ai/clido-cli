@@ -6,15 +6,19 @@
 
 use std::collections::HashMap;
 use std::io::Write as _;
+use std::sync::Mutex;
+
+/// Serialize tests that mutate env vars so they don't race each other.
+static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
 use async_trait::async_trait;
 use clido_workflows::{
     check_prerequisites, load, preflight, render, render_default, render_save_to, validate,
-    BackoffKind, InputDef, OnErrorPolicy, OutputConfig, OutputDef, PrereqEntry, PrerequisitesDef,
+    BackoffKind, InputDef, OnErrorPolicy, OutputDef, PrereqEntry, PrerequisitesDef,
     PreflightStatus, RetryConfig, StepDef, WorkflowContext, WorkflowDef,
     WorkflowStepRunner, StepRunRequest,
 };
-use clido_workflows::executor::{StepRunResult, WorkflowSummary};
+use clido_workflows::executor::StepRunResult;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -406,7 +410,7 @@ fn context_resolve_inputs_errors_on_missing_required() {
 
 #[test]
 fn context_cwd_is_set_from_current_dir() {
-    // Remove CLIDO_WORKDIR so it falls back to std::env::current_dir().
+    let _guard = ENV_MUTEX.lock().unwrap();
     let old = std::env::var("CLIDO_WORKDIR").ok();
     std::env::remove_var("CLIDO_WORKDIR");
 
@@ -425,6 +429,7 @@ fn context_cwd_is_set_from_current_dir() {
 
 #[test]
 fn context_cwd_uses_clido_workdir_env_var() {
+    let _guard = ENV_MUTEX.lock().unwrap();
     let old = std::env::var("CLIDO_WORKDIR").ok();
     std::env::set_var("CLIDO_WORKDIR", "/tmp/fake_workdir");
 

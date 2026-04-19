@@ -589,25 +589,13 @@ pub(super) fn cmd_export(app: &mut App) {
             "  Nothing to export — start a conversation first".into(),
         ));
     } else {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        // YYYYMMDD-HHMMSS from unix timestamp (UTC).
-        let mins = secs / 60;
-        let hours = mins / 60;
-        let days = hours / 24;
-        let s = secs % 60;
-        let m = mins % 60;
-        let h = hours % 24;
-        // Approximate calendar date (good enough for a filename).
-        let d = days % 31 + 1;
-        let mo = (days / 31) % 12 + 1;
-        let yr = 1970 + days / 365;
+        use chrono::Utc;
+        let now = Utc::now();
+        let sid = app.current_session_id.as_deref().unwrap_or("unknown");
         let filename = format!(
-            "conversation-{:04}{:02}{:02}-{:02}{:02}{:02}.md",
-            yr, mo, d, h, m, s
+            "conversation-{}-{}.md",
+            now.format("%Y%m%d-%H%M%S"),
+            &sid[..sid.len().min(8)],
         );
         let path = app.workspace_root.join(&filename);
         match std::fs::write(&path, &md) {

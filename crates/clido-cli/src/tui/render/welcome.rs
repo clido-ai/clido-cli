@@ -33,9 +33,9 @@ pub(crate) fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
         raw
     };
 
-    // Key status
+    // Key status — warning (not error) when unset, error only when explicitly invalid
     let key_status = if app.api_key.is_empty() {
-        Span::styled("API key ✗", Style::default().fg(TUI_STATE_ERR))
+        Span::styled("API key —", Style::default().fg(TUI_MUTED))
     } else {
         Span::styled("API key ✓", dim_green)
     };

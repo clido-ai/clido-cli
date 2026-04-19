@@ -153,53 +153,26 @@ pub(super) fn parse_per_turn_model(input: &str) -> Option<(String, String)> {
 
 pub(super) fn cmd_help(app: &mut App) {
     app.push(ChatLine::Info("".into()));
-    app.push(ChatLine::Section("Navigation".into()));
+    app.push(ChatLine::Section("Quick Help".into()));
     app.push(ChatLine::Info("Enter              send message".into()));
     app.push(ChatLine::Info(
         "Shift+Enter        insert newline (multiline input)".into(),
     ));
-    app.push(ChatLine::Info("Ctrl+Enter         interrupt & send".into()));
-    app.push(ChatLine::Info(
-        "↑↓                 input history / multiline cursor".into(),
-    ));
-    app.push(ChatLine::Info(
-        "PgUp/PgDn          scroll conversation".into(),
-    ));
-    app.push(ChatLine::Info(
-        "Ctrl+Home/End      jump to top/bottom".into(),
-    ));
-    app.push(ChatLine::Info("Ctrl+U             clear input".into()));
-    app.push(ChatLine::Info(
-        "Ctrl+W             delete word backward".into(),
-    ));
-    app.push(ChatLine::Info("Alt+←/→            jump by word".into()));
-    app.push(ChatLine::Info("".into()));
-    app.push(ChatLine::Section("Agent Controls".into()));
-    app.push(ChatLine::Info("Ctrl+C             quit".into()));
-    app.push(ChatLine::Info(
-        "Ctrl+/             interrupt current run only".into(),
-    ));
-    app.push(ChatLine::Info(
-        "Ctrl+Y             copy last assistant message".into(),
-    ));
+    app.push(ChatLine::Info("Ctrl+/             interrupt current run".into()));
+    app.push(ChatLine::Info("Ctrl+C             quit (or interrupt if busy)".into()));
+    app.push(ChatLine::Info("Ctrl+D             quit (only when input empty)".into()));
+    app.push(ChatLine::Info("Ctrl+M             model picker".into()));
+    app.push(ChatLine::Info("Ctrl+P             profile picker".into()));
+    app.push(ChatLine::Info("Ctrl+K             key bindings overlay".into()));
+    app.push(ChatLine::Info("Ctrl+V             paste from clipboard".into()));
     app.push(ChatLine::Info(
         "Queue              type while agent runs, sends on finish".into(),
     ));
     app.push(ChatLine::Info("".into()));
-    for (section, cmds) in slash_command_sections() {
-        app.push(ChatLine::Section(section.to_string()));
-        for (cmd, desc) in cmds {
-            app.push(ChatLine::Info(format!("{:<18} {}", cmd, desc)));
-        }
-        app.push(ChatLine::Info("".into()));
-    }
-    app.push(ChatLine::Section("Per-turn Override".into()));
     app.push(ChatLine::Info(
-        "@model-name <msg>  use a different model for one turn".into(),
+        "Press Ctrl+K for the full key bindings reference".into(),
     ));
-    app.push(ChatLine::Info(
-        "                   e.g. @claude-opus-4-6 refactor this".into(),
-    ));
+    app.push(ChatLine::Info("Type /<tab> to see all available slash commands".into()));
     app.push(ChatLine::Info("".into()));
 }
 
@@ -505,6 +478,13 @@ pub(super) fn cmd_copy(app: &mut App, cmd: &str) {
             buf.push_str("\n\n");
         }
         let count = slice.len();
+        let total_chars = buf.len();
+        if total_chars > 100_000 {
+            app.push(ChatLine::Info(format!(
+                "  ⚠ Large copy: {} chars, {} messages (may be slow)",
+                total_chars, count
+            )));
+        }
         match copy_to_clipboard(buf.trim()) {
             Ok(()) => app.push(ChatLine::Info(format!(
                 "  ✓ Copied {} message{} to clipboard",

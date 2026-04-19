@@ -25,6 +25,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::overlay::OverlayKind;
 use crate::tui::app_state::AppRunState;
@@ -259,8 +260,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     // When the terminal is very narrow, use a single minimal header.
     let w = area.width as usize;
     let is_narrow = area.width < 60;
-    let line1_w: usize = hline1.iter().map(|s| s.content.chars().count()).sum();
-    let line2_w: usize = hline2.iter().map(|s| s.content.chars().count()).sum();
+    let line1_w: usize = hline1.iter().map(|s| s.content.width()).sum();
+    let line2_w: usize = hline2.iter().map(|s| s.content.width()).sum();
     let header_h: u16 = if is_narrow || line1_w + line2_w <= w {
         1
     } else {
@@ -278,17 +279,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     let mut stacked_plan_h: u16 = 0;
 
     // Prompt banner: shows the active prompt (max 2 lines) below the header while busy.
-    let banner_h: u16 = if !is_narrow {
-        if let Some(ref prompt) = app.active_prompt {
-            let first_line = prompt.lines().next().unwrap_or("");
-            let available_w = area.width.saturating_sub(4) as usize;
-            if first_line.chars().count() > available_w {
-                2
-            } else {
-                1
-            }
+    let banner_h: u16 = if let Some(ref prompt) = app.active_prompt {
+        let first_line = prompt.lines().next().unwrap_or("");
+        let available_w = area.width.saturating_sub(4) as usize;
+        if first_line.width() > available_w {
+            2
         } else {
-            0
+            1
         }
     } else {
         0
@@ -446,7 +443,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
             // Total height is exactly our wrapped line count — no ratatui recount.
             let total_height = app.wrapped_lines.len() as u32;
-            let max_scroll = total_height.saturating_sub(chat_inner.height as u32);
+            let chat_h = chat_inner.height.max(1) as u32;
+            let max_scroll = total_height.saturating_sub(chat_h);
             // Store for use in handle_key (Up/PageUp need the current max_scroll).
             app.layout.max_scroll = max_scroll;
             // If a resize just occurred, restore scroll to the saved ratio.
@@ -773,9 +771,17 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Span::styled("Input", Style::default().fg(TUI_SOFT_ACCENT)),
             Span::styled(
                 if is_multiline {
-                    format!("{TUI_SEP}Shift+Enter newline{TUI_SEP}Enter send{TUI_SEP}Esc clear")
+                    if area.width < 60 {
+                        format!("{TUI_SEP}Shift+Enter ↵{TUI_SEP}Enter send")
+                    } else {
+                        format!("{TUI_SEP}Shift+Enter newline{TUI_SEP}Enter send{TUI_SEP}Esc clear")
+                    }
                 } else {
-                    format!("{TUI_SEP}Enter send{TUI_SEP}Shift+Enter newline{TUI_SEP}Esc clear")
+                    if area.width < 60 {
+                        format!("{TUI_SEP}Enter send{TUI_SEP}Esc clear")
+                    } else {
+                        format!("{TUI_SEP}Enter send{TUI_SEP}Shift+Enter newline{TUI_SEP}Esc clear")
+                    }
                 },
                 Style::default().fg(TUI_ROW_DIM).add_modifier(Modifier::DIM),
             ),
@@ -818,29 +824,33 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             ));
         }
         let hk = Style::default().fg(TUI_BRAND_TEXT);
+        // Primary hints only — full list behind /keys
+        let is_wide = area.width >= 120;
         hint_spans.extend([
             Span::styled("Enter", hk),
             Span::styled(format!(" send{TUI_SEP}"), hint_dim),
-            Span::styled("Shift+Enter", hk),
-            Span::styled(format!(" newline{TUI_SEP}"), hint_dim),
-            Span::styled("Ctrl+V", hk),
-            Span::styled(format!(" paste{TUI_SEP}"), hint_dim),
             Span::styled("Esc", hk),
             Span::styled(format!(" clear{TUI_SEP}"), hint_dim),
             Span::styled("↑↓", hk),
             Span::styled(format!(" history{TUI_SEP}"), hint_dim),
-            Span::styled("PgUp/Dn", hk),
-            Span::styled(format!(" scroll{TUI_SEP}"), hint_dim),
+        ]);
+        if is_wide {
+            hint_spans.extend([
+                Span::styled("Shift+Enter", hk),
+                Span::styled(format!(" newline{TUI_SEP}"), hint_dim),
+                Span::styled("Ctrl+V", hk),
+                Span::styled(format!(" paste{TUI_SEP}"), hint_dim),
+                Span::styled("PgUp/Dn", hk),
+                Span::styled(format!(" scroll{TUI_SEP}"), hint_dim),
+            ]);
+        }
+        hint_spans.extend([
             Span::styled("/help", hk),
             Span::styled(TUI_SEP, hint_dim),
-            Span::styled("/settings", hk),
-            Span::styled(format!(" prefs{TUI_SEP}"), hint_dim),
             Span::styled("Ctrl+/", hk),
             Span::styled(format!(" stop{TUI_SEP}"), hint_dim),
-            Span::styled("Ctrl+C", hk),
-            Span::styled(format!(" quit{TUI_SEP}"), hint_dim),
-            Span::styled("Ctrl+L", hk),
-            Span::styled(" redraw", hint_dim),
+            Span::styled("Ctrl+M", hk),
+            Span::styled(" model", hint_dim),
         ]);
         if app.layout.status_rail_active && app.layout.status_panel_max_scroll > 0 {
             hint_spans.push(Span::styled("Alt+PgUp/Dn", hk));

@@ -233,11 +233,13 @@ pub fn handle_plan_editor_key(app: &mut App, event: crossterm::event::KeyEvent) 
         Up => {
             if app.plan.selected_task > 0 {
                 app.plan.selected_task -= 1;
+                app.plan.pending_delete = None;
             }
         }
         Down => {
             if app.plan.selected_task + 1 < task_count {
                 app.plan.selected_task += 1;
+                app.plan.pending_delete = None;
             }
         }
         Enter => {
@@ -254,21 +256,38 @@ pub fn handle_plan_editor_key(app: &mut App, event: crossterm::event::KeyEvent) 
             }
         }
         Char('d') => {
-            // Delete selected task with confirmation.
+            // Delete selected task — requires pressing `d` twice to confirm.
             if let Some(ref mut editor) = app.plan.editor {
-                if let Some(task) = editor.plan.tasks.get(app.plan.selected_task) {
-                    let id = task.id.clone();
-                    let desc = task.description.clone();
-                    if editor.delete_task(&id).is_ok()
-                        && app.plan.selected_task >= editor.plan.tasks.len()
-                        && app.plan.selected_task > 0
-                    {
-                        app.plan.selected_task -= 1;
+                // If there's a pending delete and it matches the current selection, execute it.
+                if let Some((pending_idx, _)) = app.plan.pending_delete {
+                    if pending_idx == app.plan.selected_task {
+                        if let Some(task) = editor.plan.tasks.get(app.plan.selected_task) {
+                            let id = task.id.clone();
+                            let desc = task.description.clone();
+                            if editor.delete_task(&id).is_ok()
+                                && app.plan.selected_task >= editor.plan.tasks.len()
+                                && app.plan.selected_task > 0
+                            {
+                                app.plan.selected_task -= 1;
+                            }
+                            app.plan.pending_delete = None;
+                            app.push_toast(
+                                format!("Deleted: {}", desc),
+                                TUI_STATE_OK,
+                                std::time::Duration::from_secs(2),
+                            );
+                        }
+                        return;
                     }
+                }
+                // First press: set pending delete and show confirmation toast.
+                if let Some(task) = editor.plan.tasks.get(app.plan.selected_task) {
+                    let desc = task.description.clone();
+                    app.plan.pending_delete = Some((app.plan.selected_task, desc.clone()));
                     app.push_toast(
-                        format!("Deleted: {}", desc),
-                        TUI_STATE_OK,
-                        std::time::Duration::from_secs(2),
+                        format!("Delete '{}'? Press d again to confirm", desc),
+                        TUI_STATE_WARN,
+                        std::time::Duration::from_secs(3),
                     );
                 }
             }

@@ -219,6 +219,9 @@ pub(crate) struct PlanState {
     pub(crate) task_editing: Option<TaskEditState>,
     /// Simple nano-style text editor for /plan edit.
     pub(crate) text_editor: Option<PlanTextEditor>,
+    /// Pending task deletion — requires pressing `d` twice to confirm.
+    /// Stores the task index and description for the confirmation toast.
+    pub(crate) pending_delete: Option<(usize, String)>,
 }
 
 // ── Agent channels ────────────────────────────────────────────────────────────

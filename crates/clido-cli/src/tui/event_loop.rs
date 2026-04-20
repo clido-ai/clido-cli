@@ -1990,8 +1990,9 @@ pub(super) fn start_agent_runtime(
     }
 }
 
-/// Spawn a background task to fetch the model list from the provider API.
-/// Results arrive via `AgentEvent::ModelsLoaded` on the given channel.
+/// Spawn a background task to fetch the model list.
+/// Uses `ModelFetcher` (models.dev) as the primary source, falling back to
+/// the provider API only if models.dev is unavailable.
 pub(super) fn spawn_model_fetch(
     provider: String,
     api_key: String,
@@ -2000,29 +2001,54 @@ pub(super) fn spawn_model_fetch(
 ) {
     let provider_for_event = provider.clone();
     tokio::spawn(async move {
-        let base_url_ref = base_url.as_deref();
-        match clido_providers::fetch_provider_models(&provider, &api_key, base_url_ref).await {
-            Ok(entries) => {
-                let ids: Vec<String> = entries
-                    .into_iter()
-                    .filter(|m| m.available)
-                    .map(|m| m.id)
-                    .collect();
-                let _ = tx
-                    .send(AgentEvent::ModelsLoaded {
-                        ids,
-                        provider: provider_for_event,
-                    })
-                    .await;
+        // Try models.dev first (primary source)
+        let config_dir = match clido_core::global_config_dir() {
+            Some(d) => d,
+            None => std::path::PathBuf::from(".clido"),
+        };
+        let fetcher = clido_providers::ModelFetcher::new(&config_dir);
+        let ids: Vec<String> = match fetcher.get_provider_models(&provider).await {
+            Some(models) => models
+                .into_iter()
+                .filter(|m| m.available)
+                .map(|m| m.id)
+                .collect(),
+            None => Vec::new(),
+        };
+
+        // If models.dev returned nothing for this provider, fall back to direct API call
+        if ids.is_empty() {
+            let base_url_ref = base_url.as_deref();
+            match clido_providers::fetch_provider_models(&provider, &api_key, base_url_ref).await {
+                Ok(entries) => {
+                    let ids: Vec<String> = entries
+                        .into_iter()
+                        .filter(|m| m.available)
+                        .map(|m| m.id)
+                        .collect();
+                    let _ = tx
+                        .send(AgentEvent::ModelsLoaded {
+                            ids,
+                            provider: provider_for_event,
+                        })
+                        .await;
+                }
+                Err(error) => {
+                    let _ = tx
+                        .send(AgentEvent::ModelsFetchFailed {
+                            provider: provider_for_event,
+                            error,
+                        })
+                        .await;
+                }
             }
-            Err(error) => {
-                let _ = tx
-                    .send(AgentEvent::ModelsFetchFailed {
-                        provider: provider_for_event,
-                        error,
-                    })
-                    .await;
-            }
+        } else {
+            let _ = tx
+                .send(AgentEvent::ModelsLoaded {
+                    ids,
+                    provider: provider_for_event,
+                })
+                .await;
         }
     });
 }

@@ -115,7 +115,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     let version = env!("CARGO_PKG_VERSION");
     let dim = Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM);
 
-    // Line 1: brand · version  |  provider/model  |  profile  |  session title
+    // Separator tokens for consistent spacing throughout the header.
+    let sep = "  │ "; // main section separator
+    let dot = " · ";  // lightweight inline separator
+
+    // Line 1: brand · version  │  provider/model  │  profile  │  session  │  title
     let mut hline1: Vec<Span<'static>> = vec![
         Span::styled(
             "cli",
@@ -143,41 +147,40 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         } else {
             format!("{}{}{}", app.provider, TUI_SEP, app.model)
         };
-        hline1.push(Span::styled("  │ ", Style::default().fg(TUI_DIVIDER)));
+        hline1.push(Span::styled(sep, Style::default().fg(TUI_DIVIDER)));
         hline1.push(Span::styled(model_str, dim));
     }
-    hline1.push(Span::styled("  │ ", Style::default().fg(TUI_DIVIDER)));
+    hline1.push(Span::styled(sep, Style::default().fg(TUI_DIVIDER)));
     hline1.push(Span::styled(
         app.current_profile.clone(),
         Style::default()
             .fg(TUI_SOFT_ACCENT)
             .add_modifier(Modifier::BOLD),
     ));
-    // Session: explicit labels so the header is self-explanatory.
+    // Session info with lightweight dot separator.
     if let Some(ref session_id) = app.current_session_id {
-        let short_id = session_id[..session_id.len().min(8)].to_string();
+        let short_id = &session_id[..session_id.len().min(8)];
         hline1.push(Span::styled(
-            format!("{TUI_SEP}session #{short_id}"),
+            format!("{dot}session #{short_id}"),
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ));
     }
     if let Some(ref title) = app.session_title {
-        let title_str = title.clone();
         hline1.push(Span::styled(
-            format!("{TUI_SEP}title: {title_str}"),
+            format!("{dot}{title}"),
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         ));
     }
     if app.reviewer_configured {
         let reviewer_on = app.reviewer_enabled.load(Ordering::Relaxed);
-        let (dot, color) = if reviewer_on {
+        let (rdot, color) = if reviewer_on {
             ("●", TUI_STATE_OK)
         } else {
             ("○", TUI_MUTED)
         };
-        hline1.push(Span::styled("  │ ", Style::default().fg(TUI_DIVIDER)));
+        hline1.push(Span::styled(sep, Style::default().fg(TUI_DIVIDER)));
         hline1.push(Span::styled(
-            format!("reviewer {dot}"),
+            format!("reviewer {rdot}"),
             Style::default().fg(color).add_modifier(Modifier::DIM),
         ));
     }
@@ -228,18 +231,29 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 String::new()
             };
             hline2.push(Span::styled(
-                format!("{TUI_SEP}session: {}{}", turn_str, ctx_str),
+                format!("session: {turn_str}{ctx_str}"),
                 dim,
             ));
         } else {
             // On-demand providers: show cost in USD
             let cost_str = if let Some(budget) = app.max_budget_usd {
-                format!("${:.4} / ${:.2}", app.stats.session_total_cost_usd, budget)
+                // 5 decimal places for precision on small amounts, cap at $999.
+                let cost = app.stats.session_total_cost_usd;
+                if cost >= 1.0 {
+                    format!("${:.2} / ${:.2}", cost.min(999.0), budget)
+                } else {
+                    format!("${:.5} / ${:.2}", cost, budget)
+                }
             } else {
-                format!("${:.4}", app.stats.session_total_cost_usd)
+                let cost = app.stats.session_total_cost_usd;
+                if cost >= 1.0 {
+                    format!("${:.2}", cost.min(999.0))
+                } else {
+                    format!("${:.5}", cost)
+                }
             };
             hline2.push(Span::styled(
-                format!("{TUI_SEP}session: {}  {}{}", cost_str, tok_str, ctx_str),
+                format!("{TUI_SEP}session: {cost_str}  {tok_str}{ctx_str}"),
                 dim,
             ));
         }
@@ -372,11 +386,26 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Header render ──
     let header_para = if is_narrow {
-        // Minimal single-line header: just the model name.
-        Paragraph::new(Line::from(vec![Span::styled(
-            truncate_chars(&app.model, w),
-            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-        )]))
+        // Narrow terminal: session title takes priority, then session ID, then model.
+        let mut spans = Vec::new();
+        if let Some(ref t) = app.session_title {
+            spans.push(Span::styled(
+                truncate_chars(t, w),
+                Style::default().fg(TUI_SOFT_ACCENT).add_modifier(Modifier::BOLD),
+            ));
+        } else if let Some(ref id) = app.current_session_id {
+            let short = &id[..id.len().min(8)];
+            spans.push(Span::styled(
+                format!("session #{short}"),
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+            ));
+        } else {
+            spans.push(Span::styled(
+                truncate_chars(&app.model, w),
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+            ));
+        }
+        Paragraph::new(Line::from(spans))
     } else if header_h == 1 {
         // Everything on one line — append line2 to line1 and fit to width.
         hline1.extend(hline2);

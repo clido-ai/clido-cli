@@ -1,12 +1,10 @@
 //! AppShell — the root component that owns the component tree,
 //! manages the layout pass, and orchestrates rendering + event dispatch.
 
-use ratatui::{
-    layout::{Constraint, Layout},
-    Frame,
-};
+use ratatui::Frame;
 
 use crate::tui::app_state::App;
+use crate::tui::state::PlanPanelVisibility;
 
 use super::{
     header::HeaderBar,
@@ -36,46 +34,10 @@ impl AppShell {
         }
     }
 
-    /// Compute layout zones from the terminal area.
-    #[allow(dead_code)]
-    pub fn compute_zones(&self, app: &App, area: ratatui::layout::Rect) -> LayoutZones {
-        let h = area.height;
-        if h == 0 { return LayoutZones::default(); }
-
-        let line_count = app.text_input.text.matches('\n').count() + 1;
-        let input_h = (line_count as u16).clamp(3, 8).min(h.saturating_sub(2));
-
-        let status_h = if !app.status_log.is_empty() || !app.queued.is_empty() {
-            3u16.min(h.saturating_sub(1 + input_h + 1))
-        } else { 0 };
-
-        let header_h = if app.current_session_id.is_some() || app.session_title.is_some() {
-            2u16.min(h.saturating_sub(input_h + status_h + 1))
-        } else { 1u16.min(h.saturating_sub(input_h + status_h)) };
-
-        let chat_h = h.saturating_sub(header_h + input_h + status_h);
-
-        let chunks = Layout::vertical([
-            Constraint::Length(header_h),
-            Constraint::Length(chat_h),
-            Constraint::Length(status_h),
-            Constraint::Length(input_h),
-        ]).split(area);
-
-        LayoutZones {
-            header: chunks[0],
-            chat: chunks[1],
-            status: chunks[2],
-            input: chunks[3],
-        }
-    }
-
     /// Handle a key event through the component tree.
     pub fn handle_key(&mut self, key: crossterm::event::KeyEvent, app: &mut App) -> bool {
         self.on_app_update(app);
-
-        let mode = app.focus();
-        match mode {
+        match app.focus() {
             crate::tui::state::FocusTarget::ChatInput => {
                 return self.input.handle_key(key, app).is_consumed();
             }
@@ -85,7 +47,6 @@ impl AppShell {
             }
             _ => {}
         }
-
         if self.input.handle_key(key, app).is_consumed() { return true; }
         if self.chat.handle_key(key, app).is_consumed() { return true; }
         if self.status.handle_key(key, app).is_consumed() { return true; }
@@ -108,7 +69,8 @@ impl Component for AppShell {
     }
 
     fn render(&self, _frame: &mut Frame, _zones: &LayoutZones, _app: &App) {
-        // Phase 1: rendering done by main render function.
+        // Phase 1: full rendering delegated to existing render() function.
+        // Phase 2: each component renders its zone independently.
     }
 
     fn is_dirty(&self) -> bool {
@@ -128,21 +90,35 @@ impl Component for AppShell {
     }
 }
 
-// ── Public API ───────────────────────────────────────────────────────────────
+// ── Public API for the event loop ─────────────────────────────────────────────
 
 pub fn create_shell() -> AppShell { AppShell::new() }
-
-pub fn sync_shell(shell: &mut AppShell, app: &App) -> bool {
-    shell.on_app_update(app)
-}
-
+pub fn sync_shell(shell: &mut AppShell, app: &App) -> bool { shell.on_app_update(app) }
 pub fn handle_key_shell(shell: &mut AppShell, key: crossterm::event::KeyEvent, app: &mut App) -> bool {
     shell.handle_key(key, app)
 }
+pub fn clean_shell(shell: &mut AppShell) { shell.mark_clean(); }
+
+// ── Layout helpers (unused in Phase 1, kept for future Phase 2 migration) ─────
 
 #[allow(dead_code)]
-pub fn compute_zones(shell: &AppShell, app: &App, area: ratatui::layout::Rect) -> LayoutZones {
-    shell.compute_zones(app, area)
+fn gather_plan_steps(app: &App) -> Vec<String> {
+    app.plan.last_plan.clone().unwrap_or_default()
 }
 
-pub fn clean_shell(shell: &mut AppShell) { shell.mark_clean(); }
+#[allow(dead_code)]
+fn plan_panel_height_for_layout(
+    visibility: PlanPanelVisibility,
+    _terminal_w: u16,
+    terminal_h: u16,
+    steps: &[String],
+    harness_mode: bool,
+) -> u16 {
+    if matches!(visibility, PlanPanelVisibility::Off) || harness_mode {
+        return 0;
+    }
+    if steps.is_empty() { return 0; }
+    let available = terminal_h.saturating_sub(15);
+    let needed = steps.len() as u16 + 2;
+    needed.min(available.max(3)).min(4)
+}

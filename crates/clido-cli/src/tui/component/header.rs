@@ -15,6 +15,8 @@ pub struct HeaderBar {
     last_session_id: Option<String>,
     last_title: Option<String>,
     last_cost: f64,
+    last_busy: bool,
+    last_per_turn: bool,
 }
 
 impl HeaderBar {
@@ -27,6 +29,8 @@ impl HeaderBar {
             last_session_id: None,
             last_title: None,
             last_cost: 0.0,
+            last_busy: false,
+            last_per_turn: false,
         }
     }
 
@@ -38,6 +42,8 @@ impl HeaderBar {
             || app.current_session_id != last.last_session_id
             || app.session_title != last.last_title
             || (app.stats.session_total_cost_usd - last.last_cost).abs() > f64::EPSILON
+            || app.busy != last.last_busy
+            || app.per_turn_prev_model.is_some() != last.last_per_turn
     }
 }
 
@@ -50,6 +56,8 @@ impl Component for HeaderBar {
             self.last_session_id = app.current_session_id.clone();
             self.last_title = app.session_title.clone();
             self.last_cost = app.stats.session_total_cost_usd;
+            self.last_busy = app.busy;
+            self.last_per_turn = app.per_turn_prev_model.is_some();
             self.dirty.set();
         }
         self.dirty.is_set()

@@ -16,7 +16,6 @@ pub use chat::*;
 pub use input::*;
 #[allow(unused_imports)]
 pub use status::*;
-#[allow(unused_imports)]
 pub use shell::*;
 
 use ratatui::layout::Rect;
@@ -65,9 +64,14 @@ impl DirtyFlag {
 #[allow(dead_code)]
 pub struct LayoutZones {
     pub header: Rect,
+    pub banner: Rect,
     pub chat: Rect,
+    pub plan: Rect,
     pub status: Rect,
+    pub queue: Rect,
+    pub hint: Rect,
     pub input: Rect,
+    pub rail: Option<Rect>,
 }
 
 // ── Component Trait ──────────────────────────────────────────────────────────

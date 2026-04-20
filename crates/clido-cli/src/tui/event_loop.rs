@@ -2470,7 +2470,8 @@ pub(super) async fn event_loop(
         if dirty {
             // Sync component state from app (updates dirty flags).
             crate::tui::component::sync_shell(&mut shell, app);
-            terminal.draw(|f| render(f, app))?;
+            // Phase 1: delegate full rendering to existing render function.
+            terminal.draw(|f| crate::tui::render::render(f, app))?;
             // Mark components clean after render.
             crate::tui::component::clean_shell(&mut shell);
             dirty = false;

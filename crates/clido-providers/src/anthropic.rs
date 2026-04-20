@@ -710,6 +710,8 @@ impl ModelProvider for AnthropicProvider {
     ) -> std::result::Result<Vec<crate::provider::ModelMetadata>, String> {
         // Anthropic has no model discovery endpoint — use a curated static list.
         // (GET /v1/models always returns 404 because that endpoint doesn't exist.)
+        // NOTE: The TUI now fetches models via ModelFetcher (models.dev), so this
+        // is only used by the CLI `clido list-models` command and as a fallback.
         let hardcoded: Vec<ModelMetadata> = vec![
             make_meta("claude-sonnet-4-20250514", "Claude Sonnet 4", 200_000),
             make_meta("claude-opus-4-20250514", "Claude Opus 4", 200_000),

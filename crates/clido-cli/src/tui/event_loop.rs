@@ -1991,8 +1991,8 @@ pub(super) fn start_agent_runtime(
 }
 
 /// Spawn a background task to fetch the model list.
-/// Uses `ModelFetcher` (models.dev) as the primary source, falling back to
-/// the provider API only if models.dev is unavailable.
+/// - OpenRouter: calls the provider API directly (updates faster than models.dev).
+/// - All other providers: uses ModelFetcher (models.dev) for models + pricing + capabilities.
 pub(super) fn spawn_model_fetch(
     provider: String,
     api_key: String,
@@ -2001,23 +2001,9 @@ pub(super) fn spawn_model_fetch(
 ) {
     let provider_for_event = provider.clone();
     tokio::spawn(async move {
-        // Try models.dev first (primary source)
-        let config_dir = match clido_core::global_config_dir() {
-            Some(d) => d,
-            None => std::path::PathBuf::from(".clido"),
-        };
-        let fetcher = clido_providers::ModelFetcher::new(&config_dir);
-        let ids: Vec<String> = match fetcher.get_provider_models(&provider).await {
-            Some(models) => models
-                .into_iter()
-                .filter(|m| m.available)
-                .map(|m| m.id)
-                .collect(),
-            None => Vec::new(),
-        };
-
-        // If models.dev returned nothing for this provider, fall back to direct API call
-        if ids.is_empty() {
+        // OpenRouter updates faster than models.dev — query its API directly.
+        // All other providers go through models.dev for accurate metadata + pricing.
+        if provider == "openrouter" {
             let base_url_ref = base_url.as_deref();
             match clido_providers::fetch_provider_models(&provider, &api_key, base_url_ref).await {
                 Ok(entries) => {
@@ -2042,6 +2028,32 @@ pub(super) fn spawn_model_fetch(
                         .await;
                 }
             }
+            return;
+        }
+
+        // All other providers: use models.dev (ModelFetcher)
+        let config_dir = match clido_core::global_config_dir() {
+            Some(d) => d,
+            None => std::path::PathBuf::from(".clido"),
+        };
+        let fetcher = clido_providers::ModelFetcher::new(&config_dir);
+        let ids: Vec<String> = match fetcher.get_provider_models(&provider).await {
+            Some(models) => models
+                .into_iter()
+                .filter(|m| m.available)
+                .map(|m| m.id)
+                .collect(),
+            None => Vec::new(),
+        };
+
+        if ids.is_empty() {
+            // models.dev has no data — silently skip (no 404 error shown to user)
+            let _ = tx
+                .send(AgentEvent::ModelsLoaded {
+                    ids: Vec::new(),
+                    provider: provider_for_event,
+                })
+                .await;
         } else {
             let _ = tx
                 .send(AgentEvent::ModelsLoaded {

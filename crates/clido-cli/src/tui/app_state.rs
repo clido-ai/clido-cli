@@ -477,7 +477,14 @@ impl App {
                 }
                 prev.push_str(new_t);
                 if prev.len() > MAX_THINKING_COALESCE {
-                    prev.truncate(MAX_THINKING_COALESCE);
+                    // Truncate at a valid UTF-8 boundary (avoid splitting multibyte chars).
+                    let truncate_at = prev
+                        .char_indices()
+                        .take_while(|(i, _)| *i <= MAX_THINKING_COALESCE - 12)
+                        .last()
+                        .map(|(i, ch)| i + ch.len_utf8())
+                        .unwrap_or(0);
+                    prev.truncate(truncate_at);
                     prev.push_str("\n… [truncated]");
                 }
             }

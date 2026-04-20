@@ -394,9 +394,11 @@ pub(crate) fn render_plan_editor(frame: &mut Frame, app: &App, area: Rect) {
         "low"
     };
 
+    let dry_tag = if app.plan_dry_run { " [DRY RUN]" } else { "" };
     let title = format!(
-        " Plan: {}  ({} tasks · complexity: {}) ",
+        " Plan: {}{}  ({} tasks · complexity: {}) ",
         truncate_chars(&plan.meta.goal, 40),
+        dry_tag,
         task_count,
         complexity_summary
     );
@@ -609,8 +611,14 @@ pub(crate) fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) 
 
     frame.render_widget(Clear, area);
 
+    let title = if app.plan_dry_run {
+        " Plan text [DRY RUN — no changes will execute] (Ctrl+S = save · Esc / Ctrl+C = discard) "
+    } else {
+        " Plan text (Ctrl+S = save · Esc / Ctrl+C = discard) "
+    };
+
     let block = Block::default()
-        .title(" Plan text (Ctrl+S = save · Esc / Ctrl+C = discard) ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(
             Style::default()

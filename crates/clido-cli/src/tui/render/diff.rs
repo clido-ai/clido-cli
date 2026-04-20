@@ -94,7 +94,8 @@ pub(crate) fn render_diff(text: &str, width: usize) -> Vec<Line<'static>> {
 fn render_unified(text: &str) -> Vec<Line<'static>> {
     let dim = Modifier::DIM;
     let gutter_style = Style::default().fg(TUI_MUTED).add_modifier(dim);
-    let mut out = Vec::new();
+    // Pre-allocate: most diff lines produce 1 output line each, plus header/footer.
+    let mut out = Vec::with_capacity(text.lines().count() + 4);
     let mut old_lineno: u32 = 0;
     let mut new_lineno: u32 = 0;
 

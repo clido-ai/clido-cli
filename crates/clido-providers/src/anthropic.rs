@@ -16,8 +16,26 @@ use crate::backoff::{
     MAX_SERVER_ERROR_ATTEMPTS,
 };
 use tracing::{debug, warn};
-
 use crate::provider::{ModelCapabilities, ModelMetadata, ModelProvider, ModelStatus, StreamEvent};
+
+/// Helper to build a `ModelMetadata` with common defaults for Anthropic models.
+fn make_meta(id: &str, name: &str, context: u32) -> ModelMetadata {
+    ModelMetadata {
+        id: id.to_string(),
+        name: Some(name.to_string()),
+        context_window: Some(context),
+        pricing: None,
+        capabilities: ModelCapabilities {
+            reasoning: true,
+            tool_call: true,
+            vision: true,
+            temperature: true,
+        },
+        status: ModelStatus::Active,
+        release_date: None,
+        available: true,
+    }
+}
 
 /// Anthropic Messages API provider.
 pub struct AnthropicProvider {
@@ -690,63 +708,20 @@ impl ModelProvider for AnthropicProvider {
     async fn list_models_metadata(
         &self,
     ) -> std::result::Result<Vec<crate::provider::ModelMetadata>, String> {
-        let resp = match self
-            .client
-            .get("https://api.anthropic.com/v1/models")
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => return Err(format!("Network error: {}", e)),
-        };
-        let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-            return Err("Authentication failed — check your API key".to_string());
-        }
-        if !status.is_success() {
-            return Err(format!("API returned {}", status));
-        }
-        let json = match resp.json::<serde_json::Value>().await {
-            Ok(j) => j,
-            Err(e) => return Err(format!("Failed to parse response: {}", e)),
-        };
-        let mut models: Vec<ModelMetadata> = json["data"]
-            .as_array()
-            .unwrap_or(&vec![])
-            .iter()
-            .filter_map(|m| {
-                let id = m["id"].as_str()?.to_string();
-                let name = m["display_name"].as_str().map(String::from);
-                let context_window = m["context_length"]
-                    .as_u64()
-                    .map(|v| v as u32)
-                    .or_else(|| m["max_context_length"].as_u64().map(|v| v as u32));
-
-                let capabilities = ModelCapabilities {
-                    reasoning: id.to_lowercase().contains("opus")
-                        || id.to_lowercase().contains("sonnet")
-                        || id.to_lowercase().contains("claude"),
-                    tool_call: true,
-                    vision: true, // All Claude models support vision
-                    temperature: true,
-                };
-
-                Some(ModelMetadata {
-                    id,
-                    name,
-                    context_window,
-                    pricing: None, // Anthropic doesn't return pricing in /models
-                    capabilities,
-                    status: ModelStatus::Active,
-                    release_date: None,
-                    available: true,
-                })
-            })
-            .collect();
-        models.sort_by(|a, b| a.id.cmp(&b.id));
-        Ok(models)
+        // Anthropic has no model discovery endpoint — use a curated static list.
+        // (GET /v1/models always returns 404 because that endpoint doesn't exist.)
+        let hardcoded: Vec<ModelMetadata> = vec![
+            make_meta("claude-sonnet-4-20250514", "Claude Sonnet 4", 200_000),
+            make_meta("claude-opus-4-20250514", "Claude Opus 4", 200_000),
+            make_meta("claude-3-7-sonnet-20250219", "Claude 3.7 Sonnet", 200_000),
+            make_meta("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet", 200_000),
+            make_meta("claude-3-5-haiku-20241022", "Claude 3.5 Haiku", 200_000),
+            make_meta("claude-3-opus-20240229", "Claude 3 Opus", 200_000),
+            make_meta("claude-sonnet-4-20250514-thinking", "Claude Sonnet 4 (Thinking)", 200_000),
+            make_meta("claude-opus-4-20250514-thinking", "Claude Opus 4 (Thinking)", 200_000),
+            make_meta("claude-3-7-sonnet-20250219-thinking", "Claude 3.7 Sonnet (Thinking)", 200_000),
+        ];
+        Ok(hardcoded)
     }
 
     fn set_model(&self, model: String) {

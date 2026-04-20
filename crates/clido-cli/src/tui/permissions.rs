@@ -184,6 +184,10 @@ pub(super) fn format_tool_input(name: &str, input: &serde_json::Value) -> String
                 "todo".to_string()
             }
         }
+        "TestLoop" => input["max_iterations"]
+            .as_u64()
+            .map(|n| format!("max_iterations: {n}"))
+            .unwrap_or_else(|| "test loop".to_string()),
         _ => input.to_string(),
     };
     if s.chars().count() > 72 {

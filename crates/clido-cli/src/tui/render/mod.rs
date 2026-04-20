@@ -2338,6 +2338,7 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                         std::mem::take(&mut table_body),
                         &table_alignments,
                         &mut out,
+                        content_w as usize,
                     );
                 }
                 _ => {}
@@ -2431,12 +2432,12 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
 /// ├──────────┼──────────┼──────────┤
 /// │  Cell A  │  Cell B  │  Cell C  │
 /// └──────────┴──────────┴──────────┘
-/// ```
 pub(super) fn render_table_to_lines(
     header: Option<Vec<String>>,
     rows: Vec<Vec<String>>,
     alignments: &[pulldown_cmark::Alignment],
     out: &mut Vec<Line<'static>>,
+    available_width: usize,
 ) {
     use pulldown_cmark::Alignment as Align;
 
@@ -2449,7 +2450,7 @@ pub(super) fn render_table_to_lines(
         return;
     }
 
-    // Compute per-column content widths (padding added separately).
+    // Compute per-column content widths from actual data.
     let mut col_widths = vec![1usize; ncols];
     if let Some(ref h) = header {
         for (i, cell) in h.iter().enumerate().take(ncols) {
@@ -2462,15 +2463,56 @@ pub(super) fn render_table_to_lines(
         }
     }
 
+    // Cap total width to fit available terminal space.
+    // Budget: borders + gaps = ncols*3 + 1 (│ cell │ separators + outer borders).
+    let max_table_width = available_width.max(40);
+    let overhead = ncols * 3 + 1;
+    let max_content = max_table_width.saturating_sub(overhead);
+    let total_content: usize = col_widths.iter().sum();
+    if total_content > max_content {
+        let excess = total_content - max_content;
+        // Distribute excess proportionally, but give the first column (usually a key/ID) minimum shrink.
+        let shrinkable: usize = col_widths[1..].iter().sum();
+        if shrinkable > 0 {
+            for w in col_widths.iter_mut().skip(1) {
+                let share = ((*w as f64 / shrinkable as f64) * excess as f64).ceil() as usize;
+                *w = w.saturating_sub(share).max(10); // minimum 10 chars per column
+            }
+        }
+    }
+
+    let ellipsize = |s: &str, max_w: usize| -> String {
+        let w = unicode_width::UnicodeWidthStr::width(s);
+        if w <= max_w {
+            s.to_string()
+        } else {
+            // Truncate at a character boundary respecting display width.
+            let limit = max_w.saturating_sub(1); // leave room for "…"
+            let mut cur = 0;
+            let mut truncated = String::new();
+            for ch in s.chars() {
+                let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                if cur + cw > limit {
+                    break;
+                }
+                truncated.push(ch);
+                cur += cw;
+            }
+            truncated.push('…');
+            truncated
+        }
+    };
+
     let align_cell = |content: &str, width: usize, align: &Align| -> String {
+        let display_w = unicode_width::UnicodeWidthStr::width(content);
+        let pad = width.saturating_sub(display_w);
         match align {
-            Align::Right => format!("{:>width$}", content),
+            Align::Right => format!("{}{}", " ".repeat(pad), content),
             Align::Center => {
-                let pad = width.saturating_sub(content.len());
                 let left = pad / 2;
                 format!("{}{}{}", " ".repeat(left), content, " ".repeat(pad - left))
             }
-            _ => format!("{:<width$}", content),
+            _ => format!("{}{}", content, " ".repeat(pad)),
         }
     };
 
@@ -2491,8 +2533,9 @@ pub(super) fn render_table_to_lines(
     if let Some(ref h) = header {
         let mut spans = vec![Span::styled("│".to_string(), gray)];
         for (i, &w) in col_widths.iter().enumerate().take(ncols) {
-            let content = h.get(i).map(|s| s.as_str()).unwrap_or("");
-            let cell = align_cell(content, w, alignments.get(i).unwrap_or(&Align::None));
+            let raw = h.get(i).map(|s| s.as_str()).unwrap_or("");
+            let content = ellipsize(raw, w);
+            let cell = align_cell(&content, w, alignments.get(i).unwrap_or(&Align::None));
             spans.push(Span::styled(format!(" {} ", cell), hdr_style));
             spans.push(Span::styled("│".to_string(), gray));
         }
@@ -2507,12 +2550,13 @@ pub(super) fn render_table_to_lines(
         out.push(Line::from(vec![Span::styled(format!("├{}┤", sep), gray)]));
     }
 
-    // Body rows
+    // Body rows — ellipsize long cells to fit column width
     for row in &rows {
         let mut spans = vec![Span::styled("│".to_string(), gray)];
         for (i, &w) in col_widths.iter().enumerate().take(ncols) {
-            let content = row.get(i).map(|s| s.as_str()).unwrap_or("");
-            let cell = align_cell(content, w, alignments.get(i).unwrap_or(&Align::None));
+            let raw = row.get(i).map(|s| s.as_str()).unwrap_or("");
+            let content = ellipsize(raw, w);
+            let cell = align_cell(&content, w, alignments.get(i).unwrap_or(&Align::None));
             spans.push(Span::raw(format!(" {} ", cell)));
             spans.push(Span::styled("│".to_string(), gray));
         }

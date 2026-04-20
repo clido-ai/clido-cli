@@ -3369,7 +3369,7 @@ pub(super) async fn event_loop(
                             percent, cost, limit
                         )));
                     }
-                    Some(AgentEvent::ModelsLoaded { mut ids, provider }) => {
+                    Some(AgentEvent::ModelsLoaded { ids, provider }) => {
                         app.models_loading = false;
                         // No hardcoded fallbacks — models are fetched dynamically.
                         let _ = provider;

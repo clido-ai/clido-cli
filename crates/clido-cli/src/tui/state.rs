@@ -443,6 +443,7 @@ impl ModelPickerState {
     }
 
     /// Replace the full model list (e.g. after a live API fetch) and re-clamp selection.
+    #[allow(dead_code)]
     pub(crate) fn refresh_models(&mut self, ids: Vec<String>) {
         self.models = ids
             .into_iter()

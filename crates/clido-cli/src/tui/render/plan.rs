@@ -642,7 +642,6 @@ pub(crate) fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) 
         if i == ed.cursor_row {
             // Render cursor inline — account for wide characters (CJK, emoji)
             // so the cursor appears at the correct visual column.
-            use unicode_width::UnicodeWidthChar;
             let (before, cursor_ch, after) = split_at_display_col(line, ed.cursor_col);
             lines.push(Line::from(vec![
                 Span::raw(before),

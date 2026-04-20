@@ -17,7 +17,7 @@ use crate::backoff::{
 };
 use tracing::{debug, warn};
 
-use crate::provider::{ModelCapabilities, ModelEntry, ModelMetadata, ModelPricing, ModelProvider, ModelStatus, StreamEvent};
+use crate::provider::{ModelCapabilities, ModelMetadata, ModelProvider, ModelStatus, StreamEvent};
 
 /// Anthropic Messages API provider.
 pub struct AnthropicProvider {

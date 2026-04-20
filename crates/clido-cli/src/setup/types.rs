@@ -105,6 +105,7 @@ pub(super) enum ModelOption {
 
 impl ModelOption {
     /// Backward compat: create from a simple ModelEntry.
+    #[allow(dead_code)]
     pub fn from_entry(entry: ModelEntry) -> Self {
         Self::Metadata(ModelMetadata {
             id: entry.id,

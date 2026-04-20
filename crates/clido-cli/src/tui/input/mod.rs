@@ -410,7 +410,6 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         .nth(idx)
                         .map(|(_, s)| s.session_id.clone());
                     if let Some(id) = maybe_id {
-                        drop(picker);
                         app.text_input.text.clear();
                         app.text_input.cursor = 0;
                         if app.current_session_id.as_deref() == Some(&id) {
@@ -420,7 +419,6 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                             let _ = app.channels.resume_tx.send(id);
                         }
                     } else {
-                        drop(picker);
                         app.push_toast(
                             format!("No result #{digit}"),
                             TUI_STATE_WARN,

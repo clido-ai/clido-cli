@@ -12,8 +12,8 @@ pub fn compute_cost_usd(usage: &Usage, pricing: Option<&ModelPricingRef>) -> f64
         Some(p) => (
             p.input_per_mtok,
             p.output_per_mtok,
-            p.cache_read.unwrap_or(p.input_per_mtok * 0.10),
-            p.cache_write.unwrap_or(p.input_per_mtok * 1.25),
+            p.cache_write.unwrap_or(p.input_per_mtok * 0.10),
+            p.cache_read.unwrap_or(p.input_per_mtok * 1.25),
         ),
         None => (3.0, 15.0, 0.3, 3.75), // fallback USD per million tokens
     };

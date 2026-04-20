@@ -158,12 +158,16 @@ pub fn handle_workflow_editor_key(app: &mut App, event: crossterm::event::KeyEve
         }
     }
 
-    // Scroll to keep cursor visible
+    // Scroll to keep cursor visible — compute actual editor height from terminal dimensions.
     if let Some(ed) = &mut app.workflow_editor {
+        let editor_height = crossterm::terminal::size()
+            .map(|(_, h)| (h.saturating_sub(10)) as usize)
+            .unwrap_or(20)
+            .max(1);
         if ed.cursor_row < ed.scroll {
             ed.scroll = ed.cursor_row;
-        } else if ed.cursor_row >= ed.scroll + 20 {
-            ed.scroll = ed.cursor_row - 19;
+        } else if ed.cursor_row >= ed.scroll + editor_height {
+            ed.scroll = ed.cursor_row.saturating_sub(editor_height - 1);
         }
     }
 }

@@ -2,6 +2,7 @@
 
 mod app_state;
 mod commands;
+mod component;
 mod copy;
 mod event_loop;
 pub mod events;

@@ -2462,9 +2462,17 @@ pub(super) async fn event_loop(
                                          // Only redraw when state has actually changed to reduce CPU usage.
     let mut dirty = true;
 
+    // Component layer — provides component boundaries, dirty tracking,
+    // and event propagation. Phase 1: wired alongside existing code.
+    let mut shell = crate::tui::component::create_shell();
+
     loop {
         if dirty {
+            // Sync component state from app (updates dirty flags).
+            crate::tui::component::sync_shell(&mut shell, app);
             terminal.draw(|f| render(f, app))?;
+            // Mark components clean after render.
+            crate::tui::component::clean_shell(&mut shell);
             dirty = false;
         }
 
@@ -2571,7 +2579,14 @@ pub(super) async fn event_loop(
                         {
                             let _ = terminal.clear();
                         } else {
-                            handle_key(app, key);
+                            // Route through component shell for event propagation.
+                            // Falls back to existing handle_key for non-chat contexts.
+                            let consumed = crate::tui::component::handle_key_shell(
+                                &mut shell, key, app,
+                            );
+                            if !consumed {
+                                handle_key(app, key);
+                            }
                         }
                     }
                     Some(Ok(Event::Paste(mut text))) => {

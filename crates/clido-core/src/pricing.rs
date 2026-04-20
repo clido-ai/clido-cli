@@ -6,27 +6,31 @@
 use crate::types::Usage;
 
 /// Compute cost in USD for the given usage and model pricing.
-/// If pricing is None, uses fallback rates ($3/mtok input, $15/mtok output).
+/// If pricing is unavailable (None), returns 0.0 — no fake rates are used.
 pub fn compute_cost_usd(usage: &Usage, pricing: Option<&ModelPricingRef>) -> f64 {
     let (input_per_mtok, output_per_mtok, cache_creation, cache_read) = match pricing {
         Some(p) => (
-            p.input_per_mtok,
-            p.output_per_mtok,
-            p.cache_write.unwrap_or(p.input_per_mtok * 0.10),
-            p.cache_read.unwrap_or(p.input_per_mtok * 1.25),
+            Some(p.input_per_mtok),
+            Some(p.output_per_mtok),
+            p.cache_write,
+            p.cache_read,
         ),
-        None => (3.0, 15.0, 0.3, 3.75), // fallback USD per million tokens
+        None => (None, None, None, None),
     };
 
-    let input = (usage.input_tokens as f64 / 1_000_000.0) * input_per_mtok;
-    let output = (usage.output_tokens as f64 / 1_000_000.0) * output_per_mtok;
+    let input = input_per_mtok
+        .map(|r| (usage.input_tokens as f64 / 1_000_000.0) * r)
+        .unwrap_or(0.0);
+    let output = output_per_mtok
+        .map(|r| (usage.output_tokens as f64 / 1_000_000.0) * r)
+        .unwrap_or(0.0);
     let cache_creation_cost = usage
         .cache_creation_input_tokens
-        .map(|t| (t as f64 / 1_000_000.0) * cache_creation)
+        .and_then(|t| cache_creation.map(|r| (t as f64 / 1_000_000.0) * r))
         .unwrap_or(0.0);
     let cache_read_cost = usage
         .cache_read_input_tokens
-        .map(|t| (t as f64 / 1_000_000.0) * cache_read)
+        .and_then(|t| cache_read.map(|r| (t as f64 / 1_000_000.0) * r))
         .unwrap_or(0.0);
 
     input + output + cache_creation_cost + cache_read_cost
@@ -75,10 +79,10 @@ mod tests {
     }
 
     #[test]
-    fn cost_fallback_rates_known_values() {
+    fn cost_no_pricing_returns_zero() {
+        // When pricing data is unavailable, cost should be 0.0 (no fake rates).
         let usage = make_usage(1_000_000, 1_000_000);
-        let cost = compute_cost_usd(&usage, None);
-        assert!((cost - 18.0).abs() < 0.001, "expected $18, got {}", cost);
+        assert_eq!(compute_cost_usd(&usage, None), 0.0);
     }
 
     #[test]
@@ -101,16 +105,10 @@ mod tests {
     }
 
     #[test]
-    fn cost_with_cache_tokens_fallback() {
+    fn cost_no_pricing_cache_tokens_also_zero() {
+        // Without pricing data, cache tokens also contribute $0.
         let usage = make_usage_with_cache(0, 0, 1_000_000, 1_000_000);
-        let cost = compute_cost_usd(&usage, None);
-        let expected = 3.75 + 0.30;
-        assert!(
-            (cost - expected).abs() < 0.001,
-            "expected {}, got {}",
-            expected,
-            cost
-        );
+        assert_eq!(compute_cost_usd(&usage, None), 0.0);
     }
 
     #[test]

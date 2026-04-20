@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 use clido_agent::AgentLoop;
 use clido_core::{
-    agent_config_from_loaded, default_workflows_directory, load_config, ClidoError,
-    LoadedConfig, PermissionMode, Result as CoreResult,
+    agent_config_from_loaded, default_workflows_directory, load_config, ClidoError, LoadedConfig,
+    PermissionMode, Result as CoreResult,
 };
 use clido_storage::{workflow_run_path, SessionWriter};
 use clido_tools::default_registry_with_options;
@@ -54,7 +54,7 @@ impl WorkflowStepRunner for CliWorkflowRunner {
     async fn run_step(&self, request: StepRunRequest) -> CoreResult<StepRunResult> {
         let loaded =
             load_config(&self.workspace_root).map_err(|e| ClidoError::Workflow(e.to_string()))?;
-        let pricing_table = clido_core::PricingTable::default();
+        let pricing_table = clido_core::PricingTable;
         let profile_name = request
             .profile
             .as_deref()
@@ -102,7 +102,8 @@ impl WorkflowStepRunner for CliWorkflowRunner {
         )
         .map_err(|e| ClidoError::Workflow(e.to_string()))?;
         if config.max_context_tokens.is_none() {
-            config.max_context_tokens = Some(crate::agent_setup::detect_context_window(&config.model));
+            config.max_context_tokens =
+                Some(crate::agent_setup::detect_context_window(&config.model));
         }
         let session_id = format!("{}_{}", self.run_id, request.step_id);
         let mut writer = SessionWriter::create(&self.workspace_root, &session_id)

@@ -342,7 +342,10 @@ mod tests {
         assert_eq!(resolve_model_alias("sonnet"), "sonnet");
         assert_eq!(resolve_model_alias("opus"), "opus");
         assert_eq!(resolve_model_alias("gpt-4o"), "gpt-4o");
-        assert_eq!(resolve_model_alias("claude-sonnet-4-6"), "claude-sonnet-4-6");
+        assert_eq!(
+            resolve_model_alias("claude-sonnet-4-6"),
+            "claude-sonnet-4-6"
+        );
         assert_eq!(resolve_model_alias(""), "");
     }
 

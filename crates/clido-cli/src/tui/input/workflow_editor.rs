@@ -55,7 +55,8 @@ pub fn handle_workflow_editor_key(app: &mut App, event: crossterm::event::KeyEve
                     Err(e) => {
                         app.push(ChatLine::Info(format!("  ✗ Invalid workflow YAML: {e}")));
                         // Re-open editor preserving cursor position so user can fix.
-                        let (cursor_row, cursor_col, scroll) = (ed.cursor_row, ed.cursor_col, ed.scroll);
+                        let (cursor_row, cursor_col, scroll) =
+                            (ed.cursor_row, ed.cursor_col, ed.scroll);
                         let mut new_ed = PlanTextEditor::from_raw(&yaml_text);
                         new_ed.cursor_row = cursor_row;
                         new_ed.cursor_col = cursor_col;

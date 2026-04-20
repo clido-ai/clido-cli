@@ -158,13 +158,23 @@ pub(super) fn cmd_help(app: &mut App) {
     app.push(ChatLine::Info(
         "Shift+Enter        insert newline (multiline input)".into(),
     ));
-    app.push(ChatLine::Info("Ctrl+/             interrupt current run".into()));
-    app.push(ChatLine::Info("Ctrl+C             quit (or interrupt if busy)".into()));
-    app.push(ChatLine::Info("Ctrl+D             quit (only when input empty)".into()));
+    app.push(ChatLine::Info(
+        "Ctrl+/             interrupt current run".into(),
+    ));
+    app.push(ChatLine::Info(
+        "Ctrl+C             quit (or interrupt if busy)".into(),
+    ));
+    app.push(ChatLine::Info(
+        "Ctrl+D             quit (only when input empty)".into(),
+    ));
     app.push(ChatLine::Info("Ctrl+M             model picker".into()));
     app.push(ChatLine::Info("Ctrl+P             profile picker".into()));
-    app.push(ChatLine::Info("Ctrl+K             key bindings overlay".into()));
-    app.push(ChatLine::Info("Ctrl+V             paste from clipboard".into()));
+    app.push(ChatLine::Info(
+        "Ctrl+K             key bindings overlay".into(),
+    ));
+    app.push(ChatLine::Info(
+        "Ctrl+V             paste from clipboard".into(),
+    ));
     app.push(ChatLine::Info(
         "Queue              type while agent runs, sends on finish".into(),
     ));
@@ -172,7 +182,9 @@ pub(super) fn cmd_help(app: &mut App) {
     app.push(ChatLine::Info(
         "Press Ctrl+K for the full key bindings reference".into(),
     ));
-    app.push(ChatLine::Info("Type /<tab> to see all available slash commands".into()));
+    app.push(ChatLine::Info(
+        "Type /<tab> to see all available slash commands".into(),
+    ));
     app.push(ChatLine::Info("".into()));
 }
 
@@ -2258,7 +2270,7 @@ async fn run_isolated_step(
 
     let do_run = async {
         let loaded = load_config(&workspace_root)?;
-        let pricing_table = clido_core::PricingTable::default();
+        let pricing_table = clido_core::PricingTable;
         let profile = loaded.get_profile(&profile_name)?;
         clido_core::LoadedConfig::validate_provider(&profile.provider)?;
         let provider = crate::provider::make_provider(&profile_name, profile, None, None)
@@ -2289,7 +2301,8 @@ async fn run_isolated_step(
             None,
         )?;
         if config.max_context_tokens.is_none() {
-            config.max_context_tokens = Some(crate::agent_setup::detect_context_window(&config.model));
+            config.max_context_tokens =
+                Some(crate::agent_setup::detect_context_window(&config.model));
         }
         let session_id = format!("{run_id}_{step_id}");
         let mut writer = SessionWriter::create(&workspace_root, &session_id)?;

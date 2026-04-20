@@ -374,7 +374,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         if let Some(ref t) = app.session_title {
             spans.push(Span::styled(
                 truncate_chars(t, w),
-                Style::default().fg(TUI_SOFT_ACCENT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(TUI_SOFT_ACCENT)
+                    .add_modifier(Modifier::BOLD),
             ));
         } else if let Some(ref id) = app.current_session_id {
             let short = &id[..id.len().min(8)];
@@ -2353,7 +2355,7 @@ pub(super) fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
                         std::mem::take(&mut table_body),
                         &table_alignments,
                         &mut out,
-                        content_w as usize,
+                        content_w,
                     );
                 }
                 _ => {}

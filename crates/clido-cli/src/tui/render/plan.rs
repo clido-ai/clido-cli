@@ -666,8 +666,14 @@ pub(crate) fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) 
     let scroll_info = if total_rows > visible_rows {
         let pos = ed.scroll + 1;
         vec![
-            Span::styled(format!("  {pos}/{total_rows}  "), Style::default().fg(TUI_MUTED)),
-            Span::styled("↑↓ scroll  ", Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)),
+            Span::styled(
+                format!("  {pos}/{total_rows}  "),
+                Style::default().fg(TUI_MUTED),
+            ),
+            Span::styled(
+                "↑↓ scroll  ",
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+            ),
         ]
     } else {
         Vec::new()

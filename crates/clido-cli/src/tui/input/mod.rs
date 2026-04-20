@@ -406,7 +406,9 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             KeyCode::Char(digit @ '1'..='9') => {
                 if let Some(picker) = &app.session_picker {
                     let idx = digit.to_digit(10).unwrap() as usize - 1;
-                    let maybe_id = picker.picker.filtered_items()
+                    let maybe_id = picker
+                        .picker
+                        .filtered_items()
                         .nth(idx)
                         .map(|(_, s)| s.session_id.clone());
                     if let Some(id) = maybe_id {

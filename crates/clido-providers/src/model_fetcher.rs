@@ -137,14 +137,12 @@ impl ModelFetcher {
     }
 
     /// Get metadata for a specific provider, merging cache with live data.
-    pub async fn get_provider_models(
-        &self,
-        provider_id: &str,
-    ) -> Option<Vec<ModelMetadata>> {
+    pub async fn get_provider_models(&self, provider_id: &str) -> Option<Vec<ModelMetadata>> {
         let snapshot = self.load().await;
-        snapshot.providers.get(provider_id).map(|p| {
-            p.models.values().cloned().collect()
-        })
+        snapshot
+            .providers
+            .get(provider_id)
+            .map(|p| p.models.values().cloned().collect())
     }
 
     /// Enrich a list of live ModelEntry with cached metadata.
@@ -155,10 +153,7 @@ impl ModelFetcher {
         provider_id: &str,
     ) -> Vec<ModelMetadata> {
         let snapshot = self.load().await;
-        let cached = snapshot
-            .providers
-            .get(provider_id)
-            .map(|p| &p.models);
+        let cached = snapshot.providers.get(provider_id).map(|p| &p.models);
 
         live_models
             .into_iter()
@@ -202,10 +197,7 @@ impl ModelFetcher {
 
 /// Parse a single model entry from models.dev format.
 fn parse_models_dev_model(model_id: &str, data: &serde_json::Value) -> ModelMetadata {
-    let name = data
-        .get("name")
-        .and_then(|v| v.as_str())
-        .map(String::from);
+    let name = data.get("name").and_then(|v| v.as_str()).map(String::from);
 
     let context_window = data
         .get("limit")
@@ -213,25 +205,32 @@ fn parse_models_dev_model(model_id: &str, data: &serde_json::Value) -> ModelMeta
         .and_then(|v| v.as_u64())
         .map(|v| v as u32);
 
-    let pricing = data.get("cost").map(|cost| {
-        crate::provider::ModelPricing {
-            input_per_mtok: cost.get("input").and_then(|v| v.as_f64()).unwrap_or(0.0),
-            output_per_mtok: cost.get("output").and_then(|v| v.as_f64()).unwrap_or(0.0),
-            cache_read: cost.get("cache_read").and_then(|v| v.as_f64()),
-            cache_write: cost.get("cache_write").and_then(|v| v.as_f64()),
-        }
+    let pricing = data.get("cost").map(|cost| crate::provider::ModelPricing {
+        input_per_mtok: cost.get("input").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        output_per_mtok: cost.get("output").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        cache_read: cost.get("cache_read").and_then(|v| v.as_f64()),
+        cache_write: cost.get("cache_write").and_then(|v| v.as_f64()),
     });
 
     let capabilities = crate::provider::ModelCapabilities {
-        reasoning: data.get("reasoning").and_then(|v| v.as_bool()).unwrap_or(false),
-        tool_call: data.get("tool_call").and_then(|v| v.as_bool()).unwrap_or(true),
+        reasoning: data
+            .get("reasoning")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        tool_call: data
+            .get("tool_call")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
         vision: data
             .get("modalities")
             .and_then(|v| v.get("input"))
             .and_then(|v| v.as_array())
             .map(|arr| arr.iter().any(|v| v.as_str() == Some("image")))
             .unwrap_or(false),
-        temperature: data.get("temperature").and_then(|v| v.as_bool()).unwrap_or(false),
+        temperature: data
+            .get("temperature")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
     };
 
     let status = data

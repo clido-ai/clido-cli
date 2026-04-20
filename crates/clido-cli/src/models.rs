@@ -109,7 +109,10 @@ pub async fn run_list_models(provider_filter: Option<&str>, json: bool) -> anyho
                 line.push_str(&format!("  {}K ctx", ctx / 1000));
             }
             if let Some(ref p) = m.pricing {
-                line.push_str(&format!("  ${:.2}/${:.2}", p.input_per_mtok, p.output_per_mtok));
+                line.push_str(&format!(
+                    "  ${:.2}/${:.2}",
+                    p.input_per_mtok, p.output_per_mtok
+                ));
             }
             if !m.available {
                 line.push_str("  [unavailable]");
@@ -122,14 +125,17 @@ pub async fn run_list_models(provider_filter: Option<&str>, json: bool) -> anyho
 
 /// Refresh the local models cache from models.dev.
 pub async fn run_refresh_models() -> anyhow::Result<()> {
-    let config_dir = clido_core::global_config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from(".clido"));
+    let config_dir =
+        clido_core::global_config_dir().unwrap_or_else(|| std::path::PathBuf::from(".clido"));
     let fetcher = clido_providers::ModelFetcher::new(&config_dir);
     eprintln!("Fetching latest models from models.dev...");
     fetcher.refresh().await;
     let snapshot = fetcher.load().await;
     let provider_count = snapshot.providers.len();
     let model_count: usize = snapshot.providers.values().map(|p| p.models.len()).sum();
-    println!("Cached {} models across {} providers.", model_count, provider_count);
+    println!(
+        "Cached {} models across {} providers.",
+        model_count, provider_count
+    );
     Ok(())
 }

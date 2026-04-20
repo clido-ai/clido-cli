@@ -518,7 +518,10 @@ fn draw_model(f: &mut Frame, area: Rect, s: &SetupState) {
                     lines.push(if selected {
                         Line::from(vec![
                             Span::styled(" ▶ ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(display_name.to_string(), Style::default().fg(Color::DarkGray)),
+                            Span::styled(
+                                display_name.to_string(),
+                                Style::default().fg(Color::DarkGray),
+                            ),
                             Span::styled(
                                 "  no endpoints",
                                 Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
@@ -953,7 +956,10 @@ fn draw_fast_model(f: &mut Frame, area: Rect, s: &SetupState) {
                     lines.push(if selected {
                         Line::from(vec![
                             Span::styled(" ▶ ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(display_name.to_string(), Style::default().fg(Color::DarkGray)),
+                            Span::styled(
+                                display_name.to_string(),
+                                Style::default().fg(Color::DarkGray),
+                            ),
                             Span::styled(
                                 "  no endpoints",
                                 Style::default().fg(Color::Red).add_modifier(Modifier::DIM),

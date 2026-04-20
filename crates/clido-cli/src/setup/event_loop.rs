@@ -51,11 +51,10 @@ pub(super) fn setup_event_loop(
             s.model_picker = make_model_picker(&s.fetched_models);
             // If reinit, pre-select the current model in the list.
             if !s.current_model.is_empty() {
-                if let Some(idx) = s
-                    .model_picker
-                    .items()
-                    .iter()
-                    .position(|o| matches!(o, ModelOption::Metadata(m) if m.id == s.current_model))
+                if let Some(idx) =
+                    s.model_picker.items().iter().position(
+                        |o| matches!(o, ModelOption::Metadata(m) if m.id == s.current_model),
+                    )
                 {
                     s.model_picker.selected = idx;
                     // Try to center it in the visible window (assume ~10 visible rows).

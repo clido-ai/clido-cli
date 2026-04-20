@@ -15,8 +15,8 @@ use crate::backoff::{
     server_error_backoff_secs, MAX_NETWORK_ATTEMPTS, MAX_RATE_LIMIT_ATTEMPTS,
     MAX_SERVER_ERROR_ATTEMPTS,
 };
-use tracing::{debug, warn};
 use crate::provider::{ModelCapabilities, ModelMetadata, ModelProvider, ModelStatus, StreamEvent};
+use tracing::{debug, warn};
 
 /// Helper to build a `ModelMetadata` with common defaults for Anthropic models.
 fn make_meta(id: &str, name: &str, context: u32) -> ModelMetadata {
@@ -719,9 +719,21 @@ impl ModelProvider for AnthropicProvider {
             make_meta("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet", 200_000),
             make_meta("claude-3-5-haiku-20241022", "Claude 3.5 Haiku", 200_000),
             make_meta("claude-3-opus-20240229", "Claude 3 Opus", 200_000),
-            make_meta("claude-sonnet-4-20250514-thinking", "Claude Sonnet 4 (Thinking)", 200_000),
-            make_meta("claude-opus-4-20250514-thinking", "Claude Opus 4 (Thinking)", 200_000),
-            make_meta("claude-3-7-sonnet-20250219-thinking", "Claude 3.7 Sonnet (Thinking)", 200_000),
+            make_meta(
+                "claude-sonnet-4-20250514-thinking",
+                "Claude Sonnet 4 (Thinking)",
+                200_000,
+            ),
+            make_meta(
+                "claude-opus-4-20250514-thinking",
+                "Claude Opus 4 (Thinking)",
+                200_000,
+            ),
+            make_meta(
+                "claude-3-7-sonnet-20250219-thinking",
+                "Claude 3.7 Sonnet (Thinking)",
+                200_000,
+            ),
         ];
         Ok(hardcoded)
     }

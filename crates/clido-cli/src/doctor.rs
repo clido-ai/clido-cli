@@ -131,8 +131,8 @@ fn check_session_dir(cwd: &std::path::Path, use_color: bool, mandatory: &mut Vec
 }
 
 fn check_models_cache(use_color: bool, warnings: &mut Vec<String>) {
-    let config_dir = clido_core::global_config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from(".clido"));
+    let config_dir =
+        clido_core::global_config_dir().unwrap_or_else(|| std::path::PathBuf::from(".clido"));
     let cache_path = config_dir.join("models.json");
     if cache_path.exists() {
         print_ok(
@@ -144,9 +144,10 @@ fn check_models_cache(use_color: bool, warnings: &mut Vec<String>) {
                 if let Ok(age) = modified.elapsed() {
                     let mins = age.as_secs() / 60;
                     if mins > 120 {
-                        warnings.push(
-                            format!("Models cache is {} minutes old; run 'clido refresh-models' to update.", mins),
-                        );
+                        warnings.push(format!(
+                            "Models cache is {} minutes old; run 'clido refresh-models' to update.",
+                            mins
+                        ));
                     } else {
                         print_info(use_color, &format!("Models cache is {} minutes old.", mins));
                     }

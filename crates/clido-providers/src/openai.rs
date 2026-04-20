@@ -17,7 +17,9 @@ use crate::backoff::{
 };
 use tracing::warn;
 
-use crate::provider::{ModelCapabilities, ModelMetadata, ModelPricing, ModelProvider, ModelStatus, StreamEvent};
+use crate::provider::{
+    ModelCapabilities, ModelMetadata, ModelPricing, ModelProvider, ModelStatus, StreamEvent,
+};
 
 const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";

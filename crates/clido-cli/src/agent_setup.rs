@@ -3,8 +3,7 @@
 
 use clido_agent::AskUser;
 use clido_core::{
-    agent_config_from_loaded, load_config, AgentConfig, LoadedConfig, PermissionMode,
-    ProfileEntry,
+    agent_config_from_loaded, load_config, AgentConfig, LoadedConfig, PermissionMode, ProfileEntry,
 };
 use clido_providers::RetryProvider;
 use clido_tools::{default_registry_with_todo_store, McpTool, TodoItem, ToolRegistry};
@@ -270,7 +269,7 @@ impl AgentSetup {
             registry,
             config,
             ask_user,
-            pricing_table: clido_core::PricingTable::default(),
+            pricing_table: clido_core::PricingTable,
             todo_store,
             fast_provider,
             fast_config,
@@ -281,12 +280,7 @@ impl AgentSetup {
     pub fn build(cli: &Cli, workspace_root: &Path) -> Result<Self, anyhow::Error> {
         let loaded = load_config(workspace_root)
             .map_err(|e| CliError::Usage(format!("load config: {e}")))?;
-        Self::build_with_preloaded(
-            cli,
-            workspace_root,
-            loaded,
-            Arc::new(AtomicBool::new(true)),
-        )
+        Self::build_with_preloaded(cli, workspace_root, loaded, Arc::new(AtomicBool::new(true)))
     }
 
     /// Load config for `workspace_root` and build setup with optional external paths and shared todo store.

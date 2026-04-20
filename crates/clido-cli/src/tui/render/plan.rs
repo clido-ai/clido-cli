@@ -662,33 +662,45 @@ pub(crate) fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) 
 
     frame.render_widget(Paragraph::new(lines), edit_area);
 
-    let hint = Paragraph::new(Line::from(vec![
-        Span::styled("  ↑↓←→", Style::default().fg(TUI_MUTED)),
-        Span::styled(
-            " navigate  ",
-            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-        ),
-        Span::styled("Enter", Style::default().fg(TUI_MUTED)),
-        Span::styled(
-            " new line  ",
-            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-        ),
-        Span::styled("Ctrl+S", Style::default().fg(TUI_MUTED)),
-        Span::styled(
-            " save  ",
-            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-        ),
-        Span::styled("Esc", Style::default().fg(TUI_MUTED)),
-        Span::styled(
-            " discard  ",
-            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-        ),
-        Span::styled("Ctrl+C", Style::default().fg(TUI_MUTED)),
-        Span::styled(
-            " discard",
-            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-        ),
-    ]));
+    // Build scroll position indicator (e.g. "3/42") if content overflows.
+    let total_rows = ed.lines.len();
+    let scroll_info = if total_rows > visible_rows {
+        let pos = ed.scroll + 1;
+        vec![
+            Span::styled(format!("  {pos}/{total_rows}  "), Style::default().fg(TUI_MUTED)),
+            Span::styled("↑↓ scroll  ", Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)),
+        ]
+    } else {
+        Vec::new()
+    };
+
+    let mut hint_spans: Vec<Span> = scroll_info;
+    hint_spans.push(Span::styled("↑↓←→", Style::default().fg(TUI_MUTED)));
+    hint_spans.push(Span::styled(
+        " navigate  ",
+        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+    ));
+    hint_spans.push(Span::styled("Enter", Style::default().fg(TUI_MUTED)));
+    hint_spans.push(Span::styled(
+        " new line  ",
+        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+    ));
+    hint_spans.push(Span::styled("Ctrl+S", Style::default().fg(TUI_MUTED)));
+    hint_spans.push(Span::styled(
+        " save  ",
+        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+    ));
+    hint_spans.push(Span::styled("Esc", Style::default().fg(TUI_MUTED)));
+    hint_spans.push(Span::styled(
+        " discard  ",
+        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+    ));
+    hint_spans.push(Span::styled("Ctrl+C", Style::default().fg(TUI_MUTED)));
+    hint_spans.push(Span::styled(
+        " discard",
+        Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+    ));
+    let hint = Paragraph::new(Line::from(hint_spans));
     frame.render_widget(hint, hint_area);
 }
 /// Split a string at the given display column, returning (before, cursor_char, after).

@@ -402,6 +402,33 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     picker.selected.clear();
                 }
             }
+            // Number keys: quick-select filtered result (1 = first, 2 = second, etc.)
+            KeyCode::Char(digit @ '1'..='9') => {
+                if let Some(picker) = &app.session_picker {
+                    let idx = digit.to_digit(10).unwrap() as usize - 1;
+                    let maybe_id = picker.picker.filtered_items()
+                        .nth(idx)
+                        .map(|(_, s)| s.session_id.clone());
+                    if let Some(id) = maybe_id {
+                        drop(picker);
+                        app.text_input.text.clear();
+                        app.text_input.cursor = 0;
+                        if app.current_session_id.as_deref() == Some(&id) {
+                            app.push(ChatLine::Info("  Already in this session".into()));
+                        } else {
+                            app.session_picker = None;
+                            let _ = app.channels.resume_tx.send(id);
+                        }
+                    } else {
+                        drop(picker);
+                        app.push_toast(
+                            format!("No result #{digit}"),
+                            TUI_STATE_WARN,
+                            std::time::Duration::from_secs(1),
+                        );
+                    }
+                }
+            }
             _ => {
                 if let Some(picker) = &mut app.session_picker {
                     picker.picker.handle_key(event);

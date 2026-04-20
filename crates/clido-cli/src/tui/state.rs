@@ -287,7 +287,10 @@ impl PlanTextEditor {
         let max = self
             .lines
             .get(self.cursor_row)
-            .map(|l| l.chars().count())
+            .map(|l| {
+                use unicode_width::UnicodeWidthStr;
+                l.width()
+            })
             .unwrap_or(0);
         if self.cursor_col > max {
             self.cursor_col = max;

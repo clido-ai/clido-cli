@@ -632,20 +632,10 @@ pub(crate) fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) 
             break;
         }
         if i == ed.cursor_row {
-            // Render cursor inline
-            let chars: Vec<char> = line.chars().collect();
-            let col = ed.cursor_col.min(chars.len());
-            let before: String = chars[..col].iter().collect();
-            let cursor_ch: String = if col < chars.len() {
-                chars[col].to_string()
-            } else {
-                " ".to_string()
-            };
-            let after: String = if col < chars.len() {
-                chars[col + 1..].iter().collect()
-            } else {
-                String::new()
-            };
+            // Render cursor inline — account for wide characters (CJK, emoji)
+            // so the cursor appears at the correct visual column.
+            use unicode_width::UnicodeWidthChar;
+            let (before, cursor_ch, after) = split_at_display_col(line, ed.cursor_col);
             lines.push(Line::from(vec![
                 Span::raw(before),
                 Span::styled(
@@ -693,6 +683,36 @@ pub(crate) fn render_plan_text_editor(frame: &mut Frame, app: &App, area: Rect) 
     ]));
     frame.render_widget(hint, hint_area);
 }
+/// Split a string at the given display column, returning (before, cursor_char, after).
+/// `col` is the visual column offset — wide characters (CJK, emoji) advance the offset
+/// by their display width, so the cursor lands at the correct visual position.
+fn split_at_display_col(s: &str, col: usize) -> (String, String, String) {
+    use unicode_width::UnicodeWidthChar;
+    let mut before = String::new();
+    let mut current_width = 0;
+
+    for ch in s.chars() {
+        let ch_width = ch.width().unwrap_or(0);
+        if current_width + ch_width > col {
+            // This character spans the cursor boundary.
+            let after_start = before.len() + ch.len_utf8();
+            let before_out = before.clone();
+            return (before_out, ch.to_string(), s[after_start..].to_string());
+        }
+        if current_width == col {
+            // Cursor is exactly at this character's start.
+            let after_start = before.len() + ch.len_utf8();
+            let before_out = before.clone();
+            return (before_out, ch.to_string(), s[after_start..].to_string());
+        }
+        before.push(ch);
+        current_width += ch_width;
+    }
+
+    // Cursor is past the end of the line.
+    (before, " ".to_string(), String::new())
+}
+
 /// Build a deterministic plan snapshot from assistant text.
 /// This is the canonical path used for both saving and display.
 pub(crate) fn build_plan_from_assistant_text(text: &str) -> Option<Plan> {

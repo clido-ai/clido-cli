@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.0.10] - 2026-04-20
+
+### Added
+
+- **Session title in narrow mode**: Header now shows the session title (bold, accent color) on narrow terminals instead of just the model name. Falls back to session ID, then model name.
+- **Number key shortcuts (1-9)**: Session picker now supports pressing number keys to quickly select sessions.
+- **Scroll position indicator**: Plan text editor now shows a visual scroll position indicator at the bottom of the viewport.
+- **DRY RUN indicator**: Plan editor headers now show a "DRY RUN" indicator when the plan is not yet applied.
+- **Dynamic model metadata fetching**: Replaced static `pricing.toml` with live fetching from models.dev for accurate pricing, context windows, and capabilities. OpenRouter uses its own API directly (faster updates).
+
+### Changed
+
+- **Model fetch routing**: OpenRouter calls its own API directly; all other providers use models.dev. Falls back gracefully when models.dev is unavailable.
+- **Plan task deletion**: Requires double-press confirmation to prevent accidental deletions.
+- **Plan editor cursor**: Now correctly respects wide character display width (CJK, emoji).
+- **Plan/workflow editors**: Replaced hardcoded scroll offset with proper scroll management.
+
+### Fixed
+
+- **Anthropic startup 404**: Replaced broken `/v1/models` API call (Anthropic has no model discovery endpoint) with a curated static model list.
+- **Fake pricing rates**: Removed hardcoded fallback rates ($3/mtok input, $15/mtok output). Now shows $0.00 when pricing data is unavailable — real prices or nothing.
+- **Cache rate assignments**: Swapped `cache_creation` and `cache_read` rate assignments that were reversed in the pricing module.
+- **Table column overflow**: Markdown tables with long cell content (e.g. commit messages) are now capped to terminal width with ellipsis truncation.
+- **Thinking truncation UTF-8 safety**: Text coalesce truncation now respects Unicode character boundaries.
+- **Workflow editor cursor**: Preserved on save error instead of resetting to the top.
+- **Diff viewer**: Fixed Unicode width handling and optimized allocations.
+- **Export date**: Replaced flawed calendar math with chrono library for correct dates.
+- **CLI alias consistency**: `/planner` now aliases consistently with `/plan`.
+- **History dedup**: Removed duplicate entries from input history and fixed word boundary punctuation for Ctrl+Backspace.
+- **Header layout**: Fixed width calculation, narrow terminal rendering, hint line, and max scroll edge cases.
+- **Widget truncation**: `truncate_chars`, `relative_time`, and `word_wrap` now handle Unicode and edge cases correctly.
+- **Brand label**: Fixed mismatch in header and corrected separator width.
+- **Compiler warnings**: Cleaned up 8 warnings (unused imports, mutable variables, dead code, redundant casts).
+
 ## [1.0.9] - 2026-04-19
 
 ### Added

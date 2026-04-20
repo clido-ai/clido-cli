@@ -369,11 +369,26 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Header render ──
     let header_para = if is_narrow {
-        // Minimal single-line header: just the model name.
-        Paragraph::new(Line::from(vec![Span::styled(
-            truncate_chars(&app.model, w),
-            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
-        )]))
+        // Narrow terminal: session title takes priority over model name.
+        let mut spans = Vec::new();
+        if let Some(ref t) = app.session_title {
+            spans.push(Span::styled(
+                truncate_chars(t, w),
+                Style::default().fg(TUI_SOFT_ACCENT).add_modifier(Modifier::BOLD),
+            ));
+        } else if let Some(ref id) = app.current_session_id {
+            let short = &id[..id.len().min(8)];
+            spans.push(Span::styled(
+                format!("session #{short}"),
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+            ));
+        } else {
+            spans.push(Span::styled(
+                truncate_chars(&app.model, w),
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+            ));
+        }
+        Paragraph::new(Line::from(spans))
     } else if header_h == 1 {
         // Everything on one line — append line2 to line1 and fit to width.
         hline1.extend(hline2);

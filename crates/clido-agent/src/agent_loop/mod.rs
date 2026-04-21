@@ -857,17 +857,9 @@ impl AgentLoop {
 
                     self.metrics.tool_retry_scheduled(name, attempt + 1);
 
-                    // Log retry attempt (attempt+1 since we're about to retry)
-                    if let Some(ref e) = self.emit {
-                        let _ = e
-                            .on_assistant_text(&format!(
-                                "[Tool '{}' failed, retrying ({}/{})...]",
-                                name,
-                                attempt + 1,
-                                max_retries
-                            ))
-                            .await;
-                    }
+                    // Log retry attempt (silent — only surface if all retries fail)
+                    // The message is intentionally not emitted to avoid spamming the UI
+                    // with transient failures that recover on retry.
 
                     // Apply retry strategy (capped backoff + jitter)
                     match classified.strategy {

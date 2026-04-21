@@ -267,7 +267,7 @@ fn default_doom_same_args_min() -> usize {
 }
 
 fn default_max_tool_retries() -> u32 {
-    3
+    5
 }
 
 fn default_max_tool_retry_budget_per_turn() -> u32 {

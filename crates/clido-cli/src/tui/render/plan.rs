@@ -184,7 +184,7 @@ pub(crate) fn gather_plan_panel_steps(app: &App) -> Vec<PlanPanelStep> {
 }
 
 fn plan_panel_content_row_count(step_count: usize) -> u16 {
-    const MAX_STEP_LINES: usize = 12;
+    const MAX_STEP_LINES: usize = 5;
     if step_count == 0 {
         return 0;
     }

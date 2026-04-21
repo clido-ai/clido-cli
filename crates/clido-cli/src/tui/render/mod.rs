@@ -19,6 +19,8 @@ pub(super) use profile::*;
 pub(super) use welcome::*;
 pub(super) use widgets::*;
 
+use diff::render_diff;
+
 use pulldown_cmark::Parser;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -2759,37 +2761,21 @@ pub(super) fn render_chat_to_content_lines(
             }
 
             ChatLine::Diff(text) => {
-                // Diff header
-                out.push(ContentLine::new(
-                    vec![Span::styled(
-                        format!("{TUI_GUTTER}Diff"),
-                        Style::default()
-                            .fg(TUI_SOFT_ACCENT)
-                            .add_modifier(Modifier::BOLD),
-                    )],
-                    LineSource::Diff,
-                    false,
-                    msg_idx,
-                ));
-
-                // Diff content (preserve original formatting)
-                for line in text.lines() {
-                    let style = if line.starts_with('+') {
-                        Style::default().fg(TUI_STATE_OK)
-                    } else if line.starts_with('-') {
-                        Style::default().fg(TUI_STATE_ERR)
-                    } else {
-                        Style::default()
-                    };
-
+                // Use the unified diff renderer (side-by-side on wide terminals ≥ 120 cols,
+                // inline unified on narrower screens).
+                let diff_lines = render_diff(text, width);
+                for line in diff_lines {
+                    let mut spans = Vec::with_capacity(1 + line.spans.len());
+                    spans.push(Span::raw(TUI_GUTTER));
+                    spans.push(Span::raw("  "));
+                    spans.extend(line.spans);
                     out.push(ContentLine::new(
-                        vec![Span::styled(format!("{TUI_GUTTER}{}", line), style)],
+                        spans,
                         LineSource::Diff,
                         true,
                         msg_idx,
                     ));
                 }
-
                 out.push(ContentLine::new(vec![], LineSource::Diff, false, msg_idx));
             }
 

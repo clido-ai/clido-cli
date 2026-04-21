@@ -36,8 +36,7 @@ pub fn plan_scroll_up(app: &mut App) {
 
 /// Scroll down in the plan/task panel.
 pub fn plan_scroll_down(app: &mut App) {
-    let gather_plan_panel_steps = || crate::tui::render::plan::gather_plan_panel_steps(app);
-    let total = gather_plan_panel_steps().len();
+    let total = crate::tui::render::plan::gather_plan_panel_steps(app).len();
     let visible_cap = 12usize;
     let max_scroll = if total > visible_cap {
         (total - visible_cap) as u16

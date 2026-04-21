@@ -300,8 +300,72 @@ pub(crate) async fn compact_with_summary(
     Ok(out)
 }
 
+/// Last-resort truncation: drops the oldest messages one-by-one until history fits the budget.
+/// Keeps at minimum the most recent user message and the last assistant/tool exchange so the
+/// agent can still respond meaningfully. Returns a system message explaining the truncation.
+fn aggressive_tail_truncation(
+    messages: &[Message],
+    system_prompt_tokens: u32,
+    budget: u32,
+) -> Result<Vec<Message>> {
+    const MIN_KEEP: usize = 4; // system + last 3 messages minimum
+
+    let usable = budget.saturating_sub(system_prompt_tokens);
+    if usable == 0 {
+        return Err(ClidoError::ContextLimit { tokens: budget as u64 });
+    }
+
+    // Count tokens per message and work backwards from the end.
+    let msg_tokens: Vec<usize> = messages
+        .iter()
+        .map(|m| {
+            m.content
+                .iter()
+                .map(|c| match c {
+                    ContentBlock::Text { text } => text.chars().count() / 3,
+                    ContentBlock::ToolUse { name, input, .. } => {
+                        name.chars().count() + input.to_string().len() / 3
+                    }
+                    ContentBlock::ToolResult { content, .. } => content.chars().count() / 3,
+                    ContentBlock::Thinking { thinking, .. } => thinking.chars().count() / 3,
+                    ContentBlock::Image { .. } => 0, // images don't add text tokens
+                })
+                .sum::<usize>()
+        })
+        .collect();
+
+    let mut tail_start = 0;
+    let mut tail_total: usize = msg_tokens.iter().sum();
+
+    while tail_total > usable as usize && messages.len() - tail_start > MIN_KEEP {
+        tail_total -= msg_tokens[tail_start];
+        tail_start += 1;
+    }
+
+    // Build output: system notice + surviving tail messages.
+    let mut out = Vec::with_capacity(1 + messages.len() - tail_start);
+    let dropped = tail_start;
+    out.push(Message {
+        role: Role::System,
+        content: vec![ContentBlock::Text {
+            text: format!(
+                "[Context truncated: dropped {dropped} older message(s) to stay within limits.]"
+            ),
+        }],
+    });
+    out.extend_from_slice(&messages[tail_start..]);
+    warn!(
+        "aggressive truncation: dropped {dropped} messages, kept {}",
+        out.len() - 1
+    );
+    Ok(out)
+}
+
 /// Like [`compact_with_summary`], but subtracts an output reserve from the context budget and
 /// retries once with a tighter budget + forced compaction if the first pass hits `ContextLimit`.
+/// If even the tightest compaction fails, falls back to aggressive tail-only truncation —
+/// keeping only the most recent messages that fit within the budget, ensuring the agent never
+/// hard-fails on context limits.
 pub(crate) async fn compact_for_model_request(
     messages: &[Message],
     system_prompt_tokens: u32,
@@ -329,7 +393,25 @@ pub(crate) async fn compact_for_model_request(
                 "context assembly exceeded budget={budget}; retrying with tighter budget and full compaction"
             );
             let tight = budget.saturating_sub(8192).max(16_000);
-            compact_with_summary(messages, system_prompt_tokens, tight, 0.0, provider, config).await
+            match compact_with_summary(
+                messages,
+                system_prompt_tokens,
+                tight,
+                0.0,
+                provider,
+                config,
+            )
+            .await
+            {
+                Ok(m) => Ok(m),
+                Err(ClidoError::ContextLimit { .. }) => {
+                    warn!(
+                        "context assembly still exceeded budget={tight}; falling back to tail-only truncation"
+                    );
+                    aggressive_tail_truncation(messages, system_prompt_tokens, budget)
+                }
+                Err(e) => Err(e),
+            }
         }
         Err(e) => Err(e),
     }

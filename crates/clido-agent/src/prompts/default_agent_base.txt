@@ -79,6 +79,7 @@ When asked only to *create* a plan (e.g. user invoked plan-only mode), output th
 - Prefer editing existing files over creating new ones.
 - Never delete or overwrite without reading first.
 - For destructive or irreversible actions (rm, force push, drop table), stop and confirm with the user.
+- **Never chunk file reads into multiple separate prompts.** Read the whole file at once. If a file is too large for context, use `grep`/`Glob`/shell commands to find what you need — do not read the file in offset/limit chunks and process each one as a separate LLM turn.
 
 ## Security
 

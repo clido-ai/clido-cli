@@ -509,3 +509,49 @@ pub(crate) async fn summarize_messages(
 
     Ok(text)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_MIN_KEEP: usize = 4;
+
+    fn text_msg(role: Role, text: &str) -> Message {
+        Message {
+            role,
+            content: vec![ContentBlock::Text { text: text.to_string() }],
+        }
+    }
+
+    #[test]
+    fn aggressive_tail_truncation_drops_oldest_messages() {
+        // Create 20 messages of 1000 chars each (≈333 tokens per message).
+        // Total: ~6660 tokens.
+        let messages: Vec<Message> = (0..20)
+            .map(|_i| text_msg(Role::Assistant, &"x".repeat(1000)))
+            .collect();
+        let system_tokens = 0;
+        // Budget: 3000 chars → fits ~9 messages.
+        let budget = 3_000;
+
+        let result = aggressive_tail_truncation(&messages, system_tokens, budget).unwrap();
+        // First message is system truncation notice.
+        match &result[0].content[0] {
+            ContentBlock::Text { text } => assert!(text.starts_with("[Context truncated")),
+            _ => panic!("expected text block"),
+        }
+        // Should keep ~9 messages + 1 system notice = 10.
+        assert!(result.len() < 21);
+        assert!(result.len() > TEST_MIN_KEEP);
+    }
+
+    #[test]
+    fn aggressive_tail_truncation_keeps_minimum() {
+        // Very tight budget — only MIN_KEEP should remain.
+        let messages: Vec<Message> = (0..10)
+            .map(|_i| text_msg(Role::Assistant, &"x".repeat(2000)))
+            .collect();
+        let result = aggressive_tail_truncation(&messages, 0, 3000).unwrap();
+        assert_eq!(result.len(), TEST_MIN_KEEP + 1); // system notice + TEST_MIN_KEEP messages
+    }
+}

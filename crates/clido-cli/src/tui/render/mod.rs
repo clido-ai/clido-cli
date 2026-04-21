@@ -285,10 +285,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
     let plan_steps = gather_plan_panel_steps(app);
     // Auto-scroll plan panel to show the latest tasks.
-    let plan_visible_cap = 5;
+    // Must match the `max_step_lines` cap passed to `build_plan_todo_strip_lines`.
+    const PLAN_VISIBLE_CAP: usize = 12;
     let total_steps = plan_steps.len();
-    if total_steps > plan_visible_cap {
-        let target_scroll = (total_steps.saturating_sub(plan_visible_cap)) as u16;
+    if total_steps > PLAN_VISIBLE_CAP {
+        let target_scroll = (total_steps.saturating_sub(PLAN_VISIBLE_CAP)) as u16;
         if app.plan_scroll < target_scroll {
             app.plan_scroll = target_scroll;
         }

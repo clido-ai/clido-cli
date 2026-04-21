@@ -8,15 +8,7 @@ mod input;
 mod shell;
 mod status;
 
-#[allow(unused_imports)]
-pub use chat::*;
-#[allow(unused_imports)]
-pub use header::*;
-#[allow(unused_imports)]
-pub use input::*;
 pub use shell::*;
-#[allow(unused_imports)]
-pub use status::*;
 
 use ratatui::layout::Rect;
 

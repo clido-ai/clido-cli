@@ -211,6 +211,16 @@ pub(crate) fn build_status_rail_lines(
         }
     }
 
+    // ── TOOLS (activity; grows with tool calls) ────────────────────────────
+    lines.push(Line::raw(""));
+    lines.push(rail_section_title("TOOLS"));
+    if app.status_log.is_empty() {
+        lines.push(Line::from(vec![Span::styled(" —", dim)]));
+    } else {
+        // Cap rows so TASK stays visible below.
+        lines.extend(status_strip_lines(&app.status_log, w, spinner, Some(5)));
+    }
+
     // ── TASK (todos / planner / harness; often many lines) ─────────────────
     lines.push(Line::raw(""));
     lines.push(rail_section_title("TASK"));
@@ -223,20 +233,10 @@ pub(crate) fn build_status_rail_lines(
             app,
             &plan_steps,
             w,
-            10,
+            8,
             false,
             0,
         ));
-    }
-
-    // ── TOOLS (activity; grows with tool calls) ────────────────────────────
-    lines.push(Line::raw(""));
-    lines.push(rail_section_title("TOOLS"));
-    if app.status_log.is_empty() {
-        lines.push(Line::from(vec![Span::styled(" —", dim)]));
-    } else {
-        // Cap rows so SESSION/AGENT stay visible without excessive scrolling.
-        lines.extend(status_strip_lines(&app.status_log, w, spinner, Some(14)));
     }
 
     lines

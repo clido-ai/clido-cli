@@ -184,7 +184,7 @@ pub(crate) fn gather_plan_panel_steps(app: &App) -> Vec<PlanPanelStep> {
 }
 
 fn plan_panel_content_row_count(step_count: usize) -> u16 {
-    const MAX_STEP_LINES: usize = 5;
+    const MAX_STEP_LINES: usize = 8;
     if step_count == 0 {
         return 0;
     }
@@ -263,7 +263,7 @@ pub(crate) fn plan_panel_height_for_layout(
 }
 
 /// Build wrapped lines for the progress strip (`plan_h` rows from [`plan_panel_height_for_layout`]).
-/// `max_step_lines` caps listed steps (horizontal strip uses ~5; status rail uses more).
+/// `max_step_lines` caps listed steps (stacked layout uses 8; status rail uses 8).
 /// When `with_strip_title_row` is false (status rail), omit the "Tasks · auto" title row — the rail
 /// draws its own section header.
 pub(crate) fn build_plan_todo_strip_lines(
@@ -1071,5 +1071,20 @@ mod plan_panel_tests {
             plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 30, &[], false, true) > 0,
             "panel should show when busy in Auto mode"
         );
+    }
+
+    #[test]
+    fn caps_at_eight_steps_in_auto_mode() {
+        // With 15 steps, panel should show only 8 + header = 9 rows.
+        let steps = sample_steps(15);
+        let h = plan_panel_height_for_layout(
+            PlanPanelVisibility::Auto,
+            80,
+            40,
+            &steps,
+            false,
+            false,
+        );
+        assert_eq!(h, 9); // 1 header + 8 steps
     }
 }

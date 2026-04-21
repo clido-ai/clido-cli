@@ -18,7 +18,7 @@ pub(super) use profile::{
     char_byte_pos_tui, delete_char_at_cursor_pe, delete_char_before_cursor_pe,
     handle_profile_overlay_key,
 };
-pub(super) use scroll::{scroll_down, scroll_up};
+pub(super) use scroll::{plan_scroll_down, plan_scroll_up, scroll_down, scroll_up};
 pub(super) use workflow_editor::handle_workflow_editor_key;
 
 pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
@@ -246,7 +246,10 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         }
         match event.code {
             Up => {
-                if let Some(picker) = &mut app.model_picker {
+                // Shift+Up: scroll plan panel up.
+                if event.modifiers.contains(Km::SHIFT) {
+                    plan_scroll_up(app);
+                } else if let Some(picker) = &mut app.model_picker {
                     let n = picker.filtered().len();
                     if n > 0 && picker.selected > 0 {
                         picker.selected -= 1;
@@ -257,7 +260,10 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 }
             }
             Down => {
-                if let Some(picker) = &mut app.model_picker {
+                // Shift+Down: scroll plan panel down.
+                if event.modifiers.contains(Km::SHIFT) {
+                    plan_scroll_down(app);
+                } else if let Some(picker) = &mut app.model_picker {
                     let n = picker.filtered().len();
                     if n > 0 && picker.selected + 1 < n {
                         picker.selected += 1;

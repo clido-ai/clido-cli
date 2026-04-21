@@ -1,9 +1,9 @@
 //! ChatArea component — messages, scroll, welcome screen.
 //! Phase 1: delegates to existing render logic.
 
-use ratatui::Frame;
-use crate::tui::app_state::App;
 use super::{Component, DirtyFlag, EventResult, LayoutZones};
+use crate::tui::app_state::App;
+use ratatui::Frame;
 
 pub struct ChatArea {
     dirty: DirtyFlag,
@@ -39,6 +39,10 @@ impl Component for ChatArea {
         // Phase 1: chat rendering is still done by the main render function.
     }
 
-    fn is_dirty(&self) -> bool { self.dirty.is_set() }
-    fn mark_clean(&mut self) { self.dirty.take(); }
+    fn is_dirty(&self) -> bool {
+        self.dirty.is_set()
+    }
+    fn mark_clean(&mut self) {
+        self.dirty.take();
+    }
 }

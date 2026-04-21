@@ -219,7 +219,14 @@ pub(crate) fn build_status_rail_lines(
         lines.push(Line::from(vec![Span::styled(" Strip off", dim)]));
         lines.push(Line::from(vec![Span::styled(" /tasks on", dim)]));
     } else {
-        lines.extend(build_plan_todo_strip_lines(app, &plan_steps, w, 10, false));
+        lines.extend(build_plan_todo_strip_lines(
+            app,
+            &plan_steps,
+            w,
+            10,
+            false,
+            0,
+        ));
     }
 
     // ── TOOLS (activity; grows with tool calls) ────────────────────────────

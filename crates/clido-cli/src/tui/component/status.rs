@@ -1,9 +1,9 @@
 //! StatusBar component — status log, spinner, queue, plan strip.
 //! Phase 1: delegates to existing render logic.
 
-use ratatui::Frame;
-use crate::tui::app_state::App;
 use super::{Component, DirtyFlag, EventResult, LayoutZones};
+use crate::tui::app_state::App;
+use ratatui::Frame;
 
 pub struct StatusBar {
     dirty: DirtyFlag,
@@ -48,6 +48,10 @@ impl Component for StatusBar {
         // Phase 1: status rendering is still done by the main render function.
     }
 
-    fn is_dirty(&self) -> bool { self.dirty.is_set() }
-    fn mark_clean(&mut self) { self.dirty.take(); }
+    fn is_dirty(&self) -> bool {
+        self.dirty.is_set()
+    }
+    fn mark_clean(&mut self) {
+        self.dirty.take();
+    }
 }

@@ -2,21 +2,21 @@
 //! and event propagation. Components initially delegate to existing render
 //! functions; logic migrates incrementally.
 
-mod header;
 mod chat;
+mod header;
 mod input;
-mod status;
 mod shell;
+mod status;
 
-#[allow(unused_imports)]
-pub use header::*;
 #[allow(unused_imports)]
 pub use chat::*;
 #[allow(unused_imports)]
+pub use header::*;
+#[allow(unused_imports)]
 pub use input::*;
+pub use shell::*;
 #[allow(unused_imports)]
 pub use status::*;
-pub use shell::*;
 
 use ratatui::layout::Rect;
 
@@ -48,13 +48,17 @@ pub struct DirtyFlag(bool);
 
 impl DirtyFlag {
     #[inline]
-    pub fn set(&mut self) { self.0 = true; }
+    pub fn set(&mut self) {
+        self.0 = true;
+    }
     #[inline]
     pub fn take(&mut self) -> bool {
         std::mem::replace(&mut self.0, false)
     }
     #[inline]
-    pub fn is_set(&self) -> bool { self.0 }
+    pub fn is_set(&self) -> bool {
+        self.0
+    }
 }
 
 // ── Layout Zones ─────────────────────────────────────────────────────────────
@@ -83,11 +87,7 @@ pub trait Component {
     fn on_app_update(&mut self, app: &App) -> bool;
 
     /// Handle a key event. Returns `Consumed` if handled.
-    fn handle_key(
-        &mut self,
-        _key: crossterm::event::KeyEvent,
-        _app: &mut App,
-    ) -> EventResult {
+    fn handle_key(&mut self, _key: crossterm::event::KeyEvent, _app: &mut App) -> EventResult {
         EventResult::PassThrough
     }
 
@@ -105,4 +105,6 @@ pub trait Component {
 
 #[allow(dead_code)]
 #[inline]
-pub fn is_narrow(area: Rect) -> bool { area.width < 60 }
+pub fn is_narrow(area: Rect) -> bool {
+    area.width < 60
+}

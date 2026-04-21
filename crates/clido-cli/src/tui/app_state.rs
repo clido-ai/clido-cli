@@ -256,6 +256,8 @@ pub(super) struct App {
     pub(super) todo_store: std::sync::Arc<std::sync::Mutex<Vec<clido_tools::TodoItem>>>,
     /// Task list strip: todos, planner snapshot, harness, live step (`/tasks on|off|auto`, alias `/progress`).
     pub(super) plan_panel_visibility: PlanPanelVisibility,
+    /// Scroll offset for the plan/task panel strip (narrow mode).
+    pub(super) plan_scroll: u16,
     /// Right-hand status column: session, context, agent, queue, tasks, tools (`/panel on|off|auto`).
     pub(super) status_rail_visibility: StatusRailVisibility,
     /// Track whether we have already shown the empty-input hint this session.
@@ -427,6 +429,7 @@ impl App {
             } else {
                 PlanPanelVisibility::default()
             },
+            plan_scroll: 0,
             status_rail_visibility: StatusRailVisibility::default(),
             empty_input_hint_shown: false,
             pending_enhance: None,

@@ -1,5 +1,5 @@
 mod diff;
-mod plan;
+pub(crate) mod plan;
 mod profile;
 mod status_panel;
 mod surfaces;
@@ -117,7 +117,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     // Separator tokens for consistent spacing throughout the header.
     let sep = "  │ "; // main section separator
-    let dot = " · ";  // lightweight inline separator
+    let dot = " · "; // lightweight inline separator
 
     // Line 1: brand · version  │  provider/model  │  profile  │  session  │  title
     let mut hline1: Vec<Span<'static>> = vec![
@@ -230,10 +230,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             } else {
                 String::new()
             };
-            hline2.push(Span::styled(
-                format!("session: {turn_str}{ctx_str}"),
-                dim,
-            ));
+            hline2.push(Span::styled(format!("session: {turn_str}{ctx_str}"), dim));
         } else {
             // On-demand providers: show cost in USD
             let cost_str = if let Some(budget) = app.max_budget_usd {
@@ -287,9 +284,29 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     let input_h = (input_line_count as u16 + 2).clamp(3, 8);
     let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
     let plan_steps = gather_plan_panel_steps(app);
+    // Auto-scroll plan panel to show the latest tasks.
+    let plan_visible_cap = 5;
+    let total_steps = plan_steps.len();
+    if total_steps > plan_visible_cap {
+        let target_scroll = (total_steps.saturating_sub(plan_visible_cap)) as u16;
+        if app.plan_scroll < target_scroll {
+            app.plan_scroll = target_scroll;
+        }
+    } else if app.plan_scroll > 0 {
+        app.plan_scroll = 0;
+    }
     let use_rail = status_panel::status_rail_wanted(app.status_rail_visibility, area.width);
     app.layout.status_rail_active = use_rail;
-    let mut stacked_plan_h: u16 = 0;
+
+    // Plan panel height (used in stacked layout; always computed for auto-scroll).
+    let stacked_plan_h: u16 = plan_panel_height_for_layout(
+        app.plan_panel_visibility,
+        area.width,
+        area.height,
+        &plan_steps,
+        app.harness_mode,
+        app.busy,
+    );
 
     // Prompt banner: shows the active prompt (max 2 lines) below the header while busy.
     let banner_h: u16 = if !is_narrow {
@@ -346,13 +363,6 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Some(rail_a),
         )
     } else {
-        stacked_plan_h = plan_panel_height_for_layout(
-            app.plan_panel_visibility,
-            area.width,
-            area.height,
-            &plan_steps,
-            app.harness_mode,
-        );
         let min_chat_h = 10u16;
         let reserved_h = header_h + banner_h + stacked_plan_h + status_h + hint_h + input_h + 2;
         let available_for_queue = area.height.saturating_sub(min_chat_h + reserved_h);
@@ -391,7 +401,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         if let Some(ref t) = app.session_title {
             spans.push(Span::styled(
                 truncate_chars(t, w),
-                Style::default().fg(TUI_SOFT_ACCENT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(TUI_SOFT_ACCENT)
+                    .add_modifier(Modifier::BOLD),
             ));
         } else if let Some(ref id) = app.current_session_id {
             let short = &id[..id.len().min(8)];
@@ -531,7 +543,14 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let pb = surfaces::focus_lane_zone_block();
             let p_inner = pb.inner(plan_area);
             frame.render_widget(pb, plan_area);
-            let plines = build_plan_todo_strip_lines(app, &plan_steps, p_inner.width, 5, true);
+            let plines = build_plan_todo_strip_lines(
+                app,
+                &plan_steps,
+                p_inner.width,
+                12,
+                true,
+                app.plan_scroll,
+            );
             frame.render_widget(Paragraph::new(plines), p_inner);
         }
 

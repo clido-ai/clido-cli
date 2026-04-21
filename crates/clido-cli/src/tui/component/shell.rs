@@ -4,14 +4,10 @@
 use ratatui::Frame;
 
 use crate::tui::app_state::App;
-use crate::tui::state::PlanPanelVisibility;
 
 use super::{
-    header::HeaderBar,
-    chat::ChatArea,
-    input::InputBar,
-    status::StatusBar,
-    Component, DirtyFlag, LayoutZones,
+    chat::ChatArea, header::HeaderBar, input::InputBar, status::StatusBar, Component, DirtyFlag,
+    LayoutZones,
 };
 
 /// The root component — owns the entire UI tree.
@@ -47,10 +43,18 @@ impl AppShell {
             }
             _ => {}
         }
-        if self.input.handle_key(key, app).is_consumed() { return true; }
-        if self.chat.handle_key(key, app).is_consumed() { return true; }
-        if self.status.handle_key(key, app).is_consumed() { return true; }
-        if self.header.handle_key(key, app).is_consumed() { return true; }
+        if self.input.handle_key(key, app).is_consumed() {
+            return true;
+        }
+        if self.chat.handle_key(key, app).is_consumed() {
+            return true;
+        }
+        if self.status.handle_key(key, app).is_consumed() {
+            return true;
+        }
+        if self.header.handle_key(key, app).is_consumed() {
+            return true;
+        }
         false
     }
 }
@@ -92,33 +96,19 @@ impl Component for AppShell {
 
 // ── Public API for the event loop ─────────────────────────────────────────────
 
-pub fn create_shell() -> AppShell { AppShell::new() }
-pub fn sync_shell(shell: &mut AppShell, app: &App) -> bool { shell.on_app_update(app) }
-pub fn handle_key_shell(shell: &mut AppShell, key: crossterm::event::KeyEvent, app: &mut App) -> bool {
+pub fn create_shell() -> AppShell {
+    AppShell::new()
+}
+pub fn sync_shell(shell: &mut AppShell, app: &App) -> bool {
+    shell.on_app_update(app)
+}
+pub fn handle_key_shell(
+    shell: &mut AppShell,
+    key: crossterm::event::KeyEvent,
+    app: &mut App,
+) -> bool {
     shell.handle_key(key, app)
 }
-pub fn clean_shell(shell: &mut AppShell) { shell.mark_clean(); }
-
-// ── Layout helpers (unused in Phase 1, kept for future Phase 2 migration) ─────
-
-#[allow(dead_code)]
-fn gather_plan_steps(app: &App) -> Vec<String> {
-    app.plan.last_plan.clone().unwrap_or_default()
-}
-
-#[allow(dead_code)]
-fn plan_panel_height_for_layout(
-    visibility: PlanPanelVisibility,
-    _terminal_w: u16,
-    terminal_h: u16,
-    steps: &[String],
-    harness_mode: bool,
-) -> u16 {
-    if matches!(visibility, PlanPanelVisibility::Off) || harness_mode {
-        return 0;
-    }
-    if steps.is_empty() { return 0; }
-    let available = terminal_h.saturating_sub(15);
-    let needed = steps.len() as u16 + 2;
-    needed.min(available.max(3)).min(4)
+pub fn clean_shell(shell: &mut AppShell) {
+    shell.mark_clean();
 }

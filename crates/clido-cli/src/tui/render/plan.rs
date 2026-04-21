@@ -104,7 +104,7 @@ pub(crate) fn gather_plan_panel_steps(app: &App) -> Vec<PlanPanelStep> {
     if app.harness_mode {
         return gather_harness_panel_steps(&app.workspace_root);
     }
-    if let Ok(todos) = app.todo_store.lock() {
+    if let Ok(todos) = app.todo_store.try_lock() {
         if !todos.is_empty() {
             return todos
                 .iter()
@@ -166,10 +166,17 @@ pub(crate) fn gather_plan_panel_steps(app: &App) -> Vec<PlanPanelStep> {
                 text: s.clone(),
             }];
         }
-        // Fallback: show that agent is working even if no step was extracted
+        // Fallback: show that agent is working even if no step was extracted.
+        // Use a spinner character so the panel feels alive.
+        let spinner = match app.spinner_tick % 4 {
+            0 => "⠋",
+            1 => "⠙",
+            2 => "⠹",
+            _ => "⠸",
+        };
         return vec![PlanPanelStep {
             status: PlanPanelStepStatus::Active,
-            text: "Working...".to_string(),
+            text: format!("{spinner} Working..."),
         }];
     }
 
@@ -190,12 +197,15 @@ fn plan_panel_content_row_count(step_count: usize) -> u16 {
 }
 
 /// Vertical space for the progress strip (0 = hidden).
+/// Always shows at least 2 rows when the agent is busy in Auto mode,
+/// so the user sees "⠋ Working..." and knows progress is happening.
 pub(crate) fn plan_panel_height_for_layout(
     vis: PlanPanelVisibility,
     term_w: u16,
     term_h: u16,
     steps: &[PlanPanelStep],
     harness_mode: bool,
+    busy: bool,
 ) -> u16 {
     if matches!(vis, PlanPanelVisibility::Off) {
         return 0;
@@ -227,10 +237,17 @@ pub(crate) fn plan_panel_height_for_layout(
             } else {
                 MIN_TERM_H_AUTO
             };
-            if term_h < min_term_h || empty {
+            if term_h < min_term_h {
                 return 0;
             }
-            HEADER_ROWS + body_rows
+            // Always show when busy — even if empty, show "⠋ Working..."
+            if busy {
+                HEADER_ROWS + body_rows.max(1)
+            } else if empty {
+                0
+            } else {
+                HEADER_ROWS + body_rows
+            }
         }
         PlanPanelVisibility::On => {
             if term_h < MIN_TERM_H_ON {
@@ -255,6 +272,7 @@ pub(crate) fn build_plan_todo_strip_lines(
     width: u16,
     max_step_lines: usize,
     with_strip_title_row: bool,
+    scroll_offset: u16,
 ) -> Vec<Line<'static>> {
     let w = width as usize;
     let dim = Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM);
@@ -313,18 +331,26 @@ pub(crate) fn build_plan_todo_strip_lines(
         return out;
     }
 
+    // Apply scroll offset: skip first `scroll_offset` steps.
+    let skip = scroll_offset as usize;
+    let scrolled = if skip < steps.len() {
+        &steps[skip..]
+    } else {
+        &[]
+    };
+
     let cap = max_step_lines.max(1);
-    let show_more = steps.len() > cap;
+    let show_more = scrolled.len() > cap;
     let take = if show_more {
         cap - 1
     } else {
-        steps.len().min(cap)
+        scrolled.len().min(cap)
     };
 
     let prefix_cols = 4usize;
     let text_budget = w.saturating_sub(prefix_cols).max(12);
 
-    for step in steps.iter().take(take) {
+    for step in scrolled.iter().take(take) {
         let (icon, icon_style, text_style) = match step.status {
             PlanPanelStepStatus::Pending => (
                 "○",
@@ -357,9 +383,10 @@ pub(crate) fn build_plan_todo_strip_lines(
     }
 
     if show_more {
-        let n = steps.len().saturating_sub(take);
+        let visible_left = scrolled.len().saturating_sub(take);
+        let total_more = visible_left + skip;
         out.push(Line::from(vec![Span::styled(
-            format!("{TUI_GUTTER}…  +{n} more"),
+            format!("{TUI_GUTTER}…  +{total_more} more"),
             dim,
         )]));
     }
@@ -989,7 +1016,7 @@ mod plan_panel_tests {
     fn panel_off_always_zero_height() {
         let steps = sample_steps(3);
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::Off, 80, 40, &steps, false),
+            plan_panel_height_for_layout(PlanPanelVisibility::Off, 80, 40, &steps, false, false),
             0
         );
     }
@@ -998,12 +1025,15 @@ mod plan_panel_tests {
     fn auto_requires_tall_terminal_and_content() {
         let steps = sample_steps(1);
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 27, &steps, false),
+            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 27, &steps, false, false),
             0
         );
-        assert!(plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 28, &steps, false) > 0);
+        assert!(
+            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 28, &steps, false, false)
+                > 0
+        );
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 40, &[], false),
+            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 40, &[], false, false),
             0
         );
     }
@@ -1011,11 +1041,11 @@ mod plan_panel_tests {
     #[test]
     fn on_shows_placeholder_when_empty() {
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 22, &[], false),
+            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 22, &[], false, false),
             3
         );
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 17, &[], false),
+            plan_panel_height_for_layout(PlanPanelVisibility::On, 80, 17, &[], false, false),
             0
         );
     }
@@ -1024,8 +1054,22 @@ mod plan_panel_tests {
     fn narrow_terminal_hides_panel() {
         let steps = sample_steps(2);
         assert_eq!(
-            plan_panel_height_for_layout(PlanPanelVisibility::On, 50, 30, &steps, false),
+            plan_panel_height_for_layout(PlanPanelVisibility::On, 50, 30, &steps, false, false),
             0
+        );
+    }
+
+    #[test]
+    fn busy_shows_panel_even_when_empty_in_auto_mode() {
+        // In Auto mode with no steps, the panel is normally hidden.
+        // But when busy, it should show at least "⠋ Working...".
+        assert_eq!(
+            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 30, &[], false, false),
+            0
+        );
+        assert!(
+            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 30, &[], false, true) > 0,
+            "panel should show when busy in Auto mode"
         );
     }
 }

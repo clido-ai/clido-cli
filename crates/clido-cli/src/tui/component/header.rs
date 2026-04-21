@@ -72,6 +72,10 @@ impl Component for HeaderBar {
         // Phase 2: extract header building into this component.
     }
 
-    fn is_dirty(&self) -> bool { self.dirty.is_set() }
-    fn mark_clean(&mut self) { self.dirty.take(); }
+    fn is_dirty(&self) -> bool {
+        self.dirty.is_set()
+    }
+    fn mark_clean(&mut self) {
+        self.dirty.take();
+    }
 }

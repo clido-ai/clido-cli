@@ -1,9 +1,9 @@
 //! InputBar component — text input, busy state.
 //! Phase 1: delegates to existing input handling.
 
-use ratatui::Frame;
-use crate::tui::app_state::App;
 use super::{Component, DirtyFlag, EventResult, LayoutZones};
+use crate::tui::app_state::App;
+use ratatui::Frame;
 
 pub struct InputBar {
     dirty: DirtyFlag,
@@ -59,6 +59,10 @@ impl Component for InputBar {
         // Phase 1: input rendering is still done by the main render function.
     }
 
-    fn is_dirty(&self) -> bool { self.dirty.is_set() }
-    fn mark_clean(&mut self) { self.dirty.take(); }
+    fn is_dirty(&self) -> bool {
+        self.dirty.is_set()
+    }
+    fn mark_clean(&mut self) {
+        self.dirty.take();
+    }
 }

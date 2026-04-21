@@ -1,4 +1,5 @@
-use super::super::*;
+use crate::tui::app_state::App;
+use crate::tui::config::*;
 
 // ── Scroll helpers ────────────────────────────────────────────────────────────
 
@@ -37,9 +38,8 @@ pub fn plan_scroll_up(app: &mut App) {
 /// Scroll down in the plan/task panel.
 pub fn plan_scroll_down(app: &mut App) {
     let total = crate::tui::render::plan::gather_plan_panel_steps(app).len();
-    let visible_cap = 8usize;
-    let max_scroll = if total > visible_cap {
-        (total - visible_cap) as u16
+    let max_scroll = if total > PLAN_MAX_VISIBLE_STEPS {
+        (total - PLAN_MAX_VISIBLE_STEPS) as u16
     } else {
         0
     };

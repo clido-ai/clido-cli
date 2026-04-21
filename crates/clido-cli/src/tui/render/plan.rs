@@ -10,6 +10,7 @@ use clido_harness::{read_state, reconcile_order, TaskPassState};
 use clido_planner::{Complexity, Plan, TaskStatus};
 use clido_tools::TodoStatus;
 
+use crate::tui::config::*;
 use crate::tui::state::PlanPanelVisibility;
 use crate::tui::*;
 
@@ -184,15 +185,13 @@ pub(crate) fn gather_plan_panel_steps(app: &App) -> Vec<PlanPanelStep> {
 }
 
 fn plan_panel_content_row_count(step_count: usize) -> u16 {
-    const MAX_STEP_LINES: usize = 8;
     if step_count == 0 {
         return 0;
     }
-    if step_count <= MAX_STEP_LINES {
+    if step_count <= PLAN_MAX_VISIBLE_STEPS {
         step_count as u16
     } else {
-        // Reserve one row for "+N more".
-        MAX_STEP_LINES as u16
+        PLAN_MAX_VISIBLE_STEPS as u16
     }
 }
 
@@ -211,15 +210,10 @@ pub(crate) fn plan_panel_height_for_layout(
         return 0;
     }
 
-    /// Need enough width for gutter + marker + reasonable text.
-    const MIN_W: u16 = 52;
-    /// Auto: only on larger terminals so chat + input stay usable.
-    const MIN_TERM_H_AUTO: u16 = 28;
-    /// On: hide only when the terminal is too short to be usable.
-    const MIN_TERM_H_ON: u16 = 18;
+    const MIN_W: u16 = PLAN_PANEL_MIN_WIDTH;
+    const MIN_TERM_H_AUTO: u16 = PLAN_PANEL_MIN_TERM_H_AUTO;
+    const MIN_TERM_H_ON: u16 = PLAN_PANEL_MIN_TERM_H_ON;
     const HEADER_ROWS: u16 = 1;
-    /// When visibility is On and there is nothing to list, still reserve this many body rows
-    /// so the strip stays visibly present (user asked to always see the panel when toggled on).
     const ON_EMPTY_BODY_ROWS: u16 = 2;
 
     if term_w < MIN_W {
@@ -233,7 +227,9 @@ pub(crate) fn plan_panel_height_for_layout(
         PlanPanelVisibility::Off => 0,
         PlanPanelVisibility::Auto => {
             let min_term_h = if harness_mode {
-                MIN_TERM_H_AUTO.saturating_sub(4).max(20)
+                PLAN_PANEL_MIN_TERM_H_AUTO
+                    .saturating_sub(PLAN_PANEL_HARNESS_AUTO_REDUCTION)
+                    .max(PLAN_PANEL_MIN_TERM_H_FLOOR)
             } else {
                 MIN_TERM_H_AUTO
             };
@@ -262,8 +258,8 @@ pub(crate) fn plan_panel_height_for_layout(
     }
 }
 
-/// Build wrapped lines for the progress strip (`plan_h` rows from [`plan_panel_height_for_layout`]).
-/// `max_step_lines` caps listed steps (stacked layout uses 8; status rail uses 8).
+/// Build wrapped lines for the progress strip. `max_step_lines` caps
+/// listed steps (all panels use [`crate::tui::config::PLAN_MAX_VISIBLE_STEPS`]).
 /// When `with_strip_title_row` is false (status rail), omit the "Tasks · auto" title row — the rail
 /// draws its own section header.
 pub(crate) fn build_plan_todo_strip_lines(
@@ -1077,14 +1073,8 @@ mod plan_panel_tests {
     fn caps_at_eight_steps_in_auto_mode() {
         // With 15 steps, panel should show only 8 + header = 9 rows.
         let steps = sample_steps(15);
-        let h = plan_panel_height_for_layout(
-            PlanPanelVisibility::Auto,
-            80,
-            40,
-            &steps,
-            false,
-            false,
-        );
+        let h =
+            plan_panel_height_for_layout(PlanPanelVisibility::Auto, 80, 40, &steps, false, false);
         assert_eq!(h, 9); // 1 header + 8 steps
     }
 }

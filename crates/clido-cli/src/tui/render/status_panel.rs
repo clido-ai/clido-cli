@@ -11,17 +11,13 @@ use ratatui::{
 };
 
 use crate::tui::app_state::AppRunState;
+use crate::tui::config::*;
 use crate::tui::state::{PlanPanelVisibility, StatusRailVisibility};
 use crate::tui::*;
 
 use super::plan::{build_plan_todo_strip_lines, gather_plan_panel_steps};
 use super::widgets::{status_strip_lines, truncate_chars};
 use super::SPINNER;
-
-/// Minimum terminal width (columns) to show the status rail beside the transcript (`/panel auto`).
-pub(crate) const STATUS_RAIL_MIN_TERM_WIDTH: u16 = 118;
-/// Lower threshold when `/panel on` — show the rail a bit earlier than auto.
-pub(crate) const STATUS_RAIL_MIN_TERM_WIDTH_ON: u16 = 108;
 
 /// Whether the layout should allocate the right-hand status rail for this terminal width.
 pub(crate) fn status_rail_wanted(vis: StatusRailVisibility, term_width: u16) -> bool {
@@ -218,7 +214,12 @@ pub(crate) fn build_status_rail_lines(
         lines.push(Line::from(vec![Span::styled(" —", dim)]));
     } else {
         // Cap rows so TASK stays visible below.
-        lines.extend(status_strip_lines(&app.status_log, w, spinner, Some(5)));
+        lines.extend(status_strip_lines(
+            &app.status_log,
+            w,
+            spinner,
+            TOOLS_CAP_RAIL,
+        ));
     }
 
     // ── TASK (todos / planner / harness; often many lines) ─────────────────
@@ -233,7 +234,7 @@ pub(crate) fn build_status_rail_lines(
             app,
             &plan_steps,
             w,
-            8,
+            PLAN_MAX_VISIBLE_STEPS,
             false,
             0,
         ));

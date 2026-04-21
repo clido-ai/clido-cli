@@ -1070,7 +1070,7 @@ fn apply_status_rail_mode(app: &mut App, sub: &str) {
 
 /// Right-hand status column: session, git, agent, queue, task block, tools (`/panel`).
 pub(super) fn cmd_panel(app: &mut App, cmd: &str) {
-    use crate::tui::render::{STATUS_RAIL_MIN_TERM_WIDTH, STATUS_RAIL_MIN_TERM_WIDTH_ON};
+    use crate::tui::config::{STATUS_RAIL_MIN_TERM_WIDTH, STATUS_RAIL_MIN_TERM_WIDTH_ON};
     let rest = cmd.trim_start_matches("/panel").trim();
     let parts: Vec<&str> = rest.split_whitespace().collect();
     match parts.as_slice() {

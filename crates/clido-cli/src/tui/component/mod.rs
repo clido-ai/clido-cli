@@ -13,6 +13,7 @@ pub use shell::*;
 use ratatui::layout::Rect;
 
 use crate::tui::app_state::App;
+use crate::tui::config::*;
 
 // ── Event Result ─────────────────────────────────────────────────────────────
 
@@ -98,5 +99,5 @@ pub trait Component {
 #[allow(dead_code)]
 #[inline]
 pub fn is_narrow(area: Rect) -> bool {
-    area.width < 60
+    area.width < NARROW_WIDTH
 }

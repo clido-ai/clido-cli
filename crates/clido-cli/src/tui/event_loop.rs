@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::tui::config::*;
+
 #[derive(Debug)]
 enum ToolDisplay {
     Ls,
@@ -2457,9 +2459,9 @@ pub(super) async fn event_loop(
     let mut git_refresh_counter: u32 = 0;
     // Stall timeout: trigger recovery only if truly no activity (heartbeats keep this fresh
     // during long LLM calls, so 120 s is a reliable hard ceiling for genuinely hung agents).
-    const STALL_TIMEOUT_SECS: u64 = 900; // 15 minutes
-    const STALL_WARNING_SECS: u64 = 300; // 5 minutes
-                                         // Only redraw when state has actually changed to reduce CPU usage.
+    const STALL_TIMEOUT_SECS: u64 = AGENT_STALL_MAX_SECS;
+    const STALL_WARNING_SECS: u64 = AGENT_STALL_WARN_SECS;
+    // Only redraw when state has actually changed to reduce CPU usage.
     let mut dirty = true;
 
     // Component layer — provides component boundaries, dirty tracking,

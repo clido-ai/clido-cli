@@ -6,6 +6,9 @@ mod surfaces;
 mod welcome;
 mod widgets;
 
+#[allow(unused_imports)]
+use crate::tui::config::*;
+
 #[cfg(test)]
 mod proptests;
 #[cfg(test)]
@@ -13,7 +16,6 @@ mod tests;
 
 pub(super) use plan::*;
 pub(super) use profile::*;
-pub(super) use status_panel::{STATUS_RAIL_MIN_TERM_WIDTH, STATUS_RAIL_MIN_TERM_WIDTH_ON};
 pub(super) use welcome::*;
 pub(super) use widgets::*;
 
@@ -269,7 +271,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     // Decide header height: 1 line if everything fits side-by-side, else 2.
     // When the terminal is very narrow, use a single minimal header.
     let w = area.width as usize;
-    let is_narrow = area.width < 60;
+    let is_narrow = area.width < NARROW_WIDTH;
     let line1_w: usize = hline1.iter().map(|s| s.content.chars().count()).sum();
     let line2_w: usize = hline2.iter().map(|s| s.content.chars().count()).sum();
     let header_h: u16 = if is_narrow || line1_w + line2_w <= w {
@@ -281,15 +283,18 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     // Layout: wide terminals use a right **status rail** (IDE-style); narrow keeps stacked strips.
     // Input grows with content: 1 line of text = 3 rows (2 borders + 1), capped at 8.
     let input_line_count = app.text_input.text.matches('\n').count() + 1;
-    let input_h = (input_line_count as u16 + 2).clamp(3, 8);
-    let (hint_h, status_h) = if area.width < 40 { (0, 0) } else { (1, 2) };
+    let input_h = (input_line_count as u16 + 2).clamp(INPUT_MIN_HEIGHT, INPUT_MAX_HEIGHT);
+    let (hint_h, status_h) = if area.width < STATUS_MIN_WIDTH {
+        (0, 0)
+    } else {
+        (HINT_HEIGHT, STATUS_STRIP_HEIGHT)
+    };
     let plan_steps = gather_plan_panel_steps(app);
     // Auto-scroll plan panel to show the latest tasks.
     // Must match the `max_step_lines` cap passed to `build_plan_todo_strip_lines`.
-    const PLAN_VISIBLE_CAP: usize = 8;
     let total_steps = plan_steps.len();
-    if total_steps > PLAN_VISIBLE_CAP {
-        let target_scroll = (total_steps.saturating_sub(PLAN_VISIBLE_CAP)) as u16;
+    if total_steps > PLAN_MAX_VISIBLE_STEPS {
+        let target_scroll = (total_steps.saturating_sub(PLAN_MAX_VISIBLE_STEPS)) as u16;
         if app.plan_scroll < target_scroll {
             app.plan_scroll = target_scroll;
         }
@@ -548,7 +553,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 app,
                 &plan_steps,
                 p_inner.width,
-                8,
+                PLAN_MAX_VISIBLE_STEPS,
                 true,
                 app.plan_scroll,
             );
@@ -561,7 +566,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let s_inner = sb.inner(status_area);
             frame.render_widget(sb, status_area);
             let spinner = SPINNER[app.spinner_tick];
-            let slines = status_strip_lines(&app.status_log, s_inner.width, spinner, Some(2));
+            let slines =
+                status_strip_lines(&app.status_log, s_inner.width, spinner, TOOLS_CAP_STACKED);
             frame.render_widget(Paragraph::new(slines), s_inner);
         }
 
@@ -928,7 +934,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     // ── Slash command popup ──
     let rows = slash_completion_rows(&app.text_input.text);
     if !rows.is_empty() && app.pending_perm.is_none() && app.session_picker.is_none() {
-        const VISIBLE: usize = 12;
+        // Slash command completion popup.
+        const VISIBLE: usize = SLASH_COMPLETION_VISIBLE;
 
         // Find the rendered-row index of the selected command.
         let selected_row_idx = app
@@ -1028,7 +1035,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Session picker ───────────────────────────────────────────────────────
     if let Some(ref picker) = app.session_picker {
-        const VISIBLE: usize = 12;
+        const VISIBLE: usize = SESSION_PICKER_VISIBLE;
         let filtered: Vec<(usize, &clido_storage::SessionSummary)> =
             picker.picker.filtered_items().collect();
         let n_rows = filtered.len().min(VISIBLE) as u16;

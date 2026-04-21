@@ -4,6 +4,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use crate::list_picker::ListPicker;
 use crate::overlay::{AppAction, ErrorOverlay, OverlayKeyResult, OverlayKind};
 
+use super::config::*;
 use super::*;
 
 mod overlay;
@@ -193,7 +194,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
 
     // ── Model picker (modal) ─────────────────────────────────────────────────
     if app.model_picker.is_some() {
-        const VISIBLE: usize = 14;
+        const VISIBLE: usize = MODEL_PICKER_VISIBLE;
         // Ctrl+S: save default · Ctrl+F: toggle favorite (letters go to filter)
         if event.modifiers == Km::CONTROL {
             match event.code {
@@ -596,7 +597,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     loaded.profiles.into_iter().collect();
                 profiles.sort_by(|a, b| a.0.cmp(&b.0));
                 let selected = profiles.iter().position(|(n, _)| n == &active).unwrap_or(0);
-                let mut picker = ListPicker::new(profiles, 12);
+                let mut picker = ListPicker::new(profiles, PROFILE_PICKER_VISIBLE);
                 picker.selected = selected;
                 app.profile_picker = Some(ProfilePickerState { picker, active });
             }

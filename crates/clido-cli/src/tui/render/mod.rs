@@ -2040,6 +2040,38 @@ fn take_cols(s: &str, max_cols: usize) -> (&str, usize) {
 }
 
 pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
+    // Fast path: return cached lines if messages and width haven't changed.
+    // This avoids expensive markdown rendering on every frame.
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let msg_count = app.messages.len();
+    let last_msg_hash = app.messages.last().map(|m| {
+        let mut hasher = DefaultHasher::new();
+        std::mem::discriminant(m).hash(&mut hasher);
+        // Hash the text content (works for all variants with String payload)
+        match m {
+            ChatLine::User(s) | ChatLine::Assistant(s) | ChatLine::Thinking(s)
+            | ChatLine::Diff(s) | ChatLine::Info(s) | ChatLine::Section(s) => s.hash(&mut hasher),
+            ChatLine::ToolCall { name, detail, done, is_error, .. } => {
+                name.hash(&mut hasher);
+                detail.hash(&mut hasher);
+                done.hash(&mut hasher);
+                is_error.hash(&mut hasher);
+            }
+            ChatLine::SlashCommand { cmd, text } => {
+                cmd.hash(&mut hasher);
+                text.hash(&mut hasher);
+            }
+            ChatLine::WelcomeBrand | ChatLine::WelcomeSplash => {}
+        }
+        hasher.finish()
+    });
+    let cache_key = (msg_count, last_msg_hash, width);
+
+    if app.last_chat_key.as_ref() == Some(&cache_key) {
+        return app.last_lines.clone();
+    }
+
     // Use unified renderer to generate ContentLines
     let content_lines = render_chat_to_content_lines(&app.messages, width, &app.model);
 
@@ -2054,10 +2086,16 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
     app.rendered_line_texts = wrapped_lines.iter().map(|wl| wl.plain_text()).collect();
 
     // Convert wrapped lines to ratatui Lines for display
-    wrapped_lines
+    let lines: Vec<Line<'static>> = wrapped_lines
         .iter()
         .map(|wl| Line::from(wl.spans.clone()))
-        .collect()
+        .collect();
+
+    // Update cache
+    app.last_chat_key = Some(cache_key);
+    app.last_lines = lines.clone();
+
+    lines
 }
 
 /// Wrap content lines to fit screen width, tracking original positions.
@@ -2687,15 +2725,32 @@ pub(super) fn render_chat_to_content_lines(
             }
 
             ChatLine::Info(text) => {
-                for line in text.lines() {
-                    out.push(ContentLine::new(
-                        vec![Span::raw(format!("{TUI_GUTTER}{}", line))],
-                        LineSource::Info,
-                        true,
-                        msg_idx,
-                    ));
+                if text.is_empty() {
+                    out.push(ContentLine::new(vec![], LineSource::Info, false, msg_idx));
+                } else {
+                    // Info uses "› " prefix, so we need different width than regular chat.
+                    let info_prefix_width = crate::tui::render::unicode_display_width(TUI_GUTTER) + 2;
+                    let info_content_width = width.saturating_sub(info_prefix_width);
+                    let muted_style = Style::default().fg(TUI_ROW_DIM);
+                    let prefix = format!("{TUI_GUTTER}› ");
+                    for line in render_markdown(text, info_content_width) {
+                        let mut spans = vec![Span::styled(
+                            prefix.clone(),
+                            Style::default().fg(TUI_DIVIDER).add_modifier(Modifier::DIM),
+                        )];
+                        spans.extend(line.spans.into_iter().map(|span| {
+                            Span::styled(span.content.to_string(), muted_style.patch(span.style))
+                        }));
+                        out.push(ContentLine::new(
+                            spans,
+                            LineSource::Info,
+                            true,
+                            msg_idx,
+                        ));
+                    }
+                    // Blank separator
+                    out.push(ContentLine::new(vec![], LineSource::Info, false, msg_idx));
                 }
-                out.push(ContentLine::new(vec![], LineSource::Info, false, msg_idx));
             }
 
             ChatLine::Section(text) => {

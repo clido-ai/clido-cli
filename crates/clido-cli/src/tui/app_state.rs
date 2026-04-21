@@ -258,6 +258,11 @@ pub(super) struct App {
     pub(super) plan_panel_visibility: PlanPanelVisibility,
     /// Scroll offset for the plan/task panel strip (narrow mode).
     pub(super) plan_scroll: u16,
+    /// Chat render cache: (message_count, last_message_hash, terminal_width).
+    /// When unchanged, cached `last_lines` are returned instantly — no markdown re-render.
+    pub(super) last_chat_key: Option<(usize, Option<u64>, usize)>,
+    /// Cached chat lines from last `build_lines_w` call.
+    pub(super) last_lines: Vec<ratatui::text::Line<'static>>,
     /// Right-hand status column: session, context, agent, queue, tasks, tools (`/panel on|off|auto`).
     pub(super) status_rail_visibility: StatusRailVisibility,
     /// Track whether we have already shown the empty-input hint this session.
@@ -430,6 +435,8 @@ impl App {
                 PlanPanelVisibility::default()
             },
             plan_scroll: 0,
+            last_chat_key: None,
+            last_lines: Vec::new(),
             status_rail_visibility: StatusRailVisibility::default(),
             empty_input_hint_shown: false,
             pending_enhance: None,

@@ -824,11 +824,16 @@ pub(super) async fn agent_task(
                     None => break,
                 }
             }
-            _ = kill_rx.recv() => {
-                // Kill signal - set cancel flag and let agent finish current tools gracefully
-                // This ensures tool results are added to history before stopping
-                cancel.store(true, Ordering::Relaxed);
-                continue;
+            kill_sig = kill_rx.recv() => {
+                match kill_sig {
+                    Some(()) => {
+                        // Kill signal - set cancel flag and let agent finish current tools gracefully
+                        // This ensures tool results are added to history before stopping
+                        cancel.store(true, Ordering::Relaxed);
+                        continue;
+                    }
+                    None => break, // Sender dropped, exit loop
+                }
             }
             paths = allowed_paths_rx.recv() => {
                 match paths {

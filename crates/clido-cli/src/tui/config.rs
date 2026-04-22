@@ -102,3 +102,10 @@ pub const AGENT_STALL_WARN_SECS: u64 = 300;
 
 /// Seconds before force-stopping a stalled agent.
 pub const AGENT_STALL_MAX_SECS: u64 = 900;
+
+// ── Keyboard enhancement flags ───────────────────────────────────────────────
+
+/// Bitmask of crossterm keyboard enhancement flags enabled at startup.
+/// Must include REPORT_ALTERNATE_KEYS for Shift+Enter to work in Kitty-capable terminals.
+/// Value is the raw bits: DISAMBIGUATE_ESCAPE_CODES (1) | REPORT_EVENT_TYPES (2) | REPORT_ALTERNATE_KEYS (4) = 7
+pub const KEYBOARD_ENHANCEMENT_FLAGS: u8 = 0b111; // 7

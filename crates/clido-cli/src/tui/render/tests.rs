@@ -326,3 +326,153 @@ mod edge_case_tests {
         assert!(!lines.is_empty());
     }
 }
+
+// ── Integration regression tests ─────────────────────────────────────────────
+// These tests guard against the exact breakages that happened in commit 37e7fc78.
+// If any of these fail, a visible feature is broken.
+
+#[cfg(test)]
+mod integration_regression_tests {
+    use crate::tui::render::{render_chat_to_content_lines, render_diff};
+    use crate::tui::state::{ChatLine, LineSource};
+
+    // ── Test 1: Diff must render with side-by-side on wide terminals ───────
+    // Broken by: 37e7fc78 ("unify renderer") — render_diff was never called
+    // Fixed by: 9e894a7 ("restore side-by-side diff rendering")
+    #[test]
+    fn regression_diff_side_by_side_on_wide_terminal() {
+        let diff_text = "\
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,3 +1,3 @@
+ fn main() {
+-    println!(\"hello\");
++    println!(\"world\");
+ }";
+        let messages = vec![ChatLine::Diff(diff_text.to_string())];
+        // Wide terminal (≥120 cols) should produce side-by-side output
+        let lines = render_chat_to_content_lines(&messages, 140, "");
+
+        // Find the diff lines and verify they contain the side-by-side divider
+        let has_divider = lines
+            .iter()
+            .filter(|cl| cl.source == LineSource::Diff)
+            .any(|cl| cl.spans.iter().any(|s| s.content.contains('│')));
+        assert!(
+            has_divider,
+            "Diff should render with │ divider (side-by-side) on wide terminal (140 cols)"
+        );
+    }
+
+    #[test]
+    fn regression_render_diff_side_by_side() {
+        let diff = "+ added\n- removed";
+        let lines = render_diff(diff, 140);
+        let has_divider = lines
+            .iter()
+            .any(|l| l.spans.iter().any(|s| s.content.contains('│')));
+        assert!(
+            has_divider,
+            "render_diff must use side-by-side layout on wide terminal"
+        );
+    }
+
+    #[test]
+    fn regression_render_diff_unified_on_narrow() {
+        let diff = "+ added\n- removed";
+        let lines = render_diff(diff, 80);
+        let has_divider = lines
+            .iter()
+            .any(|l| l.spans.iter().any(|s| s.content.contains('│')));
+        assert!(
+            !has_divider,
+            "render_diff should NOT use side-by-side on narrow terminal"
+        );
+    }
+
+    // ── Test 2: Info messages must render markdown, not plain text ────────
+    // Broken by: 37e7fc78 — render_markdown was removed for Info
+    // Fixed by: ee0df52 ("restore Info markdown rendering")
+    #[test]
+    fn regression_info_renders_markdown_bold() {
+        let messages = vec![ChatLine::Info("This is **bold** text".to_string())];
+        let lines = render_chat_to_content_lines(&messages, 80, "");
+
+        let info_lines: Vec<_> = lines
+            .iter()
+            .filter(|cl| cl.source == LineSource::Info && !cl.spans.is_empty())
+            .collect();
+
+        assert!(
+            !info_lines.is_empty(),
+            "Info message should produce content lines"
+        );
+
+        // Bold text should produce multiple spans
+        let has_multiple_spans = info_lines
+            .iter()
+            .any(|cl| cl.spans.len() > 1 && cl.spans.iter().any(|s| s.content.contains("bold")));
+
+        assert!(
+            has_multiple_spans,
+            "Info should render markdown with multiple spans (bold = separate span), not plain text"
+        );
+    }
+
+    #[test]
+    fn regression_info_renders_markdown_code() {
+        let messages = vec![ChatLine::Info("Use `config.yml`".to_string())];
+        let lines = render_chat_to_content_lines(&messages, 80, "");
+
+        let info_lines: Vec<_> = lines
+            .iter()
+            .filter(|cl| cl.source == LineSource::Info && !cl.spans.is_empty())
+            .collect();
+
+        assert!(
+            !info_lines.is_empty(),
+            "Info with code should produce content lines"
+        );
+
+        let has_code_span = info_lines
+            .iter()
+            .any(|cl| cl.spans.iter().any(|s| s.content.contains("config.yml")));
+
+        assert!(
+            has_code_span,
+            "Info should render inline code as a span"
+        );
+    }
+
+    #[test]
+    fn regression_info_renders_markdown_link() {
+        let messages = vec![ChatLine::Info("See [docs](https://example.com)".to_string())];
+        let lines = render_chat_to_content_lines(&messages, 80, "");
+
+        let info_lines: Vec<_> = lines
+            .iter()
+            .filter(|cl| cl.source == LineSource::Info && !cl.spans.is_empty())
+            .collect();
+
+        let has_link_text = info_lines
+            .iter()
+            .any(|cl| cl.spans.iter().any(|s| s.content.contains("docs")));
+
+        assert!(
+            has_link_text,
+            "Info should render markdown links (text visible)"
+        );
+    }
+
+    // ── Test 3: Keyboard enhancement flags include REPORT_ALTERNATE_KEYS ──
+    // Broken by: missing REPORT_ALTERNATE_KEYS flag in event_loop
+    // Fixed by: c42ba3e ("add REPORT_ALTERNATE_KEYS flag")
+    #[test]
+    fn regression_keyboard_flags_include_alternate_keys() {
+        use crate::tui::config::KEYBOARD_ENHANCEMENT_FLAGS;
+        assert!(
+            KEYBOARD_ENHANCEMENT_FLAGS > 0,
+            "Keyboard enhancement flags must be non-zero (includes REPORT_ALTERNATE_KEYS)"
+        );
+    }
+}

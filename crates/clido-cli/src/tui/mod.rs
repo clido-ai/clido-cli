@@ -2014,8 +2014,15 @@ mod tests {
     fn skill_new_appears_in_completions() {
         let cmds: Vec<_> = slash_completions("/skill n").iter().map(|(c, _)| *c).collect();
         assert!(cmds.contains(&"/skill new"), "/skill new must appear in /skill n completions");
-        
+
         // Exact match for /skill new
         let exact: Vec<_> = slash_completions("/skill new").iter().map(|(c, _)| *c).collect();
         assert!(exact.contains(&"/skill new"), "/skill new must appear in exact completions");
+
+        // /skill new does NOT take args - it's interactive
+        let cmd = crate::command_registry::COMMANDS
+            .iter()
+            .find(|c| c.name == "/skill new")
+            .expect("/skill new must exist");
+        assert!(!cmd.takes_args, "/skill new should not take args (it's interactive)");
     }

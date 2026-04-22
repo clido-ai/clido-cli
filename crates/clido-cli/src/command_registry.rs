@@ -343,8 +343,8 @@ pub static COMMANDS: &[SlashCommand] = &[
         name: "/skill new",
         section: "Skills",
         description: "create a new skill with guided AI assistance",
-        usage: Some("/skill new <description of what the skill should do>"),
-        takes_args: true,
+        usage: Some("/skill new"),
+        takes_args: false,
         requires_idle: false,
     },
     SlashCommand {

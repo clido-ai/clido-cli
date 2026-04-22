@@ -3759,7 +3759,7 @@ pub(super) fn cmd_skill(app: &mut App, cmd: &str) {
             app.push(ChatLine::Info("".into()));
             app.push(ChatLine::Section("Skill Commands".into()));
             app.push(ChatLine::Info(
-                "  /skill new <desc>    create a skill with AI guidance".into(),
+                "  /skill new           create a skill interactively with AI".into(),
             ));
             app.push(ChatLine::Info(
                 "  /skill show <id>    display a skill's content".into(),
@@ -3778,32 +3778,30 @@ pub(super) fn cmd_skill(app: &mut App, cmd: &str) {
         }
         _ if sub.starts_with("new ") => {
             let desc = sub.trim_start_matches("new").trim();
-            if desc.is_empty() {
-                app.push(ChatLine::Info(
-                    "  Usage: /skill new <description of what the skill should do>".into(),
-                ));
-                return;
-            }
             let system_addition = skill_creation_system_prompt();
             let msg = format!(
                 "[System context: {system_addition}]\n\n\
-                 I want to create a skill: {desc}"
+                I want to create a skill: {desc}"
             );
-            app.push(ChatLine::Info("  ✦ Starting guided skill creation…".into()));
+            app.push(ChatLine::Info("".into()));
+            app.push(ChatLine::Section("✦ Skill Creation".into()));
+            app.push(ChatLine::Info("".into()));
             app.send_now(msg);
         }
         "new" => {
+            // Interactive skill creation - start a conversation
+            let system_addition = skill_creation_system_prompt();
+            let msg = format!(
+                "[System context: {system_addition}]\n\n\
+                The user wants to create a new skill. Ask them what the skill should do, \
+                then guide them through creating it. When done, use the write_skill tool \
+                to save it. Start by asking: \"What should this skill do? Give me a brief \
+                description of the task you want to automate.\""
+            );
             app.push(ChatLine::Info("".into()));
-            app.push(ChatLine::Info(
-                "  Type your skill description after the command:".into(),
-            ));
-            app.push(ChatLine::Info(
-                "  /skill new <description of what the skill should do>".into(),
-            ));
-            app.push(ChatLine::Info(
-                "  Example: /skill new create a react component with tests".into(),
-            ));
+            app.push(ChatLine::Section("✦ Interactive Skill Creation".into()));
             app.push(ChatLine::Info("".into()));
+            app.send_now(msg);
         }
         _ if sub.starts_with("show ") => {
             let id = sub.trim_start_matches("show").trim();

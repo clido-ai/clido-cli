@@ -3793,9 +3793,17 @@ pub(super) fn cmd_skill(app: &mut App, cmd: &str) {
             app.send_now(msg);
         }
         "new" => {
+            app.push(ChatLine::Info("".into()));
             app.push(ChatLine::Info(
-                "  Usage: /skill new <description of what the skill should do>".into(),
+                "  Type your skill description after the command:".into(),
             ));
+            app.push(ChatLine::Info(
+                "  /skill new <description of what the skill should do>".into(),
+            ));
+            app.push(ChatLine::Info(
+                "  Example: /skill new create a react component with tests".into(),
+            ));
+            app.push(ChatLine::Info("".into()));
         }
         _ if sub.starts_with("show ") => {
             let id = sub.trim_start_matches("show").trim();

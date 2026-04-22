@@ -647,26 +647,32 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 return;
             }
             (_, Enter) => {
-                if let Some(idx) = app.selected_cmd {
+                // Auto-select exact match if input exactly equals a completion
+                let exact_match_idx = completions
+                    .iter()
+                    .position(|(cmd, _)| *cmd == app.text_input.text);
+
+                let idx = app.selected_cmd.or(exact_match_idx);
+                if let Some(idx) = idx {
                     let cmd = completions[idx].0.to_string();
-                    app.selected_cmd = None;
                     let needs_arg = crate::command_registry::COMMANDS
                         .iter()
                         .find(|c| c.name == cmd)
                         .map(|c| c.takes_args)
                         .unwrap_or(false);
                     if needs_arg {
-                        // Populate input with the command + space so user can type the argument.
-                        app.text_input.text = format!("{} ", cmd);
-                        app.text_input.cursor = app.text_input.text.chars().count();
+                        // Command needs args but none provided yet.
+                        // Fall through to submit so the handler can show usage/help.
+                        // Don't return - let the normal submit flow handle it.
                     } else {
+                        app.selected_cmd = None;
                         app.text_input.text.clear();
                         app.text_input.cursor = 0;
                         execute_slash(app, &cmd);
+                        return;
                     }
-                    return;
                 }
-                // No item selected → fall through to normal Enter handling.
+                // No exact match, or needs args → fall through to normal Enter handling.
             }
             (_, Esc) => {
                 app.selected_cmd = None;

@@ -2000,3 +2000,22 @@ mod tests {
         assert!(sc <= ec || sr < er);
     }
 }
+
+    #[test]
+    fn skill_commands_are_known() {
+        assert!(is_known_slash_cmd("/skill"), "/skill must be known");
+        assert!(is_known_slash_cmd("/skill new"), "/skill new must be known");
+        assert!(is_known_slash_cmd("/skill show test"), "/skill show with args must be known");
+        assert!(is_known_slash_cmd("/skill edit test change"), "/skill edit with args must be known");
+        assert!(is_known_slash_cmd("/skill save test"), "/skill save with args must be known");
+    }
+
+    #[test]
+    fn skill_new_appears_in_completions() {
+        let cmds: Vec<_> = slash_completions("/skill n").iter().map(|(c, _)| *c).collect();
+        assert!(cmds.contains(&"/skill new"), "/skill new must appear in /skill n completions");
+        
+        // Exact match for /skill new
+        let exact: Vec<_> = slash_completions("/skill new").iter().map(|(c, _)| *c).collect();
+        assert!(exact.contains(&"/skill new"), "/skill new must appear in exact completions");
+    }

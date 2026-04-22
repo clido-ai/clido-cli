@@ -5,7 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.9] - 2026-04-19
+## [1.0.11] - 2025-01-21
+
+### Added
+
+- **Component layer architecture**: New `ComponentLayer` system with dirty tracking and event propagation for better UI modularity and incremental rendering.
+- **Integration regression tests**: Added 4 tests covering previously broken features to prevent regressions.
+- **Incremental rendering**: Long sessions now render incrementally, dramatically improving performance for conversations with many messages.
+
+### Changed
+
+- **Centralized configuration**: All magic numbers moved to `tui/config.rs` for easier maintenance and consistency.
+- **Task panel limits**: Max 8 steps, tools capped at 5 items (scrollable), tools displayed above tasks.
+- **Panel height limits**: All panels capped at 5 items with scroll for overflow content.
+
+### Fixed
+
+- **Shift+Enter for newline**: Restored with `REPORT_ALTERNATE_KEYS` flag for reliable multi-line input.
+- **Info markdown rendering**: Restored proper markdown rendering for info messages with render cache for performance.
+- **Side-by-side diff rendering**: Restored GitHub-style diff layout for code changes.
+- **Task panel reliability**: Fixed scroll behavior, spinner display, and narrow mode header issues.
+- **Plan panel**: Fixed height cap mismatch and removed unnecessary closure.
+
+### Improved
+
+- **Header layout**: Improved separators, cost format display, and narrow mode title handling.
+
+## [1.0.10] - 2025-01-20
 
 ### Added
 

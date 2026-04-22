@@ -438,15 +438,14 @@ mod integration_regression_tests {
             .iter()
             .any(|cl| cl.spans.iter().any(|s| s.content.contains("config.yml")));
 
-        assert!(
-            has_code_span,
-            "Info should render inline code as a span"
-        );
+        assert!(has_code_span, "Info should render inline code as a span");
     }
 
     #[test]
     fn regression_info_renders_markdown_link() {
-        let messages = vec![ChatLine::Info("See [docs](https://example.com)".to_string())];
+        let messages = vec![ChatLine::Info(
+            "See [docs](https://example.com)".to_string(),
+        )];
         let lines = render_chat_to_content_lines(&messages, 80, "");
 
         let info_lines: Vec<_> = lines

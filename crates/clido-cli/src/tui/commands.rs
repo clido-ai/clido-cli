@@ -3217,7 +3217,104 @@ pub(super) fn extract_last_yaml_from_chat(messages: &[ChatLine]) -> Option<Strin
     None
 }
 
-/// Build the system prompt addition for guided workflow creation.
+/// Extract the last markdown skill block (```md with frontmatter or plain markdown) from chat.
+fn extract_last_skill_from_chat(messages: &[ChatLine]) -> Option<String> {
+    for line in messages.iter().rev() {
+        let text = match line {
+            ChatLine::Assistant(text) => text,
+            ChatLine::User(text) => text,
+            _ => continue,
+        };
+        // Look for ```md or ```markdown blocks, or --- frontmatter blocks
+        let mut in_md = false;
+        let mut md_lines: Vec<&str> = Vec::new();
+        let mut found_frontmatter = false;
+        let mut frontmatter_start = -1i64;
+
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed == "```md" || trimmed == "```markdown" {
+                in_md = true;
+                continue;
+            }
+            if in_md && trimmed == "```" {
+                // Return the markdown block
+                return Some(md_lines.join("\n"));
+            }
+            if in_md {
+                md_lines.push(line);
+            }
+            // Also check for standalone frontmatter blocks
+            if trimmed == "---" && !in_md {
+                if frontmatter_start < 0 {
+                    found_frontmatter = true;
+                    frontmatter_start = md_lines.len() as i64;
+                    md_lines.push(line);
+                } else {
+                    // Found end of frontmatter
+                    md_lines.push(line);
+                }
+                continue;
+            }
+            if found_frontmatter {
+                md_lines.push(line);
+            }
+        }
+        // If we found frontmatter and have content, return it
+        if found_frontmatter && md_lines.len() > 3 {
+            return Some(md_lines.join("\n"));
+        }
+    }
+    None
+}
+
+/// Find a skill file by id in the skill directories.
+fn find_skill(workspace_root: &Path, id: &str) -> Option<PathBuf> {
+    let cfg = clido_core::load_config(workspace_root)
+        .map(|c| c.skills)
+        .unwrap_or_default();
+    let dirs = clido_core::skills::resolve_skill_directories(workspace_root, &cfg.extra_paths);
+    for (dir, _source) in dirs {
+        for ext in ["md", "txt"] {
+            let path = dir.join(format!("{id}.{ext}"));
+            if path.exists() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+/// Build the system prompt addition for guided skill creation.
+fn skill_creation_system_prompt() -> String {
+    r#"You are helping the user create a clido skill. Guide them through the process interactively.
+
+## Skill Format
+
+Skills are markdown files with optional YAML frontmatter:
+
+```md
+---
+id: my-skill
+name: My Skill
+description: One-line summary for discovery
+purpose: When this skill should be used
+inputs: What the agent needs or should ask for
+outputs: What the agent produces or verifies
+tags:
+  - category
+  - another-tag
+version: "1.0"
+---
+# Skill Title
+
+The body contains instructions the agent follows when the skill matches a task.
+Use markdown formatting, code blocks, examples, and step-by-step guidance.
+"#
+    .to_string()
+}
+
+/// Build the system prompt addition for guided skill creation.
 fn workflow_creation_system_prompt() -> String {
     r#"You are helping the user create a clido YAML workflow. Guide them through the process step by step.
 
@@ -3654,6 +3751,208 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
     }
 }
 
+pub(super) fn cmd_skill(app: &mut App, cmd: &str) {
+    let sub = cmd.trim_start_matches("/skill").trim().to_string();
+
+    match sub.as_str() {
+        "" | "help" => {
+            app.push(ChatLine::Info("".into()));
+            app.push(ChatLine::Section("Skill Commands".into()));
+            app.push(ChatLine::Info(
+                "  /skill new <desc>    create a skill with AI guidance".into(),
+            ));
+            app.push(ChatLine::Info(
+                "  /skill show <id>    display a skill's content".into(),
+            ));
+            app.push(ChatLine::Info(
+                "  /skill edit <id> <desc>  edit a skill with AI assistance".into(),
+            ));
+            app.push(ChatLine::Info(
+                "  /skill save <id>    save the last skill markdown from chat".into(),
+            ));
+            app.push(ChatLine::Info("".into()));
+            app.push(ChatLine::Info(
+                "  Use /skills to list available skills and their status.".into(),
+            ));
+            app.push(ChatLine::Info("".into()));
+        }
+        _ if sub.starts_with("new ") => {
+            let desc = sub.trim_start_matches("new").trim();
+            if desc.is_empty() {
+                app.push(ChatLine::Info(
+                    "  Usage: /skill new <description of what the skill should do>".into(),
+                ));
+                return;
+            }
+            let system_addition = skill_creation_system_prompt();
+            let msg = format!(
+                "[System context: {system_addition}]\n\n\
+                 I want to create a skill: {desc}"
+            );
+            app.push(ChatLine::Info("  ✦ Starting guided skill creation…".into()));
+            app.send_now(msg);
+        }
+        "new" => {
+            app.push(ChatLine::Info(
+                "  Usage: /skill new <description of what the skill should do>".into(),
+            ));
+        }
+        _ if sub.starts_with("show ") => {
+            let id = sub.trim_start_matches("show").trim();
+            if id.is_empty() {
+                app.push(ChatLine::Info("  Usage: /skill show <id>".into()));
+                return;
+            }
+            match find_skill(&app.workspace_root, id) {
+                Some(path) => match std::fs::read_to_string(&path) {
+                    Ok(content) => {
+                        let mut full_text = format!("Skill: {}\n```md\n", path.display());
+                        full_text.push_str(&content);
+                        if !full_text.ends_with('\n') {
+                            full_text.push('\n');
+                        }
+                        full_text.push_str("```");
+                        app.push(ChatLine::Info(full_text));
+                    }
+                    Err(e) => {
+                        app.push(ChatLine::Info(format!("  ✗ Failed to read: {e}")));
+                    }
+                },
+                None => {
+                    app.push(ChatLine::Info(format!(
+                        "  ✗ Skill '{id}' not found. Use /skills to see available skills."
+                    )));
+                }
+            }
+        }
+        "show" => {
+            app.push(ChatLine::Info("  Usage: /skill show <id>".into()));
+        }
+        _ if sub.starts_with("edit ") => {
+            let rest = sub.trim_start_matches("edit").trim();
+            // Parse: <id> <description of changes>
+            let (id, desc) = if let Some(space_idx) = rest.find(' ') {
+                (&rest[..space_idx], &rest[space_idx + 1..])
+            } else {
+                (rest, "")
+            };
+            if id.is_empty() {
+                app.push(ChatLine::Info(
+                    "  Usage: /skill edit <id> <description of changes>".into(),
+                ));
+                return;
+            }
+            match find_skill(&app.workspace_root, id) {
+                Some(path) => match std::fs::read_to_string(&path) {
+                    Ok(content) => {
+                        if desc.is_empty() {
+                            app.push(ChatLine::Info(format!(
+                                "  Usage: /skill edit {id} <description of changes>"
+                            )));
+                            return;
+                        }
+                        let prompt = format!(
+                            "Edit the following skill file. Apply this change: {desc}\n\n\
+                             Current skill ({name}):\n```md\n{content}\n```\n\n\
+                             Output ONLY the updated skill markdown (with frontmatter if present). \
+                             No explanations, no commentary, no questions.",
+                            name = id,
+                            desc = desc,
+                            content = content
+                        );
+                        app.push(ChatLine::Info(format!("  ✦ Editing skill '{id}' with AI…")));
+                        app.send_now(prompt);
+                    }
+                    Err(e) => {
+                        app.push(ChatLine::Info(format!("  ✗ Failed to read: {e}")));
+                    }
+                },
+                None => {
+                    app.push(ChatLine::Info(format!("  ✗ Skill '{id}' not found.")));
+                }
+            }
+        }
+        "edit" => {
+            app.push(ChatLine::Info(
+                "  Usage: /skill edit <id> <description of changes>".into(),
+            ));
+        }
+        _ if sub.starts_with("save ") => {
+            let id = sub.trim_start_matches("save").trim();
+            if id.is_empty() {
+                app.push(ChatLine::Info("  Usage: /skill save <id>".into()));
+                return;
+            }
+            match extract_last_skill_from_chat(&app.messages) {
+                Some(content) => {
+                    // Validate: must have either frontmatter or body content
+                    let has_frontmatter = content.trim().starts_with("---");
+                    let body = if has_frontmatter {
+                        // Extract body after frontmatter
+                        let rest = content.trim_start_matches("---").trim_start();
+                        if let Some(end) = rest.find("\n---") {
+                            rest[end + 4..].trim().to_string()
+                        } else {
+                            content.clone()
+                        }
+                    } else {
+                        content.clone()
+                    };
+                    if body.trim().is_empty() {
+                        app.push(ChatLine::Info(
+                            "  ✗ Skill body is empty. Add instructions to the skill.".into(),
+                        ));
+                        return;
+                    }
+                    // Save to workspace skills directory
+                    let save_dir = app.workspace_root.join(".clido").join("skills");
+                    let _ = std::fs::create_dir_all(&save_dir);
+                    // Sanitize id for filename
+                    let safe_id: String = id
+                        .chars()
+                        .map(|c| {
+                            if c.is_alphanumeric() || c == '-' || c == '_' {
+                                c
+                            } else {
+                                '-'
+                            }
+                        })
+                        .collect();
+                    let path = save_dir.join(format!("{safe_id}.md"));
+                    match std::fs::write(&path, &content) {
+                        Ok(()) => {
+                            app.push(ChatLine::Info(format!(
+                                "  ✓ Skill saved: {}",
+                                path.display()
+                            )));
+                            app.push(ChatLine::Info(
+                                "  It will be loaded in new sessions. Use /skills to verify."
+                                    .into(),
+                            ));
+                        }
+                        Err(e) => {
+                            app.push(ChatLine::Info(format!("  ✗ Failed to save: {e}")));
+                        }
+                    }
+                }
+                None => {
+                    app.push(ChatLine::Info(
+                        "  ✗ No skill markdown found in chat. Use /skill new <desc> to create one first.".into(),
+                    ));
+                }
+            }
+        }
+        "save" => {
+            app.push(ChatLine::Info("  Usage: /skill save <id>".into()));
+        }
+        _ => {
+            app.push(ChatLine::Info(format!(
+                "  Unknown /skill subcommand: '{sub}'. Use /skill help for usage."
+            )));
+        }
+    }
+}
+
 pub(super) fn execute_slash(app: &mut App, cmd: &str) {
     match cmd {
         "/clear" => {
@@ -3729,6 +4028,7 @@ pub(super) fn execute_slash(app: &mut App, cmd: &str) {
         }
         "/todo" => cmd_todo(app),
         _ if cmd == "/skills" || cmd.starts_with("/skills ") => cmd_skills(app, cmd),
+        _ if cmd == "/skill" || cmd.starts_with("/skill ") => cmd_skill(app, cmd),
         "/undo" => cmd_undo(app),
         _ if cmd == "/rollback" || cmd.starts_with("/rollback ") => cmd_rollback(app, cmd),
         _ if cmd == "/panel" || cmd.starts_with("/panel ") => cmd_panel(app, cmd),

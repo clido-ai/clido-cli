@@ -312,7 +312,9 @@ fn aggressive_tail_truncation(
 
     let usable = budget.saturating_sub(system_prompt_tokens);
     if usable == 0 {
-        return Err(ClidoError::ContextLimit { tokens: budget as u64 });
+        return Err(ClidoError::ContextLimit {
+            tokens: budget as u64,
+        });
     }
 
     // Count tokens per message and work backwards from the end.
@@ -393,15 +395,8 @@ pub(crate) async fn compact_for_model_request(
                 "context assembly exceeded budget={budget}; retrying with tighter budget and full compaction"
             );
             let tight = budget.saturating_sub(8192).max(16_000);
-            match compact_with_summary(
-                messages,
-                system_prompt_tokens,
-                tight,
-                0.0,
-                provider,
-                config,
-            )
-            .await
+            match compact_with_summary(messages, system_prompt_tokens, tight, 0.0, provider, config)
+                .await
             {
                 Ok(m) => Ok(m),
                 Err(ClidoError::ContextLimit { .. }) => {
@@ -519,7 +514,9 @@ mod tests {
     fn text_msg(role: Role, text: &str) -> Message {
         Message {
             role,
-            content: vec![ContentBlock::Text { text: text.to_string() }],
+            content: vec![ContentBlock::Text {
+                text: text.to_string(),
+            }],
         }
     }
 

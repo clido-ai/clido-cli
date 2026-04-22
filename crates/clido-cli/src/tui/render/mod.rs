@@ -2050,9 +2050,19 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
         std::mem::discriminant(m).hash(&mut hasher);
         // Hash the text content (works for all variants with String payload)
         match m {
-            ChatLine::User(s) | ChatLine::Assistant(s) | ChatLine::Thinking(s)
-            | ChatLine::Diff(s) | ChatLine::Info(s) | ChatLine::Section(s) => s.hash(&mut hasher),
-            ChatLine::ToolCall { name, detail, done, is_error, .. } => {
+            ChatLine::User(s)
+            | ChatLine::Assistant(s)
+            | ChatLine::Thinking(s)
+            | ChatLine::Diff(s)
+            | ChatLine::Info(s)
+            | ChatLine::Section(s) => s.hash(&mut hasher),
+            ChatLine::ToolCall {
+                name,
+                detail,
+                done,
+                is_error,
+                ..
+            } => {
                 name.hash(&mut hasher);
                 detail.hash(&mut hasher);
                 done.hash(&mut hasher);
@@ -2762,7 +2772,8 @@ pub(super) fn render_chat_to_content_lines(
                     out.push(ContentLine::new(vec![], LineSource::Info, false, msg_idx));
                 } else {
                     // Info uses "› " prefix, so we need different width than regular chat.
-                    let info_prefix_width = crate::tui::render::unicode_display_width(TUI_GUTTER) + 2;
+                    let info_prefix_width =
+                        crate::tui::render::unicode_display_width(TUI_GUTTER) + 2;
                     let info_content_width = width.saturating_sub(info_prefix_width);
                     let muted_style = Style::default().fg(TUI_ROW_DIM);
                     let prefix = format!("{TUI_GUTTER}› ");
@@ -2774,12 +2785,7 @@ pub(super) fn render_chat_to_content_lines(
                         spans.extend(line.spans.into_iter().map(|span| {
                             Span::styled(span.content.to_string(), muted_style.patch(span.style))
                         }));
-                        out.push(ContentLine::new(
-                            spans,
-                            LineSource::Info,
-                            true,
-                            msg_idx,
-                        ));
+                        out.push(ContentLine::new(spans, LineSource::Info, true, msg_idx));
                     }
                     // Blank separator
                     out.push(ContentLine::new(vec![], LineSource::Info, false, msg_idx));
@@ -2857,12 +2863,7 @@ pub(super) fn render_chat_to_content_lines(
                     spans.push(Span::raw(TUI_GUTTER));
                     spans.push(Span::raw("  "));
                     spans.extend(line.spans);
-                    out.push(ContentLine::new(
-                        spans,
-                        LineSource::Diff,
-                        true,
-                        msg_idx,
-                    ));
+                    out.push(ContentLine::new(spans, LineSource::Diff, true, msg_idx));
                 }
                 out.push(ContentLine::new(vec![], LineSource::Diff, false, msg_idx));
             }

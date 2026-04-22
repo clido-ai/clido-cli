@@ -646,8 +646,9 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.selected_cmd = None;
                 return;
             }
-            (_, Enter) => {
+            (Km::NONE, Enter) => {
                 // Auto-select exact match if input exactly equals a completion
+                // Note: Only handle plain Enter here - Shift+Enter goes to main handler for newline
                 let exact_match_idx = completions
                     .iter()
                     .position(|(cmd, _)| *cmd == app.text_input.text);
@@ -951,34 +952,40 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 }
             }
 
-            if app.text_input.text.contains('\n') && app.text_input.history_idx.is_none() {
+            // If already browsing history, continue history navigation
+            if app.text_input.history_idx.is_some() && !app.text_input.history.is_empty() {
+                let i = app.text_input.history_idx.unwrap();
+                if i > 0 {
+                    app.text_input.history_idx = Some(i - 1);
+                    app.text_input.text = app.text_input.history[i - 1].clone();
+                    app.text_input.cursor = 0;
+                    app.selected_cmd = None;
+                }
+                return;
+            }
+            // Multiline cursor movement (only if text has content)
+            if !app.text_input.text.is_empty() {
                 if let Some(new_cursor) =
                     move_cursor_line_up(&app.text_input.text, app.text_input.cursor)
                 {
                     app.text_input.cursor = new_cursor;
                     return;
                 }
+                // At boundary of text - don't fall through to history if there's text
+                return;
             }
-            // Navigate input history (works with empty input or when already browsing).
+            // Navigate input history (only when input is empty)
             if !app.text_input.history.is_empty() {
                 // Clear queue nav when switching to history
                 app.queue_nav_idx = None;
-                let new_idx = match app.text_input.history_idx {
-                    None => {
-                        app.text_input.history_draft = app.text_input.text.clone();
-                        app.text_input.history.len() - 1
-                    }
-                    Some(0) => 0,
-                    Some(i) => i - 1,
-                };
-                app.text_input.history_idx = Some(new_idx);
-                app.text_input.text = app.text_input.history[new_idx].clone();
-                // Reset cursor to start of prompt for better UX
+                app.text_input.history_draft = app.text_input.text.clone();
+                app.text_input.history_idx = Some(app.text_input.history.len() - 1);
+                app.text_input.text = app.text_input.history[app.text_input.history.len() - 1].clone();
                 app.text_input.cursor = 0;
                 app.selected_cmd = None;
             }
         }
-        // ── Down: queue nav (put current back in queue) OR multiline cursor movement OR input history ─
+        // ── Down: queue nav (put current back in queue) OR multiline cursor movement OR input history ──
         (_, Down)
             if app.pending_perm.is_none() && slash_completions(&app.text_input.text).is_empty() =>
         {
@@ -1010,17 +1017,11 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 return;
             }
 
-            if app.text_input.text.contains('\n') && app.text_input.history_idx.is_none() {
-                if let Some(new_cursor) =
-                    move_cursor_line_down(&app.text_input.text, app.text_input.cursor)
-                {
-                    app.text_input.cursor = new_cursor;
-                    return;
-                }
-            }
-            // Navigate input history forward.
-            if let Some(i) = app.text_input.history_idx {
+            // If already browsing history, continue history navigation
+            if app.text_input.history_idx.is_some() {
+                let i = app.text_input.history_idx.unwrap();
                 if i + 1 >= app.text_input.history.len() {
+                    // Exit history mode, restore draft
                     app.text_input.history_idx = None;
                     app.text_input.text = app.text_input.history_draft.clone();
                     app.text_input.cursor = 0;
@@ -1032,7 +1033,20 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     app.text_input.cursor = 0;
                     app.selected_cmd = None;
                 }
+                return;
             }
+            // Multiline cursor movement (only if text has content)
+            if !app.text_input.text.is_empty() {
+                if let Some(new_cursor) =
+                    move_cursor_line_down(&app.text_input.text, app.text_input.cursor)
+                {
+                    app.text_input.cursor = new_cursor;
+                    return;
+                }
+                // At boundary of text - don't fall through to history if there's text
+                return;
+            }
+            // Down with empty text and no history browsing - do nothing
         }
         // ── Chat scroll (PageUp/PageDown) or status rail scroll (Alt+PgUp/PgDn) ─
         (_, PageUp) => {

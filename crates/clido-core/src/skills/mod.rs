@@ -18,6 +18,50 @@ use crate::config_loader::SkillsSection;
 
 // ── Manifest (frontmatter) ───────────────────────────────────────────────────
 
+/// Deserialize a field that can be either a string or a list of strings.
+/// Lists are joined with "\n" to create a single string.
+fn deserialize_string_or_list<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct StringOrListVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for StringOrListVisitor {
+        type Value = String;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string or a list of strings")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(value.to_owned())
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut items: Vec<String> = Vec::new();
+            while let Some(item) = seq.next_element()? {
+                items.push(item);
+            }
+            Ok(items.join("\n"))
+        }
+    }
+
+    deserializer.deserialize_any(StringOrListVisitor)
+}
+
 /// Metadata for a skill. Omitted fields are filled from the file stem or body.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SkillManifest {
@@ -34,10 +78,10 @@ pub struct SkillManifest {
     #[serde(default)]
     pub purpose: String,
     /// What the agent should have or ask for.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_or_list")]
     pub inputs: String,
     /// What the agent should produce or verify.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_or_list")]
     pub outputs: String,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -129,8 +173,21 @@ pub fn parse_skill_document(raw: &str, stem: &str) -> Result<(SkillManifest, Str
             let yaml_part = &rest[..end];
             let after = &rest[end + "\n---".len()..];
             let body = after.trim_start_matches('-').trim_start().to_string();
-            let mut m: SkillManifest = serde_yaml::from_str(yaml_part)
+            // Try to parse YAML, with auto-fixup on failure
+            let m: SkillManifest = serde_yaml::from_str(yaml_part)
+                .or_else(|_| {
+                    // Auto-fix common YAML issues (unquoted strings with colons)
+                    let fixed = fixup_yaml(yaml_part);
+                    serde_yaml::from_str(&fixed).map_err(|e| {
+                        format!(
+                            "skill {stem}: invalid YAML frontmatter: {e}\n\
+                             Hint: Quote string values containing colons or special chars.\n\
+                             Example: inputs: \"What user needs: a path\""
+                        )
+                    })
+                })
                 .map_err(|e| format!("skill {stem}: invalid YAML frontmatter: {e}"))?;
+            let mut m: SkillManifest = m;
             fill_manifest_defaults(&mut m, stem, Some(body.as_str()));
             return Ok((m, body));
         }
@@ -139,6 +196,84 @@ pub fn parse_skill_document(raw: &str, stem: &str) -> Result<(SkillManifest, Str
     let mut m = SkillManifest::default();
     fill_manifest_defaults(&mut m, stem, Some(body.as_str()));
     Ok((m, body))
+}
+
+/// Auto-fix common YAML issues: quote unquoted string values containing colons or special chars.
+fn fixup_yaml(yaml: &str) -> String {
+    let mut result = String::new();
+    for line in yaml.lines() {
+        // Skip empty lines and comments
+        if line.is_empty() || line.trim_start().starts_with('#') {
+            result.push_str(line);
+            result.push('\n');
+            continue;
+        }
+
+        // Handle list items (lines starting with -)
+        if line.trim_start().starts_with('-') {
+            let trimmed = line.trim_start();
+            let item_content = trimmed.trim_start_matches('-').trim_start();
+            // If item content contains colon or special chars, quote it
+            if !item_content.is_empty()
+                && !item_content.starts_with('"')
+                && !item_content.starts_with("'")
+                && (item_content.contains(':')
+                    || item_content.contains('[') || item_content.contains(']')
+                    || item_content.contains('{') || item_content.contains('}'))
+            {
+                // Quote the list item content
+                let indent = line.len() - line.trim_start().len();
+                result.push_str(&" ".repeat(indent));
+                result.push_str("- \"");
+                result.push_str(item_content);
+                result.push('"');
+                result.push('\n');
+                continue;
+            }
+            result.push_str(line);
+            result.push('\n');
+            continue;
+        }
+
+        // Check if this is a key: value line (not a nested mapping)
+        if let Some((key, value)) = line.split_once(':') {
+            let key_trimmed = key.trim();
+            let value_trimmed = value.trim();
+
+            // Skip if value is already quoted, is a number, is a boolean, or is empty
+            if value_trimmed.is_empty()
+                || value_trimmed.starts_with('"')
+                || value_trimmed.starts_with("'")
+                || value_trimmed.parse::<f64>().is_ok()
+                || value_trimmed == "true" || value_trimmed == "false"
+                || value_trimmed == "null"
+            {
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+
+            // If value contains colon, bracket, or other YAML special chars, quote it
+            if value_trimmed.contains(':')
+                || value_trimmed.contains('[') || value_trimmed.contains(']')
+                || value_trimmed.contains('{') || value_trimmed.contains('}')
+                || value_trimmed.contains('&') || value_trimmed.contains('*')
+                || value_trimmed.contains('|') || value_trimmed.contains('>')
+            {
+                // Quote the value
+                result.push_str(key_trimmed);
+                result.push_str(": \"");
+                result.push_str(value_trimmed);
+                result.push('"');
+                result.push('\n');
+                continue;
+            }
+        }
+        
+        result.push_str(line);
+        result.push('\n');
+    }
+    result
 }
 
 fn is_skill_file(path: &Path) -> bool {
@@ -358,5 +493,39 @@ Do the thing.
         let (m, body) = parse_skill_document("Hello body", "my_skill").unwrap();
         assert_eq!(m.id, "my_skill");
         assert_eq!(body, "Hello body");
+    }
+
+    #[test]
+    fn fixup_yaml_quotes_values_with_colons() {
+        let yaml = "description: Create a React component: write tests\ninputs: path: where to create";
+        let fixed = fixup_yaml(yaml);
+        assert!(fixed.contains("description: \"Create a React component: write tests\""));
+        assert!(fixed.contains("inputs: \"path: where to create\""));
+    }
+
+    #[test]
+    fn fixup_yaml_preserves_already_quoted_values() {
+        let yaml = "description: \"Already quoted: value\"\nid: my-skill";
+        let fixed = fixup_yaml(yaml);
+        assert!(fixed.contains("description: \"Already quoted: value\""));
+        assert!(fixed.contains("id: my-skill"));
+    }
+
+    #[test]
+    fn parse_skill_auto_fixes_yaml() {
+        // This YAML has unquoted colons - should auto-fix and parse successfully
+        let raw = "---
+id: test-skill
+description: A skill with: a colon in description
+inputs: What user needs: a path
+---
+# Test Skill
+Body content here.
+";
+        let result = parse_skill_document(raw, "test");
+        assert!(result.is_ok(), "Should auto-fix YAML and parse: {:?}", result);
+        let (m, body) = result.unwrap();
+        assert_eq!(m.id, "test-skill");
+        assert!(body.contains("Body content here."));
     }
 }

@@ -3291,16 +3291,16 @@ fn skill_creation_system_prompt() -> String {
 
 ## Skill Format
 
-Skills are markdown files with optional YAML frontmatter:
+Skills are markdown files with YAML frontmatter. ALWAYS quote string values that contain colons, brackets, or special characters.
 
 ```md
 ---
 id: my-skill
-name: My Skill
-description: One-line summary for discovery
-purpose: When this skill should be used
-inputs: What the agent needs or should ask for
-outputs: What the agent produces or verifies
+name: "My Skill"
+description: "One-line summary for discovery"
+purpose: "When this skill should be used"
+inputs: "What the agent needs or should ask for"
+outputs: "What the agent produces or verifies"
 tags:
   - category
   - another-tag
@@ -3310,6 +3310,34 @@ version: "1.0"
 
 The body contains instructions the agent follows when the skill matches a task.
 Use markdown formatting, code blocks, examples, and step-by-step guidance.
+
+## CRITICAL YAML RULES
+
+1. ALL string values MUST be quoted with double quotes if they contain:
+   - Colons (:)
+   - Brackets ([ ])
+   - Curly braces ({ })
+   - Ampersands (&)
+   - Asterisks (*)
+   - Pipes (|)
+   - Greater/less than (> <)
+   - Any special YAML character
+
+2. Safe unquoted strings: simple words without special characters (e.g., `id: my-skill`)
+
+3. Example of CORRECT YAML:
+   ```yaml
+   description: "Create a React component: write file, add tests"
+   inputs: "File path: where to create the component"
+   ```
+
+4. Example of WRONG YAML (will fail):
+   ```yaml
+   description: Create a React component: write file  # ERROR: unquoted colon
+   inputs: path: where to create                       # ERROR: unquoted colon
+   ```
+
+When producing the final skill, ALWAYS validate your YAML before writing.
 "#
     .to_string()
 }

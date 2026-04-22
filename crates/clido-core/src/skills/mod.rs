@@ -432,14 +432,25 @@ fn format_one_skill(s: &LoadedSkill) -> String {
     format!("{head}{}", s.body.trim())
 }
 
-const GUIDE_AUTO: &str = "\n## Skills usage (user-controlled)\n\
-These capabilities are loaded from disk; the user enables or disables them in config or with /skills.\n\
-- When work clearly matches a skill’s **when to use** / purpose, follow that skill’s body and say which **skill id** you are applying (e.g. \"Using skill my-skill:\").\n\
-- If several skills apply, combine them explicitly; do not invent steps that are not in the loaded text.\n\
-- You may **suggest** a skill when it would help; the user can enable it if it was off. Do not claim a skill ran if it is not loaded.\n";
+const GUIDE_AUTO: &str = "\n## Skills (MANDATORY workflow step)\n\
+You MUST follow this workflow for EVERY user request:\n\
+\n\
+**Step 0: Skill Check** — Before planning or acting:\n\
+1. Read the `<skills>` block in your system prompt.\n\
+2. If any skill's **purpose** or **when to use** field matches the user's request:\n\
+   - STOP and explicitly state: \"Using skill `<skill-id>`:\" (e.g., \"Using skill `release`:\")\n\
+   - Follow EVERY step in that skill's body exactly as written.\n\
+   - Do NOT skip, modify, or invent steps outside the skill.\n\
+3. If NO skill matches, proceed with your normal planning workflow.\n\
+\n\
+Rules:\n\
+- You MUST check skills BEFORE any other work.\n\
+- You MUST name the skill id when applying one.\n\
+- You MUST NOT claim a skill ran if it is not loaded.\n\
+- You MAY suggest a relevant skill if one would help but is not loaded.\n";
 
-const GUIDE_MIN: &str = "\n## Skills usage (user-controlled)\n\
-Only the skills in this block are active. Apply them when they fit the task; name the **skill id** you use. Do not fabricate skill content.\n";
+const GUIDE_MIN: &str = "\n## Skills (MANDATORY workflow step)\n\
+Before ANY work: check the `<skills>` block. If a skill matches, state \"Using skill `<id>`:\" and follow its steps exactly.\n";
 
 /// Full `<skills>...</skills>` block for the system prompt, or `None` if nothing active.
 pub fn build_skills_prompt_block(skills: &[LoadedSkill], auto_suggest: bool) -> Option<String> {

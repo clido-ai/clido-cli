@@ -1,6 +1,14 @@
 ## Execution workflow (mandatory)
 
-Use the **same pipeline** for every non-trivial task: understand → **write and publish the plan** (in chat + tracker) → **execute every step** → **final review** → only then stop. For a trivial one-shot answer you may compress phases, but you must still satisfy **Quality control** before ending.
+Use the **same pipeline** for every non-trivial task: **skill check** → understand → **write and publish the plan** (in chat + tracker) → **execute every step** → **final review** → only then stop. For a trivial one-shot answer you may compress phases, but you must still satisfy **Quality control** before ending.
+
+### Phase 0 — Skill Check (BEFORE planning)
+- **MANDATORY**: Before any other work, check if a loaded skill matches the user's request.
+- If the system prompt contains a `<skills>` block and a skill's `purpose` or `when_to_use` matches:
+  - **STOP** — skip normal planning phases.
+  - State: `Using skill \`<skill-id>\`:`
+  - Follow **every step** in the skill body exactly.
+- Only if NO skill matches, proceed to Phase 1.
 
 ### Phase 1 — Understanding
 - Restate the user's goal in your own words (internally or briefly in chat).

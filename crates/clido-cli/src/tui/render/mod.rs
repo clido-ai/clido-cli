@@ -2072,30 +2072,63 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
         return app.last_lines.clone();
     }
 
-    // Use unified renderer to generate ContentLines
-    let content_lines = render_chat_to_content_lines(&app.messages, width, &app.model);
+    // Incremental rendering: only render NEW messages that weren't in the cache.
+    // This avoids re-rendering all messages when only the last one changes.
+    let new_msg_count = app.messages.len();
+    let cached_msg_count = app.render_cache_msg_count;
 
-    // Store content lines for reference
-    app.content_lines = content_lines.clone();
+    let (content_lines, _) = if new_msg_count > cached_msg_count && cached_msg_count > 0 {
+        // Incremental: render only new messages and append to cached ones.
+        let new_messages = &app.messages[cached_msg_count..];
+        let new_content = render_chat_to_content_lines(new_messages, width, &app.model);
 
-    // Wrap content lines to screen width and create wrapped lines
-    let wrapped_lines = wrap_content_lines(&content_lines, width);
-    app.wrapped_lines = wrapped_lines.clone();
+        // Adjust msg_idx in new content to reflect absolute positions
+        let mut adjusted = Vec::with_capacity(new_content.len());
+        for mut cl in new_content {
+            cl.msg_idx += cached_msg_count;
+            adjusted.push(cl);
+        }
 
-    // Update rendered_line_texts for backward compatibility
-    app.rendered_line_texts = wrapped_lines.iter().map(|wl| wl.plain_text()).collect();
+        // Append to existing content_lines
+        app.content_lines.extend(adjusted);
 
-    // Convert wrapped lines to ratatui Lines for display
-    let lines: Vec<Line<'static>> = wrapped_lines
-        .iter()
-        .map(|wl| Line::from(wl.spans.clone()))
-        .collect();
+        // Re-wrap from combined content lines
+        let wrapped_lines = wrap_content_lines(&app.content_lines, width);
+        app.wrapped_lines = wrapped_lines.clone();
+        app.rendered_line_texts = wrapped_lines.iter().map(|wl| wl.plain_text()).collect();
 
-    // Update cache
-    app.last_chat_key = Some(cache_key);
-    app.last_lines = lines.clone();
+        let lines: Vec<Line<'static>> = wrapped_lines
+            .iter()
+            .map(|wl| Line::from(wl.spans.clone()))
+            .collect();
 
-    lines
+        app.last_chat_key = Some(cache_key);
+        app.last_lines = lines.clone();
+        app.render_cache_msg_count = new_msg_count;
+
+        (lines, cache_key)
+    } else {
+        // Full render: no cache or width changed or messages were removed.
+        let content_lines = render_chat_to_content_lines(&app.messages, width, &app.model);
+        app.content_lines = content_lines.clone();
+
+        let wrapped_lines = wrap_content_lines(&content_lines, width);
+        app.wrapped_lines = wrapped_lines.clone();
+        app.rendered_line_texts = wrapped_lines.iter().map(|wl| wl.plain_text()).collect();
+
+        let lines: Vec<Line<'static>> = wrapped_lines
+            .iter()
+            .map(|wl| Line::from(wl.spans.clone()))
+            .collect();
+
+        app.last_chat_key = Some(cache_key);
+        app.last_lines = lines.clone();
+        app.render_cache_msg_count = new_msg_count;
+
+        (lines, cache_key)
+    };
+
+    content_lines
 }
 
 /// Wrap content lines to fit screen width, tracking original positions.

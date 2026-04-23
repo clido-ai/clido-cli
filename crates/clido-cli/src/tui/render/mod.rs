@@ -830,9 +830,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Span::styled("Input", Style::default().fg(TUI_SOFT_ACCENT)),
             Span::styled(
                 if is_multiline {
-                    format!("{TUI_SEP}Shift+Enter newline{TUI_SEP}Enter send{TUI_SEP}Esc clear")
+                    format!("{TUI_SEP}Ctrl/Shift+Enter newline{TUI_SEP}Enter send{TUI_SEP}Esc clear")
                 } else {
-                    format!("{TUI_SEP}Enter send{TUI_SEP}Shift+Enter newline{TUI_SEP}Esc clear")
+                    format!("{TUI_SEP}Enter send{TUI_SEP}Ctrl/Shift+Enter newline{TUI_SEP}Esc clear")
                 },
                 Style::default().fg(TUI_ROW_DIM).add_modifier(Modifier::DIM),
             ),

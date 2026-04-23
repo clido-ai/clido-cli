@@ -156,9 +156,8 @@ pub(super) fn cmd_help(app: &mut App) {
     app.push(ChatLine::Section("Navigation".into()));
     app.push(ChatLine::Info("Enter              send message".into()));
     app.push(ChatLine::Info(
-        "Shift+Enter        insert newline (multiline input)".into(),
+        "Shift/Ctrl+Enter   insert newline (multiline input)".into(),
     ));
-    app.push(ChatLine::Info("Ctrl+Enter         interrupt & send".into()));
     app.push(ChatLine::Info(
         "↑↓                 input history / multiline cursor".into(),
     ));
@@ -208,8 +207,7 @@ pub(super) fn cmd_keys(app: &mut App) {
         (
             "Navigation".into(),
             "Enter              send message\n\
-            Shift+Enter        insert newline (multiline)\n\
-            Ctrl+Enter         interrupt & send\n\
+            Shift/Ctrl+Enter   insert newline (multiline)\n\
             ↑↓ (empty input)   scroll conversation\n\
             ↑↓ (with text)     history navigation\n\
             PgUp/PgDn          scroll 10 lines\n\

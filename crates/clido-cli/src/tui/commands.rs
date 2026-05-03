@@ -7,8 +7,8 @@ use crate::list_picker::ListPicker;
 use crate::overlay::{ErrorOverlay, OverlayKind, ReadOnlyOverlay};
 
 use super::state::{
-    InputFormField, PlanPanelVisibility, StatusRailVisibility,
-    WorkflowEntry, WorkflowInputFormState, WorkflowPickerAction, WorkflowPickerState,
+    InputFormField, PlanPanelVisibility, StatusRailVisibility, WorkflowEntry,
+    WorkflowInputFormState, WorkflowPickerAction, WorkflowPickerState,
 };
 use super::*;
 
@@ -149,8 +149,14 @@ pub(super) fn path_completions(text: &str, cursor: usize) -> (usize, Vec<PathCom
         (expanded.as_str().to_string(), String::new())
     } else {
         let p = std::path::Path::new(&expanded);
-        let parent = p.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| ".".to_string());
-        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let parent = p
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| ".".to_string());
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         (parent, name)
     };
 
@@ -179,14 +185,26 @@ pub(super) fn path_completions(text: &str, cursor: usize) -> (usize, Vec<PathCom
                     .parent()
                     .map(|p| {
                         let s = p.to_string_lossy().into_owned();
-                        if s.is_empty() { String::new() } else { format!("{}/", s) }
+                        if s.is_empty() {
+                            String::new()
+                        } else {
+                            format!("{}/", s)
+                        }
                     })
                     .unwrap_or_default()
             };
             let dir_suffix = if is_dir { "/" } else { "" };
             let full_path = format!("{at_prefix}{orig_dir}{entry_name}{dir_suffix}");
-            let pc = PathCompletion { name: entry_name, full: full_path, is_dir };
-            if is_dir { dirs.push(pc); } else { files.push(pc); }
+            let pc = PathCompletion {
+                name: entry_name,
+                full: full_path,
+                is_dir,
+            };
+            if is_dir {
+                dirs.push(pc);
+            } else {
+                files.push(pc);
+            }
         }
         dirs.sort_by(|a, b| a.name.cmp(&b.name));
         files.sort_by(|a, b| a.name.cmp(&b.name));
@@ -2483,10 +2501,25 @@ fn is_path_field(input: &clido_workflows::types::InputDef) -> bool {
     let name = input.name.to_lowercase();
     let desc = input.description.to_lowercase();
     let path_keywords = [
-        "path", "file", "dir", "directory", "csv", "json", "yaml", "yml",
-        "src", "dest", "destination", "output", "input", "log", "txt",
+        "path",
+        "file",
+        "dir",
+        "directory",
+        "csv",
+        "json",
+        "yaml",
+        "yml",
+        "src",
+        "dest",
+        "destination",
+        "output",
+        "input",
+        "log",
+        "txt",
     ];
-    path_keywords.iter().any(|kw| name.contains(kw) || desc.contains(kw))
+    path_keywords
+        .iter()
+        .any(|kw| name.contains(kw) || desc.contains(kw))
 }
 
 /// Open the workflow input form if the workflow has inputs; otherwise run directly.
@@ -2865,7 +2898,15 @@ pub(super) fn advance_workflow(app: &mut App) {
         }
     }
 
-    let (step_id, step_name, rendered, effective_profile, tools_hint, step_system_prompt, foreach_item_label) = {
+    let (
+        step_id,
+        step_name,
+        rendered,
+        effective_profile,
+        tools_hint,
+        step_system_prompt,
+        foreach_item_label,
+    ) = {
         let wf = app.active_workflow.as_ref().unwrap();
         let step = &wf.def.steps[current_idx];
         let name = step.name.clone().unwrap_or_else(|| step.id.clone());

@@ -1094,7 +1094,10 @@ pub(super) async fn agent_task(
                 // blocked items so completed work history isn't lost across prompts.
                 if let Ok(mut todos) = todo_store.lock() {
                     todos.retain(|t| {
-                        matches!(t.status, clido_tools::TodoStatus::Done | clido_tools::TodoStatus::Blocked)
+                        matches!(
+                            t.status,
+                            clido_tools::TodoStatus::Done | clido_tools::TodoStatus::Blocked
+                        )
                     });
                 }
 

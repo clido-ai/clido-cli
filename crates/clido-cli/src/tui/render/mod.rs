@@ -113,7 +113,9 @@ fn input_wants_path(text: &str, cursor: usize) -> bool {
         s
     };
     let word: String = chars[start..cursor].iter().collect();
-    word.starts_with('/') || word.starts_with("./") || word.starts_with("~/")
+    word.starts_with('/')
+        || word.starts_with("./")
+        || word.starts_with("~/")
         || word.starts_with('@')
 }
 
@@ -858,15 +860,25 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Span::styled("Input", Style::default().fg(TUI_SOFT_ACCENT)),
             Span::styled(
                 if is_multiline {
-                    format!("{TUI_SEP}Ctrl/Shift+Enter newline{TUI_SEP}Enter send{TUI_SEP}Esc clear")
+                    format!(
+                        "{TUI_SEP}Ctrl/Shift+Enter newline{TUI_SEP}Enter send{TUI_SEP}Esc clear"
+                    )
                 } else {
-                    format!("{TUI_SEP}Enter send{TUI_SEP}Ctrl/Shift+Enter newline{TUI_SEP}Esc clear")
+                    format!(
+                        "{TUI_SEP}Enter send{TUI_SEP}Ctrl/Shift+Enter newline{TUI_SEP}Esc clear"
+                    )
                 },
                 Style::default().fg(TUI_ROW_DIM).add_modifier(Modifier::DIM),
             ),
             Span::styled(
-                if wants_path { format!("{TUI_SEP}Ctrl+F browse") } else { String::new() },
-                Style::default().fg(TUI_SOFT_ACCENT).add_modifier(Modifier::DIM),
+                if wants_path {
+                    format!("{TUI_SEP}Ctrl+F browse")
+                } else {
+                    String::new()
+                },
+                Style::default()
+                    .fg(TUI_SOFT_ACCENT)
+                    .add_modifier(Modifier::DIM),
             ),
         ]);
         let block = Block::default()
@@ -969,7 +981,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Slash command popup ──
     let rows = slash_completion_rows(&app.text_input.text);
-    if !rows.is_empty() && app.pending_perm.is_none() && app.session_picker.is_none() && app.workflow_picker.is_none() {
+    if !rows.is_empty()
+        && app.pending_perm.is_none()
+        && app.session_picker.is_none()
+        && app.workflow_picker.is_none()
+    {
         // Slash command completion popup.
         const VISIBLE: usize = SLASH_COMPLETION_VISIBLE;
 
@@ -1086,7 +1102,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let popup_rect = popup_above_input(input_area, popup_h, popup_w);
             let inner_w = popup_rect.width.saturating_sub(4) as usize;
 
-            let end = (app.selected_path.unwrap_or(0).saturating_sub(VISIBLE - 1) + VISIBLE).min(completions.len());
+            let end = (app.selected_path.unwrap_or(0).saturating_sub(VISIBLE - 1) + VISIBLE)
+                .min(completions.len());
             let scroll = end.saturating_sub(VISIBLE);
 
             let content: Vec<Line<'static>> = completions[scroll..end]
@@ -1095,11 +1112,21 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 .map(|(di, c)| {
                     let abs_idx = scroll + di;
                     let selected = app.selected_path == Some(abs_idx);
-                    let bg = if selected { TUI_SELECTION_BG } else { Color::Reset };
-                    let style = if selected {
-                        Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::BOLD)
+                    let bg = if selected {
+                        TUI_SELECTION_BG
                     } else {
-                        Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::DIM)
+                        Color::Reset
+                    };
+                    let style = if selected {
+                        Style::default()
+                            .bg(bg)
+                            .fg(TUI_TEXT)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                            .bg(bg)
+                            .fg(TUI_TEXT)
+                            .add_modifier(Modifier::DIM)
                     };
                     let marker = if selected { "▶ " } else { "  " };
                     let icon = if c.is_dir { "📁 " } else { "   " };
@@ -1120,8 +1147,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let hint = " ↑↓ navigate · Tab/Enter complete · Esc dismiss ";
             frame.render_widget(Clear, popup_rect);
             frame.render_widget(
-                Paragraph::new(all_content)
-                    .block(modal_block_with_hint(&title, hint, modal_border_default())),
+                Paragraph::new(all_content).block(modal_block_with_hint(
+                    &title,
+                    hint,
+                    modal_border_default(),
+                )),
                 popup_rect,
             );
         }
@@ -1167,11 +1197,21 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let end = (fp.scroll_offset + VISIBLE).min(filtered.len());
         for (di, entry) in filtered[fp.scroll_offset..end].iter().enumerate() {
             let is_sel = fp.scroll_offset + di == fp.selected;
-            let bg = if is_sel { TUI_SELECTION_BG } else { Color::Reset };
-            let style = if is_sel {
-                Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::BOLD)
+            let bg = if is_sel {
+                TUI_SELECTION_BG
             } else {
-                Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::DIM)
+                Color::Reset
+            };
+            let style = if is_sel {
+                Style::default()
+                    .bg(bg)
+                    .fg(TUI_TEXT)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+                    .bg(bg)
+                    .fg(TUI_TEXT)
+                    .add_modifier(Modifier::DIM)
             };
             let marker = if is_sel { "▶ " } else { "  " };
             let icon = if entry.is_dir { "📁 " } else { "   " };
@@ -1194,8 +1234,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let hint = " ↑↓ navigate · Enter select/open · Backspace up dir · type filter · Home → ~ · Esc close ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content)
-                .block(modal_block_with_hint(title, hint, modal_border_default())),
+            Paragraph::new(content).block(modal_block_with_hint(
+                title,
+                hint,
+                modal_border_default(),
+            )),
             popup_rect,
         );
     }
@@ -1214,12 +1257,18 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         for (idx, field) in form.fields.iter().enumerate() {
             let is_current = idx == form.current_field;
             let label_style = if is_current {
-                Style::default().fg(TUI_SOFT_ACCENT).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(TUI_SOFT_ACCENT)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)
             };
             let req_marker = if field.required { " *" } else { "" };
-            let path_hint = if field.is_path { "  Ctrl+F to browse" } else { "" };
+            let path_hint = if field.is_path {
+                "  Ctrl+F to browse"
+            } else {
+                ""
+            };
             let desc_part = if field.description.is_empty() {
                 String::new()
             } else {
@@ -1258,7 +1307,17 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     Span::styled("  > ", box_style),
                     Span::styled(before_trunc, box_style),
                     Span::styled(at, cursor_style),
-                    Span::styled(after.chars().take(inner_w.saturating_sub(4 + before.chars().count().saturating_sub(scroll))).collect::<String>(), box_style),
+                    Span::styled(
+                        after
+                            .chars()
+                            .take(
+                                inner_w.saturating_sub(
+                                    4 + before.chars().count().saturating_sub(scroll),
+                                ),
+                            )
+                            .collect::<String>(),
+                        box_style,
+                    ),
                 ]));
             } else {
                 let val = field.effective_value();
@@ -1288,7 +1347,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             }
         }
 
-        let wf_name = form.workflow_path
+        let wf_name = form
+            .workflow_path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "workflow".to_string());
@@ -1296,8 +1356,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let hint = " Tab/Enter next · Shift+Tab back · Ctrl+Enter submit · Ctrl+F browse path · Esc cancel ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content)
-                .block(modal_block_with_hint(&title, hint, modal_border_default())),
+            Paragraph::new(content).block(modal_block_with_hint(
+                &title,
+                hint,
+                modal_border_default(),
+            )),
             popup_rect,
         );
     }
@@ -1324,10 +1387,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
         // Column header
         let steps_w = 7usize; // "N steps"
-        let loc_w = 6usize;   // "local"/"global"
+        let loc_w = 6usize; // "local"/"global"
         let name_w = inner_w.saturating_sub(steps_w + loc_w + 6).max(8);
         content.push(Line::from(vec![Span::styled(
-            format!("  {:<name_w$}  {:>steps_w$}  {:<loc_w$}", "name", "steps", "scope"),
+            format!(
+                "  {:<name_w$}  {:>steps_w$}  {:<loc_w$}",
+                "name", "steps", "scope"
+            ),
             Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
         )]));
         content.push(Line::from(vec![Span::styled(
@@ -1343,11 +1409,21 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
         for (di, entry) in filtered[picker.scroll_offset..end].iter().enumerate() {
             let is_selected = picker.scroll_offset + di == picker.selected;
-            let bg = if is_selected { TUI_SELECTION_BG } else { Color::Reset };
-            let style = if is_selected {
-                Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::BOLD)
+            let bg = if is_selected {
+                TUI_SELECTION_BG
             } else {
-                Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::DIM)
+                Color::Reset
+            };
+            let style = if is_selected {
+                Style::default()
+                    .bg(bg)
+                    .fg(TUI_TEXT)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+                    .bg(bg)
+                    .fg(TUI_TEXT)
+                    .add_modifier(Modifier::DIM)
             };
             let marker = if is_selected { "▶ " } else { "  " };
             let name_trunc: String = entry.name.chars().take(name_w).collect();
@@ -1364,7 +1440,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
         // Scroll indicators
         let above = picker.scroll_offset;
-        let below = filtered.len().saturating_sub(picker.scroll_offset + VISIBLE);
+        let below = filtered
+            .len()
+            .saturating_sub(picker.scroll_offset + VISIBLE);
         if let Some(line) = scroll_indicator_line(above, below) {
             content.push(line);
         }
@@ -1390,8 +1468,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         let hint: &str = Box::leak(hint.into_boxed_str());
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
-            Paragraph::new(content)
-                .block(modal_block_with_hint(&title, hint, modal_border_default())),
+            Paragraph::new(content).block(modal_block_with_hint(
+                &title,
+                hint,
+                modal_border_default(),
+            )),
             popup_rect,
         );
     }

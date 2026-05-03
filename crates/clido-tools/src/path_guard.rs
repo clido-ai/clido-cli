@@ -80,9 +80,10 @@ impl PathGuard {
         self.allowed_external
             .iter()
             .any(|allowed| canonical == allowed || canonical.starts_with(allowed))
-            || self.allowed_dirs.iter().any(|dir| {
-                canonical == dir || canonical.starts_with(dir)
-            })
+            || self
+                .allowed_dirs
+                .iter()
+                .any(|dir| canonical == dir || canonical.starts_with(dir))
     }
 
     /// Canonicalize path and ensure it is under workspace_root (or explicitly allowed

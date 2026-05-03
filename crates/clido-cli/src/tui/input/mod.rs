@@ -177,15 +177,13 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             }
             Char('f') | Char('F') => {
                 // Allow entire parent directory - grant access to all files under this folder.
-                let dir = std::fs::canonicalize(path)
-                    .ok()
-                    .and_then(|c| {
-                        if c.is_dir() {
-                            Some(c)
-                        } else {
-                            c.parent().map(|p| p.to_path_buf())
-                        }
-                    });
+                let dir = std::fs::canonicalize(path).ok().and_then(|c| {
+                    if c.is_dir() {
+                        Some(c)
+                    } else {
+                        c.parent().map(|p| p.to_path_buf())
+                    }
+                });
                 if let Some(dir) = dir {
                     // Store the directory in allowed_external_paths (the parent check in
                     // is_in_allowed_external handles dir containment).
@@ -328,19 +326,25 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         let start_dir = {
                             let val = form.fields[idx].effective_value();
                             if val.is_empty() {
-                                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                                std::env::current_dir()
+                                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
                             } else {
                                 let p = std::path::Path::new(val);
                                 if p.is_dir() {
                                     p.to_path_buf()
                                 } else {
-                                    p.parent().map(|x| x.to_path_buf())
-                                        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
+                                    p.parent().map(|x| x.to_path_buf()).unwrap_or_else(|| {
+                                        std::env::current_dir()
+                                            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                                    })
                                 }
                             }
                         };
                         use crate::tui::state::{FilePickerState, FilePickerTarget};
-                        app.file_picker = Some(FilePickerState::new(start_dir, FilePickerTarget::WorkflowFormField(idx)));
+                        app.file_picker = Some(FilePickerState::new(
+                            start_dir,
+                            FilePickerTarget::WorkflowFormField(idx),
+                        ));
                     }
                 }
             }
@@ -627,15 +631,28 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         match action {
                             WorkflowPickerAction::Run => {
                                 // Go through maybe_open_workflow_form so inputs are collected if needed.
-                                if let Some(path) = crate::tui::commands::find_workflow_path(app, &name) {
-                                    crate::tui::commands::maybe_open_workflow_form(app, path, vec![], None);
+                                if let Some(path) =
+                                    crate::tui::commands::find_workflow_path(app, &name)
+                                {
+                                    crate::tui::commands::maybe_open_workflow_form(
+                                        app,
+                                        path,
+                                        vec![],
+                                        None,
+                                    );
                                 }
                             }
                             WorkflowPickerAction::Show => {
-                                crate::tui::commands::execute_slash(app, &format!("/workflow show {name}"));
+                                crate::tui::commands::execute_slash(
+                                    app,
+                                    &format!("/workflow show {name}"),
+                                );
                             }
                             WorkflowPickerAction::Edit => {
-                                crate::tui::commands::execute_slash(app, &format!("/workflow edit {name}"));
+                                crate::tui::commands::execute_slash(
+                                    app,
+                                    &format!("/workflow edit {name}"),
+                                );
                             }
                             WorkflowPickerAction::AgentEdit => {
                                 app.text_input.text = format!("/workflow agent-edit {name} ");
@@ -1103,7 +1120,9 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     });
                     return;
                 }
-                (_, Tab) | (Km::NONE, Enter) if app.selected_path.is_some() || completions.len() == 1 => {
+                (_, Tab) | (Km::NONE, Enter)
+                    if app.selected_path.is_some() || completions.len() == 1 =>
+                {
                     let idx = app.selected_path.unwrap_or(0);
                     let completion = completions[idx].full.clone();
                     let is_dir = completions[idx].is_dir;
@@ -1422,7 +1441,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.queue_nav_idx = None;
                 app.text_input.history_draft = app.text_input.text.clone();
                 app.text_input.history_idx = Some(app.text_input.history.len() - 1);
-                app.text_input.text = app.text_input.history[app.text_input.history.len() - 1].clone();
+                app.text_input.text =
+                    app.text_input.history[app.text_input.history.len() - 1].clone();
                 app.text_input.cursor = 0;
                 app.selected_cmd = None;
             }

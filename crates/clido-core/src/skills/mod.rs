@@ -218,8 +218,10 @@ fn fixup_yaml(yaml: &str) -> String {
                 && !item_content.starts_with('"')
                 && !item_content.starts_with("'")
                 && (item_content.contains(':')
-                    || item_content.contains('[') || item_content.contains(']')
-                    || item_content.contains('{') || item_content.contains('}'))
+                    || item_content.contains('[')
+                    || item_content.contains(']')
+                    || item_content.contains('{')
+                    || item_content.contains('}'))
             {
                 // Quote the list item content
                 let indent = line.len() - line.trim_start().len();
@@ -245,7 +247,8 @@ fn fixup_yaml(yaml: &str) -> String {
                 || value_trimmed.starts_with('"')
                 || value_trimmed.starts_with("'")
                 || value_trimmed.parse::<f64>().is_ok()
-                || value_trimmed == "true" || value_trimmed == "false"
+                || value_trimmed == "true"
+                || value_trimmed == "false"
                 || value_trimmed == "null"
             {
                 result.push_str(line);
@@ -255,10 +258,14 @@ fn fixup_yaml(yaml: &str) -> String {
 
             // If value contains colon, bracket, or other YAML special chars, quote it
             if value_trimmed.contains(':')
-                || value_trimmed.contains('[') || value_trimmed.contains(']')
-                || value_trimmed.contains('{') || value_trimmed.contains('}')
-                || value_trimmed.contains('&') || value_trimmed.contains('*')
-                || value_trimmed.contains('|') || value_trimmed.contains('>')
+                || value_trimmed.contains('[')
+                || value_trimmed.contains(']')
+                || value_trimmed.contains('{')
+                || value_trimmed.contains('}')
+                || value_trimmed.contains('&')
+                || value_trimmed.contains('*')
+                || value_trimmed.contains('|')
+                || value_trimmed.contains('>')
             {
                 // Quote the value
                 result.push_str(key_trimmed);
@@ -269,7 +276,7 @@ fn fixup_yaml(yaml: &str) -> String {
                 continue;
             }
         }
-        
+
         result.push_str(line);
         result.push('\n');
     }
@@ -508,7 +515,8 @@ Do the thing.
 
     #[test]
     fn fixup_yaml_quotes_values_with_colons() {
-        let yaml = "description: Create a React component: write tests\ninputs: path: where to create";
+        let yaml =
+            "description: Create a React component: write tests\ninputs: path: where to create";
         let fixed = fixup_yaml(yaml);
         assert!(fixed.contains("description: \"Create a React component: write tests\""));
         assert!(fixed.contains("inputs: \"path: where to create\""));
@@ -534,7 +542,11 @@ inputs: What user needs: a path
 Body content here.
 ";
         let result = parse_skill_document(raw, "test");
-        assert!(result.is_ok(), "Should auto-fix YAML and parse: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Should auto-fix YAML and parse: {:?}",
+            result
+        );
         let (m, body) = result.unwrap();
         assert_eq!(m.id, "test-skill");
         assert!(body.contains("Body content here."));

@@ -3,6 +3,8 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::list_picker::ListPicker;
 use crate::overlay::{AppAction, ErrorOverlay, OverlayKeyResult, OverlayKind};
+use crate::tui::commands::path_completions;
+use crate::tui::event_loop::read_clipboard;
 
 use super::config::*;
 use super::*;
@@ -318,6 +320,103 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     // ── Workflow input form (modal) ───────────────────────────────────────────
     if app.workflow_input_form.is_some() {
         match (event.modifiers, event.code) {
+            // Ctrl+V: paste from clipboard
+            (Km::CONTROL, Char('v')) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    let field = &mut form.fields[form.current_field];
+                    match read_clipboard() {
+                        Ok(s) if !s.is_empty() => {
+                            let text = s.replace("\r\n", "\n").replace('\r', "\n");
+                            let byte_pos = char_byte_pos(&field.value, form.cursor);
+                            field.value.insert_str(byte_pos, &text);
+                            form.cursor += text.chars().count();
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            app.push_toast(
+                                format!("Clipboard: {}", e),
+                                TUI_STATE_WARN,
+                                std::time::Duration::from_secs(3),
+                            );
+                        }
+                    }
+                }
+            }
+            // Ctrl+A: select all → put cursor at end
+            (Km::CONTROL, Char('a')) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    form.cursor = form.fields[form.current_field].value.chars().count();
+                }
+            }
+            // Ctrl+W: delete word before cursor
+            (Km::CONTROL, Char('w')) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    let field = &mut form.fields[form.current_field];
+                    if form.cursor > 0 {
+                        let chars: Vec<char> = field.value.chars().collect();
+                        let mut ws = form.cursor - 1;
+                        while ws > 0 && chars[ws].is_alphanumeric() {
+                            ws -= 1;
+                        }
+                        let delete_count = form.cursor - ws;
+                        let byte_ws = char_byte_pos(&field.value, ws);
+                        let byte_cursor = char_byte_pos(&field.value, form.cursor);
+                        field.value.replace_range(byte_ws..byte_cursor, "");
+                        form.cursor = ws;
+                        let _ = delete_count;
+                    }
+                }
+            }
+            // Tab on path field → cycle path completions (same as main input)
+            (Km::NONE, Tab) => {
+                if let Some(form) = &app.workflow_input_form {
+                    if form.fields[form.current_field].is_path {
+                        let field = &form.fields[form.current_field];
+                        let (word_start, completions) =
+                            path_completions(&field.value, form.cursor);
+                        if !completions.is_empty() {
+                            // Use form's stored completion index or default to 0
+                            let idx = form
+                                .path_completion_idx
+                                .unwrap_or(0)
+                                .min(completions.len() - 1);
+                            let entry = &completions[idx];
+                            if let Some(form) = &mut app.workflow_input_form {
+                                let field = &mut form.fields[form.current_field];
+                                let before: String =
+                                    field.value.chars().take(word_start).collect();
+                                field.value = format!("{}{}", before, entry.full);
+                                form.cursor =
+                                    before.chars().count() + entry.full.chars().count();
+                                form.path_completion_idx = Some(
+                                    (idx + 1).min(completions.len() - 1),
+                                );
+                            }
+                            return;
+                        }
+                    }
+                    // Not a path field — fall through to next-field behavior
+                    if let Some(form) = &mut app.workflow_input_form {
+                        if form.current_field + 1 < form.fields.len() {
+                            form.current_field += 1;
+                            form.cursor =
+                                form.fields[form.current_field].value.chars().count();
+                            form.path_completion_idx = None;
+                        }
+                    }
+                }
+            }
+            // Shift+Tab: previous field
+            (Km::SHIFT, BackTab) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    if form.current_field > 0 {
+                        form.current_field -= 1;
+                        form.cursor =
+                            form.fields[form.current_field].value.chars().count();
+                        form.path_completion_idx = None;
+                    }
+                }
+            }
             // Ctrl+F on a path field → open file picker for that field
             (Km::CONTROL, KeyCode::Char('f') | KeyCode::Char('F')) => {
                 if let Some(form) = &app.workflow_input_form {

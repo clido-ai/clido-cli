@@ -496,6 +496,8 @@ pub(crate) struct WorkflowInputFormState {
     pub(crate) profile_override: Option<String>,
     /// Cursor position within the current field's text input.
     pub(crate) cursor: usize,
+    /// Path completion cycling index for path fields.
+    pub(crate) path_completion_idx: Option<usize>,
 }
 
 impl WorkflowInputFormState {

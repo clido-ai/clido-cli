@@ -1265,7 +1265,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             };
             let req_marker = if field.required { " *" } else { "" };
             let path_hint = if field.is_path {
-                "  Ctrl+F to browse"
+                "  Tab to complete · Ctrl+F to browse"
             } else {
                 ""
             };
@@ -1353,7 +1353,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "workflow".to_string());
         let title = format!(" {} — inputs ", wf_name);
-        let hint = " Tab/Enter next · Shift+Tab back · Ctrl+Enter submit · Ctrl+F browse path · Esc cancel ";
+        let hint = " Tab/Enter next · Shift+Tab back · Ctrl+Enter submit · Ctrl+V paste · Ctrl+F browse path · Esc cancel ";
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block_with_hint(
@@ -1363,6 +1363,78 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             )),
             popup_rect,
         );
+
+        // Path completion popup for workflow form
+        if let Some(form) = &app.workflow_input_form {
+            let field = &form.fields[form.current_field];
+            if field.is_path {
+                use crate::tui::commands::path_completions;
+                let (word_start, completions) =
+                    path_completions(&field.value, form.cursor);
+                if !completions.is_empty() && form.path_completion_idx.is_some() {
+                    // Position the completion popup below the form
+                    let max_items = 8.min(completions.len()) as u16;
+                    let popup_h = max_items + 2; // items + borders
+                    let popup_w = 60.min(area.width.saturating_sub(4));
+                    if popup_rect.y + popup_rect.height + popup_h < area.height {
+                        let comp_rect = Rect::new(
+                            popup_rect.x + 2,
+                            popup_rect.y + popup_rect.height,
+                            popup_w,
+                            popup_h,
+                        );
+                        let start_idx = form.path_completion_idx.unwrap_or(0);
+                        let visible: Vec<_> = completions
+                            .iter()
+                            .skip(start_idx)
+                            .take(max_items as usize)
+                            .collect();
+                        let lines: Vec<Line<'_>> = visible
+                            .iter()
+                            .enumerate()
+                            .map(|(i, c)| {
+                                let selected = i == 0;
+                                let bg = if selected {
+                                    TUI_SELECTION_BG
+                                } else {
+                                    Color::Reset
+                                };
+                                let style = if selected {
+                                    Style::default()
+                                        .bg(bg)
+                                        .fg(TUI_TEXT)
+                                        .add_modifier(Modifier::BOLD)
+                                } else {
+                                    Style::default().bg(bg).fg(TUI_TEXT)
+                                };
+                                let marker = if selected { "▶ " } else { "  " };
+                                Line::from(vec![
+                                    Span::styled(
+                                        marker.to_string(),
+                                        if selected {
+                                            Style::default().fg(TUI_ACCENT).add_modifier(Modifier::BOLD)
+                                        } else {
+                                            Style::default().fg(TUI_MUTED)
+                                        },
+                                    ),
+                                    Span::styled(c.full.to_string(), style),
+                                ])
+                            })
+                            .collect();
+                        frame.render_widget(Clear, comp_rect);
+                        frame.render_widget(
+                            Paragraph::new(lines)
+                                .block(
+                                    Borders::rounded()
+                                        .style(Style::default().fg(TUI_ACCENT)),
+                                )
+                                .scroll((0, 0)),
+                            comp_rect,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     // ── Workflow picker ───────────────────────────────────────────────────────

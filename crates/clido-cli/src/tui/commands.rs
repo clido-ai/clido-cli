@@ -2575,6 +2575,7 @@ pub(super) fn maybe_open_workflow_form(
         current_field: 0,
         profile_override,
         cursor: 0,
+        path_completion_idx: None,
     });
 }
 

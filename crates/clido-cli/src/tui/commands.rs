@@ -2631,6 +2631,9 @@ fn start_workflow(
         parallel_abort: None,
         retry_attempts: 0,
         profile_override,
+        halted: false,
+        foreach_items: Vec::new(),
+        foreach_item_idx: 0,
     });
     app.plan_panel_visibility = super::state::PlanPanelVisibility::On;
 
@@ -2647,6 +2650,30 @@ fn start_workflow(
     }
 
     advance_workflow(app);
+}
+
+/// Evaluate a foreach expression in the TUI context: render it as a Tera template,
+/// then try JSON array parsing, falling back to newline-separated strings.
+fn evaluate_foreach_items_tui(
+    expr: &str,
+    ctx: &clido_workflows::WorkflowContext,
+) -> Result<Vec<serde_json::Value>, String> {
+    let rendered = clido_workflows::render(expr, ctx).map_err(|e| e.to_string())?;
+    let trimmed = rendered.trim();
+    // Try JSON array first.
+    if trimmed.starts_with('[') {
+        if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(trimmed) {
+            return Ok(arr);
+        }
+    }
+    // Fall back to newline-separated strings.
+    let items: Vec<serde_json::Value> = trimmed
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .map(|l| serde_json::Value::String(l.to_string()))
+        .collect();
+    Ok(items)
 }
 
 /// Advance the workflow orchestrator to the next step (or finish).
@@ -2784,8 +2811,61 @@ pub(super) fn advance_workflow(app: &mut App) {
         return;
     }
 
-    // Phase 3: sequential step — send its prompt to the main agent.
-    let (step_id, step_name, rendered, effective_profile, tools_hint, step_system_prompt) = {
+    // Phase 3: sequential step — handle foreach setup, then send its prompt to the main agent.
+
+    // Phase 3a: foreach initialization — evaluate items and inject current item into context.
+    {
+        let wf = app.active_workflow.as_mut().unwrap();
+        let step = &wf.def.steps[current_idx];
+        if let Some(ref foreach_expr) = step.foreach.clone() {
+            if wf.foreach_items.is_empty() {
+                // Evaluate foreach items for this step.
+                let expr = foreach_expr.clone();
+                match evaluate_foreach_items_tui(&expr, &wf.context) {
+                    Ok(items) if !items.is_empty() => {
+                        wf.foreach_items = items;
+                        wf.foreach_item_idx = 0;
+                    }
+                    Ok(_) => {
+                        // Empty list — skip step entirely.
+                        wf.current_idx += 1;
+                        drop(wf); // Release borrow before recursive call.
+                        advance_workflow(app);
+                        return;
+                    }
+                    Err(e) => {
+                        let step_id = step.id.clone();
+                        drop(wf);
+                        app.push(ChatLine::Info(format!(
+                            "  ✗ Failed to evaluate foreach for step '{step_id}': {e}"
+                        )));
+                        app.on_agent_done();
+                        app.active_workflow = None;
+                        return;
+                    }
+                }
+                // Re-borrow after potential drop.
+                let wf = app.active_workflow.as_mut().unwrap();
+                let var_name = wf.def.steps[current_idx]
+                    .foreach_var
+                    .clone()
+                    .unwrap_or_else(|| "item".to_string());
+                let item = wf.foreach_items[0].clone();
+                wf.context.set_foreach_item(&var_name, item);
+            } else {
+                // Already initialized — set current item.
+                let idx = wf.foreach_item_idx;
+                let var_name = step
+                    .foreach_var
+                    .clone()
+                    .unwrap_or_else(|| "item".to_string());
+                let item = wf.foreach_items[idx].clone();
+                wf.context.set_foreach_item(&var_name, item);
+            }
+        }
+    }
+
+    let (step_id, step_name, rendered, effective_profile, tools_hint, step_system_prompt, foreach_item_label) = {
         let wf = app.active_workflow.as_ref().unwrap();
         let step = &wf.def.steps[current_idx];
         let name = step.name.clone().unwrap_or_else(|| step.id.clone());
@@ -2815,6 +2895,18 @@ pub(super) fn advance_workflow(app: &mut App) {
         });
         // Effective profile: step-level > workflow --profile= override > session default.
         let effective_profile = step.profile.clone().or_else(|| wf.profile_override.clone());
+        // For foreach steps, build a label showing progress through items.
+        let foreach_item_label = if step.foreach.is_some() && !wf.foreach_items.is_empty() {
+            let idx = wf.foreach_item_idx;
+            let total_items = wf.foreach_items.len();
+            let item_str = wf.foreach_items[idx]
+                .as_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| wf.foreach_items[idx].to_string());
+            Some(format!(" [{}/{}] item: {}", idx + 1, total_items, item_str))
+        } else {
+            None
+        };
         (
             step.id.clone(),
             name,
@@ -2822,6 +2914,7 @@ pub(super) fn advance_workflow(app: &mut App) {
             effective_profile,
             tools_hint,
             step.system_prompt.clone(),
+            foreach_item_label,
         )
     };
 
@@ -2834,12 +2927,13 @@ pub(super) fn advance_workflow(app: &mut App) {
         wf.step_start_time = Some(std::time::Instant::now());
     }
 
-    // Show a step header in chat.
-    app.push(ChatLine::Info(format!(
-        "  [{}/{}] ▶ {step_name}",
-        current_idx + 1,
-        total
-    )));
+    // Show a step header in chat (include foreach item label when iterating).
+    let step_header = if let Some(ref label) = foreach_item_label {
+        format!("  [{}/{}] ▶ {step_name}{label}", current_idx + 1, total)
+    } else {
+        format!("  [{}/{}] ▶ {step_name}", current_idx + 1, total)
+    };
+    app.push(ChatLine::Info(step_header));
 
     // Switch model if effective profile specifies a different model.
     if let Some(ref profile_name) = effective_profile {
@@ -2887,6 +2981,7 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
     use clido_workflows::OnErrorPolicy;
 
     // Extract everything we need before borrowing mutably.
+    // For foreach steps we may NOT increment current_idx if more items remain.
     let (step_id, step_num, total, step_name, outputs, on_error, prev_model, dur_ms) = {
         let Some(ref mut wf) = app.active_workflow else {
             return;
@@ -2900,6 +2995,8 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
         let on_error = step.on_error;
 
         // Store output in context (all output aliases + canonical "output").
+        // For foreach steps we accumulate; simple append for now (last item's output
+        // overwrites in step_outputs but we store each iteration's text directly).
         wf.context.set_step_output(&step_id, "output", text.clone());
         for out in &outputs {
             if out.name != "output" {
@@ -2921,7 +3018,26 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
 
         let prev_model = wf.step_prev_model.take();
         wf.retry_attempts = 0;
-        wf.current_idx += 1;
+
+        // Foreach handling: check if this step has more items to iterate.
+        let in_foreach = step.foreach.is_some() && !wf.foreach_items.is_empty();
+        if in_foreach {
+            let next_item_idx = wf.foreach_item_idx + 1;
+            if next_item_idx < wf.foreach_items.len() {
+                // More items — advance item index but keep current_idx the same.
+                wf.foreach_item_idx = next_item_idx;
+                // Don't increment current_idx yet.
+            } else {
+                // All items exhausted — clear foreach state and advance to next step.
+                wf.foreach_items.clear();
+                wf.foreach_item_idx = 0;
+                wf.context.clear_foreach_context();
+                wf.current_idx += 1;
+            }
+        } else {
+            wf.current_idx += 1;
+        }
+
         (
             step_id, step_num, total, step_name, outputs, on_error, prev_model, dur_ms,
         )

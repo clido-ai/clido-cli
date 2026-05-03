@@ -2954,7 +2954,10 @@ pub(super) async fn event_loop(
                             // Continue to show the response as Assistant message
                         }
 
-                        // Check if we're waiting for agent-driven workflow edit
+                        // Check if we're waiting for agent-driven workflow edit.
+                        // Track whether we consumed this response as an agent-edit so we
+                        // don't also route it to the workflow step handler.
+                        let was_agent_edit = app.pending_workflow_agent_edit.is_some();
                         if let Some(workflow_path) = app.pending_workflow_agent_edit.take() {
                             // Try to extract YAML from the response
                             if let Some(yaml) = extract_last_yaml_from_chat(&[ChatLine::Assistant(text.clone())]) {
@@ -2994,9 +2997,12 @@ pub(super) async fn event_loop(
                             app.current_step = Some(step);
                             app.last_executed_step_num = Some(num);
                         }
-                        // If a workflow is running, route the response to the orchestrator
-                        // instead of calling on_agent_done — it will advance to the next step.
-                        if app.active_workflow.is_some() {
+                        // If a workflow is running AND not halted AND this wasn't an agent-edit
+                        // response, route to the orchestrator instead of calling on_agent_done.
+                        let workflow_active = app.active_workflow.as_ref()
+                            .map(|wf| !wf.halted)
+                            .unwrap_or(false);
+                        if workflow_active && !was_agent_edit {
                             app.push(ChatLine::Assistant(text.clone()));
                             crate::tui::commands::handle_workflow_step_response(app, text);
                             // Skip the normal on_agent_done / notification path.
@@ -3184,6 +3190,9 @@ pub(super) async fn event_loop(
                         last_agent_activity = std::time::Instant::now();
                         if let Some(ref mut wf) = app.active_workflow {
                             wf.parallel_abort = None;
+                            // Mark as halted so subsequent user messages are NOT routed
+                            // back to the workflow orchestrator.
+                            wf.halted = true;
                         }
                         app.push(ChatLine::Info(format!(
                             "  ✗ Workflow '{}' failed at '{}': {}",

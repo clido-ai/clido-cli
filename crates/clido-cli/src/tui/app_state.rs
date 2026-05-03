@@ -126,6 +126,12 @@ pub(super) struct ActiveWorkflow {
     /// Profile override from `/workflow run --profile=<name>` — applied to steps
     /// that don't have their own `profile:` field.
     pub(super) profile_override: Option<String>,
+    /// True when the workflow has failed — keep rail visible but don't advance on new messages.
+    pub(super) halted: bool,
+    /// For foreach steps: expanded items to iterate over.
+    pub(super) foreach_items: Vec<serde_json::Value>,
+    /// For foreach steps: current item index.
+    pub(super) foreach_item_idx: usize,
 }
 
 pub(super) struct App {

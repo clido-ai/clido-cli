@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.12] - 2026-04-15
+
+### Added
+
+- **Folder-level path permissions**: Press `[f]` when granting path access to allow the entire parent directory, preventing repeated permission prompts for files in the same folder.
+- **Workflow `foreach` iteration**: Steps can declare `foreach: <tera-expr>` to iterate once per item in a JSON array or newline-delimited list. Each iteration receives the item as `{{ item }}` in the template context.
+- **Workflow input form**: Running a workflow with `inputs:` now opens an interactive modal form to collect values before execution. Path fields offer Ctrl+F file browsing.
+- **Workflow picker**: `/workflow list`, `/workflow show`, `/workflow run` now open an interactive searchable picker instead of printing a flat list.
+- **Path completion popup**: Inline filesystem completions for typing file paths (Tab/Enter to select, ↑↓ to navigate). Deactivates when slash commands are active.
+- **Write tool content preview**: Successful Write output now includes the first 15 lines of the written file so users immediately see what was generated.
+- **Write error hints**: When Write fails with "path outside working directory", the error now includes an actionable hint suggesting the agent retry with a relative path.
+- **Provider 400 retry**: `InternalError` responses from providers (mis-classified transient failures) are now marked as retryable.
+- **Runtime path permissions**: Path grants now take effect immediately via a shared Arc, so tool retries after user-granted permissions see the new allowed path without waiting for registry rebuild.
+- **Done/blocked todo persistence**: Completed and blocked todos now persist across prompts instead of being cleared on every new message.
+- **Active tool display in plan panel**: When the agent is busy running a tool, that tool call is surfaced as the first step in the TASK panel.
+
+### Changed
+
+- **Slash command Enter behavior**: Selecting a completion with arrow keys and pressing Enter now fills AND executes in one step (no two-step "fill then execute" layover). Commands that need arguments still require a second Enter.
+- **Path completions respect slash commands**: Typing `/` for slash commands no longer shows root directory completions. Slash commands always take priority.
+- **Workflow input collection**: Workflows with inputs are now collected via an interactive form rather than requiring `key=value` on the command line.
+
+### Fixed
+
+- **Workflow halt on error**: Failed workflow steps now mark the workflow as halted so subsequent user messages are not incorrectly routed back to the workflow orchestrator.
+- **File picker modal scope**: Removed Ctrl+F file picker from the main text input — inline path completions handle this use case directly. File picker remains for workflow input forms.
+- **YAML fixup formatting**: Improved clippy compliance in `fixup_yaml` function.
+
 ## [1.0.11] - 2025-01-21
 
 ### Added

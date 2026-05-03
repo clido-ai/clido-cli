@@ -372,8 +372,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 if let Some(form) = &app.workflow_input_form {
                     if form.fields[form.current_field].is_path {
                         let field = &form.fields[form.current_field];
-                        let (word_start, completions) =
-                            path_completions(&field.value, form.cursor);
+                        let (word_start, completions) = path_completions(&field.value, form.cursor);
                         if !completions.is_empty() {
                             // Use form's stored completion index or default to 0
                             let idx = form
@@ -383,14 +382,11 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                             let entry = &completions[idx];
                             if let Some(form) = &mut app.workflow_input_form {
                                 let field = &mut form.fields[form.current_field];
-                                let before: String =
-                                    field.value.chars().take(word_start).collect();
+                                let before: String = field.value.chars().take(word_start).collect();
                                 field.value = format!("{}{}", before, entry.full);
-                                form.cursor =
-                                    before.chars().count() + entry.full.chars().count();
-                                form.path_completion_idx = Some(
-                                    (idx + 1).min(completions.len() - 1),
-                                );
+                                form.cursor = before.chars().count() + entry.full.chars().count();
+                                form.path_completion_idx =
+                                    Some((idx + 1).min(completions.len() - 1));
                             }
                             return;
                         }
@@ -399,20 +395,19 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     if let Some(form) = &mut app.workflow_input_form {
                         if form.current_field + 1 < form.fields.len() {
                             form.current_field += 1;
-                            form.cursor =
-                                form.fields[form.current_field].value.chars().count();
+                            form.cursor = form.fields[form.current_field].value.chars().count();
                             form.path_completion_idx = None;
                         }
                     }
                 }
+                return;
             }
             // Shift+Tab: previous field
             (Km::SHIFT, BackTab) => {
                 if let Some(form) = &mut app.workflow_input_form {
                     if form.current_field > 0 {
                         form.current_field -= 1;
-                        form.cursor =
-                            form.fields[form.current_field].value.chars().count();
+                        form.cursor = form.fields[form.current_field].value.chars().count();
                         form.path_completion_idx = None;
                     }
                 }
@@ -464,24 +459,6 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             // Shift+Enter or Ctrl+Enter: submit immediately
             (Km::SHIFT, Enter) | (Km::CONTROL, Enter) => {
                 crate::tui::commands::submit_workflow_form(app);
-            }
-            // Tab: next field
-            (Km::NONE, KeyCode::Tab) => {
-                if let Some(form) = &mut app.workflow_input_form {
-                    if form.current_field + 1 < form.fields.len() {
-                        form.current_field += 1;
-                        form.cursor = form.fields[form.current_field].value.chars().count();
-                    }
-                }
-            }
-            // Shift+Tab: previous field
-            (Km::SHIFT, KeyCode::BackTab) => {
-                if let Some(form) = &mut app.workflow_input_form {
-                    if form.current_field > 0 {
-                        form.current_field -= 1;
-                        form.cursor = form.fields[form.current_field].value.chars().count();
-                    }
-                }
             }
             // Esc: cancel
             (_, Esc) => {

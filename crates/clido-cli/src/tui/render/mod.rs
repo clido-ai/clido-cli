@@ -1369,8 +1369,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             let field = &form.fields[form.current_field];
             if field.is_path {
                 use crate::tui::commands::path_completions;
-                let (word_start, completions) =
-                    path_completions(&field.value, form.cursor);
+                let (_word_start, completions) = path_completions(&field.value, form.cursor);
                 if !completions.is_empty() && form.path_completion_idx.is_some() {
                     // Position the completion popup below the form
                     let max_items = 8.min(completions.len()) as u16;
@@ -1412,7 +1411,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                                     Span::styled(
                                         marker.to_string(),
                                         if selected {
-                                            Style::default().fg(TUI_ACCENT).add_modifier(Modifier::BOLD)
+                                            Style::default()
+                                                .fg(TUI_ACCENT)
+                                                .add_modifier(Modifier::BOLD)
                                         } else {
                                             Style::default().fg(TUI_MUTED)
                                         },
@@ -1425,7 +1426,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                         frame.render_widget(
                             Paragraph::new(lines)
                                 .block(
-                                    Borders::rounded()
+                                    Block::new()
+                                        .borders(Borders::ALL)
+                                        .border_type(BorderType::Rounded)
                                         .style(Style::default().fg(TUI_ACCENT)),
                                 )
                                 .scroll((0, 0)),

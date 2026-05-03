@@ -91,40 +91,6 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         return;
     }
 
-    // ── Ctrl+F: open file picker targeting main input ────────────────────────
-    if matches!((event.modifiers, event.code), (Km::CONTROL, Char('f'))) {
-        let start_dir = {
-            // Try to infer a start dir from the word at cursor
-            let text = &app.text_input.text;
-            let cursor = app.text_input.cursor;
-            let chars: Vec<char> = text.chars().collect();
-            let mut start = cursor;
-            while start > 0 {
-                let c = chars[start - 1];
-                if c == ' ' || c == '\t' {
-                    break;
-                }
-                start -= 1;
-            }
-            let word: String = chars[start..cursor].iter().collect();
-            let p = std::path::Path::new(&word);
-            if p.is_dir() {
-                p.to_path_buf()
-            } else if let Some(parent) = p.parent() {
-                if parent.is_dir() {
-                    parent.to_path_buf()
-                } else {
-                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-                }
-            } else {
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-            }
-        };
-        use crate::tui::state::{FilePickerState, FilePickerTarget};
-        app.file_picker = Some(FilePickerState::new(start_dir, FilePickerTarget::MainTextInput));
-        return;
-    }
-
     // ── Plan text editor (nano-style, intercepts all keys) ───────────────────
     if app.plan.text_editor.is_some() {
         handle_plan_text_editor_key(app, event);
@@ -262,7 +228,7 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         OverlayKeyResult::NotHandled | OverlayKeyResult::NoOverlay => {}
     }
 
-    // ── File picker (modal) ──────────────────────────────────────────────────
+    // ── File picker (modal) — used by workflow input forms for path fields ───
     if app.file_picker.is_some() {
         const VISIBLE: usize = 16;
         match (event.modifiers, event.code) {
@@ -300,36 +266,13 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                             fp.enter_dir(entry.path);
                             app.file_picker = Some(fp);
                         } else {
-                            // Deliver path to target
+                            // Deliver path to workflow form field
                             let path_str = entry.path.to_string_lossy().into_owned();
-                            use crate::tui::state::FilePickerTarget;
-                            match fp.target {
-                                FilePickerTarget::WorkflowFormField(idx) => {
-                                    if let Some(form) = &mut app.workflow_input_form {
-                                        if idx < form.fields.len() {
-                                            form.fields[idx].value = path_str;
-                                            form.cursor = form.fields[idx].value.chars().count();
-                                        }
-                                    }
-                                }
-                                FilePickerTarget::MainTextInput => {
-                                    // Replace the word at cursor that starts with / . or ~
-                                    let text = &app.text_input.text;
-                                    let cursor = app.text_input.cursor;
-                                    // Find word start
-                                    let chars: Vec<char> = text.chars().collect();
-                                    let mut start = cursor;
-                                    while start > 0 {
-                                        let c = chars[start - 1];
-                                        if c == ' ' || c == '\t' || c == '\n' {
-                                            break;
-                                        }
-                                        start -= 1;
-                                    }
-                                    let before: String = chars[..start].iter().collect();
-                                    let after: String = chars[cursor..].iter().collect();
-                                    app.text_input.text = format!("{before}{path_str}{after}");
-                                    app.text_input.cursor = start + path_str.chars().count();
+                            let FilePickerTarget::WorkflowFormField(idx) = fp.target;
+                            if let Some(form) = &mut app.workflow_input_form {
+                                if idx < form.fields.len() {
+                                    form.fields[idx].value = path_str;
+                                    form.cursor = form.fields[idx].value.chars().count();
                                 }
                             }
                         }
@@ -1061,14 +1004,33 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 if let Some(idx) = idx {
                     let cmd = completions[idx].0.to_string();
                     if app.text_input.text != cmd {
-                        // First Enter: fill the input with the full command name, don't send yet.
-                        // User can then add arguments or press Enter again to send.
-                        app.text_input.text = cmd;
-                        app.text_input.cursor = app.text_input.text.chars().count();
+                        // Input is a prefix match. If the user explicitly selected
+                        // this completion with arrow keys, fill AND execute in one
+                        // step (unless the command needs arguments). Otherwise just
+                        // fill the input so they can type args.
+                        let explicitly_selected = app.selected_cmd.is_some();
+                        app.text_input.text.clone_from(&cmd);
+                        app.text_input.cursor = cmd.chars().count();
                         app.selected_cmd = None;
+                        if explicitly_selected {
+                            let needs_arg = crate::command_registry::COMMANDS
+                                .iter()
+                                .find(|c| c.name == cmd)
+                                .map(|c| c.takes_args)
+                                .unwrap_or(false);
+                            if !needs_arg {
+                                app.text_input.text.clear();
+                                app.text_input.cursor = 0;
+                                execute_slash(app, &cmd);
+                                return;
+                            }
+                            // needs_arg → leave the filled command in the input for args.
+                            return;
+                        }
+                        // No explicit selection — just fill so user can type args.
                         return;
                     }
-                    // Second Enter (or input already matches): execute or fall through.
+                    // Input already matches: execute if no args needed.
                     let needs_arg = crate::command_registry::COMMANDS
                         .iter()
                         .find(|c| c.name == cmd)
@@ -1103,9 +1065,20 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
     }
 
     // ── Path completion popup ────────────────────────────────────────────────
+    // Only activate when slash commands are NOT already active. If the input
+    // starts with "/" at position 0, slash commands take priority — we don't
+    // want to show root directories when the user is trying to access commands.
+    let slash_active = {
+        let t: String = app.text_input.text.chars().take(64).collect();
+        !slash_completions(&t).is_empty()
+    };
     {
         use crate::tui::commands::path_completions;
-        let (word_start, completions) = path_completions(&app.text_input.text, app.text_input.cursor);
+        let (word_start, completions) = if slash_active {
+            (0, vec![])
+        } else {
+            path_completions(&app.text_input.text, app.text_input.cursor)
+        };
 
         if !completions.is_empty() {
             // Clamp selection.

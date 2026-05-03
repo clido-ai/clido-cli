@@ -368,8 +368,6 @@ impl PickerItem for (String, String) {
 pub(crate) enum FilePickerTarget {
     /// Fill a specific field in the workflow input form.
     WorkflowFormField(usize),
-    /// Insert the path at the cursor in the main chat text input.
-    MainTextInput,
 }
 
 #[derive(Clone)]

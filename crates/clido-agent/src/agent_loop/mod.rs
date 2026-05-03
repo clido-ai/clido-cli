@@ -2577,6 +2577,7 @@ mod tests {
             no_rules: false,
             rules_file: None,
             max_output_tokens: None,
+            stream_model_completion: false,
             ..Default::default()
         }
     }
@@ -3525,7 +3526,7 @@ mod tests {
                     Box<dyn Stream<Item = clido_core::Result<clido_providers::StreamEvent>> + Send>,
                 >,
             > {
-                unimplemented!()
+            unimplemented!()
             }
             async fn list_models(
                 &self,

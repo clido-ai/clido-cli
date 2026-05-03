@@ -811,9 +811,7 @@ impl AgentLoop {
                                         if c.is_dir() {
                                             c
                                         } else {
-                                            c.parent()
-                                                .map(|p| p.to_path_buf())
-                                                .unwrap_or(c)
+                                            c.parent().map(|p| p.to_path_buf()).unwrap_or(c)
                                         }
                                     })
                                     .unwrap_or_else(|| granted_path.clone());

@@ -264,6 +264,10 @@ pub struct AgentLoop {
     checkpoint_created: bool,
     /// Receiver for path permission grants from the TUI (for interactive external path access).
     path_permission_rx: Option<tokio::sync::mpsc::UnboundedReceiver<std::path::PathBuf>>,
+    /// Shared runtime-allowed Arc from PathGuard: updated in-place so that the immediate retry
+    /// after a user-granted permission sees the new allowed path without waiting for a full
+    /// registry rebuild (which can only happen between agent turns).
+    runtime_allowed: Option<std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>>,
     /// Identifies one outer user invocation (`run` / `run_next` / `continue`) for tracing.
     turn_correlation_id: uuid::Uuid,
 }
@@ -306,6 +310,7 @@ impl AgentLoop {
             budget_warned_pcts: Vec::new(),
             retry_attempts: HashMap::new(),
             path_permission_rx: None,
+            runtime_allowed: None,
             git_context_fn: None,
             fast_provider: None,
             fast_agent_config: None,
@@ -372,6 +377,7 @@ impl AgentLoop {
             budget_warned_pcts: Vec::new(),
             retry_attempts: HashMap::new(),
             path_permission_rx: None,
+            runtime_allowed: None,
             git_context_fn: None,
             fast_provider: None,
             fast_agent_config: None,
@@ -549,6 +555,10 @@ impl AgentLoop {
 
     /// Replace the active tool registry (used by TUI workdir changes).
     pub fn replace_tools(&mut self, tools: ToolRegistry) {
+        // Sync the runtime_allowed Arc to the new registry's guard (new workspace = fresh Arc).
+        if let Some(new_arc) = tools.runtime_allowed_arc() {
+            self.runtime_allowed = Some(new_arc);
+        }
         self.tools = tools;
         if let Ok(mut g) = self.schema_cache.lock() {
             g.clear();
@@ -681,6 +691,15 @@ impl AgentLoop {
         self.history.len()
     }
 
+    /// Set the shared runtime-allowed Arc from PathGuard so path grants take effect immediately.
+    pub fn with_runtime_allowed(
+        mut self,
+        arc: std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
+    ) -> Self {
+        self.runtime_allowed = Some(arc);
+        self
+    }
+
     /// Set the path permission receiver for interactive external path access.
     pub fn with_path_permission_receiver(
         mut self,
@@ -781,7 +800,30 @@ impl AgentLoop {
                                     ))
                                     .await;
                             }
-                            // TUI updates allowed paths and rebuilds tools — run the tool again for real output.
+                            // Immediately update the shared PathGuard runtime-allowed list so
+                            // the retry below sees the granted path without waiting for the
+                            // outer agent-task loop to rebuild the registry (which can only
+                            // happen between agent turns, not during one).
+                            if let Some(ref arc) = self.runtime_allowed {
+                                let scope = std::fs::canonicalize(&granted_path)
+                                    .ok()
+                                    .map(|c| {
+                                        if c.is_dir() {
+                                            c
+                                        } else {
+                                            c.parent()
+                                                .map(|p| p.to_path_buf())
+                                                .unwrap_or(c)
+                                        }
+                                    })
+                                    .unwrap_or_else(|| granted_path.clone());
+                                if let Ok(mut g) = arc.lock() {
+                                    if !g.contains(&scope) {
+                                        g.push(scope);
+                                    }
+                                }
+                            }
+                            // Run the tool again — PathGuard now allows the path.
                             return self.execute_tool_maybe_gated(name, input).await;
                         }
                         Ok(Some(_)) => {

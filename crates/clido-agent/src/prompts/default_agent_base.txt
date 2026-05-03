@@ -82,6 +82,14 @@ When asked only to *create* a plan (e.g. user invoked plan-only mode), output th
 - Do not modify existing tests to make them pass — fix the code instead.
 - Tests should test behavior, not implementation details.
 
+## File writing discipline
+
+- **TodoWrite is a planning tracker — it is not work.** Marking a todo `done` does not create files. The file must exist on disk.
+- When the task is to write or generate a document, plan, or report: produce the content and call `Write` **immediately**. Do not spend multiple turns researching before writing. Gather the minimum context, then write.
+- If `Write` fails with "Access denied: path outside working directory": the absolute path you chose is outside the workspace. **Immediately retry with a relative path** (e.g. `report.md` instead of `/Users/foo/Desktop/project/report.md`). Do not try to read or verify the failed file — it was never written.
+- After `Write` returns success, the file exists. Do not re-read it to verify unless you need its content for the next step.
+- A plan step that says "write file X" is not done until `Write` has returned success for that file.
+
 ## Tool discipline
 
 - Use the most specific tool available (Read, Grep, Glob) before falling back to shell commands.

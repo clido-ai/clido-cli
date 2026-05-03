@@ -8,13 +8,31 @@ use crate::Tool;
 /// Registry of named tools.
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,
+    /// Shared runtime-allowed Arc from PathGuard — lets callers grant path access in-flight.
+    runtime_allowed: Option<std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>>,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
+            runtime_allowed: None,
         }
+    }
+
+    /// Store the shared runtime-allowed handle (obtained from `PathGuard::runtime_allowed_arc`).
+    pub fn set_runtime_allowed(
+        &mut self,
+        arc: std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
+    ) {
+        self.runtime_allowed = Some(arc);
+    }
+
+    /// Return a clone of the shared runtime-allowed Arc, if set.
+    pub fn runtime_allowed_arc(
+        &self,
+    ) -> Option<std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>> {
+        self.runtime_allowed.clone()
     }
 
     pub fn register(&mut self, tool: impl Tool + 'static) {
@@ -91,7 +109,10 @@ impl ToolRegistry {
                 true
             })
             .collect();
-        ToolRegistry { tools }
+        ToolRegistry {
+            tools,
+            runtime_allowed: self.runtime_allowed,
+        }
     }
 }
 

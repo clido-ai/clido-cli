@@ -1,6 +1,7 @@
 //! Path canonicalization, workspace-root check, and blocked-path enforcement.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 /// Stable message when a path is outside the workspace and not allow-listed.
 /// The agent matches on this for interactive `/allow-path` recovery — keep in sync with callers.
@@ -8,12 +9,19 @@ pub const ACCESS_DENIED_OUTSIDE_WORKSPACE: &str = "Access denied: path outside w
 
 /// Path-access guard: restricts operations to workspace_root and rejects blocked paths.
 /// Also allows access to explicitly permitted external paths outside the workspace.
+///
+/// The `runtime_allowed` field is a shared `Arc<Mutex<Vec<PathBuf>>>` that is cloned (pointer
+/// copy) by `Clone`, so all `PathGuard` instances created from the same original share the same
+/// underlying list.  This lets the agent loop update permissions in-flight (e.g., when the user
+/// grants access while a tool retry is pending) without needing to rebuild the tool registry.
 #[derive(Clone)]
 pub struct PathGuard {
     root: PathBuf,
     blocked: Vec<PathBuf>,
     allowed_external: Vec<PathBuf>,
     allowed_dirs: Vec<PathBuf>,
+    /// Dynamically-granted paths: shared across all clones of the same guard.
+    runtime_allowed: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 impl PathGuard {
@@ -23,7 +31,13 @@ impl PathGuard {
             blocked: Vec::new(),
             allowed_external: Vec::new(),
             allowed_dirs: Vec::new(),
+            runtime_allowed: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Return a clone of the shared runtime-allowed Arc so the caller can update it directly.
+    pub fn runtime_allowed_arc(&self) -> Arc<Mutex<Vec<PathBuf>>> {
+        Arc::clone(&self.runtime_allowed)
     }
 
     pub fn with_blocked(mut self, paths: Vec<PathBuf>) -> Self {
@@ -84,6 +98,16 @@ impl PathGuard {
                 .allowed_dirs
                 .iter()
                 .any(|dir| canonical == dir || canonical.starts_with(dir))
+            || self
+                .runtime_allowed
+                .lock()
+                .ok()
+                .as_deref()
+                .map(|list| {
+                    list.iter()
+                        .any(|allowed| canonical == allowed || canonical.starts_with(allowed))
+                })
+                .unwrap_or(false)
     }
 
     /// Canonicalize path and ensure it is under workspace_root (or explicitly allowed

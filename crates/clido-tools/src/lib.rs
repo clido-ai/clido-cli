@@ -113,6 +113,7 @@ pub fn default_registry_with_options_and_allowed_paths(
     let tracker = FileTracker::new();
     let read_cache = clido_context::read_cache::ReadCache::new();
     let mut r = ToolRegistry::new();
+    r.set_runtime_allowed(guard.runtime_allowed_arc());
     r.register(ExitPlanModeTool);
     if sandbox {
         r.register(BashTool::new_sandboxed(blocked).with_workspace(workspace_root.clone()));
@@ -168,6 +169,7 @@ pub fn default_registry_with_todo_store(
     let tracker = FileTracker::new();
     let read_cache = clido_context::read_cache::ReadCache::new();
     let mut r = ToolRegistry::new();
+    r.set_runtime_allowed(guard.runtime_allowed_arc());
     r.register(ExitPlanModeTool);
     if sandbox {
         r.register(BashTool::new_sandboxed(blocked).with_workspace(workspace_root.clone()));

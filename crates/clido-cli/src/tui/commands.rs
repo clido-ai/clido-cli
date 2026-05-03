@@ -3740,6 +3740,9 @@ steps:                       # Required: at least one step
     retry:                   # Required when on_error: retry
       max_attempts: 3
       backoff: exponential   # none | exponential
+    foreach: "{{ steps.list-items.output }}"  # Optional: Tera expression → JSON array or newline list
+    foreach_var: item        # Optional: variable name injected per iteration (default: "item")
+                             # Use {{ item }} in prompt; foreach runs step once per item sequentially
     outputs:                 # Optional: named outputs; "output" is always set automatically
       - name: output         # "output" = full step text (default); custom names are aliases
         type: text
@@ -3766,6 +3769,34 @@ prerequisites:               # Optional: checked before any steps run
 - `{{ date }}` — today's date (YYYY-MM-DD)
 - `{{ datetime }}` — current date+time (YYYY-MM-DDTHH:MM:SS)
 - `{{ step_id }}` — current step id (only in `save_to` templates)
+- `{{ item }}` — current foreach iteration value (string or JSON object; only inside a `foreach` step)
+- `{{ item.field }}` — field access when foreach items are JSON objects
+
+## Foreach / iteration
+
+Use `foreach` when you need to run the same step repeatedly over a list of items:
+
+```yaml
+- id: list-protocols
+  tools: [Read]
+  prompt: |
+    Read the file {{ inputs.list_path }} and output a JSON array of strings,
+    one per line. Example: ["item1", "item2"]
+  outputs:
+    - name: output
+
+- id: process-each
+  foreach: "{{ steps.list-protocols.output }}"  # must evaluate to JSON array or newline list
+  foreach_var: item   # optional; default is "item"
+  tools: [Read, Bash]
+  prompt: |
+    Process this item: {{ item }}
+  on_error: continue  # recommended for foreach so one failure doesn't abort all iterations
+```
+
+The foreach expression is a Tera template rendered against the workflow context. It must evaluate to:
+- A JSON array: `["a","b","c"]` or `[{"name":"Foo","url":"..."},...]`
+- Or newline-separated strings (one item per line)
 
 ## Key design rules
 
@@ -3776,7 +3807,8 @@ prerequisites:               # Optional: checked before any steps run
 5. **`tools: []`** (empty list) is valid — it means the step does pure reasoning/writing with no tool access.
 6. **`on_error: continue`** is useful for optional steps (e.g. PoC generation) that shouldn't abort the workflow.
 7. **`default: "{{ cwd }}"`** on inputs enables zero-config auto-discovery — the user can run the workflow from inside the target repository without supplying any arguments.
-8. **Workflow discovery**: save workflows to `~/.config/clido/workflows/<name>.yaml` (global). Use `/workflow save` from the TUI after the agent outputs the YAML block.
+8. **`foreach`** on a step iterates the step once per item in the list. Use `on_error: continue` so one failed item doesn't abort the whole loop.
+9. **Workflow discovery**: save workflows to `~/.config/clido/workflows/<name>.yaml` (global). Use `/workflow save` from the TUI after the agent outputs the YAML block.
 
 ## Running workflows
 

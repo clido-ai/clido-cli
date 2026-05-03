@@ -157,6 +157,8 @@ pub struct AgentSetup {
     pub fast_provider: Option<Arc<dyn clido_providers::ModelProvider>>,
     /// Config (model name, etc) for the fast provider. Only meaningful when fast_provider is Some.
     pub fast_config: Option<AgentConfig>,
+    /// Shared runtime-allowed Arc from PathGuard — lets the agent grant path access mid-turn.
+    pub runtime_allowed: Option<std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>>,
 }
 
 impl AgentSetup {
@@ -279,6 +281,7 @@ impl AgentSetup {
         // Wrap provider with retry logic for transient failures.
         let provider = RetryProvider::wrap(provider);
 
+        let runtime_allowed = registry.runtime_allowed_arc();
         Ok(AgentSetup {
             provider,
             provider_name: provider_name.to_string(),
@@ -289,6 +292,7 @@ impl AgentSetup {
             todo_store,
             fast_provider,
             fast_config,
+            runtime_allowed,
         })
     }
 

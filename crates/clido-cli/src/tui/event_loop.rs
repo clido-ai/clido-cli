@@ -614,14 +614,18 @@ pub(super) async fn agent_task(
         let ws = gwr.lock().ok()?;
         GitContext::discover(ws.as_path()).map(|ctx| ctx.to_prompt_section())
     });
-    let mut agent = with_optional_trace_metrics(
-        AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
+    let mut agent = {
+        let mut a = AgentLoop::new(setup.provider, setup.registry, setup.config, setup.ask_user)
             .with_path_permission_receiver(path_permission_rx)
             .with_fast_provider(setup.fast_provider, setup.fast_config)
             .with_emitter(emitter)
             .with_planner(planner_mode)
-            .with_git_context_fn(git_context_fn),
-    );
+            .with_git_context_fn(git_context_fn);
+        if let Some(arc) = setup.runtime_allowed {
+            a = a.with_runtime_allowed(arc);
+        }
+        with_optional_trace_metrics(a)
+    };
 
     let mut first_turn = true;
     // True once a `Title` line exists on disk or the LLM/heuristic path has finalized.

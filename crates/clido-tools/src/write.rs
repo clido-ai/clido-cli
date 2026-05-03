@@ -99,7 +99,20 @@ impl Tool for WriteTool {
 
         let path = match self.guard.resolve_for_write(path_str) {
             Ok(p) => p,
-            Err(e) => return ToolOutput::err(e),
+            Err(e) => {
+                // Give the agent an actionable hint when the path is outside the workspace.
+                if e.contains("outside working directory") {
+                    let hint = format!(
+                        "{e}\n\
+                         Hint: the path '{path_str}' is outside the workspace root.\n\
+                         Fix: use a relative path (e.g. 'report.md') or a path inside the \
+                         current project directory. Do NOT read the file to verify — it was \
+                         never written. Retry Write with a corrected path immediately."
+                    );
+                    return ToolOutput::err(hint);
+                }
+                return ToolOutput::err(e);
+            }
         };
 
         // Check for external modification only for files that were previously read.

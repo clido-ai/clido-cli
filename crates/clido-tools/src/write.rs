@@ -35,6 +35,17 @@ impl WriteTool {
     }
 }
 
+/// Return the first `max_lines` lines of `content` as a preview.
+fn content_preview(content: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = content.lines().take(max_lines).collect();
+    let preview = lines.join("\n");
+    if content.lines().count() > max_lines {
+        format!("{preview}\n... ({} more lines)", content.lines().count() - max_lines)
+    } else {
+        preview
+    }
+}
+
 #[async_trait]
 impl Tool for WriteTool {
     fn name(&self) -> &str {
@@ -115,12 +126,14 @@ impl Tool for WriteTool {
                 if let Some(ref tracker) = self.tracker {
                     tracker.update(&path, mtime_nanos);
                 }
-                ToolOutput::ok_with_meta(
-                    format!("{}File written successfully.", secret_prefix),
-                    path.display().to_string(),
-                    hash,
-                    mtime_nanos,
-                )
+                // Include a content preview so the user immediately sees what was written.
+                let preview = content_preview(content, 15);
+                let mut msg = format!("{}File written successfully.", secret_prefix);
+                if !preview.is_empty() {
+                    msg.push_str(&format!("\n\n--- Preview of {} ({}) ---\n{}\n--- End preview ---",
+                        path.display(), content.len(), preview));
+                }
+                ToolOutput::ok_with_meta(msg, path.display().to_string(), hash, mtime_nanos)
             }
             Err(e) => ToolOutput::err(e.to_string()),
         }

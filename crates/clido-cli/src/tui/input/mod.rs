@@ -209,6 +209,42 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 app.pending_path_permission = None;
                 return;
             }
+            Char('f') | Char('F') => {
+                // Allow entire parent directory - grant access to all files under this folder.
+                let dir = std::fs::canonicalize(path)
+                    .ok()
+                    .and_then(|c| {
+                        if c.is_dir() {
+                            Some(c)
+                        } else {
+                            c.parent().map(|p| p.to_path_buf())
+                        }
+                    });
+                if let Some(dir) = dir {
+                    // Store the directory in allowed_external_paths (the parent check in
+                    // is_in_allowed_external handles dir containment).
+                    if !app.allowed_external_paths.contains(&dir) {
+                        app.allowed_external_paths.push(dir.clone());
+                    }
+                    let _ = app
+                        .channels
+                        .allowed_paths_tx
+                        .send(app.allowed_external_paths.clone());
+                    let _ = app.channels.path_permission_tx.send(path.clone());
+                    app.push(ChatLine::Info(format!(
+                        "  ✓ Allowed access to folder: {} (and granted access)",
+                        dir.display()
+                    )));
+                } else {
+                    let _ = app.channels.path_permission_tx.send(path.clone());
+                    app.push(ChatLine::Info(format!(
+                        "  ✓ Allowed access to: {}",
+                        path.display()
+                    )));
+                }
+                app.pending_path_permission = None;
+                return;
+            }
             _ => {
                 // Ignore other keys while waiting for permission response
                 return;

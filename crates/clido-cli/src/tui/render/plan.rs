@@ -160,15 +160,62 @@ pub(crate) fn gather_plan_panel_steps(app: &App) -> Vec<PlanPanelStep> {
         }];
     }
 
+    // When the agent is busy running a tool, surface that as the first step in the panel.
     if app.busy {
-        if let Some(ref s) = app.current_step {
-            return vec![PlanPanelStep {
+        if let Some(ref step) = app.current_step {
+            let mut result = vec![PlanPanelStep {
                 status: PlanPanelStepStatus::Active,
-                text: s.clone(),
+                text: step.clone(),
             }];
+            // Also append todo / planner / harness steps below so the user sees
+            // the full context (completed todos, remaining work, etc.).
+            if let Ok(todos) = app.todo_store.try_lock() {
+                if !todos.is_empty() {
+                    for t in todos.iter() {
+                        result.push(PlanPanelStep {
+                            status: match t.status {
+                                TodoStatus::Pending => PlanPanelStepStatus::Pending,
+                                TodoStatus::InProgress => PlanPanelStepStatus::Active,
+                                TodoStatus::Done => PlanPanelStepStatus::Completed,
+                                TodoStatus::Blocked => PlanPanelStepStatus::Blocked,
+                            },
+                            text: t.content.clone(),
+                        });
+                    }
+                    return result;
+                }
+            }
+            if let Some(ref plan) = app.plan.last_plan_snapshot {
+                if !plan.tasks.is_empty() {
+                    for t in plan.tasks.iter() {
+                        result.push(PlanPanelStep {
+                            status: match t.status {
+                                TaskStatus::Pending => PlanPanelStepStatus::Pending,
+                                TaskStatus::Running => PlanPanelStepStatus::Active,
+                                TaskStatus::Done => PlanPanelStepStatus::Completed,
+                                TaskStatus::Failed => PlanPanelStepStatus::Blocked,
+                                TaskStatus::Skipped => PlanPanelStepStatus::Completed,
+                            },
+                            text: t.description.clone(),
+                        });
+                    }
+                    return result;
+                }
+            }
+            if let Some(ref tasks) = app.plan.last_plan {
+                if !tasks.is_empty() {
+                    for s in tasks.iter() {
+                        result.push(PlanPanelStep {
+                            status: PlanPanelStepStatus::Pending,
+                            text: s.clone(),
+                        });
+                    }
+                    return result;
+                }
+            }
+            return result;
         }
         // Fallback: show that agent is working even if no step was extracted.
-        // Use a spinner character so the panel feels alive.
         let spinner = match app.spinner_tick % 4 {
             0 => "⠋",
             1 => "⠙",

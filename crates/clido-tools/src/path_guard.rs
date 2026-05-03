@@ -13,6 +13,7 @@ pub struct PathGuard {
     root: PathBuf,
     blocked: Vec<PathBuf>,
     allowed_external: Vec<PathBuf>,
+    allowed_dirs: Vec<PathBuf>,
 }
 
 impl PathGuard {
@@ -21,6 +22,7 @@ impl PathGuard {
             root: workspace_root,
             blocked: Vec::new(),
             allowed_external: Vec::new(),
+            allowed_dirs: Vec::new(),
         }
     }
 
@@ -43,6 +45,15 @@ impl PathGuard {
         self
     }
 
+    /// Add allowed external directories — any file under these dirs is accessible.
+    pub fn with_allowed_dirs(mut self, dirs: Vec<PathBuf>) -> Self {
+        self.allowed_dirs = dirs
+            .into_iter()
+            .map(|d| std::fs::canonicalize(&d).unwrap_or(d))
+            .collect();
+        self
+    }
+
     /// Set allowed external paths dynamically (for runtime permission changes).
     pub fn set_allowed_external(&mut self, paths: Vec<PathBuf>) {
         self.allowed_external = paths
@@ -51,11 +62,27 @@ impl PathGuard {
             .collect();
     }
 
-    /// Check if a canonical path is within any allowed external path.
+    /// Set allowed external directories dynamically.
+    pub fn set_allowed_dirs(&mut self, dirs: Vec<PathBuf>) {
+        self.allowed_dirs = dirs
+            .into_iter()
+            .map(|d| std::fs::canonicalize(&d).unwrap_or(d))
+            .collect();
+    }
+
+    /// Get current allowed directories (for display/serialization).
+    pub fn allowed_dirs(&self) -> &[PathBuf] {
+        &self.allowed_dirs
+    }
+
+    /// Check if a canonical path is within any allowed external path or directory.
     fn is_in_allowed_external(&self, canonical: &Path) -> bool {
         self.allowed_external
             .iter()
             .any(|allowed| canonical == allowed || canonical.starts_with(allowed))
+            || self.allowed_dirs.iter().any(|dir| {
+                canonical == dir || canonical.starts_with(dir)
+            })
     }
 
     /// Canonicalize path and ensure it is under workspace_root (or explicitly allowed

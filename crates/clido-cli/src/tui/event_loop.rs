@@ -1090,10 +1090,12 @@ pub(super) async fn agent_task(
                 let run_start = std::time::Instant::now();
                 cancel.store(false, std::sync::atomic::Ordering::Relaxed);
                 // Clear stale todos from the previous task so the sidebar reflects
-                // only what the agent writes for this new task. Clear on every prompt
-                // to ensure the task list stays fresh and relevant.
+                // only what the agent writes for this new task. Preserve done and
+                // blocked items so completed work history isn't lost across prompts.
                 if let Ok(mut todos) = todo_store.lock() {
-                    todos.clear();
+                    todos.retain(|t| {
+                        matches!(t.status, clido_tools::TodoStatus::Done | clido_tools::TodoStatus::Blocked)
+                    });
                 }
 
                 if !title_generated && !heuristic_title_sent && !prompt.trim().is_empty() {
@@ -3607,7 +3609,7 @@ pub(super) async fn event_loop(
                             path.display()
                         )));
                         app.push(ChatLine::Info(
-                            "  Allow this path for this session? [y]es / [n]o / [a]lways (add to allowed paths)".into()
+                            "  Allow this path for this session? [y]es / [n]o / [a]lways (add to allowed paths) / [f]older (grant access to parent directory)".into()
                         ));
                         // Store the pending request so input handler can respond
                         app.pending_path_permission = Some(path);

@@ -77,6 +77,7 @@ fn test_config() -> AgentConfig {
         no_rules: false,
         rules_file: None,
         max_output_tokens: None,
+        stream_model_completion: false,
         ..Default::default()
     }
 }

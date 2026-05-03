@@ -86,6 +86,7 @@ mod tests {
         AgentConfig {
             model: "test-model".into(),
             permission_mode: PermissionMode::AcceptAll,
+            stream_model_completion: false,
             ..Default::default()
         }
     }

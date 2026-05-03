@@ -320,7 +320,7 @@ impl Default for AgentConfig {
             retry_backoff_max_ms: default_retry_backoff_max_ms(),
             retry_jitter_numerator: default_retry_jitter_numerator(),
             provider_min_request_interval_ms: 0,
-            stream_model_completion: false,
+            stream_model_completion: true,
             tool_timeout_secs: default_tool_timeout_secs(),
             max_tool_output_bytes: default_max_tool_output_bytes(),
         }

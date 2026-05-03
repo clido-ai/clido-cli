@@ -3012,7 +3012,18 @@ pub(super) async fn event_loop(
                             .map(|wf| !wf.halted)
                             .unwrap_or(false);
                         if workflow_active && !was_agent_edit {
-                            app.push(ChatLine::Assistant(text.clone()));
+                            // Upgrade streamed thinking to Assistant if present
+                            if let Some(ChatLine::Thinking(t)) = app.messages.last() {
+                                if text.starts_with(t.as_str()) || t.starts_with(text.as_str()) {
+                                    if let Some(line) = app.messages.last_mut() {
+                                        if let ChatLine::Thinking(_) = line {
+                                            *line = ChatLine::Assistant(text.clone());
+                                        }
+                                    }
+                                }
+                            } else {
+                                app.push(ChatLine::Assistant(text.clone()));
+                            }
                             crate::tui::commands::handle_workflow_step_response(app, text);
                             // Skip the normal on_agent_done / notification path.
                         } else {
@@ -3035,7 +3046,20 @@ pub(super) async fn event_loop(
                                     ));
                                 }
                             }
-                            app.push(ChatLine::Assistant(text));
+                            // When streaming is enabled, the final response text was already
+                            // streamed as ChatLine::Thinking (dimmed). Replace that last thinking
+                            // line with a proper Assistant line so the content isn't duplicated.
+                            if let Some(ChatLine::Thinking(t)) = app.messages.last() {
+                                if text.starts_with(t.as_str()) || t.starts_with(text.as_str()) {
+                                    if let Some(line) = app.messages.last_mut() {
+                                        if let ChatLine::Thinking(_) = line {
+                                            *line = ChatLine::Assistant(text.clone());
+                                        }
+                                    }
+                                }
+                            } else {
+                                app.push(ChatLine::Assistant(text.clone()));
+                            }
                             // Fire desktop notification + bell if enabled.
                             if app.notify_enabled {
                                 let elapsed = app

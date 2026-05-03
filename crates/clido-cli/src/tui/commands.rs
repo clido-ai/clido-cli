@@ -7,7 +7,7 @@ use crate::list_picker::ListPicker;
 use crate::overlay::{ErrorOverlay, OverlayKind, ReadOnlyOverlay};
 
 use super::state::{
-    FilePickerState, FilePickerTarget, InputFormField, PlanPanelVisibility, StatusRailVisibility,
+    InputFormField, PlanPanelVisibility, StatusRailVisibility,
     WorkflowEntry, WorkflowInputFormState, WorkflowPickerAction, WorkflowPickerState,
 };
 use super::*;
@@ -134,12 +134,12 @@ pub(super) fn path_completions(text: &str, cursor: usize) -> (usize, Vec<PathCom
     }
 
     // Strip leading @ for @file references so we complete the path part.
-    let path_part = if word.starts_with('@') { &word[1..] } else { &word };
+    let path_part = word.strip_prefix('@').unwrap_or(word.as_str());
 
     // Expand ~ to home directory.
-    let expanded = if path_part.starts_with('~') {
+    let expanded = if let Some(stripped) = path_part.strip_prefix('~') {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        format!("{}{}", home, &path_part[1..])
+        format!("{}{}", home, stripped)
     } else {
         path_part.to_string()
     };
@@ -2829,13 +2829,13 @@ pub(super) fn advance_workflow(app: &mut App) {
                     Ok(_) => {
                         // Empty list — skip step entirely.
                         wf.current_idx += 1;
-                        drop(wf); // Release borrow before recursive call.
+                        let _ = wf; // Release borrow before recursive call.
                         advance_workflow(app);
                         return;
                     }
                     Err(e) => {
                         let step_id = step.id.clone();
-                        drop(wf);
+                        let _ = wf;
                         app.push(ChatLine::Info(format!(
                             "  ✗ Failed to evaluate foreach for step '{step_id}': {e}"
                         )));

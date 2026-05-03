@@ -68,6 +68,7 @@ impl WorkflowContext {
             inputs,
             step_outputs: HashMap::new(),
             step_results: Vec::new(),
+            foreach_context: HashMap::new(),
         }
     }
 
@@ -111,6 +112,7 @@ mod tests {
                 description: String::new(),
                 required: true,
                 default: None,
+                hint: None,
             }],
             steps: vec![],
             output: None,
@@ -134,6 +136,7 @@ mod tests {
                 description: String::new(),
                 required: false,
                 default: Some(serde_json::Value::String("default_val".to_string())),
+                hint: None,
             }],
             steps: vec![],
             output: None,
@@ -163,6 +166,7 @@ mod tests {
                 description: String::new(),
                 required: false,
                 default: Some(serde_json::Value::String("default_val".to_string())),
+                hint: None,
             }],
             steps: vec![],
             output: None,

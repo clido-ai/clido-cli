@@ -501,6 +501,7 @@ pub(crate) struct WorkflowInputFormState {
 }
 
 impl WorkflowInputFormState {
+    #[allow(dead_code)]
     pub(crate) fn current_mut(&mut self) -> &mut InputFormField {
         &mut self.fields[self.current_field]
     }

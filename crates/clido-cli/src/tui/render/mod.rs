@@ -1243,7 +1243,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 } else {
                     " ".to_string()
                 };
-                let after: String = if cursor + 1 <= chars.len() {
+                let after: String = if cursor < chars.len() {
                     chars[cursor + 1..].iter().collect()
                 } else {
                     String::new()
@@ -1252,7 +1252,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 let cursor_style = Style::default().fg(Color::Black).bg(TUI_SOFT_ACCENT);
                 let max_visible = inner_w.saturating_sub(4);
                 // Scroll view to keep cursor visible
-                let scroll = if cursor > max_visible { cursor - max_visible } else { 0 };
+                let scroll = cursor.saturating_sub(max_visible);
                 let before_trunc: String = before.chars().skip(scroll).take(max_visible).collect();
                 content.push(Line::from(vec![
                     Span::styled("  > ", box_style),

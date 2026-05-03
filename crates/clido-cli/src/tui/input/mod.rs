@@ -1016,12 +1016,10 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 // 1. Explicitly selected with arrow keys
                 // 2. Only one completion exists (unambiguous)
                 // 3. Input is an exact match
-                let idx = app.selected_cmd.or_else(|| {
-                    if completions.len() == 1 {
-                        Some(0)
-                    } else {
-                        exact_match_idx
-                    }
+                let idx = app.selected_cmd.or(if completions.len() == 1 {
+                    Some(0)
+                } else {
+                    exact_match_idx
                 });
 
                 if let Some(idx) = idx {
@@ -1476,10 +1474,8 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                     move_cursor_line_down(&app.text_input.text, app.text_input.cursor)
                 {
                     app.text_input.cursor = new_cursor;
-                    return;
                 }
                 // At boundary of text - don't fall through to history if there's text
-                return;
             }
             // Down with empty text and no history browsing - do nothing
         }

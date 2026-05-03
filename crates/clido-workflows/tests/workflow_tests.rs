@@ -68,6 +68,8 @@ fn make_step(id: &str, prompt: &str, on_error: OnErrorPolicy, parallel: bool) ->
         parallel,
         system_prompt: None,
         max_turns: None,
+        foreach: None,
+        foreach_var: None,
     }
 }
 
@@ -411,6 +413,7 @@ fn context_resolve_inputs_uses_override_over_default() {
             description: String::new(),
             required: false,
             default: Some(serde_json::Value::String("default".into())),
+            hint: None,
         }],
         steps: vec![make_step("s", "p", OnErrorPolicy::Fail, false)],
         output: None,
@@ -432,6 +435,7 @@ fn context_resolve_inputs_errors_on_missing_required() {
             description: String::new(),
             required: true,
             default: None,
+            hint: None,
         }],
         steps: vec![make_step("s", "p", OnErrorPolicy::Fail, false)],
         output: None,
@@ -770,6 +774,7 @@ async fn run_workflow_with_inputs_passed_to_template() {
             description: String::new(),
             required: true,
             default: None,
+            hint: None,
         }],
         steps: vec![make_step(
             "s1",

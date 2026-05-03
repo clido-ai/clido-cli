@@ -800,6 +800,7 @@ impl App {
     }
 
     /// Ctrl+Enter: cancel current run and send input immediately.
+    #[allow(dead_code)]
     pub(super) fn force_send(&mut self) {
         if self.pending_perm.is_some() {
             return;

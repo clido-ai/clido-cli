@@ -1033,6 +1033,8 @@ mod tests {
                 parallel: false,
                 system_prompt: Some("You are helpful.".into()),
                 max_turns: Some(5),
+                foreach: None,
+                foreach_var: None,
             }],
             output: None,
             prerequisites: None,

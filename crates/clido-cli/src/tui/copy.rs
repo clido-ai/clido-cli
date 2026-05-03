@@ -6,6 +6,7 @@ pub mod info {
     pub const BARE_SLASH: &str = "  Type a message or command — bare '/' alone is not sent";
     pub const EMPTY_HINT: &str = "  Type a message to start, or /help for available commands";
     pub const AGENT_NOT_RUNNING: &str = "  ✗ Agent is not running — try restarting clido.";
+    #[allow(dead_code)]
     pub const INTERRUPT_QUEUE: &str =
         "  ↻ Interrupt requested — will send after current response completes";
     pub const STOPPING: &str = "  ↻ Stopping...";

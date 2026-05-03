@@ -15,6 +15,8 @@ pub struct WorkflowContext {
     pub step_outputs: HashMap<String, String>,
     /// Per-step result (output_text, cost_usd, duration_ms, error).
     pub step_results: Vec<StepResult>,
+    /// Per-iteration foreach variable bindings (variable_name → current value).
+    pub foreach_context: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -80,6 +82,16 @@ impl WorkflowContext {
         self.step_outputs
             .get(&format!("{}.{}", step_id, output_name))
             .map(String::as_str)
+    }
+
+    /// Set a foreach iteration variable binding.
+    pub fn set_foreach_item(&mut self, var_name: &str, value: serde_json::Value) {
+        self.foreach_context.insert(var_name.to_string(), value);
+    }
+
+    /// Clear all foreach iteration variable bindings.
+    pub fn clear_foreach_context(&mut self) {
+        self.foreach_context.clear();
     }
 }
 

@@ -361,6 +361,216 @@ impl PickerItem for (String, String) {
     }
 }
 
+// ── File picker popup state ───────────────────────────────────────────────────
+
+/// Where the selected path should be delivered when the file picker confirms.
+#[derive(Clone)]
+pub(crate) enum FilePickerTarget {
+    /// Fill a specific field in the workflow input form.
+    WorkflowFormField(usize),
+    /// Insert the path at the cursor in the main chat text input.
+    MainTextInput,
+}
+
+#[derive(Clone)]
+pub(crate) struct FileEntry {
+    pub(crate) name: String,
+    pub(crate) is_dir: bool,
+    pub(crate) path: std::path::PathBuf,
+}
+
+pub(crate) struct FilePickerState {
+    pub(crate) current_dir: std::path::PathBuf,
+    pub(crate) entries: Vec<FileEntry>,
+    pub(crate) selected: usize,
+    pub(crate) scroll_offset: usize,
+    pub(crate) filter: String,
+    pub(crate) target: FilePickerTarget,
+}
+
+impl FilePickerState {
+    pub(crate) fn new(start_dir: std::path::PathBuf, target: FilePickerTarget) -> Self {
+        let mut s = Self {
+            current_dir: start_dir,
+            entries: Vec::new(),
+            selected: 0,
+            scroll_offset: 0,
+            filter: String::new(),
+            target,
+        };
+        s.reload();
+        s
+    }
+
+    pub(crate) fn reload(&mut self) {
+        self.entries.clear();
+        if let Ok(rd) = std::fs::read_dir(&self.current_dir) {
+            let mut dirs: Vec<FileEntry> = Vec::new();
+            let mut files: Vec<FileEntry> = Vec::new();
+            for entry in rd.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with('.') {
+                    continue; // skip hidden by default
+                }
+                let is_dir = path.is_dir();
+                let fe = FileEntry { name, is_dir, path };
+                if is_dir {
+                    dirs.push(fe);
+                } else {
+                    files.push(fe);
+                }
+            }
+            dirs.sort_by(|a, b| a.name.cmp(&b.name));
+            files.sort_by(|a, b| a.name.cmp(&b.name));
+            self.entries = dirs;
+            self.entries.extend(files);
+        }
+        self.selected = 0;
+        self.scroll_offset = 0;
+    }
+
+    pub(crate) fn filtered(&self) -> Vec<&FileEntry> {
+        let f = self.filter.to_lowercase();
+        if f.is_empty() {
+            return self.entries.iter().collect();
+        }
+        self.entries
+            .iter()
+            .filter(|e| e.name.to_lowercase().contains(&f))
+            .collect()
+    }
+
+    pub(crate) fn enter_dir(&mut self, path: std::path::PathBuf) {
+        self.current_dir = path;
+        self.filter.clear();
+        self.reload();
+    }
+
+    pub(crate) fn go_up(&mut self) {
+        if let Some(parent) = self.current_dir.parent().map(|p| p.to_path_buf()) {
+            self.current_dir = parent;
+            self.filter.clear();
+            self.reload();
+        }
+    }
+
+    pub(crate) fn clamp(&mut self) {
+        let n = self.filtered().len();
+        if n == 0 {
+            self.selected = 0;
+            self.scroll_offset = 0;
+        } else {
+            self.selected = self.selected.min(n - 1);
+        }
+    }
+}
+
+// ── Workflow input form state ─────────────────────────────────────────────────
+
+/// A single editable field in the workflow input form.
+pub(crate) struct InputFormField {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) required: bool,
+    /// Default value as a display string (empty if none).
+    pub(crate) default_val: String,
+    /// Current value being entered by the user.
+    pub(crate) value: String,
+    /// Whether this field should offer the file picker.
+    pub(crate) is_path: bool,
+}
+
+impl InputFormField {
+    pub(crate) fn effective_value(&self) -> &str {
+        if self.value.is_empty() {
+            &self.default_val
+        } else {
+            &self.value
+        }
+    }
+}
+
+pub(crate) struct WorkflowInputFormState {
+    pub(crate) workflow_path: std::path::PathBuf,
+    pub(crate) fields: Vec<InputFormField>,
+    pub(crate) current_field: usize,
+    pub(crate) profile_override: Option<String>,
+    /// Cursor position within the current field's text input.
+    pub(crate) cursor: usize,
+}
+
+impl WorkflowInputFormState {
+    pub(crate) fn current_mut(&mut self) -> &mut InputFormField {
+        &mut self.fields[self.current_field]
+    }
+
+    pub(crate) fn collect_inputs(&self) -> Vec<(String, String)> {
+        self.fields
+            .iter()
+            .filter_map(|f| {
+                let v = f.effective_value();
+                if v.is_empty() {
+                    None
+                } else {
+                    Some((f.name.clone(), v.to_string()))
+                }
+            })
+            .collect()
+    }
+}
+
+// ── Workflow picker popup state ───────────────────────────────────────────────
+
+/// One entry in the workflow picker.
+#[derive(Clone)]
+pub(crate) struct WorkflowEntry {
+    pub(crate) name: String,
+    pub(crate) desc: String,
+    pub(crate) steps: usize,
+    pub(crate) is_local: bool,
+}
+
+/// What to do when the user selects a workflow from the picker.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkflowPickerAction {
+    Run,
+    Show,
+    Edit,
+    AgentEdit,
+}
+
+pub(crate) struct WorkflowPickerState {
+    pub(crate) workflows: Vec<WorkflowEntry>,
+    pub(crate) selected: usize,
+    pub(crate) scroll_offset: usize,
+    pub(crate) filter: String,
+    pub(crate) action: WorkflowPickerAction,
+}
+
+impl WorkflowPickerState {
+    pub(crate) fn filtered(&self) -> Vec<&WorkflowEntry> {
+        let f = self.filter.trim().to_lowercase();
+        if f.is_empty() {
+            return self.workflows.iter().collect();
+        }
+        self.workflows
+            .iter()
+            .filter(|w| w.name.to_lowercase().contains(&f) || w.desc.to_lowercase().contains(&f))
+            .collect()
+    }
+
+    pub(crate) fn clamp(&mut self) {
+        let n = self.filtered().len();
+        if n == 0 {
+            self.selected = 0;
+            self.scroll_offset = 0;
+        } else {
+            self.selected = self.selected.min(n - 1);
+        }
+    }
+}
+
 // ── Session picker popup state ────────────────────────────────────────────────
 
 pub(crate) struct SessionPickerState {

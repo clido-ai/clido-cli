@@ -90,6 +90,33 @@ fn multiline_input_paragraph(
     (lines, display_row, col_display as u16)
 }
 
+/// Returns true when the current input text + cursor position suggests the user
+/// is about to type (or is mid-typing) a file/directory path, so we can surface
+/// the Ctrl+F hint in the input border.
+fn input_wants_path(text: &str, cursor: usize) -> bool {
+    let t = text.trim_start();
+    // Explicit path-taking commands
+    if t.starts_with("/image ") || t.starts_with("/allow-path ") {
+        return true;
+    }
+    // @file references: @ followed by something
+    if t.starts_with('@') && t.len() > 1 {
+        return true;
+    }
+    // Word at cursor that looks like a path fragment
+    let chars: Vec<char> = text.chars().collect();
+    let start = {
+        let mut s = cursor;
+        while s > 0 && !matches!(chars[s - 1], ' ' | '\t' | '\n') {
+            s -= 1;
+        }
+        s
+    };
+    let word: String = chars[start..cursor].iter().collect();
+    word.starts_with('/') || word.starts_with("./") || word.starts_with("~/")
+        || word.starts_with('@')
+}
+
 // ── Render ────────────────────────────────────────────────────────────────────
 
 pub(super) fn render(frame: &mut Frame, app: &mut App) {
@@ -826,6 +853,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         frame.render_widget(para, input_area);
         frame.set_cursor_position((input_area.x + 2 + cursor_col, input_area.y + 1 + cursor_row));
     } else {
+        let wants_path = input_wants_path(&app.text_input.text, app.text_input.cursor);
         let idle_title = Line::from(vec![
             Span::styled("Input", Style::default().fg(TUI_SOFT_ACCENT)),
             Span::styled(
@@ -835,6 +863,10 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                     format!("{TUI_SEP}Enter send{TUI_SEP}Ctrl/Shift+Enter newline{TUI_SEP}Esc clear")
                 },
                 Style::default().fg(TUI_ROW_DIM).add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                if wants_path { format!("{TUI_SEP}Ctrl+F browse") } else { String::new() },
+                Style::default().fg(TUI_SOFT_ACCENT).add_modifier(Modifier::DIM),
             ),
         ]);
         let block = Block::default()
@@ -858,6 +890,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             Some("Profile".into())
         } else if app.model_picker.is_some() {
             Some("Models".into())
+        } else if app.workflow_picker.is_some() {
+            Some("Workflows".into())
         } else if app.session_picker.is_some() {
             Some("Sessions".into())
         } else if app.profile_picker.is_some() {
@@ -935,7 +969,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 
     // ── Slash command popup ──
     let rows = slash_completion_rows(&app.text_input.text);
-    if !rows.is_empty() && app.pending_perm.is_none() && app.session_picker.is_none() {
+    if !rows.is_empty() && app.pending_perm.is_none() && app.session_picker.is_none() && app.workflow_picker.is_none() {
         // Slash command completion popup.
         const VISIBLE: usize = SLASH_COMPLETION_VISIBLE;
 
@@ -1031,6 +1065,333 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Clear, popup_rect);
         frame.render_widget(
             Paragraph::new(content).block(modal_block_with_hint(&title, hint, TUI_SOFT_ACCENT)),
+            popup_rect,
+        );
+    }
+
+    // ── Path completion popup ────────────────────────────────────────────────
+    let no_modal = app.pending_perm.is_none()
+        && app.session_picker.is_none()
+        && app.workflow_picker.is_none()
+        && app.workflow_input_form.is_none()
+        && app.file_picker.is_none();
+    if no_modal {
+        use crate::tui::commands::path_completions;
+        let (_, completions) = path_completions(&app.text_input.text, app.text_input.cursor);
+        if !completions.is_empty() {
+            const VISIBLE: usize = 12;
+            let n = completions.len().min(VISIBLE) as u16;
+            let popup_h = n + 2;
+            let popup_w = area.width.saturating_sub(4).min(120);
+            let popup_rect = popup_above_input(input_area, popup_h, popup_w);
+            let inner_w = popup_rect.width.saturating_sub(4) as usize;
+
+            let end = (app.selected_path.unwrap_or(0).saturating_sub(VISIBLE - 1) + VISIBLE).min(completions.len());
+            let scroll = end.saturating_sub(VISIBLE);
+
+            let content: Vec<Line<'static>> = completions[scroll..end]
+                .iter()
+                .enumerate()
+                .map(|(di, c)| {
+                    let abs_idx = scroll + di;
+                    let selected = app.selected_path == Some(abs_idx);
+                    let bg = if selected { TUI_SELECTION_BG } else { Color::Reset };
+                    let style = if selected {
+                        Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::DIM)
+                    };
+                    let marker = if selected { "▶ " } else { "  " };
+                    let icon = if c.is_dir { "📁 " } else { "   " };
+                    let name_max = inner_w.saturating_sub(6);
+                    let display: String = c.full.chars().take(name_max).collect();
+                    Line::from(Span::styled(format!("{marker}{icon}{display}"), style))
+                })
+                .collect();
+
+            let above = scroll;
+            let below = completions.len().saturating_sub(scroll + VISIBLE);
+            let mut all_content = content;
+            if let Some(line) = scroll_indicator_line(above, below) {
+                all_content.push(line);
+            }
+
+            let title = format!(" {} matches ", completions.len());
+            let hint = " ↑↓ navigate · Tab/Enter complete · Esc dismiss ";
+            frame.render_widget(Clear, popup_rect);
+            frame.render_widget(
+                Paragraph::new(all_content)
+                    .block(modal_block_with_hint(&title, hint, modal_border_default())),
+                popup_rect,
+            );
+        }
+    }
+
+    // ── File picker ──────────────────────────────────────────────────────────
+    if let Some(ref fp) = app.file_picker {
+        const VISIBLE: usize = 16;
+        let filtered = fp.filtered();
+        let n_rows = filtered.len().clamp(1, VISIBLE) as u16;
+        let popup_h = (n_rows + 6).min(area.height.saturating_sub(2)).max(8);
+        let popup_w = (area.width * 3 / 4).max(60).min(area.width);
+        let popup_rect = popup_above_input(input_area, popup_h, popup_w);
+        let inner_w = popup_rect.width.saturating_sub(4) as usize;
+
+        let mut content: Vec<Line<'static>> = Vec::new();
+
+        // Current path
+        let dir_str = fp.current_dir.to_string_lossy().into_owned();
+        let dir_display: String = if dir_str.chars().count() > inner_w {
+            let skip = dir_str.chars().count() - inner_w + 3;
+            format!("…{}", dir_str.chars().skip(skip).collect::<String>())
+        } else {
+            dir_str
+        };
+        content.push(Line::from(vec![Span::styled(
+            format!("  {dir_display}"),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+        )]));
+        content.push(Line::from(vec![Span::styled(
+            format!("  {}", "─".repeat(inner_w)),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+        )]));
+
+        // Filter indicator
+        if !fp.filter.is_empty() {
+            content.push(Line::from(vec![Span::styled(
+                format!("  filter: {}", fp.filter),
+                Style::default().fg(TUI_SOFT_ACCENT),
+            )]));
+        }
+
+        let end = (fp.scroll_offset + VISIBLE).min(filtered.len());
+        for (di, entry) in filtered[fp.scroll_offset..end].iter().enumerate() {
+            let is_sel = fp.scroll_offset + di == fp.selected;
+            let bg = if is_sel { TUI_SELECTION_BG } else { Color::Reset };
+            let style = if is_sel {
+                Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::DIM)
+            };
+            let marker = if is_sel { "▶ " } else { "  " };
+            let icon = if entry.is_dir { "📁 " } else { "   " };
+            let name_max = inner_w.saturating_sub(6);
+            let name_trunc: String = entry.name.chars().take(name_max).collect();
+            let suffix = if entry.is_dir { "/" } else { "" };
+            content.push(Line::from(vec![Span::styled(
+                format!("{marker}{icon}{name_trunc}{suffix}"),
+                style,
+            )]));
+        }
+
+        let above = fp.scroll_offset;
+        let below = filtered.len().saturating_sub(fp.scroll_offset + VISIBLE);
+        if let Some(line) = scroll_indicator_line(above, below) {
+            content.push(line);
+        }
+
+        let title = " File picker ";
+        let hint = " ↑↓ navigate · Enter select/open · Backspace up dir · type filter · Home → ~ · Esc close ";
+        frame.render_widget(Clear, popup_rect);
+        frame.render_widget(
+            Paragraph::new(content)
+                .block(modal_block_with_hint(title, hint, modal_border_default())),
+            popup_rect,
+        );
+    }
+
+    // ── Workflow input form ───────────────────────────────────────────────────
+    if let Some(ref form) = app.workflow_input_form {
+        let n_fields = form.fields.len() as u16;
+        // border(2) + title_hint(2) + per_field(3) + submit_hint(1)
+        let popup_h = (n_fields * 3 + 5).min(area.height.saturating_sub(2)).max(8);
+        let popup_w = (area.width * 3 / 4).max(60).min(area.width);
+        let popup_rect = popup_above_input(input_area, popup_h, popup_w);
+        let inner_w = popup_rect.width.saturating_sub(4) as usize;
+
+        let mut content: Vec<Line<'static>> = Vec::new();
+
+        for (idx, field) in form.fields.iter().enumerate() {
+            let is_current = idx == form.current_field;
+            let label_style = if is_current {
+                Style::default().fg(TUI_SOFT_ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)
+            };
+            let req_marker = if field.required { " *" } else { "" };
+            let path_hint = if field.is_path { "  Ctrl+F to browse" } else { "" };
+            let desc_part = if field.description.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", field.description)
+            };
+
+            content.push(Line::from(vec![Span::styled(
+                format!("  {}{req_marker}{desc_part}{path_hint}", field.name),
+                label_style,
+            )]));
+
+            // Input box line
+            if is_current {
+                // Show with cursor
+                let val = &field.value;
+                let chars: Vec<char> = val.chars().collect();
+                let cursor = form.cursor.min(chars.len());
+                let before: String = chars[..cursor].iter().collect();
+                let at: String = if cursor < chars.len() {
+                    chars[cursor..=cursor].iter().collect()
+                } else {
+                    " ".to_string()
+                };
+                let after: String = if cursor + 1 <= chars.len() {
+                    chars[cursor + 1..].iter().collect()
+                } else {
+                    String::new()
+                };
+                let box_style = Style::default().fg(TUI_TEXT).bg(TUI_SELECTION_BG);
+                let cursor_style = Style::default().fg(Color::Black).bg(TUI_SOFT_ACCENT);
+                let max_visible = inner_w.saturating_sub(4);
+                // Scroll view to keep cursor visible
+                let scroll = if cursor > max_visible { cursor - max_visible } else { 0 };
+                let before_trunc: String = before.chars().skip(scroll).take(max_visible).collect();
+                content.push(Line::from(vec![
+                    Span::styled("  > ", box_style),
+                    Span::styled(before_trunc, box_style),
+                    Span::styled(at, cursor_style),
+                    Span::styled(after.chars().take(inner_w.saturating_sub(4 + before.chars().count().saturating_sub(scroll))).collect::<String>(), box_style),
+                ]));
+            } else {
+                let val = field.effective_value();
+                let display: String = if val.is_empty() {
+                    if field.default_val.is_empty() {
+                        "(empty)".to_string()
+                    } else {
+                        format!("(default: {})", field.default_val)
+                    }
+                } else {
+                    val.chars().take(inner_w.saturating_sub(4)).collect()
+                };
+                let val_style = if val.is_empty() {
+                    Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM)
+                } else {
+                    Style::default().fg(TUI_TEXT)
+                };
+                content.push(Line::from(vec![
+                    Span::styled("    ", Style::default()),
+                    Span::styled(display, val_style),
+                ]));
+            }
+
+            // Blank separator between fields
+            if idx + 1 < form.fields.len() {
+                content.push(Line::from(""));
+            }
+        }
+
+        let wf_name = form.workflow_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "workflow".to_string());
+        let title = format!(" {} — inputs ", wf_name);
+        let hint = " Tab/Enter next · Shift+Tab back · Ctrl+Enter submit · Ctrl+F browse path · Esc cancel ";
+        frame.render_widget(Clear, popup_rect);
+        frame.render_widget(
+            Paragraph::new(content)
+                .block(modal_block_with_hint(&title, hint, modal_border_default())),
+            popup_rect,
+        );
+    }
+
+    // ── Workflow picker ───────────────────────────────────────────────────────
+    if let Some(ref picker) = app.workflow_picker {
+        const VISIBLE: usize = 10;
+        let filtered = picker.filtered();
+        let n_rows = filtered.len().clamp(1, VISIBLE) as u16;
+        // border(2) + header(1) + divider(1) + rows + filter_hint(1) = n_rows + 5
+        let popup_h = (n_rows + 5).min(area.height.saturating_sub(4)).max(6);
+        let popup_rect = popup_above_input(input_area, popup_h, input_area.width);
+
+        let inner_w = popup_rect.width.saturating_sub(4) as usize;
+        let mut content: Vec<Line<'static>> = Vec::new();
+
+        // Filter indicator
+        if !picker.filter.is_empty() {
+            content.push(Line::from(vec![Span::styled(
+                format!("  filter: {}", picker.filter),
+                Style::default().fg(TUI_SOFT_ACCENT),
+            )]));
+        }
+
+        // Column header
+        let steps_w = 7usize; // "N steps"
+        let loc_w = 6usize;   // "local"/"global"
+        let name_w = inner_w.saturating_sub(steps_w + loc_w + 6).max(8);
+        content.push(Line::from(vec![Span::styled(
+            format!("  {:<name_w$}  {:>steps_w$}  {:<loc_w$}", "name", "steps", "scope"),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+        )]));
+        content.push(Line::from(vec![Span::styled(
+            format!(
+                "  {}  {}  {}",
+                "─".repeat(name_w),
+                "─".repeat(steps_w),
+                "─".repeat(loc_w)
+            ),
+            Style::default().fg(TUI_MUTED).add_modifier(Modifier::DIM),
+        )]));
+
+        let end = (picker.scroll_offset + VISIBLE).min(filtered.len());
+        for (di, entry) in filtered[picker.scroll_offset..end].iter().enumerate() {
+            let is_selected = picker.scroll_offset + di == picker.selected;
+            let bg = if is_selected { TUI_SELECTION_BG } else { Color::Reset };
+            let style = if is_selected {
+                Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().bg(bg).fg(TUI_TEXT).add_modifier(Modifier::DIM)
+            };
+            let marker = if is_selected { "▶ " } else { "  " };
+            let name_trunc: String = entry.name.chars().take(name_w).collect();
+            let steps_str = format!("{} steps", entry.steps);
+            let loc_str = if entry.is_local { "local" } else { "global" };
+            content.push(Line::from(vec![Span::styled(
+                format!(
+                    "{marker}{:<name_w$}  {:>steps_w$}  {:<loc_w$}",
+                    name_trunc, steps_str, loc_str
+                ),
+                style,
+            )]));
+        }
+
+        // Scroll indicators
+        let above = picker.scroll_offset;
+        let below = filtered.len().saturating_sub(picker.scroll_offset + VISIBLE);
+        if let Some(line) = scroll_indicator_line(above, below) {
+            content.push(line);
+        }
+
+        let total = filtered.len();
+        use crate::tui::state::WorkflowPickerAction;
+        let action_label = match picker.action {
+            WorkflowPickerAction::Run => "run",
+            WorkflowPickerAction::Show => "show",
+            WorkflowPickerAction::Edit => "edit",
+            WorkflowPickerAction::AgentEdit => "agent-edit",
+        };
+        let title = format!(" Workflows — {action_label} · {total} total ");
+        let enter_hint = match picker.action {
+            WorkflowPickerAction::AgentEdit => "Enter select · add description · Enter send",
+            _ => "Enter to confirm",
+        };
+        let hint = if picker.filter.is_empty() {
+            format!(" ↑↓ navigate · {enter_hint} · type to filter · Esc close ")
+        } else {
+            format!(" ↑↓ navigate · {enter_hint} · Backspace filter · Esc close ")
+        };
+        let hint: &str = Box::leak(hint.into_boxed_str());
+        frame.render_widget(Clear, popup_rect);
+        frame.render_widget(
+            Paragraph::new(content)
+                .block(modal_block_with_hint(&title, hint, modal_border_default())),
             popup_rect,
         );
     }

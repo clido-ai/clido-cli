@@ -91,6 +91,40 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         return;
     }
 
+    // ── Ctrl+F: open file picker targeting main input ────────────────────────
+    if matches!((event.modifiers, event.code), (Km::CONTROL, Char('f'))) {
+        let start_dir = {
+            // Try to infer a start dir from the word at cursor
+            let text = &app.text_input.text;
+            let cursor = app.text_input.cursor;
+            let chars: Vec<char> = text.chars().collect();
+            let mut start = cursor;
+            while start > 0 {
+                let c = chars[start - 1];
+                if c == ' ' || c == '\t' {
+                    break;
+                }
+                start -= 1;
+            }
+            let word: String = chars[start..cursor].iter().collect();
+            let p = std::path::Path::new(&word);
+            if p.is_dir() {
+                p.to_path_buf()
+            } else if let Some(parent) = p.parent() {
+                if parent.is_dir() {
+                    parent.to_path_buf()
+                } else {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                }
+            } else {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            }
+        };
+        use crate::tui::state::{FilePickerState, FilePickerTarget};
+        app.file_picker = Some(FilePickerState::new(start_dir, FilePickerTarget::MainTextInput));
+        return;
+    }
+
     // ── Plan text editor (nano-style, intercepts all keys) ───────────────────
     if app.plan.text_editor.is_some() {
         handle_plan_text_editor_key(app, event);
@@ -190,6 +224,254 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
             return;
         }
         OverlayKeyResult::NotHandled | OverlayKeyResult::NoOverlay => {}
+    }
+
+    // ── File picker (modal) ──────────────────────────────────────────────────
+    if app.file_picker.is_some() {
+        const VISIBLE: usize = 16;
+        match (event.modifiers, event.code) {
+            (_, Up) => {
+                if let Some(fp) = &mut app.file_picker {
+                    let n = fp.filtered().len();
+                    if n > 0 && fp.selected > 0 {
+                        fp.selected -= 1;
+                        if fp.selected < fp.scroll_offset {
+                            fp.scroll_offset = fp.selected;
+                        }
+                    }
+                }
+            }
+            (_, Down) => {
+                if let Some(fp) = &mut app.file_picker {
+                    let n = fp.filtered().len();
+                    if n > 0 && fp.selected + 1 < n {
+                        fp.selected += 1;
+                        if fp.selected >= fp.scroll_offset + VISIBLE {
+                            fp.scroll_offset = fp.selected - VISIBLE + 1;
+                        }
+                    }
+                }
+            }
+            (_, Enter) => {
+                if let Some(fp) = app.file_picker.take() {
+                    let filtered = fp.filtered();
+                    if !filtered.is_empty() {
+                        let entry = filtered[fp.selected].clone();
+                        drop(filtered);
+                        if entry.is_dir {
+                            // Navigate into directory
+                            let mut fp = fp;
+                            fp.enter_dir(entry.path);
+                            app.file_picker = Some(fp);
+                        } else {
+                            // Deliver path to target
+                            let path_str = entry.path.to_string_lossy().into_owned();
+                            use crate::tui::state::FilePickerTarget;
+                            match fp.target {
+                                FilePickerTarget::WorkflowFormField(idx) => {
+                                    if let Some(form) = &mut app.workflow_input_form {
+                                        if idx < form.fields.len() {
+                                            form.fields[idx].value = path_str;
+                                            form.cursor = form.fields[idx].value.chars().count();
+                                        }
+                                    }
+                                }
+                                FilePickerTarget::MainTextInput => {
+                                    // Replace the word at cursor that starts with / . or ~
+                                    let text = &app.text_input.text;
+                                    let cursor = app.text_input.cursor;
+                                    // Find word start
+                                    let chars: Vec<char> = text.chars().collect();
+                                    let mut start = cursor;
+                                    while start > 0 {
+                                        let c = chars[start - 1];
+                                        if c == ' ' || c == '\t' || c == '\n' {
+                                            break;
+                                        }
+                                        start -= 1;
+                                    }
+                                    let before: String = chars[..start].iter().collect();
+                                    let after: String = chars[cursor..].iter().collect();
+                                    app.text_input.text = format!("{before}{path_str}{after}");
+                                    app.text_input.cursor = start + path_str.chars().count();
+                                }
+                            }
+                        }
+                    } else {
+                        app.file_picker = None;
+                    }
+                }
+            }
+            (_, Esc) => {
+                app.file_picker = None;
+            }
+            // Backspace with empty filter → go up a directory
+            (Km::NONE, KeyCode::Backspace) => {
+                if let Some(fp) = &mut app.file_picker {
+                    if fp.filter.is_empty() {
+                        fp.go_up();
+                    } else {
+                        fp.filter.pop();
+                        fp.clamp();
+                    }
+                }
+            }
+            // Home → jump to home directory
+            (Km::NONE, KeyCode::Home) => {
+                if let Some(fp) = &mut app.file_picker {
+                    let home = std::env::var("HOME")
+                        .ok()
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    fp.enter_dir(home);
+                }
+            }
+            (m, KeyCode::Char(c)) if m == Km::NONE || m == Km::SHIFT => {
+                if let Some(fp) = &mut app.file_picker {
+                    fp.filter.push(c);
+                    fp.selected = 0;
+                    fp.scroll_offset = 0;
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // ── Workflow input form (modal) ───────────────────────────────────────────
+    if app.workflow_input_form.is_some() {
+        match (event.modifiers, event.code) {
+            // Ctrl+F on a path field → open file picker for that field
+            (Km::CONTROL, KeyCode::Char('f') | KeyCode::Char('F')) => {
+                if let Some(form) = &app.workflow_input_form {
+                    let idx = form.current_field;
+                    if form.fields[idx].is_path {
+                        let start_dir = {
+                            let val = form.fields[idx].effective_value();
+                            if val.is_empty() {
+                                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                            } else {
+                                let p = std::path::Path::new(val);
+                                if p.is_dir() {
+                                    p.to_path_buf()
+                                } else {
+                                    p.parent().map(|x| x.to_path_buf())
+                                        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
+                                }
+                            }
+                        };
+                        use crate::tui::state::{FilePickerState, FilePickerTarget};
+                        app.file_picker = Some(FilePickerState::new(start_dir, FilePickerTarget::WorkflowFormField(idx)));
+                    }
+                }
+            }
+            // Enter: advance to next field or submit on last
+            (Km::NONE, Enter) => {
+                let done = if let Some(form) = &app.workflow_input_form {
+                    form.current_field + 1 >= form.fields.len()
+                } else {
+                    false
+                };
+                if done {
+                    crate::tui::commands::submit_workflow_form(app);
+                } else if let Some(form) = &mut app.workflow_input_form {
+                    form.current_field += 1;
+                    form.cursor = form.fields[form.current_field].value.chars().count();
+                }
+            }
+            // Shift+Enter or Ctrl+Enter: submit immediately
+            (Km::SHIFT, Enter) | (Km::CONTROL, Enter) => {
+                crate::tui::commands::submit_workflow_form(app);
+            }
+            // Tab: next field
+            (Km::NONE, KeyCode::Tab) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    if form.current_field + 1 < form.fields.len() {
+                        form.current_field += 1;
+                        form.cursor = form.fields[form.current_field].value.chars().count();
+                    }
+                }
+            }
+            // Shift+Tab: previous field
+            (Km::SHIFT, KeyCode::BackTab) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    if form.current_field > 0 {
+                        form.current_field -= 1;
+                        form.cursor = form.fields[form.current_field].value.chars().count();
+                    }
+                }
+            }
+            // Esc: cancel
+            (_, Esc) => {
+                app.workflow_input_form = None;
+            }
+            // Left / Right: move cursor within field
+            (Km::NONE, Left) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    if form.cursor > 0 {
+                        form.cursor -= 1;
+                    }
+                }
+            }
+            (Km::NONE, Right) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    let len = form.fields[form.current_field].value.chars().count();
+                    if form.cursor < len {
+                        form.cursor += 1;
+                    }
+                }
+            }
+            // Home / End
+            (Km::NONE, KeyCode::Home) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    form.cursor = 0;
+                }
+            }
+            (Km::NONE, KeyCode::End) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    form.cursor = form.fields[form.current_field].value.chars().count();
+                }
+            }
+            // Backspace
+            (Km::NONE, KeyCode::Backspace) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    let field = &mut form.fields[form.current_field];
+                    if form.cursor > 0 {
+                        let chars: Vec<char> = field.value.chars().collect();
+                        let mut new_chars = chars.clone();
+                        new_chars.remove(form.cursor - 1);
+                        field.value = new_chars.into_iter().collect();
+                        form.cursor -= 1;
+                    }
+                }
+            }
+            // Delete
+            (Km::NONE, KeyCode::Delete) => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    let field = &mut form.fields[form.current_field];
+                    let len = field.value.chars().count();
+                    if form.cursor < len {
+                        let chars: Vec<char> = field.value.chars().collect();
+                        let mut new_chars = chars.clone();
+                        new_chars.remove(form.cursor);
+                        field.value = new_chars.into_iter().collect();
+                    }
+                }
+            }
+            // Regular character input
+            (m, KeyCode::Char(c)) if m == Km::NONE || m == Km::SHIFT => {
+                if let Some(form) = &mut app.workflow_input_form {
+                    let field = &mut form.fields[form.current_field];
+                    let chars: Vec<char> = field.value.chars().collect();
+                    let mut new_chars = chars;
+                    new_chars.insert(form.cursor, c);
+                    field.value = new_chars.into_iter().collect();
+                    form.cursor += 1;
+                }
+            }
+            _ => {}
+        }
+        return;
     }
 
     // ── Model picker (modal) ─────────────────────────────────────────────────
@@ -320,6 +602,84 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                         picker.selected = n - 1;
                         picker.scroll_offset = picker.selected.saturating_sub(VISIBLE - 1);
                     }
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // ── Workflow picker (modal) ───────────────────────────────────────────────
+    if app.workflow_picker.is_some() {
+        const VISIBLE: usize = 10;
+        match event.code {
+            Up => {
+                if let Some(picker) = &mut app.workflow_picker {
+                    let n = picker.filtered().len();
+                    if n > 0 && picker.selected > 0 {
+                        picker.selected -= 1;
+                        if picker.selected < picker.scroll_offset {
+                            picker.scroll_offset = picker.selected;
+                        }
+                    }
+                }
+            }
+            Down => {
+                if let Some(picker) = &mut app.workflow_picker {
+                    let n = picker.filtered().len();
+                    if n > 0 && picker.selected + 1 < n {
+                        picker.selected += 1;
+                        if picker.selected >= picker.scroll_offset + VISIBLE {
+                            picker.scroll_offset = picker.selected - VISIBLE + 1;
+                        }
+                    }
+                }
+            }
+            Enter => {
+                if let Some(picker) = app.workflow_picker.take() {
+                    let filtered = picker.filtered();
+                    if !filtered.is_empty() {
+                        let name = filtered[picker.selected].name.clone();
+                        let action = picker.action;
+                        drop(filtered);
+                        app.text_input.text.clear();
+                        app.text_input.cursor = 0;
+                        use crate::tui::state::WorkflowPickerAction;
+                        match action {
+                            WorkflowPickerAction::Run => {
+                                // Go through maybe_open_workflow_form so inputs are collected if needed.
+                                if let Some(path) = crate::tui::commands::find_workflow_path(app, &name) {
+                                    crate::tui::commands::maybe_open_workflow_form(app, path, vec![], None);
+                                }
+                            }
+                            WorkflowPickerAction::Show => {
+                                crate::tui::commands::execute_slash(app, &format!("/workflow show {name}"));
+                            }
+                            WorkflowPickerAction::Edit => {
+                                crate::tui::commands::execute_slash(app, &format!("/workflow edit {name}"));
+                            }
+                            WorkflowPickerAction::AgentEdit => {
+                                app.text_input.text = format!("/workflow agent-edit {name} ");
+                                app.text_input.cursor = app.text_input.text.chars().count();
+                            }
+                        }
+                    }
+                }
+            }
+            Esc => {
+                app.workflow_picker = None;
+            }
+            KeyCode::Backspace => {
+                if let Some(picker) = &mut app.workflow_picker {
+                    picker.filter.pop();
+                    picker.clamp();
+                }
+            }
+            KeyCode::Char(c) if event.modifiers == Km::NONE || event.modifiers == Km::SHIFT => {
+                if let Some(picker) = &mut app.workflow_picker {
+                    picker.filter.push(c);
+                    picker.selected = 0;
+                    picker.scroll_offset = 0;
                 }
             }
             _ => {}
@@ -647,33 +1007,49 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
                 return;
             }
             (Km::NONE, Enter) => {
-                // Auto-select exact match if input exactly equals a completion
                 // Note: Only handle plain Enter here - Shift+Enter goes to main handler for newline
                 let exact_match_idx = completions
                     .iter()
                     .position(|(cmd, _)| *cmd == app.text_input.text);
 
-                let idx = app.selected_cmd.or(exact_match_idx);
+                // Resolve which completion to use:
+                // 1. Explicitly selected with arrow keys
+                // 2. Only one completion exists (unambiguous)
+                // 3. Input is an exact match
+                let idx = app.selected_cmd.or_else(|| {
+                    if completions.len() == 1 {
+                        Some(0)
+                    } else {
+                        exact_match_idx
+                    }
+                });
+
                 if let Some(idx) = idx {
                     let cmd = completions[idx].0.to_string();
+                    if app.text_input.text != cmd {
+                        // First Enter: fill the input with the full command name, don't send yet.
+                        // User can then add arguments or press Enter again to send.
+                        app.text_input.text = cmd;
+                        app.text_input.cursor = app.text_input.text.chars().count();
+                        app.selected_cmd = None;
+                        return;
+                    }
+                    // Second Enter (or input already matches): execute or fall through.
                     let needs_arg = crate::command_registry::COMMANDS
                         .iter()
                         .find(|c| c.name == cmd)
                         .map(|c| c.takes_args)
                         .unwrap_or(false);
-                    if needs_arg {
-                        // Command needs args but none provided yet.
-                        // Fall through to submit so the handler can show usage/help.
-                        // Don't return - let the normal submit flow handle it.
-                    } else {
+                    if !needs_arg {
                         app.selected_cmd = None;
                         app.text_input.text.clear();
                         app.text_input.cursor = 0;
                         execute_slash(app, &cmd);
                         return;
                     }
+                    // needs_arg → fall through to submit so the handler can process it.
                 }
-                // No exact match, or needs args → fall through to normal Enter handling.
+                // No completion resolved, or needs args → fall through to normal Enter handling.
             }
             (_, Esc) => {
                 app.selected_cmd = None;
@@ -690,6 +1066,67 @@ pub(super) fn handle_key(app: &mut App, event: crossterm::event::KeyEvent) {
         }
     } else {
         app.selected_cmd = None;
+    }
+
+    // ── Path completion popup ────────────────────────────────────────────────
+    {
+        use crate::tui::commands::path_completions;
+        let (word_start, completions) = path_completions(&app.text_input.text, app.text_input.cursor);
+
+        if !completions.is_empty() {
+            // Clamp selection.
+            if let Some(sel) = app.selected_path {
+                if sel >= completions.len() {
+                    app.selected_path = Some(completions.len() - 1);
+                }
+            }
+
+            match (event.modifiers, event.code) {
+                (_, Up) => {
+                    app.selected_path = Some(match app.selected_path {
+                        None | Some(0) => completions.len() - 1,
+                        Some(i) => i - 1,
+                    });
+                    return;
+                }
+                (_, Down) => {
+                    app.selected_path = Some(match app.selected_path {
+                        None => 0,
+                        Some(i) => (i + 1) % completions.len(),
+                    });
+                    return;
+                }
+                (_, Tab) | (Km::NONE, Enter) if app.selected_path.is_some() || completions.len() == 1 => {
+                    let idx = app.selected_path.unwrap_or(0);
+                    let completion = completions[idx].full.clone();
+                    let is_dir = completions[idx].is_dir;
+                    // Replace the word at cursor with the completion.
+                    let chars: Vec<char> = app.text_input.text.chars().collect();
+                    let after: String = chars[app.text_input.cursor..].iter().collect();
+                    let before: String = chars[..word_start].iter().collect();
+                    app.text_input.text = format!("{before}{completion}{after}");
+                    app.text_input.cursor = word_start + completion.chars().count();
+                    app.selected_path = None;
+                    // If it's a dir, keep completions live (cursor is now at the trailing /)
+                    // so the user can continue drilling in. Otherwise close popup.
+                    if !is_dir {
+                        // add a space after file completions for convenience
+                        if after.is_empty() {
+                            app.text_input.text.push(' ');
+                            app.text_input.cursor += 1;
+                        }
+                    }
+                    return;
+                }
+                (_, Esc) => {
+                    app.selected_path = None;
+                    return;
+                }
+                _ => {}
+            }
+        } else {
+            app.selected_path = None;
+        }
     }
 
     // ── Selection Mode: handle keys first ────────────────────────────────

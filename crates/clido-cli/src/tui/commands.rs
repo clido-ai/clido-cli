@@ -6,7 +6,10 @@ use clido_memory::MemoryStore;
 use crate::list_picker::ListPicker;
 use crate::overlay::{ErrorOverlay, OverlayKind, ReadOnlyOverlay};
 
-use super::state::{PlanPanelVisibility, StatusRailVisibility};
+use super::state::{
+    FilePickerState, FilePickerTarget, InputFormField, PlanPanelVisibility, StatusRailVisibility,
+    WorkflowEntry, WorkflowInputFormState, WorkflowPickerAction, WorkflowPickerState,
+};
 use super::*;
 
 /// Switch the default profile on disk, tell the agent to rebuild provider/tools in-process,
@@ -90,6 +93,110 @@ pub(super) fn slash_completions(input: &str) -> Vec<(&'static str, &'static str)
         .into_iter()
         .filter(|(cmd, _)| cmd.starts_with(input))
         .collect()
+}
+
+/// One path completion entry.
+#[derive(Clone)]
+pub(super) struct PathCompletion {
+    /// Display name (file/dir name only).
+    pub(super) name: String,
+    /// Full path string to insert.
+    pub(super) full: String,
+    pub(super) is_dir: bool,
+}
+
+/// Given the full input text and cursor position, extract the path-like word at the
+/// cursor and return filesystem completions for it.
+/// Returns `(word_start_char_idx, completions)` — word_start is needed so the
+/// caller knows how much of the text to replace on completion.
+pub(super) fn path_completions(text: &str, cursor: usize) -> (usize, Vec<PathCompletion>) {
+    // Find the start of the word at cursor.
+    let chars: Vec<char> = text.chars().collect();
+    let mut word_start = cursor;
+    while word_start > 0 {
+        let c = chars[word_start - 1];
+        if c == ' ' || c == '\t' || c == '\n' {
+            break;
+        }
+        word_start -= 1;
+    }
+    let word: String = chars[word_start..cursor].iter().collect();
+
+    // Only activate for path-like prefixes.
+    let is_path_prefix = word.starts_with('/')
+        || word.starts_with("./")
+        || word.starts_with("../")
+        || word.starts_with('~')
+        || (word.starts_with('@') && (word.contains('/') || word.len() > 1));
+
+    if !is_path_prefix || word.is_empty() {
+        return (word_start, vec![]);
+    }
+
+    // Strip leading @ for @file references so we complete the path part.
+    let path_part = if word.starts_with('@') { &word[1..] } else { &word };
+
+    // Expand ~ to home directory.
+    let expanded = if path_part.starts_with('~') {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        format!("{}{}", home, &path_part[1..])
+    } else {
+        path_part.to_string()
+    };
+
+    // Split into parent dir and prefix of the final component.
+    let (search_dir, name_prefix) = if expanded.ends_with('/') {
+        (expanded.as_str().to_string(), String::new())
+    } else {
+        let p = std::path::Path::new(&expanded);
+        let parent = p.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| ".".to_string());
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        (parent, name)
+    };
+
+    let search_path = std::path::Path::new(&search_dir);
+    let mut results = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(search_path) {
+        let name_lc = name_prefix.to_lowercase();
+        let mut dirs: Vec<PathCompletion> = Vec::new();
+        let mut files: Vec<PathCompletion> = Vec::new();
+        for entry in rd.flatten() {
+            let entry_name = entry.file_name().to_string_lossy().into_owned();
+            if !name_prefix.is_empty() && !entry_name.to_lowercase().starts_with(&name_lc) {
+                continue;
+            }
+            // Skip hidden files unless prefix starts with '.'
+            if entry_name.starts_with('.') && !name_prefix.starts_with('.') {
+                continue;
+            }
+            let is_dir = entry.path().is_dir();
+            // Reconstruct the full string to insert (preserve original prefix format).
+            let at_prefix = if word.starts_with('@') { "@" } else { "" };
+            let orig_dir = if path_part.ends_with('/') {
+                path_part.to_string()
+            } else {
+                std::path::Path::new(path_part)
+                    .parent()
+                    .map(|p| {
+                        let s = p.to_string_lossy().into_owned();
+                        if s.is_empty() { String::new() } else { format!("{}/", s) }
+                    })
+                    .unwrap_or_default()
+            };
+            let dir_suffix = if is_dir { "/" } else { "" };
+            let full_path = format!("{at_prefix}{orig_dir}{entry_name}{dir_suffix}");
+            let pc = PathCompletion { name: entry_name, full: full_path, is_dir };
+            if is_dir { dirs.push(pc); } else { files.push(pc); }
+        }
+        dirs.sort_by(|a, b| a.name.cmp(&b.name));
+        files.sort_by(|a, b| a.name.cmp(&b.name));
+        results = dirs;
+        results.extend(files);
+    }
+
+    // Cap at a reasonable number.
+    results.truncate(20);
+    (word_start, results)
 }
 
 /// A row in the autocomplete popup: either a non-selectable section header or a
@@ -2367,6 +2474,96 @@ async fn run_isolated_step(
 
 /// Load a workflow, validate it, resolve inputs, check prerequisites, and start
 /// orchestrating it through the main agent session.
+/// Infer whether a workflow input field is a file/path field from its name, description, or hint.
+fn is_path_field(input: &clido_workflows::types::InputDef) -> bool {
+    if let Some(hint) = &input.hint {
+        let h = hint.to_lowercase();
+        return h == "path" || h == "file" || h == "dir" || h == "directory";
+    }
+    let name = input.name.to_lowercase();
+    let desc = input.description.to_lowercase();
+    let path_keywords = [
+        "path", "file", "dir", "directory", "csv", "json", "yaml", "yml",
+        "src", "dest", "destination", "output", "input", "log", "txt",
+    ];
+    path_keywords.iter().any(|kw| name.contains(kw) || desc.contains(kw))
+}
+
+/// Open the workflow input form if the workflow has inputs; otherwise run directly.
+pub(super) fn maybe_open_workflow_form(
+    app: &mut App,
+    path: std::path::PathBuf,
+    partial_inputs: Vec<(String, String)>,
+    profile_override: Option<String>,
+) {
+    use clido_workflows::load as load_workflow;
+    let def = match load_workflow(&path) {
+        Ok(d) => d,
+        Err(e) => {
+            app.push(ChatLine::Info(format!("  ✗ {e}")));
+            return;
+        }
+    };
+
+    if def.inputs.is_empty() {
+        // No inputs needed — run directly.
+        start_workflow(app, path, partial_inputs, profile_override);
+        return;
+    }
+
+    let fields: Vec<InputFormField> = def
+        .inputs
+        .iter()
+        .map(|inp| {
+            let pre_filled = partial_inputs
+                .iter()
+                .find(|(k, _)| k == &inp.name)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default();
+            let default_val = inp
+                .default
+                .as_ref()
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_default();
+            InputFormField {
+                name: inp.name.clone(),
+                description: inp.description.clone(),
+                required: inp.required,
+                default_val,
+                value: pre_filled,
+                is_path: is_path_field(inp),
+            }
+        })
+        .collect();
+
+    app.workflow_input_form = Some(WorkflowInputFormState {
+        workflow_path: path,
+        fields,
+        current_field: 0,
+        profile_override,
+        cursor: 0,
+    });
+}
+
+/// Called when the user confirms the workflow input form.
+pub(super) fn submit_workflow_form(app: &mut App) {
+    if let Some(form) = app.workflow_input_form.take() {
+        // Validate required fields
+        for field in &form.fields {
+            if field.required && field.effective_value().is_empty() {
+                app.push(ChatLine::Info(format!(
+                    "  ✗ Required field '{}' is empty.",
+                    field.name
+                )));
+                app.workflow_input_form = Some(form);
+                return;
+            }
+        }
+        let inputs = form.collect_inputs();
+        start_workflow(app, form.workflow_path, inputs, form.profile_override);
+    }
+}
+
 fn start_workflow(
     app: &mut App,
     path: std::path::PathBuf,
@@ -3181,6 +3378,11 @@ fn find_workflow(workspace_root: &std::path::Path, name: &str) -> Option<std::pa
     None
 }
 
+/// Public wrapper around find_workflow for use from the input module.
+pub(super) fn find_workflow_path(app: &App, name: &str) -> Option<std::path::PathBuf> {
+    find_workflow(&app.workspace_root, name)
+}
+
 /// Extract the last YAML code block from assistant messages in the chat.
 pub(super) fn extract_last_yaml_from_chat(messages: &[ChatLine]) -> Option<String> {
     for msg in messages.iter().rev() {
@@ -3449,50 +3651,38 @@ Keep the conversation natural. Ask one thing at a time."#
         .to_string()
 }
 
+fn open_workflow_picker(app: &mut App, action: WorkflowPickerAction) {
+    let workflows = list_workflows(&app.workspace_root);
+    if workflows.is_empty() {
+        app.push(ChatLine::Info(
+            "  No workflows found. Use /workflow new <description> to create one.".into(),
+        ));
+        return;
+    }
+    let entries: Vec<WorkflowEntry> = workflows
+        .into_iter()
+        .map(|(name, path, desc, steps)| WorkflowEntry {
+            is_local: path.starts_with(&app.workspace_root),
+            name,
+            desc,
+            steps,
+        })
+        .collect();
+    app.workflow_picker = Some(WorkflowPickerState {
+        workflows: entries,
+        selected: 0,
+        scroll_offset: 0,
+        filter: String::new(),
+        action,
+    });
+}
+
 pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
     let sub = cmd.trim_start_matches("/workflow").trim().to_string();
 
     match sub.as_str() {
         "" | "list" => {
-            // List workflows with directory info
-            let (_global_dirs, _local_dir, info) = workflow_dirs_with_info(&app.workspace_root);
-            let workflows = list_workflows(&app.workspace_root);
-
-            app.push(ChatLine::Info("".into()));
-            app.push(ChatLine::Section("Workflows".into()));
-
-            // Show search paths
-            app.push(ChatLine::Info("  Search paths:".into()));
-            for path_info in &info {
-                app.push(ChatLine::Info(format!("    • {}", path_info)));
-            }
-            app.push(ChatLine::Info("".into()));
-
-            if workflows.is_empty() {
-                app.push(ChatLine::Info(
-                    "  No workflows found. Use /workflow new <description> to create one.".into(),
-                ));
-            } else {
-                app.push(ChatLine::Info(format!(
-                    "  Found {} workflow(s):",
-                    workflows.len()
-                )));
-                app.push(ChatLine::Info("".into()));
-                for (name, path, desc, steps) in &workflows {
-                    let loc = if path.starts_with(&app.workspace_root) {
-                        "local"
-                    } else {
-                        "global"
-                    };
-                    app.push(ChatLine::Info(format!("  {name}  ({steps} steps, {loc})")));
-                    app.push(ChatLine::Info(format!("    {desc}")));
-                }
-                app.push(ChatLine::Info("".into()));
-                app.push(ChatLine::Info(
-                    "  Use /workflow show <name> to view, /workflow run <name> to execute".into(),
-                ));
-            }
-            app.push(ChatLine::Info("".into()));
+            open_workflow_picker(app, WorkflowPickerAction::Run);
         }
         "help" => {
             app.push(ChatLine::Info("".into()));
@@ -3542,10 +3732,13 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
             ));
             app.send_now(msg);
         }
+        "show" => {
+            open_workflow_picker(app, WorkflowPickerAction::Show);
+        }
         _ if sub.starts_with("show ") => {
             let name = sub.trim_start_matches("show").trim();
             if name.is_empty() {
-                app.push(ChatLine::Info("  Usage: /workflow show <name>".into()));
+                open_workflow_picker(app, WorkflowPickerAction::Show);
                 return;
             }
             match find_workflow(&app.workspace_root, name) {
@@ -3568,13 +3761,14 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
                 }
             }
         }
+        "agent-edit" => {
+            open_workflow_picker(app, WorkflowPickerAction::AgentEdit);
+        }
         _ if sub.starts_with("agent-edit") => {
             // Agent-driven workflow editing
             let rest = sub.trim_start_matches("agent-edit").trim();
             if rest.is_empty() {
-                app.push(ChatLine::Info(
-                    "  Usage: /workflow agent-edit <name> <description of changes>".into(),
-                ));
+                open_workflow_picker(app, WorkflowPickerAction::AgentEdit);
                 return;
             }
 
@@ -3643,16 +3837,14 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
         _ if sub.starts_with("edit") => {
             let name = sub.trim_start_matches("edit").trim();
             if name.is_empty() {
-                // Edit last YAML from chat
+                // Edit last YAML from chat if available, otherwise open picker
                 match extract_last_yaml_from_chat(&app.messages) {
                     Some(yaml) => {
                         app.workflow_editor = Some(PlanTextEditor::from_raw(&yaml));
                         app.workflow_editor_path = None;
                     }
                     None => {
-                        app.push(ChatLine::Info(
-                            "  ✗ No workflow YAML found in chat. Use /workflow edit <name> to edit a saved workflow.".into(),
-                        ));
+                        open_workflow_picker(app, WorkflowPickerAction::Edit);
                     }
                 }
             } else {
@@ -3724,12 +3916,13 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
                 }
             }
         }
+        "run" => {
+            open_workflow_picker(app, WorkflowPickerAction::Run);
+        }
         _ if sub.starts_with("run ") => {
             let rest = sub.trim_start_matches("run").trim();
             if rest.is_empty() {
-                app.push(ChatLine::Info(
-                    "  Usage: /workflow run <name> [key=value …] [--profile=<name>]".into(),
-                ));
+                open_workflow_picker(app, WorkflowPickerAction::Run);
                 return;
             }
             // Parse: first token = workflow name, remaining = key=value pairs or --profile=
@@ -3746,7 +3939,7 @@ pub(super) fn cmd_workflow(app: &mut App, cmd: &str) {
             }
             match find_workflow(&app.workspace_root, name) {
                 Some(path) => {
-                    start_workflow(app, path, inputs, profile_override);
+                    maybe_open_workflow_form(app, path, inputs, profile_override);
                 }
                 None => {
                     app.push(ChatLine::Info(format!(

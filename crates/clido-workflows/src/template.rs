@@ -41,6 +41,10 @@ pub fn build_tera_context(ctx: &WorkflowContext) -> Result<Context> {
     tera_ctx.insert("datetime", &Utc::now().to_rfc3339());
     let cwd = get_cwd();
     tera_ctx.insert("cwd", &cwd);
+    // Inject foreach iteration variables.
+    for (k, v) in &ctx.foreach_context {
+        tera_ctx.insert(k, v);
+    }
     Ok(tera_ctx)
 }
 /// Render a string default value that may contain template expressions.

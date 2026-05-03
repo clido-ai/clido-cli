@@ -81,6 +81,10 @@ pub async fn invoke_model_completion(
                     clido_core::ClidoError::NetworkError(_) => true,
                     clido_core::ClidoError::ServerError { .. } => true,
                     clido_core::ClidoError::MalformedModelOutput { .. } => true,
+                    // Some providers mis-classify transient server-side failures as 400.
+                    // e.g. "InternalError.Algo.InvalidParameter: function.arguments not JSON"
+                    // These are safe to retry because the request itself is valid.
+                    clido_core::ClidoError::Provider(msg) => msg.contains("InternalError"),
                     _ => false,
                 };
 

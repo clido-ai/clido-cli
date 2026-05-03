@@ -164,6 +164,12 @@ pub(super) struct App {
     pub(super) queue_nav_idx: Option<usize>,
     /// When editing a queued item, this stores the original text to restore if cancelled.
     pub(super) editing_queued_item: Option<String>,
+    /// Workflow picker popup state (Some = popup visible).
+    pub(super) workflow_picker: Option<WorkflowPickerState>,
+    /// Workflow input form (Some = visible, collecting inputs before run).
+    pub(super) workflow_input_form: Option<WorkflowInputFormState>,
+    /// File / directory picker popup (Some = visible).
+    pub(super) file_picker: Option<FilePickerState>,
     /// Session picker popup state (Some = popup visible).
     pub(super) session_picker: Option<SessionPickerState>,
     /// Model picker popup state (Some = popup visible).
@@ -186,6 +192,8 @@ pub(super) struct App {
     pub(super) permission_mode_override: Option<PermissionMode>,
     /// Selected index in the slash-command popup (None = no popup).
     pub(super) selected_cmd: Option<usize>,
+    /// Selected index in the path-completion popup (None = popup closed).
+    pub(super) selected_path: Option<usize>,
     pub(super) quit: bool,
     /// When true, the TUI exits and setup wizard re-runs to reconfigure.
     pub(super) wants_reinit: bool,
@@ -387,6 +395,9 @@ impl App {
             queued: VecDeque::new(),
             queue_nav_idx: None,
             editing_queued_item: None,
+            workflow_picker: None,
+            workflow_input_form: None,
+            file_picker: None,
             session_picker: None,
             model_picker: None,
             profile_picker: None,
@@ -398,6 +409,7 @@ impl App {
             perm_feedback_input: None,
             permission_mode_override: None,
             selected_cmd: None,
+            selected_path: None,
             quit: false,
             wants_reinit: false,
             wants_profile_create: false,

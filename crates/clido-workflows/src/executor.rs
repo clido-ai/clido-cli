@@ -205,7 +205,105 @@ pub async fn run(
     })
 }
 
+/// Evaluate a foreach expression: render it as a Tera template, then try JSON
+/// array parsing, falling back to newline-separated strings.
+fn evaluate_foreach_items(expr: &str, ctx: &WorkflowContext) -> Result<Vec<serde_json::Value>> {
+    let rendered = render(expr, ctx)?;
+    let trimmed = rendered.trim();
+    // Try JSON array first.
+    if trimmed.starts_with('[') {
+        if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(trimmed) {
+            return Ok(arr);
+        }
+    }
+    // Fall back to newline-separated strings.
+    let items = trimmed
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .map(|l| serde_json::Value::String(l.to_string()))
+        .collect();
+    Ok(items)
+}
+
 async fn run_one_step(
+    step: &StepDef,
+    context: &mut WorkflowContext,
+    runner: &dyn WorkflowStepRunner,
+) -> Result<(StepRunResult, StepResult)> {
+    if let Some(ref foreach_expr) = step.foreach {
+        // Foreach mode: run the step once per item.
+        let items = evaluate_foreach_items(foreach_expr, context)?;
+        let var_name = step.foreach_var.as_deref().unwrap_or("item");
+        let mut combined_outputs: Vec<String> = Vec::new();
+        let mut total_cost = 0.0_f64;
+        let mut total_duration = 0_u64;
+        let mut last_error: Option<String> = None;
+
+        for item in items {
+            context.set_foreach_item(var_name, item);
+            let (result, _step_result) = run_one_step_single(step, context, runner).await?;
+            total_cost += result.cost_usd;
+            total_duration += result.duration_ms;
+            if let Some(ref e) = result.error {
+                if step.on_error == OnErrorPolicy::Fail {
+                    context.clear_foreach_context();
+                    let step_result = StepResult {
+                        step_id: step.id.clone(),
+                        output_text: String::new(),
+                        cost_usd: total_cost,
+                        duration_ms: total_duration,
+                        error: Some(e.clone()),
+                    };
+                    return Ok((
+                        StepRunResult {
+                            output_text: String::new(),
+                            cost_usd: total_cost,
+                            duration_ms: total_duration,
+                            error: Some(e.clone()),
+                        },
+                        step_result,
+                    ));
+                }
+                last_error = Some(e.clone());
+                // continue or retry policies: skip the failed item and move on.
+            } else {
+                combined_outputs.push(result.output_text.clone());
+            }
+        }
+
+        context.clear_foreach_context();
+        let combined = combined_outputs.join("\n---\n");
+        context.set_step_output(&step.id, "output", combined.clone());
+        for out in &step.outputs {
+            if out.name != "output" {
+                context.set_step_output(&step.id, &out.name, combined.clone());
+            }
+        }
+        if last_error.is_none() {
+            apply_save_to(step, context, &combined)?;
+        }
+        let step_result = StepResult {
+            step_id: step.id.clone(),
+            output_text: combined.clone(),
+            cost_usd: total_cost,
+            duration_ms: total_duration,
+            error: last_error.clone(),
+        };
+        return Ok((
+            StepRunResult {
+                output_text: combined,
+                cost_usd: total_cost,
+                duration_ms: total_duration,
+                error: last_error,
+            },
+            step_result,
+        ));
+    }
+    run_one_step_single(step, context, runner).await
+}
+
+async fn run_one_step_single(
     step: &StepDef,
     context: &mut WorkflowContext,
     runner: &dyn WorkflowStepRunner,
@@ -367,6 +465,8 @@ mod tests {
                     parallel: false,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
                 StepDef {
                     id: "b".into(),
@@ -380,6 +480,8 @@ mod tests {
                     parallel: false,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
                 StepDef {
                     id: "c".into(),
@@ -393,6 +495,8 @@ mod tests {
                     parallel: false,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
             ],
             output: None,
@@ -436,6 +540,8 @@ mod tests {
                     parallel: false,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
                 StepDef {
                     id: "b".into(),
@@ -449,6 +555,8 @@ mod tests {
                     parallel: false,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
                 StepDef {
                     id: "c".into(),
@@ -462,6 +570,8 @@ mod tests {
                     parallel: false,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
             ],
             output: None,
@@ -498,6 +608,8 @@ mod tests {
                 parallel: false,
                 system_prompt: None,
                 max_turns: None,
+                foreach: None,
+                foreach_var: None,
             }],
             output: None,
             prerequisites: None,
@@ -530,6 +642,8 @@ mod tests {
                     parallel: false,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
                 StepDef {
                     id: "b".into(),
@@ -543,6 +657,8 @@ mod tests {
                     parallel: true,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
                 StepDef {
                     id: "c".into(),
@@ -556,6 +672,8 @@ mod tests {
                     parallel: true,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
                 StepDef {
                     id: "d".into(),
@@ -569,6 +687,8 @@ mod tests {
                     parallel: false,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
             ],
             output: None,
@@ -603,6 +723,8 @@ mod tests {
                 parallel: false,
                 system_prompt: None,
                 max_turns: None,
+                foreach: None,
+                foreach_var: None,
             }],
             output: None,
             prerequisites: None,
@@ -635,6 +757,8 @@ mod tests {
                 parallel: false,
                 system_prompt: None,
                 max_turns: None,
+                foreach: None,
+                foreach_var: None,
             }],
             output: None,
             prerequisites: None,
@@ -674,6 +798,8 @@ mod tests {
                 parallel: false,
                 system_prompt: None,
                 max_turns: None,
+                foreach: None,
+                foreach_var: None,
             }],
             output: None,
             prerequisites: None,
@@ -740,6 +866,8 @@ mod tests {
                     parallel: true,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
                 StepDef {
                     id: "p2".into(),
@@ -753,6 +881,8 @@ mod tests {
                     parallel: true,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
             ],
             output: None,
@@ -797,6 +927,8 @@ mod tests {
                 parallel: false,
                 system_prompt: None,
                 max_turns: None,
+                foreach: None,
+                foreach_var: None,
             }],
             output: None,
             prerequisites: None,
@@ -833,6 +965,8 @@ mod tests {
                     parallel: true,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
                 StepDef {
                     id: "p2".into(),
@@ -846,6 +980,8 @@ mod tests {
                     parallel: true,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
             ],
             output: None,
@@ -946,6 +1082,8 @@ mod tests {
                 parallel: false,
                 system_prompt: None,
                 max_turns: None,
+                foreach: None,
+                foreach_var: None,
             }],
             output: None,
             prerequisites: None,
@@ -985,6 +1123,8 @@ mod tests {
                 parallel: false,
                 system_prompt: None,
                 max_turns: None,
+                foreach: None,
+                foreach_var: None,
             }],
             output: None,
             prerequisites: None,
@@ -1022,6 +1162,8 @@ mod tests {
                 parallel: false,
                 system_prompt: None,
                 max_turns: None,
+                foreach: None,
+                foreach_var: None,
             }],
             output: None,
             prerequisites: None,
@@ -1066,6 +1208,8 @@ mod tests {
                     parallel: true,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
                 StepDef {
                     id: "p2".into(),
@@ -1079,6 +1223,8 @@ mod tests {
                     parallel: true,
                     system_prompt: None,
                     max_turns: None,
+                    foreach: None,
+                    foreach_var: None,
                 },
             ],
             output: None,

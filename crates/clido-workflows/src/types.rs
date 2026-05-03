@@ -31,6 +31,10 @@ pub struct InputDef {
     pub required: bool,
     #[serde(default)]
     pub default: Option<serde_json::Value>,
+    /// Optional hint for the UI. Supported values: `"path"` (file path picker),
+    /// `"dir"` (directory picker). If omitted, the UI infers from the field name.
+    #[serde(default)]
+    pub hint: Option<String>,
 }
 
 /// Single step definition.
@@ -58,6 +62,14 @@ pub struct StepDef {
     pub system_prompt: Option<String>,
     #[serde(default)]
     pub max_turns: Option<u32>,
+    /// Optional iteration: Tera expression that evaluates to a JSON array or
+    /// newline-delimited list. The step is run once per item. Each iteration
+    /// receives the item as `{{ item }}` (or the name from `foreach_var`).
+    #[serde(default)]
+    pub foreach: Option<String>,
+    /// Variable name injected per foreach iteration. Default: "item".
+    #[serde(default)]
+    pub foreach_var: Option<String>,
 }
 
 /// Output binding for a step.

@@ -3526,7 +3526,7 @@ mod tests {
                     Box<dyn Stream<Item = clido_core::Result<clido_providers::StreamEvent>> + Send>,
                 >,
             > {
-            unimplemented!()
+                unimplemented!()
             }
             async fn list_models(
                 &self,

@@ -94,6 +94,14 @@ impl WorkflowContext {
     pub fn clear_foreach_context(&mut self) {
         self.foreach_context.clear();
     }
+
+    /// Clear all step outputs and results (used when looping the workflow for a new iteration).
+    /// Inputs are preserved so the new iteration runs with the same parameters.
+    pub fn clear_step_outputs(&mut self) {
+        self.step_outputs.clear();
+        self.step_results.clear();
+        self.foreach_context.clear();
+    }
 }
 
 #[cfg(test)]

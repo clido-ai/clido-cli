@@ -18,6 +18,37 @@ pub struct WorkflowDef {
     pub output: Option<OutputConfig>,
     #[serde(default)]
     pub prerequisites: Option<PrerequisitesDef>,
+    /// Optional loop configuration: re-run all steps until a break condition is met.
+    #[serde(default)]
+    pub loop_config: Option<LoopConfig>,
+}
+
+/// Loop configuration: repeat the full workflow until `break_if` fires or `max_iterations` is reached.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LoopConfig {
+    /// Maximum number of times to repeat the workflow (safety limit). Default: 1000.
+    #[serde(default = "default_max_iterations")]
+    pub max_iterations: u32,
+    /// Stop looping when the output of this step contains the given string.
+    /// Checked after every step — fires as soon as the step produces the sentinel value,
+    /// skipping any remaining steps in the current iteration.
+    #[serde(default)]
+    pub break_if_step_output_contains: Option<BreakCondition>,
+}
+
+fn default_max_iterations() -> u32 {
+    1000
+}
+
+/// Condition that stops the workflow loop early.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BreakCondition {
+    /// Step ID whose output is checked.
+    pub step: String,
+    /// Substring to look for in the step output. If found, the loop stops.
+    pub contains: String,
 }
 
 /// Input parameter definition.

@@ -1910,16 +1910,17 @@ impl AgentLoop {
             return self.execute_tool(name, input).await;
         }
 
-        // Auto-checkpoint: create a git commit of dirty state before first write operation.
+        // Auto-checkpoint: spawn a background task so git add+commit never blocks tool execution.
         if !self.checkpoint_created {
             if let Some(tool) = self.tools.get(name) {
                 if !tool.is_read_only() {
                     self.checkpoint_created = true;
-                    if let Some(hash) =
-                        maybe_create_checkpoint(std::env::current_dir().ok().as_deref()).await
-                    {
-                        debug!("Pre-edit git checkpoint created: {hash}");
-                    }
+                    let cwd = std::env::current_dir().ok();
+                    tokio::spawn(async move {
+                        if let Some(hash) = maybe_create_checkpoint(cwd.as_deref()).await {
+                            debug!("Pre-edit git checkpoint created: {hash}");
+                        }
+                    });
                 }
             }
         }

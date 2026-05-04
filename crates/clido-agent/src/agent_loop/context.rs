@@ -11,12 +11,15 @@ use tracing::warn;
 use super::history::repair_orphaned_tool_calls;
 
 /// Proactive summarization triggers at this fraction of effective max context (below full compaction).
-pub(crate) const PROACTIVE_SUMMARIZE_THRESHOLD: f64 = 0.45;
+/// Set high enough that it only kicks in when context is genuinely filling up — avoids adding
+/// extra LLM round-trips on every agent inner turn for typical sessions.
+pub(crate) const PROACTIVE_SUMMARIZE_THRESHOLD: f64 = 0.72;
 
 /// Reserve tokens for model output + provider overhead so request assembly stays under the real limit.
 pub(crate) const CONTEXT_OUTPUT_RESERVE: u32 = 12_288;
 /// Maximum number of tool pairs to summarize per turn (to limit latency).
-const MAX_PROACTIVE_SUMMARIES_PER_TURN: usize = 5;
+/// Kept low so proactive summarization never blocks more than 1-2 extra provider calls per inner turn.
+const MAX_PROACTIVE_SUMMARIES_PER_TURN: usize = 2;
 
 /// Find indices of the oldest tool_call + tool_result message pairs in history
 /// that haven't already been summarized. Returns pairs of (assistant_idx, user_idx).

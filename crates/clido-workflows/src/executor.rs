@@ -309,11 +309,15 @@ async fn run_one_step_single(
     runner: &dyn WorkflowStepRunner,
 ) -> Result<(StepRunResult, StepResult)> {
     let rendered_prompt = render(&step.prompt, context)?;
+    let rendered_system_prompt = step
+        .system_prompt
+        .as_deref()
+        .map(|sp| render(sp, context).unwrap_or_else(|_| sp.to_string()));
     let request = StepRunRequest {
         step_id: step.id.clone(),
         profile: step.profile.clone(),
         tools: step.tools.clone(),
-        system_prompt_override: step.system_prompt.clone(),
+        system_prompt_override: rendered_system_prompt,
         max_turns_override: step.max_turns,
         rendered_prompt,
     };

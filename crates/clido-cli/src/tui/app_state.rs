@@ -132,6 +132,8 @@ pub(super) struct ActiveWorkflow {
     pub(super) foreach_items: Vec<serde_json::Value>,
     /// For foreach steps: current item index.
     pub(super) foreach_item_idx: usize,
+    /// Current loop iteration (0 = first run). Only meaningful when `def.loop_config` is set.
+    pub(super) loop_iteration: u32,
 }
 
 pub(super) struct App {

@@ -2668,6 +2668,7 @@ fn start_workflow(
         halted: false,
         foreach_items: Vec::new(),
         foreach_item_idx: 0,
+        loop_iteration: 0,
     });
     app.plan_panel_visibility = super::state::PlanPanelVisibility::On;
 
@@ -2797,12 +2798,15 @@ pub(super) fn advance_workflow(app: &mut App) {
                     .profile
                     .clone()
                     .unwrap_or_else(|| fallback_profile.clone());
+                let rendered_system_prompt = step.system_prompt.as_deref().map(|sp| {
+                    clido_workflows::render(sp, &wf.context).unwrap_or_else(|_| sp.to_string())
+                });
                 tasks.push((
                     step.id.clone(),
                     rendered,
                     profile,
                     step.tools.clone(),
-                    step.system_prompt.clone(),
+                    rendered_system_prompt,
                     step.max_turns,
                     step.outputs.clone(),
                 ));
@@ -2959,13 +2963,16 @@ pub(super) fn advance_workflow(app: &mut App) {
         } else {
             None
         };
+        let rendered_system_prompt = step.system_prompt.as_deref().map(|sp| {
+            clido_workflows::render(sp, &wf.context).unwrap_or_else(|_| sp.to_string())
+        });
         (
             step.id.clone(),
             name,
             rendered,
             effective_profile,
             tools_hint,
-            step.system_prompt.clone(),
+            rendered_system_prompt,
             foreach_item_label,
         )
     };

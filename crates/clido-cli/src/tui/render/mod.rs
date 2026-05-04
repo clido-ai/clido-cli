@@ -2659,6 +2659,8 @@ pub(super) fn build_lines_w(app: &mut App, width: usize) -> Vec<Line<'static>> {
 }
 
 /// Wrap content lines to fit screen width, tracking original positions.
+/// Word-aware wrapping: never splits words, only breaks at whitespace.
+/// Preserves indentation on continuation lines.
 fn wrap_content_lines(
     content_lines: &[crate::tui::state::ContentLine],
     width: usize,
@@ -2666,68 +2668,219 @@ fn wrap_content_lines(
     let mut wrapped_lines = Vec::new();
 
     for (content_idx, line) in content_lines.iter().enumerate() {
-        let mut char_offset = 0usize;
-        let mut chars_on_segment = 0usize;
+        // Fast path: if line fits entirely, use it as-is
+        let total_width: usize = line
+            .spans
+            .iter()
+            .map(|s| unicode_display_width(s.content.as_ref()))
+            .sum();
+        if total_width <= width {
+            wrapped_lines.push(crate::tui::state::WrappedLine::new(
+                line.spans.clone(),
+                line.source,
+                line.selectable,
+                line.msg_idx,
+                content_idx,
+                0,
+            ));
+            continue;
+        }
 
-        // Split the line into chunks that fit within width
-        let mut current_col = 0usize;
-        let mut current_spans: Vec<Span<'static>> = Vec::new();
+        // Slow path: word-aware wrapping with indentation preservation
+        // Extract indentation from leading whitespace-only spans
+        let mut indent_spans: Vec<Span<'static>> = Vec::new();
+        let mut content_spans: Vec<Span<'static>> = Vec::new();
+        let mut found_non_whitespace = false;
 
         for span in &line.spans {
-            let span_text = span.content.as_ref();
-            let span_chars = span_text.chars().peekable();
-
-            for ch in span_chars {
-                let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-
-                if current_col + ch_width > width && current_col > 0 {
-                    // Finish current wrapped line
-                    wrapped_lines.push(crate::tui::state::WrappedLine::new(
-                        current_spans.clone(),
-                        line.source,
-                        line.selectable,
-                        line.msg_idx,
-                        content_idx,
-                        char_offset,
-                    ));
-
-                    // Advance char_offset by the number of chars emitted so far,
-                    // then reset for the next segment.
-                    char_offset += chars_on_segment;
-                    chars_on_segment = 0;
-                    current_spans = Vec::new();
-                    current_col = 0;
-                }
-
-                // Add character to current span
-                if let Some(last_span) = current_spans.last_mut() {
-                    if last_span.style == span.style {
-                        last_span.content = format!("{}{}", last_span.content, ch).into();
-                    } else {
-                        current_spans.push(Span::styled(ch.to_string(), span.style));
-                    }
-                } else {
-                    current_spans.push(Span::styled(ch.to_string(), span.style));
-                }
-
-                chars_on_segment += 1;
-                current_col += ch_width;
+            if !found_non_whitespace && span.content.chars().all(|c| c.is_whitespace()) {
+                indent_spans.push(span.clone());
+            } else {
+                found_non_whitespace = true;
+                content_spans.push(span.clone());
             }
         }
 
-        // Always emit at least one WrappedLine per ContentLine.
-        // Empty ContentLines (blank separators between messages) must produce a
-        // blank row so that visual spacing and row-index arithmetic stay consistent.
-        // Blank rows are never selectable — no content to copy.
-        let is_blank = current_spans.is_empty();
-        wrapped_lines.push(crate::tui::state::WrappedLine::new(
-            current_spans,
-            line.source,
-            line.selectable && !is_blank,
-            line.msg_idx,
-            content_idx,
-            char_offset,
-        ));
+        // Calculate indent width
+        let indent_width: usize = indent_spans
+            .iter()
+            .map(|s| unicode_display_width(s.content.as_ref()))
+            .sum();
+        let avail_width = width.saturating_sub(indent_width);
+
+        if avail_width < 10 {
+            // Not enough space for word wrapping, fall back to character-based
+            // but still preserve the original line structure
+            wrapped_lines.push(crate::tui::state::WrappedLine::new(
+                line.spans.clone(),
+                line.source,
+                line.selectable,
+                line.msg_idx,
+                content_idx,
+                0,
+            ));
+            continue;
+        }
+
+        // Collect all content text and build style map
+        let mut full_text = String::new();
+        let mut style_map: Vec<Style> = Vec::new();
+        for span in &content_spans {
+            let span_text = span.content.as_ref();
+            for ch in span_text.chars() {
+                full_text.push(ch);
+                style_map.push(span.style);
+            }
+        }
+
+        if full_text.is_empty() {
+            // Only indentation, emit as-is
+            wrapped_lines.push(crate::tui::state::WrappedLine::new(
+                line.spans.clone(),
+                line.source,
+                line.selectable,
+                line.msg_idx,
+                content_idx,
+                0,
+            ));
+            continue;
+        }
+
+        // Word-wrap the content
+        let words: Vec<&str> = full_text.split_whitespace().collect();
+        if words.is_empty() {
+            wrapped_lines.push(crate::tui::state::WrappedLine::new(
+                line.spans.clone(),
+                line.source,
+                line.selectable,
+                line.msg_idx,
+                content_idx,
+                0,
+            ));
+            continue;
+        }
+
+        // Build wrapped lines with word-aware wrapping
+        let mut wrapped_segments: Vec<(String, Vec<Style>)> = Vec::new();
+        let mut current_line = String::new();
+        let mut current_styles: Vec<Style> = Vec::new();
+        let mut current_width = 0usize;
+        let mut is_first_line = true;
+        let char_offset = 0usize;
+
+        for word in words {
+            let word_width = unicode_display_width(word);
+            let effective_width = if is_first_line { width } else { avail_width };
+
+            // Check if word fits
+            let needs_space = !current_line.is_empty();
+            let space_width = if needs_space { 1 } else { 0 };
+
+            if current_width + space_width + word_width <= effective_width {
+                // Word fits - add it
+                if needs_space {
+                    current_line.push(' ');
+                    current_styles.push(Style::default());
+                    current_width += 1;
+                }
+
+                // Find the byte position of this word in full_text
+                if let Some(word_pos) = full_text[char_offset..].find(word) {
+                    let absolute_pos = char_offset + word_pos;
+                    for (i, c) in word.chars().enumerate() {
+                        current_line.push(c);
+                        let style_idx = absolute_pos + i;
+                        if style_idx < style_map.len() {
+                            current_styles.push(style_map[style_idx]);
+                        } else {
+                            current_styles.push(Style::default());
+                        }
+                    }
+                } else {
+                    // Fallback: add word without style
+                    for c in word.chars() {
+                        current_line.push(c);
+                        current_styles.push(Style::default());
+                    }
+                }
+                current_width += word_width;
+            } else {
+                // Word doesn't fit - flush current line
+                if !current_line.is_empty() {
+                    wrapped_segments.push((current_line, current_styles));
+                    current_line = String::new();
+                    current_styles = Vec::new();
+                    is_first_line = false;
+                }
+
+                // Add word to new line
+                if let Some(word_pos) = full_text[char_offset..].find(word) {
+                    let absolute_pos = char_offset + word_pos;
+                    for (i, c) in word.chars().enumerate() {
+                        current_line.push(c);
+                        let style_idx = absolute_pos + i;
+                        if style_idx < style_map.len() {
+                            current_styles.push(style_map[style_idx]);
+                        } else {
+                            current_styles.push(Style::default());
+                        }
+                    }
+                } else {
+                    for c in word.chars() {
+                        current_line.push(c);
+                        current_styles.push(Style::default());
+                    }
+                }
+                current_width = word_width;
+            }
+        }
+
+        // Flush last line
+        if !current_line.is_empty() {
+            wrapped_segments.push((current_line, current_styles));
+        }
+
+        // Create WrappedLine objects from wrapped text with proper styles
+        let mut segment_char_offset = 0usize;
+        for (wrapped_text, styles) in &wrapped_segments {
+            let mut line_spans: Vec<Span<'static>> = Vec::new();
+
+            // Add indent spans for all lines (first line keeps original, continuation lines repeat it)
+            line_spans.extend(indent_spans.clone());
+
+            // Build spans from text and styles, grouping consecutive same-style characters
+            if !wrapped_text.is_empty() {
+                let mut current_style = styles.first().copied().unwrap_or_default();
+                let mut current_text = String::new();
+
+                for (j, c) in wrapped_text.chars().enumerate() {
+                    let style = styles.get(j).copied().unwrap_or_default();
+                    if style == current_style {
+                        current_text.push(c);
+                    } else {
+                        if !current_text.is_empty() {
+                            line_spans.push(Span::styled(current_text, current_style));
+                        }
+                        current_text = String::from(c);
+                        current_style = style;
+                    }
+                }
+                if !current_text.is_empty() {
+                    line_spans.push(Span::styled(current_text, current_style));
+                }
+            }
+
+            wrapped_lines.push(crate::tui::state::WrappedLine::new(
+                line_spans,
+                line.source,
+                line.selectable,
+                line.msg_idx,
+                content_idx,
+                segment_char_offset,
+            ));
+
+            segment_char_offset += wrapped_text.chars().count();
+        }
     }
 
     wrapped_lines

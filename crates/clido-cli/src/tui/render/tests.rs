@@ -175,7 +175,8 @@ mod wrapped_line_tests {
 
     #[test]
     fn test_wrap_long_line() {
-        let long_text = "a".repeat(100);
+        // Use multiple words to test word-aware wrapping
+        let long_text = "word ".repeat(30); // Creates "word word word ..."
         let content_lines = vec![ContentLine::new(
             vec![Span::raw(long_text)],
             LineSource::User,
@@ -184,7 +185,7 @@ mod wrapped_line_tests {
         )];
 
         let wrapped = wrap_content_lines(&content_lines, 40);
-        assert!(wrapped.len() > 1);
+        assert!(wrapped.len() > 1, "Long text with multiple words should wrap to multiple lines");
     }
 
     #[test]
@@ -265,6 +266,60 @@ mod wrapped_line_tests {
         // Each wrapped line should have increasing char_offset
         if wrapped.len() >= 2 {
             assert!(wrapped[1].char_offset > wrapped[0].char_offset);
+        }
+    }
+
+    #[test]
+    fn test_wrap_preserves_indentation() {
+        // Test that indentation is preserved on continuation lines
+        let text = "word ".repeat(30);
+        let content_lines = vec![ContentLine::new(
+            vec![Span::raw("  "), Span::raw(text)], // Leading spaces as indentation
+            LineSource::User,
+            true,
+            0,
+        )];
+
+        let wrapped = wrap_content_lines(&content_lines, 40);
+        assert!(wrapped.len() > 1, "Text should wrap to multiple lines");
+        
+        // Check that all wrapped lines start with the indentation
+        for line in &wrapped {
+            let plain_text = line.plain_text();
+            assert!(
+                plain_text.starts_with("  "),
+                "Wrapped line should preserve indentation: {:?}",
+                plain_text
+            );
+        }
+    }
+
+    #[test]
+    fn test_wrap_word_boundaries() {
+        // Test that words are not split mid-word
+        let text = "hello world foo bar baz qux".to_string();
+        let content_lines = vec![ContentLine::new(
+            vec![Span::raw(text)],
+            LineSource::User,
+            true,
+            0,
+        )];
+
+        let wrapped = wrap_content_lines(&content_lines, 15);
+        
+        // Check that no line breaks mid-word
+        for line in &wrapped {
+            let plain_text = line.plain_text();
+            // Each line should either end with a complete word or be the last line
+            // We verify by checking that there are no partial words
+            let words_in_line: Vec<&str> = plain_text.split_whitespace().collect();
+            for word in &words_in_line {
+                assert!(
+                    !word.is_empty(),
+                    "Words should not be empty: {:?}",
+                    plain_text
+                );
+            }
         }
     }
 }

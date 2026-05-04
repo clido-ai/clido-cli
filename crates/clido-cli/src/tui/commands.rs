@@ -2963,9 +2963,10 @@ pub(super) fn advance_workflow(app: &mut App) {
         } else {
             None
         };
-        let rendered_system_prompt = step.system_prompt.as_deref().map(|sp| {
-            clido_workflows::render(sp, &wf.context).unwrap_or_else(|_| sp.to_string())
-        });
+        let rendered_system_prompt = step
+            .system_prompt
+            .as_deref()
+            .map(|sp| clido_workflows::render(sp, &wf.context).unwrap_or_else(|_| sp.to_string()));
         (
             step.id.clone(),
             name,

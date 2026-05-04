@@ -133,6 +133,7 @@ pub(super) struct ActiveWorkflow {
     /// For foreach steps: current item index.
     pub(super) foreach_item_idx: usize,
     /// Current loop iteration (0 = first run). Only meaningful when `def.loop_config` is set.
+    #[allow(dead_code)]
     pub(super) loop_iteration: u32,
 }
 

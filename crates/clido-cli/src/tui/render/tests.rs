@@ -185,7 +185,10 @@ mod wrapped_line_tests {
         )];
 
         let wrapped = wrap_content_lines(&content_lines, 40);
-        assert!(wrapped.len() > 1, "Long text with multiple words should wrap to multiple lines");
+        assert!(
+            wrapped.len() > 1,
+            "Long text with multiple words should wrap to multiple lines"
+        );
     }
 
     #[test]
@@ -282,7 +285,7 @@ mod wrapped_line_tests {
 
         let wrapped = wrap_content_lines(&content_lines, 40);
         assert!(wrapped.len() > 1, "Text should wrap to multiple lines");
-        
+
         // Check that all wrapped lines start with the indentation
         for line in &wrapped {
             let plain_text = line.plain_text();
@@ -306,7 +309,7 @@ mod wrapped_line_tests {
         )];
 
         let wrapped = wrap_content_lines(&content_lines, 15);
-        
+
         // Check that no line breaks mid-word
         for line in &wrapped {
             let plain_text = line.plain_text();

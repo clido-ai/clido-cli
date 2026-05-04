@@ -2781,8 +2781,18 @@ pub(super) fn advance_workflow(app: &mut App) {
                 .unwrap_or_else(|| app.current_profile.clone());
             let mut tasks = Vec::new();
             for step in &parallel_batch {
-                let rendered = clido_workflows::render(&step.prompt, &wf.context)
-                    .unwrap_or_else(|_| step.prompt.clone());
+                let rendered = match clido_workflows::render(&step.prompt, &wf.context) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        app.push(ChatLine::Info(format!(
+                            "  ✗ Failed to render step '{}': {e}",
+                            step.id
+                        )));
+                        app.on_agent_done();
+                        app.active_workflow = None;
+                        return;
+                    }
+                };
                 let profile = step
                     .profile
                     .clone()

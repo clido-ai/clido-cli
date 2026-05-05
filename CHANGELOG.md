@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.15] - 2025-01-22
+
+### Added
+
+- **Rate limit auto-recovery backoff**: Rate limit auto-recovery now uses an exponential backoff schedule (60s, 120s, 300s, 600s, 900s) instead of fixed 15-minute intervals for faster recovery.
+
+### Fixed
+
+- **Workflow input form**: Fields left empty (accepting defaults) are now excluded from submission, allowing templates like `{{ cwd }}/...` and cross-input references like `{{ inputs.work_dir }}/repos/selected` to render correctly.
+
 ## [1.0.14] - 2025-01-22
 
 ### Added

@@ -3317,17 +3317,19 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
     // the loop reset (or completion) at the top of the next call.
     {
         let wf = app.active_workflow.as_ref();
-        let should_skip_to_end = wf.and_then(|wf| wf.def.loop_config.as_ref()).and_then(|lc| {
-            lc.break_if_step_output_contains.as_ref()
-        }).map(|bc| {
-            bc.step == step_id
-                && wf
-                    .unwrap()
-                    .context
-                    .get_step_output(&bc.step, "output")
-                    .map(|o| o.contains(&bc.contains))
-                    .unwrap_or(false)
-        }).unwrap_or(false);
+        let should_skip_to_end = wf
+            .and_then(|wf| wf.def.loop_config.as_ref())
+            .and_then(|lc| lc.break_if_step_output_contains.as_ref())
+            .map(|bc| {
+                bc.step == step_id
+                    && wf
+                        .unwrap()
+                        .context
+                        .get_step_output(&bc.step, "output")
+                        .map(|o| o.contains(&bc.contains))
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false);
         if should_skip_to_end {
             if let Some(wf) = app.active_workflow.as_mut() {
                 wf.current_idx = wf.def.steps.len(); // jump to end of iteration

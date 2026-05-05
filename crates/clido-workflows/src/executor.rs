@@ -96,89 +96,114 @@ pub async fn run(
     let steps = &def.steps;
     let n = steps.len();
 
-    let mut i = 0;
-    while i < n {
-        // Group consecutive parallel steps.
-        let mut batch = vec![&steps[i]];
-        while i + batch.len() < n && steps[i + batch.len()].parallel {
-            batch.push(&steps[i + batch.len()]);
+    let max_iterations = def
+        .loop_config
+        .as_ref()
+        .map(|lc| lc.max_iterations)
+        .unwrap_or(1);
+
+    'iteration: for iter in 0..max_iterations {
+        // Clear step outputs at the start of each iteration after the first.
+        if iter > 0 {
+            context.clear_step_outputs();
         }
 
-        if batch.len() == 1 {
-            let step = batch[0];
-            let (result, step_result) = run_one_step(step, context, runner).await?;
-            total_cost += result.cost_usd;
-            total_duration += result.duration_ms;
-            context.step_results.push(step_result);
-            if result.error.is_some() {
-                match step.on_error {
-                    OnErrorPolicy::Fail => {
-                        return Err(ClidoError::Workflow(non_empty_error(
-                            result.error.as_deref(),
-                        )));
-                    }
-                    OnErrorPolicy::Continue => {
-                        success = false;
-                    }
-                    OnErrorPolicy::Retry => {
-                        let mut attempts = 1_u32;
-                        let max_attempts = step.retry.as_ref().map(|r| r.max_attempts).unwrap_or(3);
-                        let mut last_error = result.error.clone();
-                        while attempts < max_attempts {
-                            let (retry_result, step_result) =
-                                run_one_step(step, context, runner).await?;
-                            total_cost += retry_result.cost_usd;
-                            total_duration += retry_result.duration_ms;
-                            context.step_results.push(step_result);
-                            last_error = retry_result.error.clone();
-                            if last_error.is_none() {
-                                break;
-                            }
-                            attempts += 1;
+        let mut i = 0;
+        while i < n {
+            // Group consecutive parallel steps.
+            let mut batch = vec![&steps[i]];
+            while i + batch.len() < n && steps[i + batch.len()].parallel {
+                batch.push(&steps[i + batch.len()]);
+            }
+
+            if batch.len() == 1 {
+                let step = batch[0];
+                let (result, step_result) = run_one_step(step, context, runner).await?;
+                total_cost += result.cost_usd;
+                total_duration += result.duration_ms;
+                context.step_results.push(step_result);
+                if result.error.is_some() {
+                    match step.on_error {
+                        OnErrorPolicy::Fail => {
+                            return Err(ClidoError::Workflow(non_empty_error(
+                                result.error.as_deref(),
+                            )));
                         }
-                        if last_error.is_some() {
+                        OnErrorPolicy::Continue => {
                             success = false;
                         }
+                        OnErrorPolicy::Retry => {
+                            let mut attempts = 1_u32;
+                            let max_attempts =
+                                step.retry.as_ref().map(|r| r.max_attempts).unwrap_or(3);
+                            let mut last_error = result.error.clone();
+                            while attempts < max_attempts {
+                                let (retry_result, step_result) =
+                                    run_one_step(step, context, runner).await?;
+                                total_cost += retry_result.cost_usd;
+                                total_duration += retry_result.duration_ms;
+                                context.step_results.push(step_result);
+                                last_error = retry_result.error.clone();
+                                if last_error.is_none() {
+                                    break;
+                                }
+                                attempts += 1;
+                            }
+                            if last_error.is_some() {
+                                success = false;
+                            }
+                        }
+                    }
+                }
+                i += 1;
+            } else {
+                let mut handles = Vec::with_capacity(batch.len());
+                for step in &batch {
+                    let step = (*step).clone();
+                    let ctx = context.clone();
+                    handles.push(run_one_step_owned(step, ctx, runner));
+                }
+                let results = futures::future::join_all(handles).await;
+                for (res, step) in results.into_iter().zip(batch.iter()) {
+                    let (run_res, step_result) = res?;
+                    total_cost += run_res.cost_usd;
+                    total_duration += run_res.duration_ms;
+                    context.set_step_output(&step.id, "output", step_result.output_text.clone());
+                    for out in &step.outputs {
+                        if out.name != "output" {
+                            context.set_step_output(
+                                &step.id,
+                                &out.name,
+                                step_result.output_text.clone(),
+                            );
+                        }
+                    }
+                    if run_res.error.is_none() {
+                        apply_save_to(step, context, &step_result.output_text)?;
+                    }
+                    context.step_results.push(step_result);
+                    if run_res.error.is_some() {
+                        success = false;
+                        if step.on_error == OnErrorPolicy::Fail {
+                            return Err(ClidoError::Workflow(non_empty_error(
+                                run_res.error.as_deref(),
+                            )));
+                        }
+                    }
+                }
+                i += batch.len();
+            }
+
+            // Check loop break condition after each step (or batch).
+            if let Some(ref lc) = def.loop_config {
+                if let Some(ref bc) = lc.break_if_step_output_contains {
+                    if let Some(output) = context.get_step_output(&bc.step, "output") {
+                        if output.contains(&bc.contains) {
+                            break 'iteration;
+                        }
                     }
                 }
             }
-            i += 1;
-        } else {
-            let mut handles = Vec::with_capacity(batch.len());
-            for step in &batch {
-                let step = (*step).clone();
-                let ctx = context.clone();
-                handles.push(run_one_step_owned(step, ctx, runner));
-            }
-            let results = futures::future::join_all(handles).await;
-            for (res, step) in results.into_iter().zip(batch.iter()) {
-                let (run_res, step_result) = res?;
-                total_cost += run_res.cost_usd;
-                total_duration += run_res.duration_ms;
-                context.set_step_output(&step.id, "output", step_result.output_text.clone());
-                for out in &step.outputs {
-                    if out.name != "output" {
-                        context.set_step_output(
-                            &step.id,
-                            &out.name,
-                            step_result.output_text.clone(),
-                        );
-                    }
-                }
-                if run_res.error.is_none() {
-                    apply_save_to(step, context, &step_result.output_text)?;
-                }
-                context.step_results.push(step_result);
-                if run_res.error.is_some() {
-                    success = false;
-                    if step.on_error == OnErrorPolicy::Fail {
-                        return Err(ClidoError::Workflow(non_empty_error(
-                            run_res.error.as_deref(),
-                        )));
-                    }
-                }
-            }
-            i += batch.len();
         }
     }
 
@@ -505,6 +530,7 @@ mod tests {
             ],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let ctx = WorkflowContext::new(HashMap::new());
         (def, ctx)
@@ -580,6 +606,7 @@ mod tests {
             ],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new().fail_step("b");
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -617,6 +644,7 @@ mod tests {
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new().succeed_after("b", 3);
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -697,6 +725,7 @@ mod tests {
             ],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new();
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -732,6 +761,7 @@ mod tests {
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new();
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -766,6 +796,7 @@ mod tests {
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new().fail_step("bad");
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -807,6 +838,7 @@ mod tests {
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new().fail_step("s");
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -891,6 +923,7 @@ mod tests {
             ],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new().fail_step("p1");
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -936,6 +969,7 @@ mod tests {
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new();
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -990,6 +1024,7 @@ mod tests {
             ],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new();
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -1042,6 +1077,7 @@ mod tests {
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
 
         let runner = CapturingRunner {
@@ -1093,6 +1129,7 @@ mod tests {
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new();
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -1134,6 +1171,7 @@ mod tests {
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new();
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -1173,6 +1211,7 @@ mod tests {
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new().fail_step("s1");
         let mut ctx = WorkflowContext::new(HashMap::new());
@@ -1235,6 +1274,7 @@ mod tests {
             ],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let runner = MockRunner::new();
         let mut ctx = WorkflowContext::new(HashMap::new());

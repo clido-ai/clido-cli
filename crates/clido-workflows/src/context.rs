@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::template::render_default;
+use crate::template::render_default_with_inputs;
 use crate::types::WorkflowDef;
 use clido_core::{ClidoError, Result};
 
@@ -47,7 +47,7 @@ impl WorkflowContext {
                 // `{{ datetime }}` work in default values.
                 let resolved = match default {
                     serde_json::Value::String(s) if s.contains("{{") || s.contains("${{") => {
-                        serde_json::Value::String(render_default(s))
+                        serde_json::Value::String(render_default_with_inputs(s, &map))
                     }
                     other => other.clone(),
                 };
@@ -125,6 +125,7 @@ mod tests {
             steps: vec![],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let overrides: Vec<(String, serde_json::Value)> = vec![];
         let err = WorkflowContext::resolve_inputs(&def, &overrides).unwrap_err();
@@ -149,6 +150,7 @@ mod tests {
             steps: vec![],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         // Override the key so the default should be skipped (line 40: continue)
         let overrides = vec![(
@@ -179,6 +181,7 @@ mod tests {
             steps: vec![],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let overrides: Vec<(String, serde_json::Value)> = vec![];
         let map = WorkflowContext::resolve_inputs(&def, &overrides).unwrap();

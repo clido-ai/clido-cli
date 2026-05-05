@@ -263,6 +263,7 @@ steps:
             ],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let err = validate(&def).unwrap_err();
         assert!(err.to_string().contains("Duplicate step id"));
@@ -302,6 +303,7 @@ steps:
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let result = preflight(&def, &["default"], &[]);
         let profile_check = result
@@ -340,6 +342,7 @@ steps:
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let result = preflight(&def, &[], &["Read", "Write"]);
         let tool_check = result.checks.iter().find(|c| c.name == "tool:UnknownTool");
@@ -379,6 +382,7 @@ steps:
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let err = validate(&def).unwrap_err();
         assert!(err
@@ -433,6 +437,7 @@ steps:
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let result = preflight(&def, &["default"], &[]);
         let profile_check = result.checks.iter().find(|c| c.name == "profile:default");
@@ -468,6 +473,7 @@ steps:
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let result = preflight(&def, &[], &["Read", "Write"]);
         let tool_check = result.checks.iter().find(|c| c.name == "tool:Read");
@@ -517,6 +523,7 @@ steps:
             ],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let result = preflight(&def, &[], &[]);
         assert!(!result.is_ok());
@@ -551,6 +558,7 @@ steps:
             }],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let (tools, profiles) = required_tools_and_profiles(&def);
         assert!(tools.is_empty());
@@ -585,6 +593,7 @@ steps:
             steps: vec![],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         let result = preflight(&def, &[], &[]);
         // Either has "validate" pass or a generic "preflight" pass
@@ -604,6 +613,7 @@ steps:
             steps: vec![],
             output: None,
             prerequisites: None,
+            loop_config: None,
         };
         assert!(check_prerequisites(&def).is_ok());
     }
@@ -624,6 +634,7 @@ steps:
                     "__CLIDO_DEFINITELY_NOT_SET_XYZ__".into(),
                 )],
             }),
+            loop_config: None,
         };
         let err = check_prerequisites(&def).unwrap_err();
         assert!(err
@@ -648,6 +659,7 @@ steps:
                     optional: true,
                 }],
             }),
+            loop_config: None,
         };
         assert!(check_prerequisites(&def).is_ok());
     }
@@ -668,6 +680,7 @@ steps:
                 )],
                 env: vec![],
             }),
+            loop_config: None,
         };
         let err = check_prerequisites(&def).unwrap_err();
         assert!(err.to_string().contains("Required command not found"));
@@ -688,6 +701,7 @@ steps:
                 commands: vec![PrereqEntry::Required("sh".into())],
                 env: vec![],
             }),
+            loop_config: None,
         };
         assert!(check_prerequisites(&def).is_ok());
     }

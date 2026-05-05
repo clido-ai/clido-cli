@@ -51,12 +51,25 @@ pub fn build_tera_context(ctx: &WorkflowContext) -> Result<Context> {
 /// Only `{{ cwd }}`, `{{ date }}`, and `{{ datetime }}` are available at this stage
 /// (no inputs or step outputs yet).
 pub fn render_default(template_str: &str) -> String {
+    render_default_with_inputs(template_str, &HashMap::new())
+}
+
+/// Render a string default value with already-resolved inputs available as `{{ inputs.name }}`.
+/// This allows later input defaults to reference earlier ones (e.g. `{{ inputs.work_dir }}/repos`).
+pub fn render_default_with_inputs(
+    template_str: &str,
+    resolved_inputs: &HashMap<String, serde_json::Value>,
+) -> String {
     let normalized = normalize_template(template_str);
     let mut tera_ctx = Context::new();
     let cwd = get_cwd();
     tera_ctx.insert("cwd", &cwd);
     tera_ctx.insert("date", &Utc::now().format("%Y-%m-%d").to_string());
     tera_ctx.insert("datetime", &Utc::now().to_rfc3339());
+    tera_ctx.insert("inputs", resolved_inputs);
+    for (k, v) in resolved_inputs {
+        tera_ctx.insert(k, v);
+    }
     let mut tera = Tera::default();
     if tera.add_raw_template("default", &normalized).is_ok() {
         tera.render("default", &tera_ctx)

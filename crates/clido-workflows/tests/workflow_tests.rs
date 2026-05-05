@@ -51,6 +51,7 @@ fn two_step_def() -> WorkflowDef {
         ],
         output: None,
         prerequisites: None,
+        loop_config: None,
     }
 }
 
@@ -288,6 +289,7 @@ fn validate_duplicate_step_ids_fails() {
         ],
         output: None,
         prerequisites: None,
+        loop_config: None,
     };
     let err = validate(&def).unwrap_err();
     assert!(
@@ -311,6 +313,7 @@ fn validate_retry_without_on_error_retry_fails() {
         steps: vec![step],
         output: None,
         prerequisites: None,
+        loop_config: None,
     };
     let err = validate(&def).unwrap_err();
     assert!(err
@@ -346,6 +349,7 @@ fn preflight_fails_for_invalid_workflow() {
         ],
         output: None,
         prerequisites: None,
+        loop_config: None,
     };
     let result = preflight(&def, &[], &[]);
     assert!(!result.is_ok());
@@ -367,6 +371,7 @@ fn preflight_warns_for_unknown_tool_but_still_passes() {
         steps: vec![step],
         output: None,
         prerequisites: None,
+        loop_config: None,
     };
     let result = preflight(&def, &[], &["KnownTool"]);
     assert!(
@@ -418,6 +423,7 @@ fn context_resolve_inputs_uses_override_over_default() {
         steps: vec![make_step("s", "p", OnErrorPolicy::Fail, false)],
         output: None,
         prerequisites: None,
+        loop_config: None,
     };
     let overrides = vec![("key".into(), serde_json::Value::String("override".into()))];
     let inputs = WorkflowContext::resolve_inputs(&def, &overrides).unwrap();
@@ -440,6 +446,7 @@ fn context_resolve_inputs_errors_on_missing_required() {
         steps: vec![make_step("s", "p", OnErrorPolicy::Fail, false)],
         output: None,
         prerequisites: None,
+        loop_config: None,
     };
     let err = WorkflowContext::resolve_inputs(&def, &[]).unwrap_err();
     assert!(err.to_string().contains("Missing required input"));
@@ -667,6 +674,7 @@ async fn run_workflow_on_error_fail_returns_error() {
         steps: vec![make_step("bad", "fail me", OnErrorPolicy::Fail, false)],
         output: None,
         prerequisites: None,
+        loop_config: None,
     };
     let mut ctx = WorkflowContext::new(HashMap::new());
     let result = clido_workflows::run_workflow(&def, &mut ctx, &FailRunner, None).await;
@@ -687,6 +695,7 @@ async fn run_workflow_on_error_continue_runs_remaining_steps() {
         ],
         output: None,
         prerequisites: None,
+        loop_config: None,
     };
     // Use a runner that fails only "bad_middle".
     struct SelectiveFail;
@@ -752,6 +761,7 @@ async fn run_workflow_output_chaining_across_steps() {
         ],
         output: None,
         prerequisites: None,
+        loop_config: None,
     };
     let mut ctx = WorkflowContext::new(HashMap::new());
     clido_workflows::run_workflow(&def, &mut ctx, &SuccessRunner, None)
@@ -784,6 +794,7 @@ async fn run_workflow_with_inputs_passed_to_template() {
         )],
         output: None,
         prerequisites: None,
+        loop_config: None,
     };
     let mut inputs = HashMap::new();
     inputs.insert("lang".into(), serde_json::Value::String("Rust".into()));
@@ -832,6 +843,7 @@ async fn run_workflow_save_to_writes_step_output() {
         steps: vec![step],
         output: None,
         prerequisites: None,
+        loop_config: None,
     };
     let mut ctx = WorkflowContext::new(HashMap::new());
     clido_workflows::run_workflow(&def, &mut ctx, &SuccessRunner, None)
@@ -862,6 +874,7 @@ fn check_prerequisites_missing_required_env_fails() {
                 "__CLIDO_INTEGRATION_TEST_NOT_SET__".into(),
             )],
         }),
+        loop_config: None,
     };
     let err = check_prerequisites(&def).unwrap_err();
     assert!(err
@@ -885,6 +898,7 @@ fn check_prerequisites_optional_missing_env_passes() {
                 optional: true,
             }],
         }),
+        loop_config: None,
     };
     check_prerequisites(&def).expect("optional missing env should pass");
 }
@@ -902,6 +916,7 @@ fn check_prerequisites_missing_required_command_fails() {
             commands: vec![PrereqEntry::Required("__clido_no_such_cmd_xyz__".into())],
             env: vec![],
         }),
+        loop_config: None,
     };
     let err = check_prerequisites(&def).unwrap_err();
     assert!(err.to_string().contains("Required command not found"));

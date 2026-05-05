@@ -2722,6 +2722,46 @@ pub(super) fn advance_workflow(app: &mut App) {
     };
 
     if current_idx >= total {
+        // Check if the workflow should loop before declaring it complete.
+        let loop_reset = {
+            let wf = app.active_workflow.as_ref().unwrap();
+            wf.def.loop_config.as_ref().and_then(|lc| {
+                let next_iter = wf.loop_iteration + 1;
+                if next_iter >= lc.max_iterations {
+                    return None; // Safety limit reached.
+                }
+                // Break if the sentinel step output contains the break string.
+                if let Some(ref bc) = lc.break_if_step_output_contains {
+                    if wf
+                        .context
+                        .get_step_output(&bc.step, "output")
+                        .map(|o| o.contains(&bc.contains))
+                        .unwrap_or(false)
+                    {
+                        return None; // Break condition met — don't loop.
+                    }
+                }
+                Some(next_iter)
+            })
+        };
+
+        if let Some(next_iter) = loop_reset {
+            // Reset state for the next iteration.
+            let wf = app.active_workflow.as_mut().unwrap();
+            wf.loop_iteration = next_iter;
+            wf.current_idx = 0;
+            wf.context.clear_step_outputs();
+            for step_entry in &mut wf.steps {
+                step_entry.status = crate::tui::app_state::WorkflowStepStatus::Pending;
+            }
+            app.push(ChatLine::Info(format!(
+                "  ↻ Loop iteration {} — starting next repo",
+                next_iter + 1
+            )));
+            advance_workflow(app);
+            return;
+        }
+
         // All steps done — use session_total_cost_usd for accurate delta including parallel steps.
         let (name, cost_str, elapsed_ms) = {
             let wf = app.active_workflow.as_ref().unwrap();
@@ -3270,6 +3310,29 @@ pub(super) fn handle_workflow_step_response(app: &mut App, text: String) {
     if let Some(prev) = prev_model {
         app.model = prev.clone();
         let _ = app.channels.model_switch_tx.send(prev);
+    }
+
+    // Early-break check: if this step triggered the loop break condition, skip
+    // remaining steps in the current iteration and let advance_workflow handle
+    // the loop reset (or completion) at the top of the next call.
+    {
+        let wf = app.active_workflow.as_ref();
+        let should_skip_to_end = wf.and_then(|wf| wf.def.loop_config.as_ref()).and_then(|lc| {
+            lc.break_if_step_output_contains.as_ref()
+        }).map(|bc| {
+            bc.step == step_id
+                && wf
+                    .unwrap()
+                    .context
+                    .get_step_output(&bc.step, "output")
+                    .map(|o| o.contains(&bc.contains))
+                    .unwrap_or(false)
+        }).unwrap_or(false);
+        if should_skip_to_end {
+            if let Some(wf) = app.active_workflow.as_mut() {
+                wf.current_idx = wf.def.steps.len(); // jump to end of iteration
+            }
+        }
     }
 
     advance_workflow(app);

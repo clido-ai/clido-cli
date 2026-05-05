@@ -166,6 +166,45 @@ mod tests {
     }
 
     #[test]
+    fn resolve_inputs_later_default_can_reference_earlier_input() {
+        // Reproduces the sa2-orchestrated bug: repo_path default references inputs.work_dir.
+        let def = WorkflowDef {
+            name: "x".into(),
+            version: "1".into(),
+            description: String::new(),
+            inputs: vec![
+                InputDef {
+                    name: "work_dir".to_string(),
+                    description: String::new(),
+                    required: false,
+                    default: Some(serde_json::Value::String("/base/output".to_string())),
+                    hint: None,
+                },
+                InputDef {
+                    name: "repo_path".to_string(),
+                    description: String::new(),
+                    required: false,
+                    default: Some(serde_json::Value::String(
+                        "{{ inputs.work_dir }}/repos/selected".to_string(),
+                    )),
+                    hint: None,
+                },
+            ],
+            steps: vec![],
+            output: None,
+            prerequisites: None,
+            loop_config: None,
+        };
+        let overrides: Vec<(String, serde_json::Value)> = vec![];
+        let map = WorkflowContext::resolve_inputs(&def, &overrides).unwrap();
+        assert_eq!(
+            map.get("repo_path").and_then(|v| v.as_str()),
+            Some("/base/output/repos/selected"),
+            "repo_path default should resolve inputs.work_dir to its actual value"
+        );
+    }
+
+    #[test]
     fn resolve_inputs_default_applied() {
         let def = WorkflowDef {
             name: "x".into(),

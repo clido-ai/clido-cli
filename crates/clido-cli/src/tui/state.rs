@@ -510,11 +510,14 @@ impl WorkflowInputFormState {
         self.fields
             .iter()
             .filter_map(|f| {
-                let v = f.effective_value();
-                if v.is_empty() {
+                // Only submit fields the user explicitly typed as overrides.
+                // Fields left empty (accepted default) are intentionally excluded so
+                // resolve_inputs can render default templates like `{{ cwd }}/...`
+                // and cross-input references like `{{ inputs.work_dir }}/repos/selected`.
+                if f.value.is_empty() {
                     None
                 } else {
-                    Some((f.name.clone(), v.to_string()))
+                    Some((f.name.clone(), f.value.clone()))
                 }
             })
             .collect()

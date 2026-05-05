@@ -2534,9 +2534,14 @@ pub(super) async fn event_loop(
                                 );
                             }
 
-                            // Schedule next ping in 15 minutes
+                            // Schedule next ping using backoff: 60, 120, 300, 600, 900, 900, ...
+                            let backoff_schedule = [60u64, 120, 300, 600, 900];
+                            let next_secs = backoff_schedule
+                                .get(ping_count as usize)
+                                .copied()
+                                .unwrap_or(900);
                             app.rate_limit_next_ping = Some(
-                                std::time::Instant::now() + std::time::Duration::from_secs(15 * 60)
+                                std::time::Instant::now() + std::time::Duration::from_secs(next_secs)
                             );
                         }
                     }
@@ -3326,15 +3331,16 @@ pub(super) async fn event_loop(
                                 "    ⏳ Will auto-resume when limit resets. Press Esc to cancel.".into()
                             ));
                         } else {
-                            // Unknown reset time - start background pinging mode
+                            // Unknown reset time - start background pinging mode.
+                            // Backoff schedule (seconds): 60, 120, 300, 600, 900, 900, ...
                             app.rate_limit_cancelled = false;
                             app.rate_limit_pinging = true;
-                            app.rate_limit_next_ping = Some(
-                                std::time::Instant::now() + std::time::Duration::from_secs(15 * 60)
-                            );
                             app.rate_limit_ping_count = 0;
+                            app.rate_limit_next_ping = Some(
+                                std::time::Instant::now() + std::time::Duration::from_secs(60)
+                            );
                             app.push(ChatLine::Info(
-                                "    ⏳ Auto-recovery active: checking every 15 min. Press Esc to cancel.".into()
+                                "    ⏳ Auto-recovery active: will retry in 1 min, then 2, 5, 10, 15 min. Press Esc to cancel.".into()
                             ));
                         }
                         app.on_agent_done();
